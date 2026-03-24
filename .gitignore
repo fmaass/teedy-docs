@@ -17,5 +17,10 @@ teedy-importer-win.exe
 docs/*
 !docs/.gitkeep
 
+# Environment files with secrets
+.env
+.env.*
+.env.local
+
 #macos
 .DS_Store

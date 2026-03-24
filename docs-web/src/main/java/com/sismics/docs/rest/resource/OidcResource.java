@@ -1,7 +1,9 @@
 package com.sismics.docs.rest.resource;
 
 import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import com.auth0.jwt.interfaces.JWTVerifier;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.AuthenticationTokenDao;
 import com.sismics.docs.core.dao.UserDao;
@@ -9,6 +11,7 @@ import com.sismics.docs.core.model.jpa.AuthenticationToken;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import jakarta.json.Json;
+import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 import jakarta.ws.rs.GET;
@@ -24,9 +27,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.StringReader;
+import java.math.BigInteger;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.RSAPublicKeySpec;
+import java.util.Base64;
+import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,23 +51,26 @@ public class OidcResource extends BaseResource {
     private static final Logger log = LoggerFactory.getLogger(OidcResource.class);
     private static final OkHttpClient httpClient = new OkHttpClient();
 
-    /**
-     * Pending state tokens with creation timestamp for CSRF protection.
-     * Entries are cleaned up on use; stale entries expire after 10 minutes.
-     */
     private static final Map<String, Long> pendingStates = new ConcurrentHashMap<>();
+    private static final Map<String, String> pendingNonces = new ConcurrentHashMap<>();
     private static final long STATE_TTL_MS = 10 * 60 * 1000;
 
-    /**
-     * Cached OIDC discovery metadata (lazily fetched once).
-     */
     private static volatile JsonObject discoveryCache;
+    private static volatile JsonObject jwksCache;
+    private static volatile boolean configValidated = false;
 
-    /**
-     * Initiates the OIDC login flow by redirecting to the provider's authorization endpoint.
-     *
-     * @return 302 redirect to the OIDC provider
-     */
+    private static final String PROP_ENABLED = "docs.oidc_enabled";
+    private static final String PROP_ISSUER = "docs.oidc_issuer";
+    private static final String PROP_CLIENT_ID = "docs.oidc_client_id";
+    private static final String PROP_CLIENT_SECRET = "docs.oidc_client_secret";
+    private static final String PROP_REDIRECT_URI = "docs.oidc_redirect_uri";
+    private static final String PROP_SCOPE = "docs.oidc_scope";
+    private static final String PROP_AUTH_ENDPOINT = "docs.oidc_authorization_endpoint";
+    private static final String PROP_TOKEN_ENDPOINT = "docs.oidc_token_endpoint";
+    private static final String PROP_JWKS_URI = "docs.oidc_jwks_uri";
+
+    private static final String USERNAME_PATTERN = "^[a-zA-Z0-9_]{3,50}$";
+
     @GET
     @Path("login")
     public Response login() {
@@ -66,14 +78,22 @@ public class OidcResource extends BaseResource {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
+        String configError = validateConfig();
+        if (configError != null) {
+            log.error("OIDC misconfigured: {}", configError);
+            return Response.serverError().build();
+        }
+
         try {
             String authorizationEndpoint = getAuthorizationEndpoint();
-            String clientId = System.getProperty("docs.oidc_client_id");
-            String redirectUri = System.getProperty("docs.oidc_redirect_uri");
-            String scope = ofNullable(System.getProperty("docs.oidc_scope")).orElse("openid profile email");
+            String clientId = System.getProperty(PROP_CLIENT_ID);
+            String redirectUri = System.getProperty(PROP_REDIRECT_URI);
+            String scope = ofNullable(System.getProperty(PROP_SCOPE)).orElse("openid profile email");
 
             String state = UUID.randomUUID().toString();
+            String nonce = UUID.randomUUID().toString();
             pendingStates.put(state, System.currentTimeMillis());
+            pendingNonces.put(state, nonce);
             cleanupExpiredStates();
 
             String authorizeUrl = authorizationEndpoint
@@ -81,7 +101,8 @@ public class OidcResource extends BaseResource {
                     + "&client_id=" + urlEncode(clientId)
                     + "&redirect_uri=" + urlEncode(redirectUri)
                     + "&scope=" + urlEncode(scope)
-                    + "&state=" + urlEncode(state);
+                    + "&state=" + urlEncode(state)
+                    + "&nonce=" + urlEncode(nonce);
 
             return Response.temporaryRedirect(URI.create(authorizeUrl)).build();
         } catch (Exception e) {
@@ -90,15 +111,6 @@ public class OidcResource extends BaseResource {
         }
     }
 
-    /**
-     * Handles the OIDC callback after the user authenticates with the provider.
-     * Exchanges the authorization code for tokens, extracts user identity,
-     * finds or creates the Teedy user, issues a session cookie, and redirects to the app.
-     *
-     * @param code  Authorization code from the provider
-     * @param state State parameter for CSRF validation
-     * @return 302 redirect to the application with auth_token cookie set
-     */
     @GET
     @Path("callback")
     public Response callback(@QueryParam("code") String code,
@@ -118,15 +130,14 @@ public class OidcResource extends BaseResource {
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
 
-        // Validate state (CSRF protection)
         Long stateTimestamp = pendingStates.remove(state);
+        String expectedNonce = pendingNonces.remove(state);
         if (stateTimestamp == null || System.currentTimeMillis() - stateTimestamp > STATE_TTL_MS) {
             log.warn("OIDC callback with invalid or expired state");
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
 
         try {
-            // Exchange authorization code for tokens
             JsonObject tokenResponse = exchangeCodeForTokens(code);
             String idTokenStr = tokenResponse.getString("id_token", null);
             if (idTokenStr == null) {
@@ -134,17 +145,21 @@ public class OidcResource extends BaseResource {
                 return Response.temporaryRedirect(URI.create("/#/login")).build();
             }
 
-            // Decode the ID token to extract claims
-            DecodedJWT idToken = JWT.decode(idTokenStr);
+            DecodedJWT idToken = verifyIdToken(idTokenStr);
+
+            // Verify nonce matches what we sent in the authorization request
+            String tokenNonce = getClaimAsString(idToken, "nonce");
+            if (expectedNonce != null && !expectedNonce.equals(tokenNonce)) {
+                log.error("OIDC nonce mismatch: expected={}, got={}", expectedNonce, tokenNonce);
+                return Response.temporaryRedirect(URI.create("/#/login")).build();
+            }
+
             String preferredUsername = getClaimAsString(idToken, "preferred_username");
             String email = getClaimAsString(idToken, "email");
             String subject = idToken.getSubject();
 
-            if (log.isInfoEnabled()) {
-                log.info("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
-            }
+            log.info("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
 
-            // Resolve the Teedy user: try username first, then email, then auto-create
             UserDao userDao = new UserDao();
             User user = null;
 
@@ -162,7 +177,6 @@ public class OidcResource extends BaseResource {
                 }
             }
 
-            // Create a long-lived session token (same as regular login with "remember me")
             String ip = request.getHeader("x-forwarded-for");
             if (StringUtils.isBlank(ip)) {
                 ip = request.getRemoteAddr();
@@ -179,8 +193,9 @@ public class OidcResource extends BaseResource {
 
             NewCookie cookie = new NewCookie(
                     TokenBasedSecurityFilter.COOKIE_NAME, tokenValue,
-                    "/", null, null,
-                    TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME, false);
+                    "/", null, NewCookie.DEFAULT_VERSION, null,
+                    TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME,
+                    (Date) null, true, true);
 
             return Response.temporaryRedirect(URI.create("/#/"))
                     .cookie(cookie)
@@ -192,13 +207,55 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Exchanges the authorization code for tokens via the provider's token endpoint.
+     * Verifies the ID token signature using the provider's JWKS, and validates issuer + audience.
      */
+    private DecodedJWT verifyIdToken(String idTokenStr) throws Exception {
+        DecodedJWT unverified = JWT.decode(idTokenStr);
+        String kid = unverified.getKeyId();
+
+        RSAPublicKey publicKey = getSigningKey(kid);
+        if (publicKey == null) {
+            throw new Exception("No matching key found in JWKS for kid=" + kid);
+        }
+
+        Algorithm algo = Algorithm.RSA256(publicKey, null);
+        JWTVerifier verifier = JWT.require(algo)
+                .withIssuer(System.getProperty(PROP_ISSUER))
+                .withAudience(System.getProperty(PROP_CLIENT_ID))
+                .build();
+
+        return verifier.verify(idTokenStr);
+    }
+
+    /**
+     * Fetches the RSA public key matching the given kid from the provider's JWKS.
+     */
+    private RSAPublicKey getSigningKey(String kid) throws Exception {
+        JsonObject jwks = getJwks();
+        JsonArray keys = jwks.getJsonArray("keys");
+
+        for (int i = 0; i < keys.size(); i++) {
+            JsonObject key = keys.getJsonObject(i);
+            if (kid == null || kid.equals(key.getString("kid", null))) {
+                String n = key.getString("n");
+                String e = key.getString("e");
+
+                byte[] nBytes = Base64.getUrlDecoder().decode(n);
+                byte[] eBytes = Base64.getUrlDecoder().decode(e);
+                RSAPublicKeySpec spec = new RSAPublicKeySpec(
+                        new BigInteger(1, nBytes), new BigInteger(1, eBytes));
+
+                return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(spec);
+            }
+        }
+        return null;
+    }
+
     private JsonObject exchangeCodeForTokens(String code) throws Exception {
         String tokenEndpoint = getTokenEndpoint();
-        String clientId = System.getProperty("docs.oidc_client_id");
-        String clientSecret = System.getProperty("docs.oidc_client_secret");
-        String redirectUri = System.getProperty("docs.oidc_redirect_uri");
+        String clientId = System.getProperty(PROP_CLIENT_ID);
+        String clientSecret = System.getProperty(PROP_CLIENT_SECRET);
+        String redirectUri = System.getProperty(PROP_REDIRECT_URI);
 
         FormBody body = new FormBody.Builder()
                 .add("grant_type", "authorization_code")
@@ -224,12 +281,19 @@ public class OidcResource extends BaseResource {
         }
     }
 
-    /**
-     * Creates a new Teedy user from OIDC claims (mirrors JwtBasedSecurityFilter provisioning).
-     */
     private User provisionUser(UserDao userDao, String preferredUsername, String email, String subject) {
         String username = preferredUsername != null ? preferredUsername : (email != null ? email : subject);
         String userEmail = email != null ? email : username + "@oidc.local";
+
+        if (!username.matches(USERNAME_PATTERN)) {
+            log.warn("OIDC provisioning rejected: username '{}' does not match required pattern", username);
+            return null;
+        }
+
+        if (userEmail.indexOf('@') < 1) {
+            log.warn("OIDC provisioning rejected: invalid email '{}'", userEmail);
+            return null;
+        }
 
         User user = new User();
         user.setRoleId(Constants.DEFAULT_USER_ROLE);
@@ -251,32 +315,61 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Returns the authorization endpoint URL (browser-facing).
-     * Uses docs.oidc_authorization_endpoint if set, otherwise falls back to OIDC discovery.
+     * Validates OIDC configuration on first use. Returns an error message if invalid, null if OK.
      */
+    private String validateConfig() {
+        if (configValidated) {
+            return null;
+        }
+
+        synchronized (OidcResource.class) {
+            if (configValidated) {
+                return null;
+            }
+
+            String issuer = System.getProperty(PROP_ISSUER);
+            String clientId = System.getProperty(PROP_CLIENT_ID);
+            String clientSecret = System.getProperty(PROP_CLIENT_SECRET);
+            String redirectUri = System.getProperty(PROP_REDIRECT_URI);
+
+            if (StringUtils.isBlank(issuer)) return PROP_ISSUER + " is required";
+            if (StringUtils.isBlank(clientId)) return PROP_CLIENT_ID + " is required";
+            if (StringUtils.isBlank(clientSecret)) return PROP_CLIENT_SECRET + " is required";
+            if (StringUtils.isBlank(redirectUri)) return PROP_REDIRECT_URI + " is required";
+
+            log.info("OIDC configuration: issuer={}, client_id={}, redirect_uri={}, secret={}***",
+                    issuer, clientId, redirectUri,
+                    clientSecret.length() > 4 ? clientSecret.substring(0, 4) : "****");
+
+            configValidated = true;
+            return null;
+        }
+    }
+
     private String getAuthorizationEndpoint() throws Exception {
-        String explicit = System.getProperty("docs.oidc_authorization_endpoint");
+        String explicit = System.getProperty(PROP_AUTH_ENDPOINT);
         if (explicit != null) {
             return explicit;
         }
         return getDiscovery().getString("authorization_endpoint");
     }
 
-    /**
-     * Returns the token endpoint URL (server-to-server).
-     * Uses docs.oidc_token_endpoint if set, otherwise falls back to OIDC discovery.
-     */
     private String getTokenEndpoint() throws Exception {
-        String explicit = System.getProperty("docs.oidc_token_endpoint");
+        String explicit = System.getProperty(PROP_TOKEN_ENDPOINT);
         if (explicit != null) {
             return explicit;
         }
         return getDiscovery().getString("token_endpoint");
     }
 
-    /**
-     * Fetches and caches the OIDC discovery document from {issuer}/.well-known/openid-configuration.
-     */
+    private String getJwksUri() throws Exception {
+        String explicit = System.getProperty(PROP_JWKS_URI);
+        if (explicit != null) {
+            return explicit;
+        }
+        return getDiscovery().getString("jwks_uri");
+    }
+
     private JsonObject getDiscovery() throws Exception {
         if (discoveryCache != null) {
             return discoveryCache;
@@ -287,7 +380,7 @@ public class OidcResource extends BaseResource {
                 return discoveryCache;
             }
 
-            String issuer = System.getProperty("docs.oidc_issuer");
+            String issuer = System.getProperty(PROP_ISSUER);
             String discoveryUrl = issuer.replaceAll("/+$", "") + "/.well-known/openid-configuration";
 
             Request req = new Request.Builder().url(discoveryUrl).get().build();
@@ -306,8 +399,35 @@ public class OidcResource extends BaseResource {
         }
     }
 
+    private JsonObject getJwks() throws Exception {
+        if (jwksCache != null) {
+            return jwksCache;
+        }
+
+        synchronized (OidcResource.class) {
+            if (jwksCache != null) {
+                return jwksCache;
+            }
+
+            String jwksUri = getJwksUri();
+            Request req = new Request.Builder().url(jwksUri).get().build();
+            try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
+                if (!resp.isSuccessful() || resp.body() == null) {
+                    throw new Exception("Failed to fetch JWKS: HTTP " + resp.code());
+                }
+                String body = resp.body().string();
+                try (JsonReader reader = Json.createReader(new StringReader(body))) {
+                    jwksCache = reader.readObject();
+                }
+            }
+
+            log.info("OIDC JWKS loaded from {}", jwksUri);
+            return jwksCache;
+        }
+    }
+
     private static boolean isOidcEnabled() {
-        return Boolean.parseBoolean(System.getProperty("docs.oidc_enabled"));
+        return Boolean.parseBoolean(System.getProperty(PROP_ENABLED));
     }
 
     private static String getClaimAsString(DecodedJWT jwt, String claim) {
@@ -322,5 +442,6 @@ public class OidcResource extends BaseResource {
     private void cleanupExpiredStates() {
         long now = System.currentTimeMillis();
         pendingStates.entrySet().removeIf(e -> now - e.getValue() > STATE_TTL_MS);
+        pendingNonces.keySet().removeIf(key -> !pendingStates.containsKey(key));
     }
 }

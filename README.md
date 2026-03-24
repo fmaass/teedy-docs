@@ -27,7 +27,8 @@ A demo is available at [demo.teedy.io](https://demo.teedy.io)
 
 - Responsive user interface
 - Optical character recognition
-- LDAP authentication ![New!](https://www.sismics.com/public/img/new.png)
+- LDAP authentication
+- OpenID Connect (OIDC) authentication
 - Support image, PDF, ODT, DOCX, PPTX files
 - Video file support
 - Flexible search engine with suggestions and highlighting
@@ -92,6 +93,94 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
   - `DOCS_SMTP_PORT`: The port which should be used.
   - `DOCS_SMTP_USERNAME`: The username to be used.
   - `DOCS_SMTP_PASSWORD`: The password to be used.
+
+## OIDC / SSO Authentication
+
+Teedy supports OpenID Connect (OIDC) authentication via the Authorization Code flow with a confidential client. This allows integration with identity providers like Authelia, Keycloak, or any standard OIDC provider.
+
+### System Properties
+
+Configure via `JAVA_TOOL_OPTIONS` environment variable (e.g., `-Ddocs.oidc_enabled=true`):
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `docs.oidc_enabled` | Yes | Set to `true` to enable OIDC |
+| `docs.oidc_issuer` | Yes | Issuer URL (e.g., `https://auth.example.com`) |
+| `docs.oidc_client_id` | Yes | OIDC client ID |
+| `docs.oidc_client_secret` | Yes | OIDC client secret (plaintext) |
+| `docs.oidc_redirect_uri` | Yes | Callback URL (e.g., `https://teedy.example.com/api/oidc/callback`) |
+| `docs.oidc_scope` | No | Scopes to request (default: `openid profile email`) |
+| `docs.oidc_authorization_endpoint` | No | Override the authorization endpoint (see Docker networking below) |
+| `docs.oidc_token_endpoint` | No | Override the token endpoint (see Docker networking below) |
+| `docs.oidc_jwks_uri` | No | Override the JWKS URI (see Docker networking below) |
+
+### How It Works
+
+1. User navigates to `/api/oidc/login` (or clicks "Login with SSO" on the login page)
+2. Teedy redirects to the OIDC provider's authorization endpoint
+3. After authentication, the provider redirects back to `/api/oidc/callback`
+4. Teedy exchanges the authorization code for tokens, verifies the ID token signature (RSA via JWKS), and validates issuer and audience claims
+5. The user is matched by `preferred_username`, then by `email`. If no match exists, a new user is auto-provisioned with the `user` role
+6. A session cookie is set and the user is redirected to the application
+
+### Docker Networking
+
+When Teedy runs in a Docker container, it often cannot resolve the external OIDC issuer URL (e.g., `https://auth.example.com`). In this case, use the explicit endpoint overrides to split browser-facing and server-to-server URLs:
+
+```yaml
+JAVA_TOOL_OPTIONS: >-
+  -Ddocs.oidc_enabled=true
+  -Ddocs.oidc_issuer=https://auth.example.com
+  -Ddocs.oidc_client_id=teedy
+  -Ddocs.oidc_client_secret=your-secret-here
+  -Ddocs.oidc_redirect_uri=https://teedy.example.com/api/oidc/callback
+  -Ddocs.oidc_authorization_endpoint=https://auth.example.com/api/oidc/authorization
+  -Ddocs.oidc_token_endpoint=http://authelia:9091/api/oidc/token
+  -Ddocs.oidc_jwks_uri=http://authelia:9091/jwks.json
+```
+
+The authorization endpoint uses the external URL (browser redirect), while the token endpoint and JWKS URI use internal Docker DNS (server-to-server).
+
+### Authelia Setup
+
+When using Authelia as the OIDC provider, you must add a `claims_policy` to include `preferred_username` and `email` in the ID token (they are not included by default):
+
+```yaml
+identity_providers:
+  oidc:
+    claims_policies:
+      teedy:
+        id_token:
+          - 'preferred_username'
+          - 'email'
+          - 'name'
+    clients:
+      - client_id: 'teedy'
+        client_name: 'Teedy'
+        client_secret: '$pbkdf2-sha512$...'
+        public: false
+        authorization_policy: 'two_factor'
+        consent_mode: 'implicit'
+        redirect_uris:
+          - 'https://teedy.example.com/api/oidc/callback'
+        scopes:
+          - 'openid'
+          - 'profile'
+          - 'email'
+        response_types:
+          - 'code'
+        grant_types:
+          - 'authorization_code'
+        userinfo_signed_response_alg: 'none'
+        token_endpoint_auth_method: 'client_secret_post'
+        claims_policy: 'teedy'
+```
+
+Without the `claims_policy`, the ID token will only contain the `sub` claim (an opaque UUID), and Teedy will be unable to match existing users.
+
+### Coexistence with Header Auth
+
+OIDC and header-based proxy auth (`-Ddocs.header_authentication=true`) can both be active simultaneously. Header auth is useful as a fallback for API access from the local network, while OIDC provides proper per-user identity for browser sessions.
 
 ## Examples
 
@@ -184,7 +273,7 @@ services:
 
 ## Requirements
 
-- Java 11
+- Java 17
 - Tesseract 4 for OCR
 - ffmpeg for video thumbnails
 - mediainfo for video metadata extraction
@@ -197,7 +286,7 @@ The latest release is downloadable here: <https://github.com/sismics/docs/releas
 
 ## How to build Teedy from the sources
 
-Prerequisites: JDK 11, Maven 3, NPM, Grunt, Tesseract 4
+Prerequisites: JDK 17, Maven 3, NPM, Grunt, Tesseract 4
 
 Teedy is organized in several Maven modules:
 
