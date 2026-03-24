@@ -5,6 +5,26 @@
  */
 angular.module('docs').controller('Login', function(Restangular, $scope, $rootScope, $state, $stateParams, $dialog, User, $translate, $uibModal) {
   $scope.codeRequired = false;
+  $scope.authChecked = false;
+
+  // Check if already authenticated (e.g. via header-based proxy auth)
+  User.userInfo(true).then(function(data) {
+    $rootScope.userInfo = data;
+    if (!data.anonymous) {
+      if ($stateParams.redirectState !== undefined && $stateParams.redirectParams !== undefined) {
+        $state.go($stateParams.redirectState, JSON.parse($stateParams.redirectParams))
+          .catch(function() {
+            $state.go('document.default');
+          });
+      } else {
+        $state.go('document.default');
+      }
+      return;
+    }
+    $scope.authChecked = true;
+  }, function() {
+    $scope.authChecked = true;
+  });
 
   // Get the app configuration
   Restangular.one('app').get().then(function(data) {

@@ -95,12 +95,15 @@ public class AppResource extends BaseResource {
             globalQuota = Long.valueOf(globalQuotaStr);
         }
 
+        boolean headerAuthEnabled = Boolean.parseBoolean(System.getProperty("docs.header_authentication"));
+
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("current_version", currentVersion.replace("-SNAPSHOT", ""))
                 .add("min_version", minVersion)
                 .add("guest_login", guestLogin)
                 .add("ocr_enabled", ocrEnabled)
                 .add("default_language", defaultLanguage)
+                .add("header_authentication_enabled", headerAuthEnabled)
                 .add("queued_tasks", AppContext.getInstance().getQueuedTaskCount())
                 .add("total_memory", Runtime.getRuntime().totalMemory())
                 .add("free_memory", Runtime.getRuntime().freeMemory())
