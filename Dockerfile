@@ -4,8 +4,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64/
-ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64/
+ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 \
+    --add-opens java.base/java.lang=ALL-UNNAMED \
+    --add-opens java.base/java.util=ALL-UNNAMED \
+    --add-opens java.base/java.io=ALL-UNNAMED \
+    --add-opens java.base/java.nio=ALL-UNNAMED"
 ENV JETTY_VERSION=11.0.20
 ENV JETTY_HOME=/opt/jetty
 
@@ -13,7 +17,7 @@ ENV JETTY_HOME=/opt/jetty
 RUN apt-get update && \
     apt-get upgrade -y -q libgnutls30 && \
     apt-get -y -q --no-install-recommends install \
-    vim less procps unzip wget tzdata openjdk-11-jdk \
+    vim less procps curl unzip wget tzdata openjdk-17-jdk \
     ffmpeg \
     mediainfo \
     tesseract-ocr \
