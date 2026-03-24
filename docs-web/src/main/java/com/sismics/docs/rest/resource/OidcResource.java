@@ -197,7 +197,7 @@ public class OidcResource extends BaseResource {
                     TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME,
                     (Date) null, true, true);
 
-            return Response.temporaryRedirect(URI.create("/#/"))
+            return Response.temporaryRedirect(URI.create("/#/document"))
                     .cookie(cookie)
                     .build();
         } catch (Exception e) {
