@@ -29,7 +29,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: |
-          npm install -g grunt-cli
+          npm install -g --force grunt-cli
           cd docs-web/src/main/webapp && npm install
 
       - name: Build with Maven
