@@ -67,8 +67,7 @@ public class OidcResource extends BaseResource {
         }
 
         try {
-            JsonObject discovery = getDiscovery();
-            String authorizationEndpoint = discovery.getString("authorization_endpoint");
+            String authorizationEndpoint = getAuthorizationEndpoint();
             String clientId = System.getProperty("docs.oidc_client_id");
             String redirectUri = System.getProperty("docs.oidc_redirect_uri");
             String scope = ofNullable(System.getProperty("docs.oidc_scope")).orElse("openid profile email");
@@ -196,8 +195,7 @@ public class OidcResource extends BaseResource {
      * Exchanges the authorization code for tokens via the provider's token endpoint.
      */
     private JsonObject exchangeCodeForTokens(String code) throws Exception {
-        JsonObject discovery = getDiscovery();
-        String tokenEndpoint = discovery.getString("token_endpoint");
+        String tokenEndpoint = getTokenEndpoint();
         String clientId = System.getProperty("docs.oidc_client_id");
         String clientSecret = System.getProperty("docs.oidc_client_secret");
         String redirectUri = System.getProperty("docs.oidc_redirect_uri");
@@ -250,6 +248,30 @@ public class OidcResource extends BaseResource {
             log.error("Error creating OIDC user: {}", username, e);
             return null;
         }
+    }
+
+    /**
+     * Returns the authorization endpoint URL (browser-facing).
+     * Uses docs.oidc_authorization_endpoint if set, otherwise falls back to OIDC discovery.
+     */
+    private String getAuthorizationEndpoint() throws Exception {
+        String explicit = System.getProperty("docs.oidc_authorization_endpoint");
+        if (explicit != null) {
+            return explicit;
+        }
+        return getDiscovery().getString("authorization_endpoint");
+    }
+
+    /**
+     * Returns the token endpoint URL (server-to-server).
+     * Uses docs.oidc_token_endpoint if set, otherwise falls back to OIDC discovery.
+     */
+    private String getTokenEndpoint() throws Exception {
+        String explicit = System.getProperty("docs.oidc_token_endpoint");
+        if (explicit != null) {
+            return explicit;
+        }
+        return getDiscovery().getString("token_endpoint");
     }
 
     /**
