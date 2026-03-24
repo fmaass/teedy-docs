@@ -96,6 +96,7 @@ public class AppResource extends BaseResource {
         }
 
         boolean headerAuthEnabled = Boolean.parseBoolean(System.getProperty("docs.header_authentication"));
+        boolean oidcEnabled = Boolean.parseBoolean(System.getProperty("docs.oidc_enabled"));
 
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("current_version", currentVersion.replace("-SNAPSHOT", ""))
@@ -104,6 +105,7 @@ public class AppResource extends BaseResource {
                 .add("ocr_enabled", ocrEnabled)
                 .add("default_language", defaultLanguage)
                 .add("header_authentication_enabled", headerAuthEnabled)
+                .add("oidc_enabled", oidcEnabled)
                 .add("queued_tasks", AppContext.getInstance().getQueuedTaskCount())
                 .add("total_memory", Runtime.getRuntime().totalMemory())
                 .add("free_memory", Runtime.getRuntime().freeMemory())

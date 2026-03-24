@@ -83,6 +83,12 @@
           <button type="submit" class="btn btn-default btn-block" ng-if="app.guest_login" ng-click="loginAsGuest()">
             <span class="fas fa-user"></span> {{ 'login.login_as_guest' | translate }}
           </button>
+
+          <p class="text-center" ng-if="app.oidc_enabled">&nbsp;</p>
+
+          <button type="button" class="btn btn-default btn-block" ng-if="app.oidc_enabled" ng-click="loginOidc()">
+            <span class="fas fa-sign-in-alt"></span> {{ 'login.login_with_sso' | translate }}
+          </button>
         </form>
       </div>
     </div>

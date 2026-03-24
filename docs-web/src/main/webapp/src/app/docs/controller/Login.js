@@ -7,7 +7,7 @@ angular.module('docs').controller('Login', function(Restangular, $scope, $rootSc
   $scope.codeRequired = false;
   $scope.authChecked = false;
 
-  // Check if already authenticated (e.g. via header-based proxy auth)
+  // Check if already authenticated (e.g. via header-based proxy auth or existing session)
   User.userInfo(true).then(function(data) {
     $rootScope.userInfo = data;
     if (!data.anonymous) {
@@ -30,6 +30,11 @@ angular.module('docs').controller('Login', function(Restangular, $scope, $rootSc
   Restangular.one('app').get().then(function(data) {
     $rootScope.app = data;
   });
+
+  // Redirect to OIDC provider login
+  $scope.loginOidc = function() {
+    window.location.href = '../api/oidc/login';
+  };
 
   // Login as guest
   $scope.loginAsGuest = function() {
