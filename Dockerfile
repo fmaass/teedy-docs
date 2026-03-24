@@ -11,6 +11,7 @@ ENV JETTY_HOME=/opt/jetty
 
 # Install packages
 RUN apt-get update && \
+    apt-get upgrade -y -q libgnutls30 && \
     apt-get -y -q --no-install-recommends install \
     vim less procps unzip wget tzdata openjdk-11-jdk \
     ffmpeg \
