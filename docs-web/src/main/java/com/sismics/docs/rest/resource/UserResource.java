@@ -588,10 +588,12 @@ public class UserResource extends BaseResource {
                 response.add("is_default_password", Constants.DEFAULT_ADMIN_PASSWORD.equals(adminUser.getPassword()));
             }
         } else {
-            // Update the last connection date
+            // Update the last connection date (null when authenticated via header/proxy)
             String authToken = getAuthToken();
-            AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
-            authenticationTokenDao.updateLastConnectionDate(authToken);
+            if (authToken != null) {
+                AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+                authenticationTokenDao.updateLastConnectionDate(authToken);
+            }
             
             // Build the response
             response.add("anonymous", false);
