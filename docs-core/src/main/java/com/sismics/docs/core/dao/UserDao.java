@@ -256,7 +256,42 @@ public class UserDao {
             return null;
         }
     }
-    
+
+    /**
+     * Gets an active user by OIDC issuer and subject.
+     *
+     * @param issuer OIDC issuer URL
+     * @param subject OIDC subject identifier
+     * @return User
+     */
+    public User getByOidcSubject(String issuer, String subject) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        try {
+            Query q = em.createQuery("select u from User u where u.oidcIssuer = :issuer and u.oidcSubject = :subject and u.deleteDate is null");
+            q.setParameter("issuer", issuer);
+            q.setParameter("subject", subject);
+            return (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Stores the OIDC issuer and subject on a user for stable identity binding.
+     *
+     * @param userId User ID
+     * @param issuer OIDC issuer URL
+     * @param subject OIDC subject identifier
+     */
+    public void updateOidcBinding(String userId, String issuer, String subject) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("update T_USER set USE_OIDC_ISSUER_C = :issuer, USE_OIDC_SUBJECT_C = :subject where USE_ID_C = :userId");
+        q.setParameter("issuer", issuer);
+        q.setParameter("subject", subject);
+        q.setParameter("userId", userId);
+        q.executeUpdate();
+    }
+
     /**
      * Deletes a user.
      * 

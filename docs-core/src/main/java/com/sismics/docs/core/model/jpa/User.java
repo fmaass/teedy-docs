@@ -95,6 +95,18 @@ public class User implements Loggable {
     @Column(name = "USE_DISABLEDATE_D")
     private Date disableDate;
 
+    /**
+     * OIDC issuer URL (for stable IdP binding).
+     */
+    @Column(name = "USE_OIDC_ISSUER_C", length = 500)
+    private String oidcIssuer;
+
+    /**
+     * OIDC subject identifier (the "sub" claim from the IdP).
+     */
+    @Column(name = "USE_OIDC_SUBJECT_C", length = 500)
+    private String oidcSubject;
+
     public String getId() {
         return id;
     }
@@ -210,6 +222,24 @@ public class User implements Loggable {
 
     public User setOnboarding(boolean onboarding) {
         this.onboarding = onboarding;
+        return this;
+    }
+
+    public String getOidcIssuer() {
+        return oidcIssuer;
+    }
+
+    public User setOidcIssuer(String oidcIssuer) {
+        this.oidcIssuer = oidcIssuer;
+        return this;
+    }
+
+    public String getOidcSubject() {
+        return oidcSubject;
+    }
+
+    public User setOidcSubject(String oidcSubject) {
+        this.oidcSubject = oidcSubject;
         return this;
     }
 
