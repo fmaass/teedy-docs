@@ -1,12 +1,12 @@
 {
-  "name": "sismics-docs",
+  "name": "teedy-docs",
   "description": "Lightweight document management system",
-  "readme": "See http://github.com/simics/docs for more informations.",
+  "readme": "See https://github.com/fmaass/teedy-docs for more information.",
   "license": "GPL-2.0",
-  "version": "1.5.0",
+  "version": "2.1.0",
   "repository": {
     "type": "git",
-    "url": "git://github.com/sismics/docs.git"
+    "url": "git+https://github.com/fmaass/teedy-docs.git"
   },
   "apidoc": {
     "name": "Teedy API",
