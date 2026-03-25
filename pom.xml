@@ -28,6 +28,7 @@
     <org.slf4j.jcl-over-slf4j.version>2.0.11</org.slf4j.jcl-over-slf4j.version>
     <org.slf4j.jul-to-slf4j.version>2.0.11</org.slf4j.jul-to-slf4j.version>
     <junit.junit.version>4.13.2</junit.junit.version>
+    <junit-vintage-engine.version>5.10.0</junit-vintage-engine.version>
     <com.h2database.h2.version>2.2.224</com.h2database.h2.version>
     <jakarta.json.jakarta.json-api.version>2.1.1</jakarta.json.jakarta.json-api.version>
     <at.favre.lib.bcrypt.version>0.10.2</at.favre.lib.bcrypt.version>
@@ -255,6 +256,12 @@
         <groupId>junit</groupId>
         <artifactId>junit</artifactId>
         <version>${junit.junit.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.junit.vintage</groupId>
+        <artifactId>junit-vintage-engine</artifactId>
+        <version>${junit-vintage-engine.version}</version>
       </dependency>
 
       <dependency>
