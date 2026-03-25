@@ -34,6 +34,8 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.ArrayList;
@@ -94,12 +96,15 @@ public class OidcResource extends BaseResource {
 
             String state = UUID.randomUUID().toString();
             String nonce = UUID.randomUUID().toString();
+            String codeVerifier = generateCodeVerifier();
+            String codeChallenge = computeCodeChallenge(codeVerifier);
 
             OidcStateDao oidcStateDao = new OidcStateDao();
             oidcStateDao.deleteExpired(STATE_TTL_MS);
             OidcState oidcState = new OidcState()
                     .setId(state)
-                    .setNonce(nonce);
+                    .setNonce(nonce)
+                    .setCodeVerifier(codeVerifier);
             oidcStateDao.create(oidcState);
 
             String authorizeUrl = authorizationEndpoint
@@ -108,7 +113,9 @@ public class OidcResource extends BaseResource {
                     + "&redirect_uri=" + urlEncode(redirectUri)
                     + "&scope=" + urlEncode(scope)
                     + "&state=" + urlEncode(state)
-                    + "&nonce=" + urlEncode(nonce);
+                    + "&nonce=" + urlEncode(nonce)
+                    + "&code_challenge=" + urlEncode(codeChallenge)
+                    + "&code_challenge_method=S256";
 
             return Response.temporaryRedirect(URI.create(authorizeUrl)).build();
         } catch (Exception e) {
@@ -149,7 +156,7 @@ public class OidcResource extends BaseResource {
         String expectedNonce = oidcState.getNonce();
 
         try {
-            JsonObject tokenResponse = exchangeCodeForTokens(code);
+            JsonObject tokenResponse = exchangeCodeForTokens(code, oidcState.getCodeVerifier());
             String idTokenStr = tokenResponse.getString("id_token", null);
             if (idTokenStr == null) {
                 log.error("OIDC token response missing id_token");
@@ -351,19 +358,22 @@ public class OidcResource extends BaseResource {
         return result;
     }
 
-    private JsonObject exchangeCodeForTokens(String code) throws Exception {
+    private JsonObject exchangeCodeForTokens(String code, String codeVerifier) throws Exception {
         String tokenEndpoint = getTokenEndpoint();
         String clientId = System.getProperty(PROP_CLIENT_ID);
         String clientSecret = System.getProperty(PROP_CLIENT_SECRET);
         String redirectUri = System.getProperty(PROP_REDIRECT_URI);
 
-        FormBody body = new FormBody.Builder()
+        FormBody.Builder bodyBuilder = new FormBody.Builder()
                 .add("grant_type", "authorization_code")
                 .add("code", code)
                 .add("redirect_uri", redirectUri)
                 .add("client_id", clientId)
-                .add("client_secret", clientSecret)
-                .build();
+                .add("client_secret", clientSecret);
+        if (codeVerifier != null) {
+            bodyBuilder.add("code_verifier", codeVerifier);
+        }
+        FormBody body = bodyBuilder.build();
 
         Request req = new Request.Builder()
                 .url(tokenEndpoint)
@@ -548,6 +558,19 @@ public class OidcResource extends BaseResource {
 
     private static String urlEncode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String generateCodeVerifier() {
+        SecureRandom random = new SecureRandom();
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String computeCodeChallenge(String codeVerifier) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
     }
 
 }
