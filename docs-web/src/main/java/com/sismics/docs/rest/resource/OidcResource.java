@@ -161,24 +161,45 @@ public class OidcResource extends BaseResource {
             String preferredUsername = getClaimAsString(idToken, "preferred_username");
             String email = getClaimAsString(idToken, "email");
             String subject = idToken.getSubject();
+            String issuer = System.getProperty(PROP_ISSUER);
 
             log.info("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
 
             UserDao userDao = new UserDao();
             User user = null;
 
-            if (preferredUsername != null) {
-                user = userDao.getActiveByUsername(preferredUsername);
+            // First: stable lookup by OIDC subject (prevents email-based account takeover)
+            if (subject != null) {
+                user = userDao.getByOidcSubject(issuer, subject);
             }
-            if (user == null && email != null) {
-                user = userDao.getByEmail(email);
-            }
+
+            // Second: initial linking by username or email (only if no subject binding exists)
+            boolean needsBinding = false;
             if (user == null) {
-                user = provisionUser(userDao, preferredUsername, email, subject);
+                if (preferredUsername != null) {
+                    user = userDao.getActiveByUsername(preferredUsername);
+                }
+                if (user == null && email != null) {
+                    user = userDao.getByEmail(email);
+                }
+                if (user != null) {
+                    needsBinding = true;
+                }
+            }
+
+            // Third: provision a new user
+            if (user == null) {
+                user = provisionUser(userDao, preferredUsername, email, subject, issuer);
                 if (user == null) {
                     log.error("Failed to provision OIDC user: sub={}", subject);
                     return Response.temporaryRedirect(URI.create("/#/login")).build();
                 }
+            }
+
+            // Store OIDC binding on first login for existing users
+            if (needsBinding && subject != null) {
+                userDao.updateOidcBinding(user.getId(), issuer, subject);
+                log.info("Stored OIDC binding for user {}: issuer={}, sub={}", user.getUsername(), issuer, subject);
             }
 
             String ip = request.getHeader("x-forwarded-for");
@@ -353,7 +374,7 @@ public class OidcResource extends BaseResource {
         }
     }
 
-    private User provisionUser(UserDao userDao, String preferredUsername, String email, String subject) {
+    private User provisionUser(UserDao userDao, String preferredUsername, String email, String subject, String issuer) {
         String username = preferredUsername != null ? preferredUsername : (email != null ? email : subject);
         String userEmail = email != null ? email : username + "@oidc.local";
 
@@ -371,6 +392,8 @@ public class OidcResource extends BaseResource {
         user.setRoleId(Constants.DEFAULT_USER_ROLE);
         user.setUsername(username);
         user.setEmail(userEmail);
+        user.setOidcIssuer(issuer);
+        user.setOidcSubject(subject);
         user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
                 .orElse("1073741824")));
         user.setPassword(UUID.randomUUID().toString());
@@ -378,7 +401,7 @@ public class OidcResource extends BaseResource {
 
         try {
             userDao.create(user, username);
-            log.info("Provisioned new OIDC user: {}", username);
+            log.info("Provisioned new OIDC user: {} (issuer={}, sub={})", username, issuer, subject);
             return user;
         } catch (Exception e) {
             log.error("Error creating OIDC user: {}", username, e);
