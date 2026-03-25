@@ -389,9 +389,18 @@ public class OidcResource extends BaseResource {
                     throw new Exception("Failed to fetch OIDC discovery: HTTP " + resp.code());
                 }
                 String body = resp.body().string();
+                JsonObject discovery;
                 try (JsonReader reader = Json.createReader(new StringReader(body))) {
-                    discoveryCache = reader.readObject();
+                    discovery = reader.readObject();
                 }
+
+                String discoveredIssuer = discovery.getString("issuer", null);
+                if (!issuer.equals(discoveredIssuer)) {
+                    throw new Exception("OIDC discovery issuer mismatch: configured="
+                            + issuer + ", discovered=" + discoveredIssuer);
+                }
+
+                discoveryCache = discovery;
             }
 
             log.info("OIDC discovery loaded from {}", discoveryUrl);
