@@ -33,7 +33,17 @@ angular.module('docs').controller('Login', function(Restangular, $scope, $rootSc
 
   // Redirect to OIDC provider login
   $scope.loginOidc = function() {
-    window.location.href = '../api/oidc/login';
+    var url = '../api/oidc/login';
+    if ($stateParams.redirectState) {
+      try {
+        var params = $stateParams.redirectParams ? JSON.parse($stateParams.redirectParams) : {};
+        var returnUrl = $state.href($stateParams.redirectState, params);
+        if (returnUrl) {
+          url += '?returnUrl=' + encodeURIComponent(returnUrl);
+        }
+      } catch (e) {}
+    }
+    window.location.href = url;
   };
 
   // Login as guest

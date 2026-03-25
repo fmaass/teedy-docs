@@ -77,7 +77,7 @@ public class OidcResource extends BaseResource {
 
     @GET
     @Path("login")
-    public Response login() {
+    public Response login(@QueryParam("returnUrl") String returnUrl) {
         if (!isOidcEnabled()) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
@@ -101,10 +101,16 @@ public class OidcResource extends BaseResource {
 
             OidcStateDao oidcStateDao = new OidcStateDao();
             oidcStateDao.deleteExpired(STATE_TTL_MS);
+            String safeReturnUrl = null;
+            if (returnUrl != null && returnUrl.startsWith("/#/")) {
+                safeReturnUrl = returnUrl;
+            }
+
             OidcState oidcState = new OidcState()
                     .setId(state)
                     .setNonce(nonce)
-                    .setCodeVerifier(codeVerifier);
+                    .setCodeVerifier(codeVerifier)
+                    .setReturnUrl(safeReturnUrl);
             oidcStateDao.create(oidcState);
 
             String authorizeUrl = authorizationEndpoint
@@ -236,7 +242,12 @@ public class OidcResource extends BaseResource {
                     TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME,
                     (Date) null, true, true);
 
-            return Response.temporaryRedirect(URI.create("/#/document"))
+            String redirectTarget = oidcState.getReturnUrl();
+            if (redirectTarget == null || !redirectTarget.startsWith("/#/")) {
+                redirectTarget = "/#/document";
+            }
+
+            return Response.temporaryRedirect(URI.create(redirectTarget))
                     .cookie(cookie)
                     .build();
         } catch (Exception e) {
