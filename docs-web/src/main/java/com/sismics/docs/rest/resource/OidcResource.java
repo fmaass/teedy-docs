@@ -6,8 +6,10 @@ import com.auth0.jwt.interfaces.DecodedJWT;
 import com.auth0.jwt.interfaces.JWTVerifier;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.AuthenticationTokenDao;
+import com.sismics.docs.core.dao.OidcStateDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.AuthenticationToken;
+import com.sismics.docs.core.model.jpa.OidcState;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import jakarta.json.Json;
@@ -38,9 +40,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 import static java.util.Optional.ofNullable;
 
@@ -53,8 +53,6 @@ public class OidcResource extends BaseResource {
     private static final Logger log = LoggerFactory.getLogger(OidcResource.class);
     private static final OkHttpClient httpClient = new OkHttpClient();
 
-    private static final Map<String, Long> pendingStates = new ConcurrentHashMap<>();
-    private static final Map<String, String> pendingNonces = new ConcurrentHashMap<>();
     private static final long STATE_TTL_MS = 10 * 60 * 1000;
 
     private static volatile JsonObject discoveryCache;
@@ -96,9 +94,13 @@ public class OidcResource extends BaseResource {
 
             String state = UUID.randomUUID().toString();
             String nonce = UUID.randomUUID().toString();
-            pendingStates.put(state, System.currentTimeMillis());
-            pendingNonces.put(state, nonce);
-            cleanupExpiredStates();
+
+            OidcStateDao oidcStateDao = new OidcStateDao();
+            oidcStateDao.deleteExpired(STATE_TTL_MS);
+            OidcState oidcState = new OidcState()
+                    .setId(state)
+                    .setNonce(nonce);
+            oidcStateDao.create(oidcState);
 
             String authorizeUrl = authorizationEndpoint
                     + "?response_type=code"
@@ -134,12 +136,17 @@ public class OidcResource extends BaseResource {
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
 
-        Long stateTimestamp = pendingStates.remove(state);
-        String expectedNonce = pendingNonces.remove(state);
-        if (stateTimestamp == null || System.currentTimeMillis() - stateTimestamp > STATE_TTL_MS) {
+        OidcStateDao oidcStateDao = new OidcStateDao();
+        OidcState oidcState = oidcStateDao.getAndDelete(state);
+        if (oidcState == null) {
             log.warn("OIDC callback with invalid or expired state");
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
+        if (System.currentTimeMillis() - oidcState.getCreateDate().getTime() > STATE_TTL_MS) {
+            log.warn("OIDC callback with expired state");
+            return Response.status(Response.Status.BAD_REQUEST).build();
+        }
+        String expectedNonce = oidcState.getNonce();
 
         try {
             JsonObject tokenResponse = exchangeCodeForTokens(code);
@@ -543,9 +550,4 @@ public class OidcResource extends BaseResource {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
-    private void cleanupExpiredStates() {
-        long now = System.currentTimeMillis();
-        pendingStates.entrySet().removeIf(e -> now - e.getValue() > STATE_TTL_MS);
-        pendingNonces.keySet().removeIf(key -> !pendingStates.containsKey(key));
-    }
 }
