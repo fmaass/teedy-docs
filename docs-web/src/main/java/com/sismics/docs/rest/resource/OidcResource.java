@@ -59,6 +59,8 @@ public class OidcResource extends BaseResource {
 
     private static volatile JsonObject discoveryCache;
     private static volatile JsonObject jwksCache;
+    private static volatile long jwksLastRefreshMs = 0;
+    private static final long JWKS_MIN_REFRESH_INTERVAL_MS = 60 * 1000;
     private static volatile boolean configValidated = false;
 
     private static final String PROP_ENABLED = "docs.oidc_enabled";
@@ -217,6 +219,9 @@ public class OidcResource extends BaseResource {
 
         List<RSAPublicKey> candidates = getSigningKeys(kid);
         if (candidates.isEmpty()) {
+            candidates = refreshJwksAndRetry(kid);
+        }
+        if (candidates.isEmpty()) {
             throw new Exception("No matching key found in JWKS for kid=" + kid);
         }
 
@@ -236,8 +241,39 @@ public class OidcResource extends BaseResource {
                 lastException = e;
             }
         }
-        throw new Exception("ID token verification failed against all " + candidates.size()
-                + " candidate JWKS keys", lastException);
+
+        // All cached keys failed -- try one JWKS refresh before giving up
+        candidates = refreshJwksAndRetry(kid);
+        for (RSAPublicKey publicKey : candidates) {
+            try {
+                Algorithm algo = Algorithm.RSA256(publicKey, null);
+                JWTVerifier verifier = JWT.require(algo)
+                        .withIssuer(issuer)
+                        .withAudience(audience)
+                        .build();
+                return verifier.verify(idTokenStr);
+            } catch (Exception e) {
+                lastException = e;
+            }
+        }
+
+        throw new Exception("ID token verification failed against all JWKS keys"
+                + " (including refresh)", lastException);
+    }
+
+    /**
+     * Clears the JWKS cache and re-fetches, rate-limited to once per minute.
+     */
+    private List<RSAPublicKey> refreshJwksAndRetry(String kid) throws Exception {
+        long now = System.currentTimeMillis();
+        if (now - jwksLastRefreshMs < JWKS_MIN_REFRESH_INTERVAL_MS) {
+            log.debug("JWKS refresh skipped (rate limited)");
+            return List.of();
+        }
+        log.info("Refreshing JWKS cache (kid={} not found or verification failed)", kid);
+        jwksCache = null;
+        jwksLastRefreshMs = now;
+        return getSigningKeys(kid);
     }
 
     /**
