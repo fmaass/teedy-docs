@@ -3,41 +3,39 @@
 </h3>
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-[![Maven CI/CD](https://github.com/sismics/docs/actions/workflows/build-deploy.yml/badge.svg)](https://github.com/sismics/docs/actions/workflows/build-deploy.yml)
+[![Build and Publish](https://github.com/fmaass/teedy-docs/actions/workflows/build-deploy.yml/badge.svg)](https://github.com/fmaass/teedy-docs/actions/workflows/build-deploy.yml)
+
+> **This is an actively maintained fork of [sismics/docs](https://github.com/sismics/docs) (Teedy).**
+> It includes OIDC/SSO authentication, Java 17 + Jetty 11 modernization, security hardening, and multi-arch Docker images published to GHCR.
 
 Teedy is an open source, lightweight document management system for individuals and businesses.
 
-<hr />
-<h2 align="center">
-  ✨ <a href="https://github.com/users/jendib/sponsorship">Sponsor this project if you use and appreciate it!</a> ✨
-</h2>
-<hr />
+# What's different in this fork
 
-![New!](https://teedy.io/img/laptop-demo.png?20180301)
-
-# Demo
-
-A demo is available at [demo.teedy.io](https://demo.teedy.io)
-
-- Guest login is enabled with read access on all documents
-- "admin" login with "admin" password
-- "demo" login with "password" password 
+- **OpenID Connect (OIDC) authentication** with PKCE, auto-provisioning, and stable subject binding
+- **Header-based proxy authentication** (e.g., Authelia, Authentik) with auto-skip login
+- **Java 17 + Jetty 11 + Jakarta EE 9** (upgraded from Java 11 / Jetty 9)
+- **Multi-arch Docker images** (amd64 + arm64) published to GitHub Container Registry
+- **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed, JWT bearer filter with iss/aud checks
+- **Log4j 1.x removed**, replaced with Logback
+- **Dependency updates**: Hibernate 6.3, Jersey 3.1, Guava 33, OkHttp 4.12, PostgreSQL driver 42.6
 
 # Features
 
 - Responsive user interface
 - Optical character recognition
 - LDAP authentication
-- OpenID Connect (OIDC) authentication
+- OpenID Connect (OIDC) / SSO authentication
+- Header-based proxy authentication
 - Support image, PDF, ODT, DOCX, PPTX files
 - Video file support
 - Flexible search engine with suggestions and highlighting
 - Full text search in all supported files
 - All [Dublin Core](http://dublincore.org/) metadata
-- Custom user-defined metadata ![New!](https://www.sismics.com/public/img/new.png)
-- Workflow system ![New!](https://www.sismics.com/public/img/new.png)
+- Custom user-defined metadata
+- Workflow system
 - 256-bit AES encryption of stored files
-- File versioning ![New!](https://www.sismics.com/public/img/new.png)
+- File versioning
 - Tag system with nesting
 - Import document from email (EML format)
 - Automatic inbox scanning and importing
@@ -51,17 +49,17 @@ A demo is available at [demo.teedy.io](https://demo.teedy.io)
 - RESTful Web API
 - Webhooks to trigger external service
 - Fully featured Android client
-- [Bulk files importer](https://github.com/sismics/docs/tree/master/docs-importer) (single or scan mode)
+- [Bulk files importer](https://github.com/fmaass/teedy-docs/tree/main/docs-importer) (single or scan mode)
 - Tested to one million documents
 
 # Install with Docker
 
-A preconfigured Docker image is available, including OCR and media conversion tools, listening on port 8080. If no PostgreSQL config is provided, the database is an embedded H2 database. The H2 embedded database should only be used for testing. For production usage use the provided PostgreSQL configuration (check the Docker Compose example)
+A preconfigured Docker image is available, including OCR and media conversion tools, listening on port 8080. If no PostgreSQL config is provided, the database is an embedded H2 database. The H2 embedded database should only be used for testing. For production usage use the provided PostgreSQL configuration (check the Docker Compose example).
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Master branch, can be unstable. Not recommended for production use: `sismics/docs:latest`
-- Latest stable version: `sismics/docs:v1.11`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.1.0`
+- Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
 
@@ -96,7 +94,7 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
 
 ## OIDC / SSO Authentication
 
-Teedy supports OpenID Connect (OIDC) authentication via the Authorization Code flow with a confidential client. This allows integration with identity providers like Authelia, Keycloak, or any standard OIDC provider.
+Teedy supports OpenID Connect (OIDC) authentication via the Authorization Code flow with PKCE and a confidential client. This allows integration with identity providers like Authelia, Keycloak, or any standard OIDC provider.
 
 ### System Properties
 
@@ -117,11 +115,20 @@ Configure via `JAVA_TOOL_OPTIONS` environment variable (e.g., `-Ddocs.oidc_enabl
 ### How It Works
 
 1. User navigates to `/api/oidc/login` (or clicks "Login with SSO" on the login page)
-2. Teedy redirects to the OIDC provider's authorization endpoint
+2. Teedy redirects to the OIDC provider's authorization endpoint (with PKCE challenge)
 3. After authentication, the provider redirects back to `/api/oidc/callback`
-4. Teedy exchanges the authorization code for tokens, verifies the ID token signature (RSA via JWKS), and validates issuer and audience claims
-5. The user is matched by `preferred_username`, then by `email`. If no match exists, a new user is auto-provisioned with the `user` role
-6. A session cookie is set and the user is redirected to the application
+4. Teedy exchanges the authorization code for tokens (with PKCE verifier), verifies the ID token signature (RSA via JWKS), and validates issuer, audience, and nonce claims
+5. The user is matched by OIDC subject (stable binding), then by `preferred_username`, then by `email`. If no match exists, a new user is auto-provisioned with the `user` role
+6. A session cookie is set and the user is redirected to the application (preserving the original URL if the user followed a deep link)
+
+### Security Features
+
+- **PKCE (S256)**: Protects against authorization code interception
+- **Stable subject binding**: After first login, users are bound to their IdP `sub` claim, preventing email-based account takeover
+- **JWKS validation**: Keys are filtered by kty/use/alg; cache refreshes automatically on key rotation
+- **Discovery issuer verification**: The OIDC discovery document's issuer is cross-checked against configuration
+- **Nonce verification**: Fail-closed — missing nonce always rejects the login
+- **Persistent state**: CSRF state and nonce are stored in the database, surviving restarts
 
 ### Docker Networking
 
@@ -182,33 +189,36 @@ Without the `claims_policy`, the ID token will only contain the `sub` claim (an 
 
 OIDC and header-based proxy auth (`-Ddocs.header_authentication=true`) can both be active simultaneously. Header auth is useful as a fallback for API access from the local network, while OIDC provides proper per-user identity for browser sessions.
 
+## JWT Bearer Authentication
+
+For API-to-API authentication using JWT bearer tokens (e.g., from Keycloak), configure:
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `docs.jwt_authentication` | Yes | Set to `true` to enable |
+| `docs.jwt_expected_issuer` | Yes | Expected `iss` claim (must match exactly) |
+| `docs.jwt_expected_audience` | Yes | Expected `aud` claim |
+
+If JWT authentication is enabled without both `issuer` and `audience` configured, it will be automatically disabled (fail closed).
+
 ## Examples
 
 In the following examples some passwords are exposed in cleartext. This was done in order to keep the examples simple. We strongly encourage you to use variables with an `.env` file or other means to securely store your passwords.
-
 
 ### Default, using PostgreSQL
 
 ```yaml
 version: '3'
 services:
-# Teedy Application
   teedy-server:
-    image: sismics/docs:v1.11
+    image: ghcr.io/fmaass/teedy-docs:v2.1.0
     restart: unless-stopped
     ports:
-      # Map internal port to host
       - 8080:8080
     environment:
-      # Base url to be used
       DOCS_BASE_URL: "https://docs.example.com"
-      # Set the admin email
       DOCS_ADMIN_EMAIL_INIT: "admin@example.com"
-      # Set the admin password (in this example: "superSecure")
       DOCS_ADMIN_PASSWORD_INIT: "$$2a$$05$$PcMNUbJvsk7QHFSfEIDaIOjk1VI9/E7IPjTKx.jkjPxkx2EOKSoPS"
-      # Setup the database connection. "teedy-db" is the hostname
-      # and "teedy" is the name of the database the application
-      # will connect to.
       DATABASE_URL: "jdbc:postgresql://teedy-db:5432/teedy"
       DATABASE_USER: "teedy_db_user"
       DATABASE_PASSWORD: "teedy_db_password"
@@ -221,9 +231,8 @@ services:
     depends_on:
       - teedy-db
 
-# DB for Teedy
   teedy-db:
-    image: postgres:13.1-alpine
+    image: postgres:16-alpine
     restart: unless-stopped
     expose:
       - 5432
@@ -237,8 +246,6 @@ services:
       - docker-internal
 
 networks:
-  # Network without internet access. The db does not need
-  # access to the host network.
   docker-internal:
     driver: bridge
     internal: true
@@ -251,19 +258,14 @@ networks:
 ```yaml
 version: '3'
 services:
-# Teedy Application
   teedy-server:
-    image: sismics/docs:v1.11
+    image: ghcr.io/fmaass/teedy-docs:v2.1.0
     restart: unless-stopped
     ports:
-      # Map internal port to host
       - 8080:8080
     environment:
-      # Base url to be used
       DOCS_BASE_URL: "https://docs.example.com"
-      # Set the admin email
       DOCS_ADMIN_EMAIL_INIT: "admin@example.com"
-      # Set the admin password (in this example: "superSecure")
       DOCS_ADMIN_PASSWORD_INIT: "$$2a$$05$$PcMNUbJvsk7QHFSfEIDaIOjk1VI9/E7IPjTKx.jkjPxkx2EOKSoPS"
     volumes:
       - ./docs/data:/data
@@ -281,7 +283,7 @@ services:
 
 ## Download
 
-The latest release is downloadable here: <https://github.com/sismics/docs/releases> in WAR format. 
+The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/releases> in WAR format.
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
 ## How to build Teedy from the sources
@@ -294,7 +296,7 @@ Teedy is organized in several Maven modules:
 - docs-web
 - docs-web-common
 
-First off, clone the repository: `git clone git://github.com/sismics/docs.git`
+First off, clone the repository: `git clone https://github.com/fmaass/teedy-docs.git`
 or download the sources from GitHub.
 
 ### Launch the build
@@ -327,7 +329,7 @@ You will get your deployable WAR in the `docs-web/target` directory.
 
 All contributions are more than welcomed. Contributions may close an issue, fix a bug (reported or not reported), improve the existing code, add new feature, and so on.
 
-The `master` branch is the default and base branch for the project. It is used for development and all Pull Requests should go there.
+The `main` branch is the default and base branch for the project. It is used for development and all Pull Requests should go there.
 
 # License
 
