@@ -285,7 +285,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
             criteriaList.add("d.DOC_ID_C in :documentIdList");
             parameterMap.put("documentIdList", documentSearchMap.keySet());
 
-            suggestSearchTerms(criteria.getFullSearch(), suggestionList);
+            String suggestionQuery = !Strings.isNullOrEmpty(criteria.getFullSearch())
+                    ? criteria.getFullSearch() : criteria.getSimpleSearch();
+            suggestSearchTerms(suggestionQuery, suggestionList);
         }
         if (criteria.getCreateDateMin() != null) {
             criteriaList.add("d.DOC_CREATEDATE_D >= :createDateMin");
@@ -393,6 +395,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
      * @throws Exception e
      */
     private void suggestSearchTerms(String search, List<String> suggestionList) throws Exception {
+        if (Strings.isNullOrEmpty(search)) {
+            return;
+        }
         DirectoryReader directoryReader = getDirectoryReader();
         if (directoryReader == null) {
             return;
