@@ -147,9 +147,9 @@ public class OidcResource extends BaseResource {
 
             DecodedJWT idToken = verifyIdToken(idTokenStr);
 
-            // Verify nonce matches what we sent in the authorization request
+            // Verify nonce matches what we sent in the authorization request (fail closed)
             String tokenNonce = getClaimAsString(idToken, "nonce");
-            if (expectedNonce != null && !expectedNonce.equals(tokenNonce)) {
+            if (expectedNonce == null || !expectedNonce.equals(tokenNonce)) {
                 log.error("OIDC nonce mismatch: expected={}, got={}", expectedNonce, tokenNonce);
                 return Response.temporaryRedirect(URI.create("/#/login")).build();
             }
