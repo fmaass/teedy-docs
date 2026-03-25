@@ -34,8 +34,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.RSAPublicKeySpec;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -213,26 +215,40 @@ public class OidcResource extends BaseResource {
         DecodedJWT unverified = JWT.decode(idTokenStr);
         String kid = unverified.getKeyId();
 
-        RSAPublicKey publicKey = getSigningKey(kid);
-        if (publicKey == null) {
+        List<RSAPublicKey> candidates = getSigningKeys(kid);
+        if (candidates.isEmpty()) {
             throw new Exception("No matching key found in JWKS for kid=" + kid);
         }
 
-        Algorithm algo = Algorithm.RSA256(publicKey, null);
-        JWTVerifier verifier = JWT.require(algo)
-                .withIssuer(System.getProperty(PROP_ISSUER))
-                .withAudience(System.getProperty(PROP_CLIENT_ID))
-                .build();
+        String issuer = System.getProperty(PROP_ISSUER);
+        String audience = System.getProperty(PROP_CLIENT_ID);
 
-        return verifier.verify(idTokenStr);
+        Exception lastException = null;
+        for (RSAPublicKey publicKey : candidates) {
+            try {
+                Algorithm algo = Algorithm.RSA256(publicKey, null);
+                JWTVerifier verifier = JWT.require(algo)
+                        .withIssuer(issuer)
+                        .withAudience(audience)
+                        .build();
+                return verifier.verify(idTokenStr);
+            } catch (Exception e) {
+                lastException = e;
+            }
+        }
+        throw new Exception("ID token verification failed against all " + candidates.size()
+                + " candidate JWKS keys", lastException);
     }
 
     /**
-     * Fetches the RSA public key matching the given kid from the provider's JWKS.
+     * Fetches RSA public keys from the provider's JWKS.
+     * When kid is non-null, returns at most one key matching that kid.
+     * When kid is null, returns all eligible RSA signing keys.
      */
-    private RSAPublicKey getSigningKey(String kid) throws Exception {
+    private List<RSAPublicKey> getSigningKeys(String kid) throws Exception {
         JsonObject jwks = getJwks();
         JsonArray keys = jwks.getJsonArray("keys");
+        List<RSAPublicKey> result = new ArrayList<>();
 
         for (int i = 0; i < keys.size(); i++) {
             JsonObject key = keys.getJsonObject(i);
@@ -250,19 +266,25 @@ public class OidcResource extends BaseResource {
                 continue;
             }
 
-            if (kid == null || kid.equals(key.getString("kid", null))) {
-                String n = key.getString("n");
-                String e = key.getString("e");
+            if (kid != null && !kid.equals(key.getString("kid", null))) {
+                continue;
+            }
 
-                byte[] nBytes = Base64.getUrlDecoder().decode(n);
-                byte[] eBytes = Base64.getUrlDecoder().decode(e);
-                RSAPublicKeySpec spec = new RSAPublicKeySpec(
-                        new BigInteger(1, nBytes), new BigInteger(1, eBytes));
+            String n = key.getString("n");
+            String e = key.getString("e");
 
-                return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(spec);
+            byte[] nBytes = Base64.getUrlDecoder().decode(n);
+            byte[] eBytes = Base64.getUrlDecoder().decode(e);
+            RSAPublicKeySpec spec = new RSAPublicKeySpec(
+                    new BigInteger(1, nBytes), new BigInteger(1, eBytes));
+
+            result.add((RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(spec));
+
+            if (kid != null) {
+                break;
             }
         }
-        return null;
+        return result;
     }
 
     private JsonObject exchangeCodeForTokens(String code) throws Exception {
