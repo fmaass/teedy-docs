@@ -236,6 +236,20 @@ public class OidcResource extends BaseResource {
 
         for (int i = 0; i < keys.size(); i++) {
             JsonObject key = keys.getJsonObject(i);
+
+            String kty = key.getString("kty", null);
+            if (!"RSA".equals(kty)) {
+                continue;
+            }
+            String use = key.getString("use", null);
+            if (use != null && !"sig".equals(use)) {
+                continue;
+            }
+            String alg = key.getString("alg", null);
+            if (alg != null && !"RS256".equals(alg)) {
+                continue;
+            }
+
             if (kid == null || kid.equals(key.getString("kid", null))) {
                 String n = key.getString("n");
                 String e = key.getString("e");
