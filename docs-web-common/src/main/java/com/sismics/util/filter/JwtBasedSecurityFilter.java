@@ -44,19 +44,30 @@ import static java.util.Optional.ofNullable;
 public class JwtBasedSecurityFilter extends SecurityFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtBasedSecurityFilter.class);
     private static final okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
-    /**
-     * Name of the header used to store the authentication token.
-     */
+
     public static final String HEADER_NAME = "Authorization";
-    /**
-     * True if this authentication method is enabled.
-     */
+
     private boolean enabled;
+    private String expectedIssuer;
+    private String expectedAudience;
 
     @Override
     public void init(FilterConfig filterConfig) {
         enabled = Boolean.parseBoolean(filterConfig.getInitParameter("enabled"))
                 || Boolean.parseBoolean(System.getProperty("docs.jwt_authentication"));
+
+        if (enabled) {
+            expectedIssuer = System.getProperty("docs.jwt_expected_issuer");
+            expectedAudience = System.getProperty("docs.jwt_expected_audience");
+            if (expectedIssuer == null || expectedIssuer.isBlank()
+                    || expectedAudience == null || expectedAudience.isBlank()) {
+                log.error("JWT authentication is enabled but docs.jwt_expected_issuer and/or "
+                        + "docs.jwt_expected_audience are not configured. Disabling JWT auth.");
+                enabled = false;
+            } else {
+                log.info("JWT authentication enabled: issuer={}, audience={}", expectedIssuer, expectedAudience);
+            }
+        }
     }
 
     @Override
@@ -64,27 +75,34 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
         if (!enabled) {
             return null;
         }
-        log.info("Jwt authentication started");
+        log.debug("JWT authentication started");
         User user = null;
         String token = extractAuthToken(request).replace("Bearer ", "");
+        if (token.isEmpty()) {
+            return null;
+        }
         DecodedJWT jwt = JWT.decode(token);
         if (verifyJwt(jwt, token)) {
-            String email = jwt.getClaim("preferred_username").toString();
+            String username = jwt.getClaim("preferred_username").asString();
+            if (username == null || username.isBlank()) {
+                log.warn("JWT token missing preferred_username claim");
+                return null;
+            }
             UserDao userDao = new UserDao();
-            user = userDao.getActiveByUsername(email);
+            user = userDao.getActiveByUsername(username);
             if (user == null) {
                 user = new User();
                 user.setRoleId(Constants.DEFAULT_USER_ROLE);
-                user.setUsername(email);
-                user.setEmail(email);
+                user.setUsername(username);
+                user.setEmail(username);
                 user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
                         .orElse("1073741824")));
                 user.setPassword(UUID.randomUUID().toString());
                 try {
-                    userDao.create(user, email);
-                    log.info("user created");
+                    userDao.create(user, username);
+                    log.info("Provisioned JWT user: {}", username);
                 } catch (Exception e) {
-                    log.info("Error:" + e.getMessage());
+                    log.error("Error creating JWT user: {}", username, e);
                     return null;
                 }
             }
@@ -93,24 +111,19 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
     }
 
     private boolean verifyJwt(final DecodedJWT jwt, final String token) {
-
         try {
             buildJWTVerifier(jwt).verify(token);
-            // if token is valid no exception will be thrown
-            log.info("Valid TOKEN");
-            return Boolean.TRUE;
+            log.debug("JWT token verified successfully");
+            return true;
         } catch (CertificateException e) {
-            //if CertificateException comes from buildJWTVerifier()
-            log.info("InValid TOKEN: " + e.getMessage());
-            return Boolean.FALSE;
+            log.warn("JWT verification failed (certificate): {}", e.getMessage());
+            return false;
         } catch (JWTVerificationException e) {
-            // if JWT Token in invalid
-            log.info("InValid TOKEN: " + e.getMessage() );
-            return Boolean.FALSE;
+            log.warn("JWT verification failed: {}", e.getMessage());
+            return false;
         } catch (Exception e) {
-            // If any other exception comes
-            log.info("InValid TOKEN, Exception Occurred: " + e.getMessage());
-            return Boolean.FALSE;
+            log.warn("JWT verification failed (unexpected): {}", e.getMessage());
+            return false;
         }
     }
 
@@ -118,23 +131,23 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
         return ofNullable(request.getHeader("Authorization")).orElse("");
     }
 
+    // TODO: JWKS is fetched on every request; should be cached with TTL
     private RSAPublicKey getPublicKey(DecodedJWT jwt) {
         String jwtIssuerCerts = jwt.getIssuer() + "/protocol/openid-connect/certs";
-        String publicKey = "";
         RSAPublicKey rsaPublicKey = null;
         Request request = new Request.Builder()
                 .url(jwtIssuerCerts)
                 .get()
                 .build();
         try (Response response = client.newCall(request).execute()) {
-            log.info("Successfully called the jwt issuer at: " + jwtIssuerCerts + " - " + response.code());
+            log.debug("Called JWT issuer JWKS at: {} - {}", jwtIssuerCerts, response.code());
             assert response.body() != null;
             if (response.isSuccessful()) {
                 try (Reader reader = response.body().charStream()) {
                     try (JsonReader jsonReader = Json.createReader(reader)) {
                         JsonObject jwks = jsonReader.readObject();
                         JsonArray keys = jwks.getJsonArray("keys");
-                        publicKey = keys.stream().filter(key -> Objects.equals(key.asJsonObject().getString("kid"),
+                        String publicKey = keys.stream().filter(key -> Objects.equals(key.asJsonObject().getString("kid"),
                                         jwt.getKeyId()))
                                 .findFirst()
                                 .map(k -> k.asJsonObject().getJsonArray("x5c").getString(0))
@@ -147,15 +160,18 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
                 }
             }
         } catch (IOException e) {
-            log.error("Error calling the jwt issuer at: " + jwtIssuerCerts, e);
+            log.error("Error calling JWT issuer JWKS at: {}", jwtIssuerCerts, e);
         } catch (CertificateException e) {
-            log.error("Error in getting the certificate: ", e);
+            log.error("Error parsing certificate from JWKS", e);
         }
         return rsaPublicKey;
     }
 
     private JWTVerifier buildJWTVerifier(DecodedJWT jwt) throws CertificateException {
         var algo = Algorithm.RSA256(getPublicKey(jwt), null);
-        return JWT.require(algo).build();
+        return JWT.require(algo)
+                .withIssuer(expectedIssuer)
+                .withAudience(expectedAudience)
+                .build();
     }
 }
