@@ -65,5 +65,11 @@ public enum ConfigType {
     LDAP_BASE_DN,
     LDAP_FILTER,
     LDAP_DEFAULT_EMAIL,
-    LDAP_DEFAULT_STORAGE
+    LDAP_DEFAULT_STORAGE,
+
+    /**
+     * Tag search mode: "PREFIX" (default, case-insensitive startsWith)
+     * or "EXACT" (case-insensitive equals).
+     */
+    TAG_SEARCH_MODE
 }

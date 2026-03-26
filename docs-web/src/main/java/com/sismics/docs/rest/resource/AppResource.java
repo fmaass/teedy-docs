@@ -87,6 +87,12 @@ public class AppResource extends BaseResource {
         Boolean guestLogin = ConfigUtil.getConfigBooleanValue(ConfigType.GUEST_LOGIN);
         Boolean ocrEnabled = ConfigUtil.getConfigBooleanValue(ConfigType.OCR_ENABLED, true);
         String defaultLanguage = ConfigUtil.getConfigStringValue(ConfigType.DEFAULT_LANGUAGE);
+        String tagSearchMode;
+        try {
+            tagSearchMode = ConfigUtil.getConfigStringValue(ConfigType.TAG_SEARCH_MODE);
+        } catch (IllegalStateException e) {
+            tagSearchMode = "PREFIX";
+        }
         UserDao userDao = new UserDao();
         DocumentDao documentDao = new DocumentDao();
         String globalQuotaStr = System.getenv(Constants.GLOBAL_QUOTA_ENV);
@@ -111,7 +117,8 @@ public class AppResource extends BaseResource {
                 .add("free_memory", Runtime.getRuntime().freeMemory())
                 .add("document_count", documentDao.getDocumentCount())
                 .add("active_user_count", userDao.getActiveUserCount())
-                .add("global_storage_current", userDao.getGlobalStorageCurrent());
+                .add("global_storage_current", userDao.getGlobalStorageCurrent())
+                .add("tag_search_mode", tagSearchMode);
         if (globalQuota > 0) {
             response.add("global_storage_quota", globalQuota);
         }
@@ -191,7 +198,9 @@ public class AppResource extends BaseResource {
      */
     @POST
     @Path("config")
-    public Response config(@FormParam("default_language") String defaultLanguage) {
+    public Response config(
+            @FormParam("default_language") String defaultLanguage,
+            @FormParam("tag_search_mode") String tagSearchMode) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -203,6 +212,13 @@ public class AppResource extends BaseResource {
 
         ConfigDao configDao = new ConfigDao();
         configDao.update(ConfigType.DEFAULT_LANGUAGE, defaultLanguage);
+
+        if (tagSearchMode != null) {
+            if (!"PREFIX".equals(tagSearchMode) && !"EXACT".equals(tagSearchMode)) {
+                throw new ClientException("ValidationError", "tag_search_mode must be PREFIX or EXACT");
+            }
+            configDao.update(ConfigType.TAG_SEARCH_MODE, tagSearchMode);
+        }
 
         return Response.ok().build();
     }

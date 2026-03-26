@@ -1,6 +1,8 @@
 package com.sismics.docs.rest.util;
 
+import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.dao.dto.TagDto;
+import com.sismics.docs.core.util.ConfigUtil;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,23 +35,34 @@ public class TagUtil {
     }
 
     /**
-     * Find tags by name prefix (case-insensitive).
+     * Find tags by name (case-insensitive). Uses prefix matching by default,
+     * or exact matching if TAG_SEARCH_MODE is set to "EXACT".
      *
-     * @param name Name prefix
+     * @param name Name to search for
      * @param allTagDtoList List of all tags
-     * @return List of filtered tags
+     * @return List of matching tags
      */
     public static List<TagDto> findByName(String name, List<TagDto> allTagDtoList) {
         if (name.isEmpty()) {
             return Collections.emptyList();
         }
+        boolean exactMode = isExactMatchMode();
         List<TagDto> tagDtoList = new ArrayList<>();
-        name = name.toLowerCase();
+        String lowerName = name.toLowerCase();
         for (TagDto tagDto : allTagDtoList) {
-            if (tagDto.getName().toLowerCase().startsWith(name)) {
+            String tagName = tagDto.getName().toLowerCase();
+            if (exactMode ? tagName.equals(lowerName) : tagName.startsWith(lowerName)) {
                 tagDtoList.add(tagDto);
             }
         }
         return tagDtoList;
+    }
+
+    private static boolean isExactMatchMode() {
+        try {
+            return "EXACT".equals(ConfigUtil.getConfigStringValue(ConfigType.TAG_SEARCH_MODE));
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
 }
