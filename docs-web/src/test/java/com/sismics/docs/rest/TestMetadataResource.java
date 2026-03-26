@@ -1,8 +1,8 @@
 package com.sismics.docs.rest;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -32,7 +32,7 @@ public class TestMetadataResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         JsonArray metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(0, metadata.size());
+        Assertions.assertEquals(0, metadata.size());
 
         // Create a metadata with admin
         json = target().path("/metadata").request()
@@ -41,9 +41,9 @@ public class TestMetadataResource extends BaseJerseyTest {
                         .param("name", "ISBN 13")
                         .param("type", "STRING")), JsonObject.class);
         String metadataIsbnId = json.getString("id");
-        Assert.assertNotNull(metadataIsbnId);
-        Assert.assertEquals("ISBN 13", json.getString("name"));
-        Assert.assertEquals("STRING", json.getString("type"));
+        Assertions.assertNotNull(metadataIsbnId);
+        Assertions.assertEquals("ISBN 13", json.getString("name"));
+        Assertions.assertEquals("STRING", json.getString("type"));
 
         // Get all metadata with admin
         json = target().path("/metadata")
@@ -53,16 +53,16 @@ public class TestMetadataResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(1, metadata.size());
+        Assertions.assertEquals(1, metadata.size());
 
         // Update a metadata with admin
         json = target().path("/metadata/" + metadataIsbnId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .post(Entity.form(new Form()
                         .param("name", "ISBN 10")), JsonObject.class);
-        Assert.assertEquals(metadataIsbnId, json.getString("id"));
-        Assert.assertEquals("ISBN 10", json.getString("name"));
-        Assert.assertEquals("STRING", json.getString("type"));
+        Assertions.assertEquals(metadataIsbnId, json.getString("id"));
+        Assertions.assertEquals("ISBN 10", json.getString("name"));
+        Assertions.assertEquals("STRING", json.getString("type"));
 
         // Delete a metadata with admin
         target().path("/metadata/" + metadataIsbnId).request()
@@ -77,6 +77,6 @@ public class TestMetadataResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(0, metadata.size());
+        Assertions.assertEquals(0, metadata.size());
     }
 }

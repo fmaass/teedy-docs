@@ -8,8 +8,8 @@ import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.util.format.*;
 import com.sismics.util.mime.MimeType;
 import com.sismics.util.mime.MimeTypeUtil;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -29,50 +29,50 @@ public class TestFileUtil extends BaseTest {
     public void extractContentOpenDocumentTextTest() throws Exception {
         Path path = Paths.get(getResource(FILE_ODT).toURI());
         FormatHandler formatHandler = FormatHandlerUtil.find(MimeTypeUtil.guessMimeType(path, FILE_ODT));
-        Assert.assertNotNull(formatHandler);
-        Assert.assertTrue(formatHandler instanceof OdtFormatHandler);
+        Assertions.assertNotNull(formatHandler);
+        Assertions.assertTrue(formatHandler instanceof OdtFormatHandler);
         String content = formatHandler.extractContent("eng", path);
-        Assert.assertTrue(content.contains("Lorem ipsum dolor sit amen."));
+        Assertions.assertTrue(content.contains("Lorem ipsum dolor sit amen."));
     }
     
     @Test
     public void extractContentOfficeDocumentTest() throws Exception {
         Path path = Paths.get(getResource(FILE_DOCX).toURI());
         FormatHandler formatHandler = FormatHandlerUtil.find(MimeTypeUtil.guessMimeType(path, FILE_DOCX));
-        Assert.assertNotNull(formatHandler);
-        Assert.assertTrue(formatHandler instanceof DocxFormatHandler);
+        Assertions.assertNotNull(formatHandler);
+        Assertions.assertTrue(formatHandler instanceof DocxFormatHandler);
         String content = formatHandler.extractContent("eng", path);
-        Assert.assertTrue(content.contains("Lorem ipsum dolor sit amen."));
+        Assertions.assertTrue(content.contains("Lorem ipsum dolor sit amen."));
     }
 
     @Test
     public void extractContentPowerpointTest() throws Exception {
         Path path = Paths.get(getResource(FILE_PPTX).toURI());
         FormatHandler formatHandler = FormatHandlerUtil.find(MimeTypeUtil.guessMimeType(path, FILE_PPTX));
-        Assert.assertNotNull(formatHandler);
-        Assert.assertTrue(formatHandler instanceof PptxFormatHandler);
+        Assertions.assertNotNull(formatHandler);
+        Assertions.assertTrue(formatHandler instanceof PptxFormatHandler);
         String content = formatHandler.extractContent("eng", path);
-        Assert.assertTrue(content.contains("Scaling"));
+        Assertions.assertTrue(content.contains("Scaling"));
     }
 
     @Test
     public void extractContentPdf() throws Exception {
         Path path = Paths.get(getResource(FILE_PDF).toURI());
         FormatHandler formatHandler = FormatHandlerUtil.find(MimeTypeUtil.guessMimeType(path, FILE_PDF));
-        Assert.assertNotNull(formatHandler);
-        Assert.assertTrue(formatHandler instanceof PdfFormatHandler);
+        Assertions.assertNotNull(formatHandler);
+        Assertions.assertTrue(formatHandler instanceof PdfFormatHandler);
         String content = formatHandler.extractContent("eng", path);
-        Assert.assertTrue(content.contains("All human beings are born free and equal in dignity and rights."));
+        Assertions.assertTrue(content.contains("All human beings are born free and equal in dignity and rights."));
     }
 
     @Test
     public void extractContentScannedPdf() throws Exception {
         Path path = Paths.get(getResource("scanned.pdf").toURI());
         FormatHandler formatHandler = FormatHandlerUtil.find(MimeTypeUtil.guessMimeType(path, FILE_PDF_SCANNED));
-        Assert.assertNotNull(formatHandler);
-        Assert.assertTrue(formatHandler instanceof PdfFormatHandler);
+        Assertions.assertNotNull(formatHandler);
+        Assertions.assertTrue(formatHandler instanceof PdfFormatHandler);
         String content = formatHandler.extractContent("eng", path);
-        Assert.assertTrue(content.contains("All human beings are born free and equal in dignity and rights."));
+        Assertions.assertTrue(content.contains("All human beings are born free and equal in dignity and rights."));
     }
 
     @Test
@@ -137,7 +137,7 @@ public class TestFileUtil extends BaseTest {
 
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             PdfUtil.convertToPdf(documentDto, Lists.newArrayList(file0, file1, file2, file3, file4, file5), true, true, 10, outputStream);
-            Assert.assertTrue(outputStream.toByteArray().length > 0);
+            Assertions.assertTrue(outputStream.toByteArray().length > 0);
         }
     }
 }

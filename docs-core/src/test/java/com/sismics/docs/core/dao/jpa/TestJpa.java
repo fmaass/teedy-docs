@@ -5,8 +5,8 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.authentication.InternalAuthenticationHandler;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests the persistance layer.
@@ -24,11 +24,11 @@ public class TestJpa extends BaseTransactionalTest {
 
         // Search a user by his ID
         user = userDao.getById(user.getId());
-        Assert.assertNotNull(user);
-        Assert.assertEquals("toto@docs.com", user.getEmail());
+        Assertions.assertNotNull(user);
+        Assertions.assertEquals("toto@docs.com", user.getEmail());
 
         // Authenticate using the database
-        Assert.assertNotNull(new InternalAuthenticationHandler().authenticate("testJpa", "12345678"));
+        Assertions.assertNotNull(new InternalAuthenticationHandler().authenticate("testJpa", "12345678"));
 
         // Delete the created user
         userDao.delete("testJpa", user.getId());

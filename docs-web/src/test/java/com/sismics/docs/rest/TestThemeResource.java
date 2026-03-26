@@ -5,8 +5,8 @@ import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonObject;
 import jakarta.ws.rs.client.Entity;
@@ -32,14 +32,14 @@ public class TestThemeResource extends BaseJerseyTest {
         // Get the stylesheet anonymously
         String stylesheet = target().path("/theme/stylesheet").request()
                 .get(String.class);
-        Assert.assertTrue(stylesheet.contains("background-color: #ffffff;"));
+        Assertions.assertTrue(stylesheet.contains("background-color: #ffffff;"));
 
         // Get the theme configuration anonymously
         JsonObject json = target().path("/theme").request()
                 .get(JsonObject.class);
-        Assert.assertEquals("Teedy", json.getString("name"));
-        Assert.assertEquals("#ffffff", json.getString("color"));
-        Assert.assertEquals("", json.getString("css"));
+        Assertions.assertEquals("Teedy", json.getString("name"));
+        Assertions.assertEquals("#ffffff", json.getString("color"));
+        Assertions.assertEquals("", json.getString("css"));
 
         // Update the main color as admin
         target().path("/theme").request()
@@ -52,23 +52,23 @@ public class TestThemeResource extends BaseJerseyTest {
         // Get the stylesheet anonymously
         stylesheet = target().path("/theme/stylesheet").request()
                 .get(String.class);
-        Assert.assertTrue(stylesheet.contains("background-color: #ff0000;"));
-        Assert.assertTrue(stylesheet.contains("Custom CSS"));
+        Assertions.assertTrue(stylesheet.contains("background-color: #ff0000;"));
+        Assertions.assertTrue(stylesheet.contains("Custom CSS"));
 
         // Get the theme configuration anonymously
         json = target().path("/theme").request()
                 .get(JsonObject.class);
-        Assert.assertEquals("My App", json.getString("name"));
-        Assert.assertEquals("#ff0000", json.getString("color"));
-        Assert.assertEquals(".body { content: 'Custom CSS'; }", json.getString("css"));
+        Assertions.assertEquals("My App", json.getString("name"));
+        Assertions.assertEquals("#ff0000", json.getString("color"));
+        Assertions.assertEquals(".body { content: 'Custom CSS'; }", json.getString("css"));
 
         // Get the logo
         Response response = target().path("/theme/image/logo").request().get();
-        Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
 
         // Get the background
         response = target().path("/theme/image/background").request().get();
-        Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
 
         // Change the logo
         try (InputStream is = Resources.getResource("file/PIA00452.jpg").openStream()) {
@@ -98,11 +98,11 @@ public class TestThemeResource extends BaseJerseyTest {
 
         // Get the logo
         response = target().path("/theme/image/logo").request().get();
-        Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
 
         // Get the background
         response = target().path("/theme/image/background").request().get();
-        Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
 
         // Reset the main color as admin
         target().path("/theme").request()

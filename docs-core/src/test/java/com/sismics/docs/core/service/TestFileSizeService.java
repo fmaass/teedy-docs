@@ -4,8 +4,8 @@ import com.sismics.docs.BaseTransactionalTest;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 public class TestFileSizeService extends BaseTransactionalTest {
 
@@ -17,6 +17,6 @@ public class TestFileSizeService extends BaseTransactionalTest {
         File file = createFile(user, File.UNKNOWN_SIZE);
         FileSizeService fileSizeService = new FileSizeService();
         fileSizeService.processFile(file);
-        Assert.assertEquals(fileDao.getFile(file.getId()).getSize(), Long.valueOf(FILE_JPG_SIZE));
+        Assertions.assertEquals(fileDao.getFile(file.getId()).getSize(), Long.valueOf(FILE_JPG_SIZE));
     }
 }

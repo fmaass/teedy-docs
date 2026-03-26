@@ -1,8 +1,8 @@
 package com.sismics.docs.rest;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -34,7 +34,7 @@ public class TestAuditLogResource extends BaseJerseyTest {
                         .param("name", "SuperTag")
                         .param("color", "#ffff00")), JsonObject.class);
         String tag1Id = json.getString("id");
-        Assert.assertNotNull(tag1Id);
+        Assertions.assertNotNull(tag1Id);
 
         // Create a document
         long create1Date = new Date().getTime();
@@ -47,7 +47,7 @@ public class TestAuditLogResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("create_date", Long.toString(create1Date))), JsonObject.class);
         String document1Id = json.getString("id");
-        Assert.assertNotNull(document1Id);
+        Assertions.assertNotNull(document1Id);
         
         // Get all logs for the document
         json = target().path("/auditlog")
@@ -56,41 +56,41 @@ public class TestAuditLogResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .get(JsonObject.class);
         JsonArray logs = json.getJsonArray("logs");
-        Assert.assertEquals(3, logs.size());
-        Assert.assertEquals(countByClass(logs, "Document"), 1);
-        Assert.assertEquals(countByClass(logs, "Acl"), 2);
-        Assert.assertEquals("auditlog1", logs.getJsonObject(0).getString("username"));
-        Assert.assertNotNull(logs.getJsonObject(0).getString("id"));
-        Assert.assertNotNull(logs.getJsonObject(0).getString("target"));
-        Assert.assertNotNull(logs.getJsonObject(0).getString("type"));
-        Assert.assertNotNull(logs.getJsonObject(0).getString("message"));
-        Assert.assertNotNull(logs.getJsonObject(0).getJsonNumber("create_date"));
-        Assert.assertEquals("auditlog1", logs.getJsonObject(1).getString("username"));
-        Assert.assertEquals("auditlog1", logs.getJsonObject(2).getString("username"));
+        Assertions.assertEquals(3, logs.size());
+        Assertions.assertEquals(countByClass(logs, "Document"), 1);
+        Assertions.assertEquals(countByClass(logs, "Acl"), 2);
+        Assertions.assertEquals("auditlog1", logs.getJsonObject(0).getString("username"));
+        Assertions.assertNotNull(logs.getJsonObject(0).getString("id"));
+        Assertions.assertNotNull(logs.getJsonObject(0).getString("target"));
+        Assertions.assertNotNull(logs.getJsonObject(0).getString("type"));
+        Assertions.assertNotNull(logs.getJsonObject(0).getString("message"));
+        Assertions.assertNotNull(logs.getJsonObject(0).getJsonNumber("create_date"));
+        Assertions.assertEquals("auditlog1", logs.getJsonObject(1).getString("username"));
+        Assertions.assertEquals("auditlog1", logs.getJsonObject(2).getString("username"));
         
         // Get all logs for the current user
         json = target().path("/auditlog").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .get(JsonObject.class);
         logs = json.getJsonArray("logs");
-        Assert.assertEquals(2, logs.size());
-        Assert.assertEquals(countByClass(logs, "Document"), 1);
-        Assert.assertEquals(countByClass(logs, "Tag"), 1);
+        Assertions.assertEquals(2, logs.size());
+        Assertions.assertEquals(countByClass(logs, "Document"), 1);
+        Assertions.assertEquals(countByClass(logs, "Tag"), 1);
         
         // Deletes a tag
         json = target().path("/tag/" + tag1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
         
         // Get all logs for the current user
         json = target().path("/auditlog").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .get(JsonObject.class);
         logs = json.getJsonArray("logs");
-        Assert.assertEquals(3, logs.size());
-        Assert.assertEquals(countByClass(logs, "Document"), 1);
-        Assert.assertEquals(countByClass(logs, "Tag"), 2);
+        Assertions.assertEquals(3, logs.size());
+        Assertions.assertEquals(countByClass(logs, "Document"), 1);
+        Assertions.assertEquals(countByClass(logs, "Tag"), 2);
 
         // Get document 1
         json = target().path("/document/" + document1Id).request()
@@ -105,7 +105,7 @@ public class TestAuditLogResource extends BaseJerseyTest {
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .get(JsonObject.class);
-        Assert.assertTrue(json.getJsonNumber("update_date").longValue() > update1Date); // Adding a file to a document updates it
+        Assertions.assertTrue(json.getJsonNumber("update_date").longValue() > update1Date); // Adding a file to a document updates it
 
         // Get all logs for the document
         json = target().path("/auditlog")
@@ -114,10 +114,10 @@ public class TestAuditLogResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, auditlog1Token)
                 .get(JsonObject.class);
         logs = json.getJsonArray("logs");
-        Assert.assertEquals(4, logs.size());
-        Assert.assertEquals(countByClass(logs, "Document"), 1);
-        Assert.assertEquals(countByClass(logs, "Acl"), 2);
-        Assert.assertEquals(countByClass(logs, "File"), 1);
+        Assertions.assertEquals(4, logs.size());
+        Assertions.assertEquals(countByClass(logs, "Document"), 1);
+        Assertions.assertEquals(countByClass(logs, "Acl"), 2);
+        Assertions.assertEquals(countByClass(logs, "File"), 1);
 
         // Delete auditlog1
         String adminToken = adminToken();

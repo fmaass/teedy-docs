@@ -3,7 +3,7 @@
   "description": "Lightweight document management system",
   "readme": "See https://github.com/fmaass/teedy-docs for more information.",
   "license": "GPL-2.0",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fmaass/teedy-docs.git"

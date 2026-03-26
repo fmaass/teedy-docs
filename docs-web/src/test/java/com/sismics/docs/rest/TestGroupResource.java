@@ -1,8 +1,8 @@
 package com.sismics.docs.rest;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -58,18 +58,18 @@ public class TestGroupResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         JsonArray groups = json.getJsonArray("groups");
-        Assert.assertEquals(6, groups.size());
+        Assertions.assertEquals(6, groups.size());
         JsonObject groupG11 = groups.getJsonObject(2);
-        Assert.assertEquals("g11", groupG11.getString("name"));
-        Assert.assertEquals("g1", groupG11.getString("parent"));
+        Assertions.assertEquals("g11", groupG11.getString("name"));
+        Assertions.assertEquals("g1", groupG11.getString("parent"));
         
         // Check admin groups (all computed groups)
         json = target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         groups = json.getJsonArray("groups");
-        Assert.assertEquals(1, groups.size());
-        Assert.assertEquals("administrators", groups.getString(0));
+        Assertions.assertEquals(1, groups.size());
+        Assertions.assertEquals("administrators", groups.getString(0));
         
         // Check group1 groups (all computed groups)
         json = target().path("/user").request()
@@ -80,20 +80,20 @@ public class TestGroupResource extends BaseJerseyTest {
         for (int i = 0; i < groups.size(); i++) {
             groupList.add(groups.getString(i));
         }
-        Assert.assertEquals(4, groups.size());
-        Assert.assertTrue(groupList.contains("g1"));
-        Assert.assertTrue(groupList.contains("g12"));
-        Assert.assertTrue(groupList.contains("g11"));
-        Assert.assertTrue(groupList.contains("g112"));
+        Assertions.assertEquals(4, groups.size());
+        Assertions.assertTrue(groupList.contains("g1"));
+        Assertions.assertTrue(groupList.contains("g12"));
+        Assertions.assertTrue(groupList.contains("g11"));
+        Assertions.assertTrue(groupList.contains("g112"));
         
         // Check group1 groups with admin (only direct groups)
         json = target().path("/user/group1").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         groups = json.getJsonArray("groups");
-        Assert.assertEquals(2, groups.size());
-        Assert.assertEquals("g112", groups.getString(0));
-        Assert.assertEquals("g12", groups.getString(1));
+        Assertions.assertEquals(2, groups.size());
+        Assertions.assertEquals("g112", groups.getString(0));
+        Assertions.assertEquals("g12", groups.getString(1));
         
         // List all users in group1
         json = target().path("/user/list")
@@ -102,7 +102,7 @@ public class TestGroupResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         JsonArray users = json.getJsonArray("users");
-        Assert.assertEquals(1, users.size());
+        Assertions.assertEquals(1, users.size());
         
         // Add group1 to g112 (again)
         target().path("/group/g112").request()
@@ -115,7 +115,7 @@ public class TestGroupResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, group1Token)
                 .get(JsonObject.class);
         groups = json.getJsonArray("groups");
-        Assert.assertEquals(4, groups.size());
+        Assertions.assertEquals(4, groups.size());
         
         // Update group g12
         target().path("/group/g12").request()
@@ -129,19 +129,19 @@ public class TestGroupResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         groups = json.getJsonArray("groups");
-        Assert.assertEquals(2, groups.size());
-        Assert.assertEquals("g112", groups.getString(0));
-        Assert.assertEquals("g12new", groups.getString(1));
+        Assertions.assertEquals(2, groups.size());
+        Assertions.assertEquals("g112", groups.getString(0));
+        Assertions.assertEquals("g12new", groups.getString(1));
         
         // Get group g12new
         json = target().path("/group/g12new").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
-        Assert.assertEquals("g12new", json.getString("name"));
-        Assert.assertEquals("g11", json.getString("parent"));
+        Assertions.assertEquals("g12new", json.getString("name"));
+        Assertions.assertEquals("g11", json.getString("parent"));
         JsonArray members = json.getJsonArray("members");
-        Assert.assertEquals(1, members.size());
-        Assert.assertEquals("group1", members.getString(0));
+        Assertions.assertEquals(1, members.size());
+        Assertions.assertEquals("group1", members.getString(0));
         
         // Remove group1 from g12new
         target().path("/group/g12new/group1").request()
@@ -157,10 +157,10 @@ public class TestGroupResource extends BaseJerseyTest {
         for (int i = 0; i < groups.size(); i++) {
             groupList.add(groups.getString(i));
         }
-        Assert.assertEquals(3, groups.size());
-        Assert.assertTrue(groupList.contains("g1"));
-        Assert.assertTrue(groupList.contains("g11"));
-        Assert.assertTrue(groupList.contains("g112"));
+        Assertions.assertEquals(3, groups.size());
+        Assertions.assertTrue(groupList.contains("g1"));
+        Assertions.assertTrue(groupList.contains("g11"));
+        Assertions.assertTrue(groupList.contains("g112"));
         
         // Delete group g1
         target().path("/group/g1").request()
@@ -171,10 +171,10 @@ public class TestGroupResource extends BaseJerseyTest {
         Response response = target().path("/group/administrators").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        Assert.assertEquals(Response.Status.BAD_REQUEST, Response.Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Response.Status.BAD_REQUEST, Response.Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
-        Assert.assertEquals("ForbiddenError", json.getString("type"));
-        Assert.assertEquals("The administrators group cannot be deleted", json.getString("message"));
+        Assertions.assertEquals("ForbiddenError", json.getString("type"));
+        Assertions.assertEquals("The administrators group cannot be deleted", json.getString("message"));
         
         // Check group1 groups (all computed groups)
         json = target().path("/user").request()
@@ -185,9 +185,9 @@ public class TestGroupResource extends BaseJerseyTest {
         for (int i = 0; i < groups.size(); i++) {
             groupList.add(groups.getString(i));
         }
-        Assert.assertEquals(2, groups.size());
-        Assert.assertTrue(groupList.contains("g11"));
-        Assert.assertTrue(groupList.contains("g112"));
+        Assertions.assertEquals(2, groups.size());
+        Assertions.assertTrue(groupList.contains("g11"));
+        Assertions.assertTrue(groupList.contains("g112"));
 
         // Delete all remaining groups and users
         target().path("/group/g11").request()

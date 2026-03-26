@@ -6,12 +6,12 @@ import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.jpa.EMF;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityTransaction;
-import org.junit.After;
-import org.junit.Before;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 
 public abstract class BaseTransactionalTest {
 
-    @Before
+    @BeforeEach
     public void setUp() {
         // Initialize the entity manager
         EntityManager em = EMF.get().createEntityManager();
@@ -20,7 +20,7 @@ public abstract class BaseTransactionalTest {
         em.getTransaction().begin();
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         ThreadLocalContext.get().getEntityManager().getTransaction().rollback();
     }

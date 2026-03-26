@@ -6,9 +6,17 @@ import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.auth0.jwt.interfaces.JWTVerifier;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.Reader;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.interfaces.RSAPublicKey;
 import java.util.Base64;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.UserDao;
@@ -24,13 +32,6 @@ import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.security.interfaces.RSAPublicKey;
-import java.util.Objects;
-import java.util.UUID;
-
 import static java.util.Optional.ofNullable;
 
 /**
@@ -44,8 +45,17 @@ import static java.util.Optional.ofNullable;
 public class JwtBasedSecurityFilter extends SecurityFilter {
     private static final Logger log = LoggerFactory.getLogger(JwtBasedSecurityFilter.class);
     private static final okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+    private static final long JWKS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
     public static final String HEADER_NAME = "Authorization";
+
+    private record CachedKey(RSAPublicKey key, long fetchedAt) {
+        boolean isExpired() {
+            return System.currentTimeMillis() - fetchedAt > JWKS_CACHE_TTL_MS;
+        }
+    }
+
+    private final Map<String, CachedKey> jwksCache = new ConcurrentHashMap<>();
 
     private boolean enabled;
     private String expectedIssuer;
@@ -131,32 +141,44 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
         return ofNullable(request.getHeader("Authorization")).orElse("");
     }
 
-    // TODO: JWKS is fetched on every request; should be cached with TTL
     private RSAPublicKey getPublicKey(DecodedJWT jwt) {
+        String cacheKey = jwt.getIssuer() + "|" + jwt.getKeyId();
+
+        CachedKey cached = jwksCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.key();
+        }
+
+        RSAPublicKey rsaPublicKey = fetchPublicKey(jwt);
+        if (rsaPublicKey != null) {
+            jwksCache.put(cacheKey, new CachedKey(rsaPublicKey, System.currentTimeMillis()));
+        }
+        return rsaPublicKey;
+    }
+
+    private RSAPublicKey fetchPublicKey(DecodedJWT jwt) {
         String jwtIssuerCerts = jwt.getIssuer() + "/protocol/openid-connect/certs";
-        RSAPublicKey rsaPublicKey = null;
         Request request = new Request.Builder()
                 .url(jwtIssuerCerts)
                 .get()
                 .build();
         try (Response response = client.newCall(request).execute()) {
-            log.debug("Called JWT issuer JWKS at: {} - {}", jwtIssuerCerts, response.code());
+            log.debug("Fetched JWKS from: {} - {}", jwtIssuerCerts, response.code());
             assert response.body() != null;
             if (response.isSuccessful()) {
-                try (Reader reader = response.body().charStream()) {
-                    try (JsonReader jsonReader = Json.createReader(reader)) {
-                        JsonObject jwks = jsonReader.readObject();
-                        JsonArray keys = jwks.getJsonArray("keys");
-                        String publicKey = keys.stream().filter(key -> Objects.equals(key.asJsonObject().getString("kid"),
-                                        jwt.getKeyId()))
-                                .findFirst()
-                                .map(k -> k.asJsonObject().getJsonArray("x5c").getString(0))
-                                .orElse("");
-                        var decode = Base64.getDecoder().decode(publicKey);
-                        var certificate = CertificateFactory.getInstance("X.509")
-                                .generateCertificate(new ByteArrayInputStream(decode));
-                        rsaPublicKey = (RSAPublicKey) certificate.getPublicKey();
-                    }
+                try (Reader reader = response.body().charStream();
+                     JsonReader jsonReader = Json.createReader(reader)) {
+                    JsonObject jwks = jsonReader.readObject();
+                    JsonArray keys = jwks.getJsonArray("keys");
+                    String publicKey = keys.stream()
+                            .filter(key -> Objects.equals(key.asJsonObject().getString("kid"), jwt.getKeyId()))
+                            .findFirst()
+                            .map(k -> k.asJsonObject().getJsonArray("x5c").getString(0))
+                            .orElse("");
+                    var decode = Base64.getDecoder().decode(publicKey);
+                    var certificate = CertificateFactory.getInstance("X.509")
+                            .generateCertificate(new ByteArrayInputStream(decode));
+                    return (RSAPublicKey) certificate.getPublicKey();
                 }
             }
         } catch (IOException e) {
@@ -164,7 +186,7 @@ public class JwtBasedSecurityFilter extends SecurityFilter {
         } catch (CertificateException e) {
             log.error("Error parsing certificate from JWKS", e);
         }
-        return rsaPublicKey;
+        return null;
     }
 
     private JWTVerifier buildJWTVerifier(DecodedJWT jwt) throws CertificateException {

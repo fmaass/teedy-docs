@@ -3,8 +3,8 @@ package com.sismics.docs.core.util;
 import com.google.common.base.Strings;
 import com.google.common.io.ByteStreams;
 import com.sismics.BaseTest;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import javax.crypto.Cipher;
 import javax.crypto.CipherInputStream;
@@ -20,14 +20,14 @@ public class TestEncryptUtil extends BaseTest {
     public void generatePrivateKeyTest() {
         String key = EncryptionUtil.generatePrivateKey();
         System.out.println(key);
-        Assert.assertFalse(Strings.isNullOrEmpty(key));
+        Assertions.assertFalse(Strings.isNullOrEmpty(key));
     }
     
     @Test
     public void encryptStreamTest() throws Exception {
         try {
             EncryptionUtil.getEncryptionCipher("");
-            Assert.fail();
+            Assertions.fail();
         } catch (IllegalArgumentException e) {
             // NOP
         }
@@ -36,7 +36,7 @@ public class TestEncryptUtil extends BaseTest {
         byte[] encryptedData = ByteStreams.toByteArray(inputStream);
         byte[] assertData = ByteStreams.toByteArray(getSystemResourceAsStream(FILE_PDF_ENCRYPTED));
 
-        Assert.assertEquals(encryptedData.length, assertData.length);
+        Assertions.assertEquals(encryptedData.length, assertData.length);
     }
     
     @Test
@@ -46,6 +46,6 @@ public class TestEncryptUtil extends BaseTest {
         byte[] encryptedData = ByteStreams.toByteArray(inputStream);
         byte[] assertData = ByteStreams.toByteArray(getSystemResourceAsStream(FILE_PDF));
         
-        Assert.assertEquals(encryptedData.length, assertData.length);
+        Assertions.assertEquals(encryptedData.length, assertData.length);
     }
 }

@@ -6,8 +6,8 @@ import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.TransactionUtil;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
 
@@ -27,7 +27,7 @@ public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
         event.setFileId(file.getId());
         event.setUserId(user.getId());
         fileDeletedAsyncListener.on(event);
-        Assert.assertEquals(userDao.getById(user.getId()).getStorageCurrent(), Long.valueOf(10_000 - FILE_JPG_SIZE));
+        Assertions.assertEquals(userDao.getById(user.getId()).getStorageCurrent(), Long.valueOf(10_000 - FILE_JPG_SIZE));
     }
 
     @Test
@@ -46,7 +46,7 @@ public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
         event.setFileId(file.getId());
         event.setUserId(user.getId());
         fileDeletedAsyncListener.on(event);
-        Assert.assertEquals(userDao.getById(user.getId()).getStorageCurrent(), Long.valueOf(10_000 - FILE_JPG_SIZE));
+        Assertions.assertEquals(userDao.getById(user.getId()).getStorageCurrent(), Long.valueOf(10_000 - FILE_JPG_SIZE));
     }
 
 }

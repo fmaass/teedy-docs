@@ -1,6 +1,6 @@
 package com.sismics.util;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.sismics.util.css.Selector;
 

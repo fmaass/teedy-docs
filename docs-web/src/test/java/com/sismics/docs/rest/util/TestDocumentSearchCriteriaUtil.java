@@ -10,8 +10,8 @@ import com.sismics.docs.rest.BaseTransactionalTest;
 import com.sismics.util.mime.MimeType;
 import org.apache.poi.ss.formula.functions.T;
 import org.joda.time.DateTime;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -43,7 +43,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getCreatorId(), user.getId());
+        Assertions.assertEquals(documentCriteria.getCreatorId(), user.getId());
 
         documentCriteria = new DocumentCriteria();
         DocumentSearchCriteriaUtil.addHttpSearchParams(
@@ -64,7 +64,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertNotNull(documentCriteria.getCreatorId());
+        Assertions.assertNotNull(documentCriteria.getCreatorId());
     }
 
     @Test
@@ -88,7 +88,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getCreateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getCreateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
     }
 
     @Test
@@ -112,7 +112,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getCreateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getCreateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
     }
 
     @Test
@@ -136,7 +136,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getFullSearch(), "full");
+        Assertions.assertEquals(documentCriteria.getFullSearch(), "full");
     }
 
     @Test
@@ -160,7 +160,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getLanguage(), "fra");
+        Assertions.assertEquals(documentCriteria.getLanguage(), "fra");
 
         documentCriteria = new DocumentCriteria();
         DocumentSearchCriteriaUtil.addHttpSearchParams(
@@ -181,8 +181,8 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertNotNull(documentCriteria.getLanguage());
-        Assert.assertNotEquals(documentCriteria.getLanguage(), "unknown");
+        Assertions.assertNotNull(documentCriteria.getLanguage());
+        Assertions.assertNotEquals(documentCriteria.getLanguage(), "unknown");
     }
 
     @Test
@@ -206,7 +206,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getMimeType(), MimeType.IMAGE_GIF);
+        Assertions.assertEquals(documentCriteria.getMimeType(), MimeType.IMAGE_GIF);
     }
 
     @Test
@@ -230,7 +230,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertTrue(documentCriteria.getShared());
+        Assertions.assertTrue(documentCriteria.getShared());
     }
 
     @Test
@@ -254,7 +254,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getSimpleSearch(), "simple");
+        Assertions.assertEquals(documentCriteria.getSimpleSearch(), "simple");
     }
 
     @Test
@@ -301,7 +301,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 allTagDtoList
         );
-        Assert.assertEquals(documentCriteria.getTagIdList(), List.of(Collections.singletonList(tag1.getId())));
+        Assertions.assertEquals(documentCriteria.getTagIdList(), List.of(Collections.singletonList(tag1.getId())));
 
         documentCriteria = new DocumentCriteria();
         DocumentSearchCriteriaUtil.addHttpSearchParams(
@@ -322,7 +322,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 allTagDtoList
         );
-        Assert.assertEquals(documentCriteria.getTagIdList(), List.of(List.of(tag2.getId(), tag3.getId())));
+        Assertions.assertEquals(documentCriteria.getTagIdList(), List.of(List.of(tag2.getId(), tag3.getId())));
     }
 
     @Test
@@ -369,7 +369,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 allTagDtoList
         );
-        Assert.assertEquals(documentCriteria.getExcludedTagIdList(), List.of(Collections.singletonList(tag1.getId())));
+        Assertions.assertEquals(documentCriteria.getExcludedTagIdList(), List.of(Collections.singletonList(tag1.getId())));
 
         documentCriteria = new DocumentCriteria();
         DocumentSearchCriteriaUtil.addHttpSearchParams(
@@ -390,7 +390,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 allTagDtoList
         );
-        Assert.assertEquals(documentCriteria.getExcludedTagIdList(), List.of(List.of(tag2.getId(), tag3.getId())));
+        Assertions.assertEquals(documentCriteria.getExcludedTagIdList(), List.of(List.of(tag2.getId(), tag3.getId())));
     }
 
     @Test
@@ -414,7 +414,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getTitleList(), Arrays.asList(new String[]{"title1", "title2"}));
+        Assertions.assertEquals(documentCriteria.getTitleList(), Arrays.asList(new String[]{"title1", "title2"}));
     }
 
     @Test
@@ -438,7 +438,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getUpdateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getUpdateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
     }
 
     @Test
@@ -462,7 +462,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assert.assertEquals(documentCriteria.getUpdateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getUpdateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
     }
 
     @Test
@@ -486,7 +486,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 "me",
                 null
         );
-        Assert.assertTrue(documentCriteria.getActiveRoute());
+        Assertions.assertTrue(documentCriteria.getActiveRoute());
     }
 
 }

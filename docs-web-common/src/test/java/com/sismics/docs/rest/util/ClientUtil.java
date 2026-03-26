@@ -6,7 +6,7 @@ import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
-import org.junit.Assert;
+import org.junit.jupiter.api.Assertions;
 
 import jakarta.json.JsonObject;
 import jakarta.ws.rs.client.Entity;
@@ -121,7 +121,7 @@ public class ClientUtil {
                         .param("username", username)
                         .param("password", password)
                         .param("remember", remember.toString())));
-        Assert.assertEquals(200, response.getStatus());
+        Assertions.assertEquals(200, response.getStatus());
 
         return getAuthenticationCookie(response);
     }
@@ -178,7 +178,7 @@ public class ClientUtil {
                         .param("language", "eng")
                         .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
         String documentId = json.getString("id");
-        Assert.assertNotNull(documentId);
+        Assertions.assertNotNull(documentId);
         return documentId;
     }
 
@@ -212,8 +212,8 @@ public class ClientUtil {
                         .put(Entity.entity(formContent,
                                 MediaType.MULTIPART_FORM_DATA_TYPE), JsonObject.class);
                 String fileId = json.getString("id");
-                Assert.assertNotNull(fileId);
-                Assert.assertEquals(Files.size(filePath), json.getJsonNumber("size").longValue());
+                Assertions.assertNotNull(fileId);
+                Assertions.assertEquals(Files.size(filePath), json.getJsonNumber("size").longValue());
                 return fileId;
             }
         }
