@@ -11,8 +11,8 @@
   <name>Docs Parent</name>
 
   <properties>
-    <maven.compiler.source>17</maven.compiler.source>
-    <maven.compiler.target>17</maven.compiler.target>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- Dependencies version (external) -->
@@ -36,7 +36,7 @@
     <org.apache.pdfbox.pdfbox.version>2.0.29</org.apache.pdfbox.pdfbox.version>
     <org.bouncycastle.bcprov-jdk18on.version>1.83</org.bouncycastle.bcprov-jdk18on.version>
     <joda-time.joda-time.version>2.12.2</joda-time.joda-time.version>
-    <org.hibernate.hibernate.version>6.3.1.Final</org.hibernate.hibernate.version>
+    <org.hibernate.hibernate.version>6.6.18.Final</org.hibernate.hibernate.version>
     <fr.opensagres.xdocreport.version>2.0.4</fr.opensagres.xdocreport.version>
     <xerces.xercesImpl.version>2.12.2</xerces.xercesImpl.version>
     <net.java.dev.jna.jna.version>5.13.0</net.java.dev.jna.jna.version>
@@ -97,12 +97,6 @@
         <configuration>
           <forkCount>1</forkCount>
           <reuseForks>false</reuseForks>
-          <argLine>
-            --add-opens java.base/java.lang=ALL-UNNAMED
-            --add-opens java.base/java.util=ALL-UNNAMED
-            --add-opens java.base/java.io=ALL-UNNAMED
-            --add-opens java.base/java.nio=ALL-UNNAMED
-          </argLine>
         </configuration>
       </plugin>
 
