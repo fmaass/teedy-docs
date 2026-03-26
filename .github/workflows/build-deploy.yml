@@ -45,9 +45,7 @@ jobs:
           cache: maven
 
       - name: Install frontend dependencies
-        run: |
-          npm install -g --force grunt-cli
-          cd docs-web/src/main/webapp && npm install
+        run: cd docs-web/src/main/webapp && npm install
 
       - name: Build with Maven
         run: ./mvnw --batch-mode -Pprod clean install -DskipTests
