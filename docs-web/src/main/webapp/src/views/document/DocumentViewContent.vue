@@ -26,7 +26,7 @@ function isImage(mime: string) {
 <template>
   <div v-if="doc">
     <!-- Description -->
-    <p v-if="doc.description" class="doc-description">{{ doc.description }}</p>
+    <div v-if="doc.description" class="doc-description" v-html="doc.description" />
 
     <!-- Primary file preview -->
     <div v-if="doc.files?.length" class="file-preview-section">
