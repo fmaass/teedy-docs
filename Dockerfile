@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -9,11 +9,9 @@ ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPa
 ENV JETTY_VERSION=12.0.21
 ENV JETTY_HOME=/opt/jetty
 
-# Install packages
 RUN apt-get update && \
-    apt-get upgrade -y -q libgnutls30 && \
     apt-get -y -q --no-install-recommends install \
-    vim less procps curl unzip wget tzdata openjdk-21-jdk \
+    procps curl unzip wget tzdata openjdk-21-jre-headless \
     ffmpeg \
     mediainfo \
     tesseract-ocr \
@@ -48,7 +46,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN dpkg-reconfigure -f noninteractive tzdata
 
-# Install Jetty
 RUN wget -nv -O /tmp/jetty.tar.gz \
     "https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-home/${JETTY_VERSION}/jetty-home-${JETTY_VERSION}.tar.gz" \
     && tar xzf /tmp/jetty.tar.gz -C /opt \
@@ -61,7 +58,6 @@ RUN wget -nv -O /tmp/jetty.tar.gz \
 
 EXPOSE 8080
 
-# Install app
 RUN mkdir /app && \
     cd /app && \
     java -jar /opt/jetty/start.jar --add-modules=server,http,ee10-deploy,ee10-webapp
