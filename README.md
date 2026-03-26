@@ -6,7 +6,7 @@
 [![Build and Publish](https://github.com/fmaass/teedy-docs/actions/workflows/build-deploy.yml/badge.svg)](https://github.com/fmaass/teedy-docs/actions/workflows/build-deploy.yml)
 
 > **This is an actively maintained fork of [sismics/docs](https://github.com/sismics/docs) (Teedy).**
-> It includes OIDC/SSO authentication, Java 17 + Jetty 11 modernization, security hardening, and multi-arch Docker images published to GHCR.
+> It includes OIDC/SSO authentication, Java 21 + Jetty 12 modernization, security hardening, and multi-arch Docker images published to GHCR.
 
 Teedy is an open source, lightweight document management system for individuals and businesses.
 
@@ -14,11 +14,11 @@ Teedy is an open source, lightweight document management system for individuals 
 
 - **OpenID Connect (OIDC) authentication** with PKCE, auto-provisioning, and stable subject binding
 - **Header-based proxy authentication** (e.g., Authelia, Authentik) with auto-skip login
-- **Java 17 + Jetty 11 + Jakarta EE 9** (upgraded from Java 11 / Jetty 9)
+- **Java 21 + Jetty 12 + Jakarta EE 10** (upgraded from Java 11 / Jetty 9)
 - **Multi-arch Docker images** (amd64 + arm64) published to GitHub Container Registry
 - **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed, JWT bearer filter with iss/aud checks
-- **Log4j 1.x removed**, replaced with Logback
-- **Dependency updates**: Hibernate 6.3, Jersey 3.1, Guava 33, OkHttp 4.12, PostgreSQL driver 42.6
+- **Log4j 1.x removed**, replaced with Log4j 2
+- **Dependency updates**: Hibernate 6.6, Jersey 3.1, Lucene 10, Guava 33, OkHttp 4.12, PostgreSQL driver 42.7
 
 # Features
 
@@ -58,7 +58,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.1.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.3.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -211,7 +211,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.1.0
+    image: ghcr.io/fmaass/teedy-docs:v2.3.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -232,7 +232,7 @@ services:
       - teedy-db
 
   teedy-db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     expose:
       - 5432
@@ -259,7 +259,7 @@ networks:
 version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.1.0
+    image: ghcr.io/fmaass/teedy-docs:v2.3.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -275,8 +275,8 @@ services:
 
 ## Requirements
 
-- Java 17
-- Tesseract 4 for OCR
+- Java 21
+- Tesseract 4+ for OCR
 - ffmpeg for video thumbnails
 - mediainfo for video metadata extraction
 - A webapp server like [Jetty](http://eclipse.org/jetty/) or [Tomcat](http://tomcat.apache.org/)
@@ -288,7 +288,7 @@ The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/r
 
 ## How to build Teedy from the sources
 
-Prerequisites: JDK 17, Maven 3, NPM, Grunt, Tesseract 4
+Prerequisites: JDK 21, Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Grunt, Tesseract 4+
 
 Teedy is organized in several Maven modules:
 
@@ -304,7 +304,7 @@ or download the sources from GitHub.
 From the root directory:
 
 ```console
-mvn clean -DskipTests install
+./mvnw clean -DskipTests install
 ```
 
 ### Run a stand-alone version
@@ -312,15 +312,15 @@ mvn clean -DskipTests install
 From the `docs-web` directory:
 
 ```console
-mvn jetty:run
+../mvnw jetty:run
 ```
 
 ### Build a .war to deploy to your servlet container
 
-From the `docs-web` directory:
+From the root directory:
 
 ```console
-mvn -Pprod -DskipTests clean install
+./mvnw -Pprod -DskipTests clean install
 ```
 
 You will get your deployable WAR in the `docs-web/target` directory.
