@@ -48,7 +48,6 @@ Teedy is an open source, lightweight document management system for individuals 
 - Document sharing by URL
 - RESTful Web API
 - Webhooks to trigger external service
-- Fully featured Android client
 - [Bulk files importer](https://github.com/fmaass/teedy-docs/tree/main/docs-importer) (single or scan mode)
 - Tested to one million documents
 
