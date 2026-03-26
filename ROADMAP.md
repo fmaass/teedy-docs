@@ -20,45 +20,52 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.2.0) fo
 
 ---
 
-## v2.3.0 (Planning)
+## v2.3.0 (Released)
 
-**Working theme:** Developer Experience + Search Improvements
+**Theme:** Developer Experience + Backend Modernization
 
-Items to consider for the next release. Not all will make the cut -- this is the input for planning, not the plan itself.
+- Java 21 LTS, Hibernate 6.6.18, Lucene 10.4.0, Jetty 12
+- Full migration to Jakarta EE 10 namespace
+- All dependencies bumped to current stable versions
+- JUnit 5 migration (55 tests)
+- Maven Wrapper (3.9.9) for reproducible builds
+- Docker: Ubuntu 24.04 + JRE 21 headless
+- JWKS caching with 10-minute TTL
+- Dependabot configuration, SECURITY.md, issue/PR templates, README refresh
+- Android module removed (unmaintained)
 
-### Carried over from v2.2
+See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.3.0) for details.
 
-- **Configurable tag search mode** ([#5](https://github.com/fmaass/teedy-docs/issues/5)): add a setting to switch between prefix matching (current default) and exact matching. Deferred from v2.2 because the exact-match change was too disruptive without a toggle.
+---
 
-### Infrastructure / DX
+## v2.4.0 (In Progress)
 
-- **Technical API user for deployment testing**: set up a long-lived API token or a Traefik bypass route for smoke-testing endpoints behind Authelia. We hit integration issues in v2.2 that couldn't be verified without manual browser testing.
-- **Synology non-root compatibility**: the `USER jetty` directive in the Dockerfile doesn't work on Synology NAS due to BTRFS/ACL restrictions. Investigate alternatives (matching UID to host, entrypoint script with `gosu`, or documenting the `user: "0:0"` workaround more prominently).
-- **`TestPdfFormatHandler.testIssue373`**: currently `@Ignore`d because the test PDF was never committed. Either find/recreate the PDF or replace with a different OCR extraction test.
+**Theme:** Modern UI + Smart Document Handling
 
-### Search & Indexing
+### Frontend rewrite
 
-- **Full-text search improvements**: stemming, synonyms, multi-language analyzers (Lucene 9 unlocks better analysis chains)
-- **Lucene 10.x**: requires Java 21. If we bump the minimum Java version, this comes along for free. Assess Java 21 readiness of all dependencies first.
+- Replace AngularJS 1.6.6 + Bootstrap 3 + Grunt with Vue 3 (Composition API) + PrimeVue + Vite
+- TypeScript, Pinia state management, Vue Router, vue-i18n (reusing existing 12 locale files)
+- Phased migration: core document flow → tags → settings → share mini-app → polish
 
-### Features (community interest)
+### Auto-tagging via regex matchers
 
-- **Auto-tagging via regex matchers** (upstream [sismics/docs#234](https://github.com/sismics/docs/issues/234), 9 comments): the most requested community feature. Regex-based tag rules like Paperless-ngx.
-- **Admin-only tag management** (upstream [sismics/docs#323](https://github.com/sismics/docs/issues/323), 10 comments): RBAC for tag creation.
-- **Trash / recycle bin** (upstream [sismics/docs#328](https://github.com/sismics/docs/issues/328)): soft-delete with restore.
+- New `TagMatchRule` entity: match document title, filename, or extracted content against regex patterns to automatically apply tags
+- REST API for CRUD on rules, plus a regex test endpoint
+- Hook into `FileProcessingAsyncListener` after content extraction
+- Built-in `#TagName` pattern support (extending existing IMAP inbox behavior to all documents)
+- Community request: upstream [sismics/docs#234](https://github.com/sismics/docs/issues/234)
 
-### Bigger bets (high effort, high impact)
+### Configurable tag search mode
 
-- **Frontend modernization**: AngularJS 1.x is EOL. A rewrite to a modern framework would be the single highest-impact change but also the largest undertaking.
-- **Webhook / event system**: document lifecycle events for external automation.
-- **S3-compatible storage backend**: store files in object storage instead of local filesystem.
+- Setting to switch between prefix matching (current default) and exact matching ([#5](https://github.com/fmaass/teedy-docs/issues/5))
+- Carried over from v2.2 and v2.3
 
-### Lessons from v2.2 to apply
+### Technical debt cleanup
 
-- Always test logout/auth flows end-to-end behind the actual proxy setup, not just unit tests
-- Synology NAS has filesystem quirks that break common Docker patterns (non-root user, chown)
-- The Jetty 12 upgrade was less scary than expected -- don't over-estimate risk on well-documented migrations
-- Having the full test suite running is transformative -- every subsequent change gets immediate feedback
+- Replace joda-time with java.time across all modules
+- Refactor DbOpenHelper/EMF to plain JDBC (remove Hibernate ServiceRegistry dependency for migrations)
+- Fix `TestPdfFormatHandler.testIssue373` (disabled since test PDF was never committed)
 
 ---
 
@@ -66,7 +73,10 @@ Items to consider for the next release. Not all will make the cut -- this is the
 
 Lower-priority ideas that may be worth exploring:
 
+- **Admin-only tag management** (upstream [sismics/docs#323](https://github.com/sismics/docs/issues/323)): RBAC for tag creation
+- **Trash / recycle bin** (upstream [sismics/docs#328](https://github.com/sismics/docs/issues/328)): soft-delete with restore
 - **Bulk operations UI**: select multiple documents for tagging, moving, or deleting
 - **Document templates**: pre-filled metadata for common document types
-- **Audit log**: track who viewed/edited/shared documents
+- **S3-compatible storage backend**: store files in object storage instead of local filesystem
+- **Webhook / event system enhancements**: document lifecycle events for external automation
 - **Improved email integration** (upstream [sismics/docs#352](https://github.com/sismics/docs/issues/352)): IMAP monitoring, attachment extraction
