@@ -6,7 +6,7 @@
   <groupId>com.sismics.docs</groupId>
   <artifactId>docs-parent</artifactId>
   <packaging>pom</packaging>
-  <version>2.1.0</version>
+  <version>2.2.0-SNAPSHOT</version>
 
   <name>Docs Parent</name>
 
@@ -31,10 +31,10 @@
     <com.h2database.h2.version>2.2.224</com.h2database.h2.version>
     <jakarta.json.jakarta.json-api.version>2.1.1</jakarta.json.jakarta.json-api.version>
     <at.favre.lib.bcrypt.version>0.10.2</at.favre.lib.bcrypt.version>
-    <org.apache.lucene.version>8.7.0</org.apache.lucene.version>
+    <org.apache.lucene.version>9.12.3</org.apache.lucene.version>
     <org.imgscalr.imgscalr-lib.version>4.2</org.imgscalr.imgscalr-lib.version>
     <org.apache.pdfbox.pdfbox.version>2.0.29</org.apache.pdfbox.pdfbox.version>
-    <org.bouncycastle.bcprov-jdk15on.version>1.70</org.bouncycastle.bcprov-jdk15on.version>
+    <org.bouncycastle.bcprov-jdk18on.version>1.83</org.bouncycastle.bcprov-jdk18on.version>
     <joda-time.joda-time.version>2.12.2</joda-time.joda-time.version>
     <org.hibernate.hibernate.version>6.3.1.Final</org.hibernate.hibernate.version>
     <fr.opensagres.xdocreport.version>2.0.4</fr.opensagres.xdocreport.version>
@@ -53,17 +53,14 @@
 
     <org.glassfish.jersey.version>3.1.5</org.glassfish.jersey.version>
     <parsson.version>1.1.5</parsson.version>
-    <jakarta.servlet.jakarta.servlet-api.version>5.0.0</jakarta.servlet.jakarta.servlet-api.version>
-    <org.eclipse.jetty.jetty-server.version>11.0.20</org.eclipse.jetty.jetty-server.version>
-    <org.eclipse.jetty.jetty-webapp.version>11.0.20</org.eclipse.jetty.jetty-webapp.version>
-    <org.eclipse.jetty.jetty-servlet.version>11.0.20</org.eclipse.jetty.jetty-servlet.version>
+    <jakarta.servlet.jakarta.servlet-api.version>6.0.0</jakarta.servlet.jakarta.servlet-api.version>
+    <org.eclipse.jetty.version>12.0.21</org.eclipse.jetty.version>
 
     <!-- Plugins version -->
     <org.apache.maven.plugins.maven-antrun-plugin.version>3.1.0</org.apache.maven.plugins.maven-antrun-plugin.version>
     <org.apache.maven.plugins.maven-jar-plugin.version>3.3.0</org.apache.maven.plugins.maven-jar-plugin.version>
     <org.apache.maven.plugins.maven-war-plugin.version>3.3.2</org.apache.maven.plugins.maven-war-plugin.version>
-    <org.apache.maven.plugins.maven-surefire-plugin.version>3.0.0</org.apache.maven.plugins.maven-surefire-plugin.version>
-    <org.eclipse.jetty.jetty-maven-plugin.version>11.0.20</org.eclipse.jetty.jetty-maven-plugin.version>
+    <org.apache.maven.plugins.maven-surefire-plugin.version>3.5.5</org.apache.maven.plugins.maven-surefire-plugin.version>
   </properties>
 
   <scm>
@@ -72,17 +69,6 @@
     <url>https://github.com/fmaass/teedy-docs</url>
     <tag>HEAD</tag>
   </scm>
-
-  <repositories>
-    <repository>
-      <id>ApacheSnapshot</id>
-      <name>Apache Repository</name>
-      <url>https://repository.apache.org/content/groups/snapshots/</url>
-      <snapshots>
-        <enabled>true</enabled>
-      </snapshots>
-    </repository>
-  </repositories>
 
   <build>
     <plugins>
@@ -111,13 +97,19 @@
         <configuration>
           <forkCount>1</forkCount>
           <reuseForks>false</reuseForks>
+          <argLine>
+            --add-opens java.base/java.lang=ALL-UNNAMED
+            --add-opens java.base/java.util=ALL-UNNAMED
+            --add-opens java.base/java.io=ALL-UNNAMED
+            --add-opens java.base/java.nio=ALL-UNNAMED
+          </argLine>
         </configuration>
       </plugin>
 
       <plugin>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-maven-plugin</artifactId>
-        <version>${org.eclipse.jetty.jetty-maven-plugin.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-maven-plugin</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </plugin>
     </plugins>
   </build>
@@ -158,19 +150,19 @@
       <dependency>
         <groupId>org.eclipse.jetty</groupId>
         <artifactId>jetty-server</artifactId>
-        <version>${org.eclipse.jetty.jetty-server.version}</version>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-webapp</artifactId>
-        <version>${org.eclipse.jetty.jetty-webapp.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-webapp</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-servlet</artifactId>
-        <version>${org.eclipse.jetty.jetty-servlet.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-servlet</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
@@ -368,7 +360,7 @@
 
       <dependency>
         <groupId>org.apache.lucene</groupId>
-        <artifactId>lucene-analyzers-common</artifactId>
+        <artifactId>lucene-analysis-common</artifactId>
         <version>${org.apache.lucene.version}</version>
       </dependency>
 
@@ -410,8 +402,8 @@
 
       <dependency>
         <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk15on</artifactId>
-        <version>${org.bouncycastle.bcprov-jdk15on.version}</version>
+        <artifactId>bcprov-jdk18on</artifactId>
+        <version>${org.bouncycastle.bcprov-jdk18on.version}</version>
       </dependency>
 
       <dependency>

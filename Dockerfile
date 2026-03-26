@@ -10,7 +10,7 @@ ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPa
     --add-opens java.base/java.util=ALL-UNNAMED \
     --add-opens java.base/java.io=ALL-UNNAMED \
     --add-opens java.base/java.nio=ALL-UNNAMED"
-ENV JETTY_VERSION=11.0.20
+ENV JETTY_VERSION=12.0.21
 ENV JETTY_HOME=/opt/jetty
 
 # Install packages
@@ -68,11 +68,17 @@ EXPOSE 8080
 # Install app
 RUN mkdir /app && \
     cd /app && \
-    java -jar /opt/jetty/start.jar --add-modules=server,http,webapp,deploy
+    java -jar /opt/jetty/start.jar --add-modules=server,http,ee10-deploy,ee10-webapp
 
 COPY docs.xml /app/webapps/docs.xml
 COPY docs-web/target/docs-web-*.war /app/webapps/docs.war
 
+RUN mkdir -p /data && chown -R jetty:jetty /app /data
+
 WORKDIR /app
+USER jetty
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/api/user || exit 1
 
 CMD java ${JAVA_OPTIONS} -jar /opt/jetty/start.jar

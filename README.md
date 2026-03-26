@@ -325,6 +325,10 @@ mvn -Pprod -DskipTests clean install
 
 You will get your deployable WAR in the `docs-web/target` directory.
 
+# Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features, deferred items, and the release outlook.
+
 # Contributing
 
 All contributions are more than welcomed. Contributions may close an issue, fix a bug (reported or not reported), improve the existing code, add new feature, and so on.

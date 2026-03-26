@@ -371,7 +371,7 @@ public class GroupResource extends BaseResource {
     public Response list(
             @QueryParam("sort_column") Integer sortColumn,
             @QueryParam("asc") Boolean asc) {
-        if (!authenticate()) {
+        if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
         
@@ -412,7 +412,7 @@ public class GroupResource extends BaseResource {
     @GET
     @Path("{groupName: [a-zA-Z0-9_]+}")
     public Response get(@PathParam("groupName") String groupName) {
-        if (!authenticate()) {
+        if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
         

@@ -232,7 +232,8 @@ public class OidcResource extends BaseResource {
                     .setUserId(user.getId())
                     .setLongLasted(true)
                     .setIp(StringUtils.abbreviate(ip, 45))
-                    .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000));
+                    .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
+                    .setOidcIdToken(idTokenStr);
             String tokenValue = authTokenDao.create(authToken);
             authTokenDao.deleteOldSessionToken(user.getId());
 
@@ -555,6 +556,20 @@ public class OidcResource extends BaseResource {
 
             log.info("OIDC JWKS loaded from {}", jwksUri);
             return jwksCache;
+        }
+    }
+
+    /**
+     * Returns the end_session_endpoint from discovery, or null if not supported.
+     */
+    static String getEndSessionEndpoint() {
+        try {
+            if (!isOidcEnabled() || discoveryCache == null) {
+                return null;
+            }
+            return discoveryCache.getString("end_session_endpoint", null);
+        } catch (Exception e) {
+            return null;
         }
     }
 

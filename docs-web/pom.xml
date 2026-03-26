@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>2.1.0</version>
+    <version>2.2.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   
@@ -102,6 +102,13 @@
       <artifactId>junit</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <dependency>
+      <groupId>org.junit.vintage</groupId>
+      <artifactId>junit-vintage-engine</artifactId>
+      <version>5.10.5</version>
+      <scope>test</scope>
+    </dependency>
     
     <dependency>
       <groupId>org.glassfish.jersey.test-framework.providers</groupId>
@@ -182,14 +189,11 @@
 
         <plugins>
           <plugin>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-maven-plugin</artifactId>
+            <groupId>org.eclipse.jetty.ee10</groupId>
+            <artifactId>jetty-ee10-maven-plugin</artifactId>
             <configuration>
               <systemProperties>
-                <systemProperty>
-                  <name>application.mode</name>
-                  <value>dev</value>
-                </systemProperty>
+                <application.mode>dev</application.mode>
               </systemProperties>
               <webApp>
                 <contextPath>/docs-web</contextPath>

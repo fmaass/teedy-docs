@@ -60,6 +60,12 @@ public class AuthenticationToken {
     @Column(name = "AUT_LASTCONNECTIONDATE_D")
     private Date lastConnectionDate;
 
+    /**
+     * Raw OIDC ID token (stored for RP-Initiated Logout).
+     */
+    @Column(name = "AUT_OIDC_IDTOKEN_C", length = 4000)
+    private String oidcIdToken;
+
     public String getId() {
         return id;
     }
@@ -120,6 +126,15 @@ public class AuthenticationToken {
 
     public AuthenticationToken setLastConnectionDate(Date lastConnectionDate) {
         this.lastConnectionDate = lastConnectionDate;
+        return this;
+    }
+
+    public String getOidcIdToken() {
+        return oidcIdToken;
+    }
+
+    public AuthenticationToken setOidcIdToken(String oidcIdToken) {
+        this.oidcIdToken = oidcIdToken;
         return this;
     }
 
