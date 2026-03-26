@@ -2,10 +2,11 @@ package com.sismics.docs.core.dao;
 
 import com.sismics.docs.core.model.jpa.AuthenticationToken;
 import com.sismics.util.context.ThreadLocalContext;
-import org.joda.time.DateTime;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -74,7 +75,7 @@ public class AuthenticationTokenDao {
         Query q = em.createNativeQuery(sb.toString());
         q.setParameter("userId", userId);
         q.setParameter("longLasted", false);
-        q.setParameter("minDate", DateTime.now().minusDays(1).toDate());
+        q.setParameter("minDate", Date.from(Instant.now().minus(1, ChronoUnit.DAYS)));
         q.executeUpdate();
     }
 

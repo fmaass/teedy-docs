@@ -3,7 +3,8 @@ package com.sismics.security;
 import java.util.Set;
 
 import com.sismics.docs.core.constant.Constants;
-import org.joda.time.DateTimeZone;
+
+import java.time.ZoneId;
 
 /**
  * Authenticated users principal.
@@ -24,7 +25,7 @@ public class UserPrincipal implements IPrincipal {
     /**
      * Timezone of the principal.
      */
-    private DateTimeZone dateTimeZone;
+    private ZoneId dateTimeZone;
     
     /**
      * Email of the principal.
@@ -76,11 +77,11 @@ public class UserPrincipal implements IPrincipal {
     }
 
     @Override
-    public DateTimeZone getDateTimeZone() {
+    public ZoneId getDateTimeZone() {
         return dateTimeZone;
     }
 
-    public void setDateTimeZone(DateTimeZone dateTimeZone) {
+    public void setDateTimeZone(ZoneId dateTimeZone) {
         this.dateTimeZone = dateTimeZone;
     }
 

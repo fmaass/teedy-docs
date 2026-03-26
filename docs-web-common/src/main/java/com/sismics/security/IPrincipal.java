@@ -3,7 +3,7 @@ package com.sismics.security;
 import java.security.Principal;
 import java.util.Set;
 
-import org.joda.time.DateTimeZone;
+import java.time.ZoneId;
 
 /**
  * Interface of principals.
@@ -45,7 +45,7 @@ public interface IPrincipal extends Principal {
      *
      * @return Timezone of the principal
      */
-    public DateTimeZone getDateTimeZone();
+    public ZoneId getDateTimeZone();
 
     /**
      * Returns the email of the principal.
