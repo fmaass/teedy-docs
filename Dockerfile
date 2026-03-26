@@ -73,6 +73,12 @@ RUN mkdir /app && \
 COPY docs.xml /app/webapps/docs.xml
 COPY docs-web/target/docs-web-*.war /app/webapps/docs.war
 
+RUN mkdir -p /data && chown -R jetty:jetty /app /data
+
 WORKDIR /app
+USER jetty
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/api/user || exit 1
 
 CMD java ${JAVA_OPTIONS} -jar /opt/jetty/start.jar
