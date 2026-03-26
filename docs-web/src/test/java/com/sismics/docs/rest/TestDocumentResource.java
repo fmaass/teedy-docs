@@ -286,7 +286,7 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assert.assertTrue(relations.getJsonObject(0).getBoolean("source"));
         Assert.assertEquals("My super title document 1", relations.getJsonObject(0).getString("title"));
         Assert.assertFalse(json.containsKey("files"));
-        Assert.assertEquals(file1Id, json.getString("file_id"));
+        Assert.assertTrue(json.isNull("file_id"));
 
         // Create a tag
         json = target().path("/tag").request()

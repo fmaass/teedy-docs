@@ -424,7 +424,8 @@ public class LuceneIndexingHandler implements IndexingHandler {
      */
     private Map<String, String> search(String simpleSearchQuery, String fullSearchQuery) throws Exception {
         // The fulltext query searches in all fields
-        String searchQuery = simpleSearchQuery + " " + fullSearchQuery;
+        String searchQuery = Strings.nullToEmpty(simpleSearchQuery)
+                + " " + Strings.nullToEmpty(fullSearchQuery);
 
         // Build search query
         Analyzer analyzer = new StandardAnalyzer();
@@ -442,7 +443,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
                 .add(buildQueryParser(analyzer, "coverage").parse(searchQuery), BooleanClause.Occur.SHOULD)
                 .add(buildQueryParser(analyzer, "rights").parse(searchQuery), BooleanClause.Occur.SHOULD)
                 .add(buildQueryParser(analyzer, "filename").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "content").parse(fullSearchQuery), BooleanClause.Occur.SHOULD)
+                .add(buildQueryParser(analyzer, "content").parse(Strings.isNullOrEmpty(fullSearchQuery) ? searchQuery : fullSearchQuery), BooleanClause.Occur.SHOULD)
                 .build();
 
         // Search
