@@ -5,53 +5,60 @@ It is maintained alongside the code and updated with each release.
 
 ---
 
-## v2.2.0 (In Progress)
+## v2.2.0 (Released)
 
 **Theme:** Test Infrastructure + Dependency Modernization
 
-- Jetty 11 -> 12 (EE 10) + Servlet 6.0 to align with Jersey 3.1.5
-- Enable the full integration test suite (~50 REST tests, broken since Java 17 upgrade)
-- Lucene 8.7 -> 9.12 (latest compatible with Java 17)
-- BouncyCastle migration to jdk18on artifact line
-- auth0 java-jwt bump to latest 4.x
-- docs-importer Node.js 14 -> 20 LTS
-- OIDC RP-Initiated Logout (end_session_endpoint)
-- Fix tag search prefix matching (exact match instead of startsWith)
-- Hide user/group lists from guest users
-- Dockerfile: HEALTHCHECK, non-root user, pinned base image
+- Jetty 12.0.21 (EE10, Servlet 6.0)
+- 74 integration tests running in CI
+- Lucene 9.12.3, BouncyCastle 1.83, java-jwt 4.5.1, Node 20
+- External logout support (docs.logout_url + OIDC RP-Initiated Logout)
+- Guest user privacy fix
+- Docker hardening (HEALTHCHECK, non-root user)
 
-Tracking: [GitHub Milestone v2.2.0](https://github.com/fmaass/teedy-docs/milestone/1)
+See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.2.0) for details.
 
 ---
 
-## Future Consideration (v2.3+)
+## v2.3.0 (Planning)
 
-Items discussed and intentionally deferred. Roughly ordered by community interest.
+**Working theme:** Developer Experience + Search Improvements
 
-### Auto-tagging via regex matchers
-Upstream [sismics/docs#234](https://github.com/sismics/docs/issues/234) (9 comments).
-Regex-based tag rules similar to Paperless-ngx: define patterns that automatically apply tags to newly imported documents. Significant feature, requires UI for rule management.
+Items to consider for the next release. Not all will make the cut -- this is the input for planning, not the plan itself.
 
-### Admin-only tag management
-Upstream [sismics/docs#323](https://github.com/sismics/docs/issues/323) (10 comments).
-RBAC for tag creation -- only admins can create/rename/delete tags, regular users can only apply existing ones. Medium effort.
+### Carried over from v2.2
 
-### Trash / recycle bin
-Upstream [sismics/docs#328](https://github.com/sismics/docs/issues/328).
-Soft-delete with restore capability. Requires new DB table for deleted documents, UI for trash view, and scheduled permanent deletion.
+- **Configurable tag search mode** ([#5](https://github.com/fmaass/teedy-docs/issues/5)): add a setting to switch between prefix matching (current default) and exact matching. Deferred from v2.2 because the exact-match change was too disruptive without a toggle.
 
-### Lucene 10.x
-Requires Java 21 (project is currently on Java 17). Revisit when the minimum Java version is bumped. The v2.2.0 Lucene 9.x upgrade keeps us on the latest version compatible with Java 17.
+### Infrastructure / DX
 
-### Frontend modernization
-AngularJS 1.x reached end-of-life in January 2022. A full rewrite to a modern framework (Angular, React, or Vue) would be a major project but would unlock modern tooling, better accessibility, and mobile responsiveness.
+- **Technical API user for deployment testing**: set up a long-lived API token or a Traefik bypass route for smoke-testing endpoints behind Authelia. We hit integration issues in v2.2 that couldn't be verified without manual browser testing.
+- **Synology non-root compatibility**: the `USER jetty` directive in the Dockerfile doesn't work on Synology NAS due to BTRFS/ACL restrictions. Investigate alternatives (matching UID to host, entrypoint script with `gosu`, or documenting the `user: "0:0"` workaround more prominently).
+- **`TestPdfFormatHandler.testIssue373`**: currently `@Ignore`d because the test PDF was never committed. Either find/recreate the PDF or replace with a different OCR extraction test.
 
-### Improved email integration
-Upstream [sismics/docs#352](https://github.com/sismics/docs/issues/352).
-Better IMAP inbox monitoring, attachment extraction, and email-to-document workflows.
+### Search & Indexing
 
-### Webhook / event system
-Allow external systems to subscribe to document events (created, tagged, shared). Would enable integration with automation platforms.
+- **Full-text search improvements**: stemming, synonyms, multi-language analyzers (Lucene 9 unlocks better analysis chains)
+- **Lucene 10.x**: requires Java 21. If we bump the minimum Java version, this comes along for free. Assess Java 21 readiness of all dependencies first.
+
+### Features (community interest)
+
+- **Auto-tagging via regex matchers** (upstream [sismics/docs#234](https://github.com/sismics/docs/issues/234), 9 comments): the most requested community feature. Regex-based tag rules like Paperless-ngx.
+- **Admin-only tag management** (upstream [sismics/docs#323](https://github.com/sismics/docs/issues/323), 10 comments): RBAC for tag creation.
+- **Trash / recycle bin** (upstream [sismics/docs#328](https://github.com/sismics/docs/issues/328)): soft-delete with restore.
+
+### Bigger bets (high effort, high impact)
+
+- **Frontend modernization**: AngularJS 1.x is EOL. A rewrite to a modern framework would be the single highest-impact change but also the largest undertaking.
+- **Webhook / event system**: document lifecycle events for external automation.
+- **S3-compatible storage backend**: store files in object storage instead of local filesystem.
+
+### Lessons from v2.2 to apply
+
+- Always test logout/auth flows end-to-end behind the actual proxy setup, not just unit tests
+- Synology NAS has filesystem quirks that break common Docker patterns (non-root user, chown)
+- The Jetty 12 upgrade was less scary than expected -- don't over-estimate risk on well-documented migrations
+- Having the full test suite running is transformative -- every subsequent change gets immediate feedback
 
 ---
 
@@ -59,8 +66,7 @@ Allow external systems to subscribe to document events (created, tagged, shared)
 
 Lower-priority ideas that may be worth exploring:
 
-- **Full-text search improvements**: stemming, synonyms, multi-language analyzers
 - **Bulk operations UI**: select multiple documents for tagging, moving, or deleting
 - **Document templates**: pre-filled metadata for common document types
 - **Audit log**: track who viewed/edited/shared documents
-- **S3-compatible storage backend**: store files in object storage instead of local filesystem
+- **Improved email integration** (upstream [sismics/docs#352](https://github.com/sismics/docs/issues/352)): IMAP monitoring, attachment extraction
