@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../../api/client'
-import { useTagStore } from '../../stores/tags'
+import { listTags } from '../../api/tag'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -12,9 +13,9 @@ import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
-const tagStore = useTagStore()
 const toast = useToast()
 const confirm = useConfirm()
+const queryClient = useQueryClient()
 
 interface Rule {
   id: string
@@ -25,8 +26,6 @@ interface Rule {
   enabled: boolean
 }
 
-const rules = ref<Rule[]>([])
-const loading = ref(true)
 const showDialog = ref(false)
 const editId = ref<string | null>(null)
 
@@ -44,15 +43,41 @@ const ruleTypes = [
   { label: 'Content regex', value: 'CONTENT_REGEX' },
 ]
 
-async function loadRules() {
-  loading.value = true
-  try {
-    const { data } = await api.get('/tagmatchrule')
-    rules.value = data.rules
-  } finally {
-    loading.value = false
-  }
-}
+const { data: rules, isLoading: loading } = useQuery({
+  queryKey: ['tagmatchrules'],
+  queryFn: () => api.get('/tagmatchrule').then((r) => r.data.rules as Rule[]),
+})
+
+const { data: tags } = useQuery({
+  queryKey: ['tags'],
+  queryFn: () => listTags().then((r) => r.data.tags),
+  staleTime: 60_000,
+})
+
+const { mutate: saveRule } = useMutation({
+  mutationFn: (vars: { editId: string | null; params: URLSearchParams }) => {
+    if (vars.editId) {
+      return api.post(`/tagmatchrule/${vars.editId}`, vars.params)
+    }
+    return api.put('/tagmatchrule', vars.params)
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['tagmatchrules'] })
+    showDialog.value = false
+    toast.add({ severity: 'success', summary: 'Rule saved', life: 2000 })
+  },
+  onError: (e: any) => {
+    toast.add({ severity: 'error', summary: e.response?.data?.message || 'Failed to save rule', life: 3000 })
+  },
+})
+
+const { mutate: deleteRule } = useMutation({
+  mutationFn: (id: string) => api.delete(`/tagmatchrule/${id}`),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['tagmatchrules'] })
+    toast.add({ severity: 'success', summary: 'Rule deleted', life: 2000 })
+  },
+})
 
 function openCreate() {
   editId.value = null
@@ -66,26 +91,14 @@ function openEdit(rule: Rule) {
   showDialog.value = true
 }
 
-async function handleSave() {
-  try {
-    const params = new URLSearchParams()
-    params.set('tag_id', form.value.tag_id)
-    params.set('rule_type', form.value.rule_type)
-    params.set('pattern', form.value.pattern)
-    params.set('order', form.value.order)
-    params.set('enabled', String(form.value.enabled))
-
-    if (editId.value) {
-      await api.post(`/tagmatchrule/${editId.value}`, params)
-    } else {
-      await api.put('/tagmatchrule', params)
-    }
-    showDialog.value = false
-    await loadRules()
-    toast.add({ severity: 'success', summary: 'Rule saved', life: 2000 })
-  } catch (e: any) {
-    toast.add({ severity: 'error', summary: e.response?.data?.message || 'Failed to save rule', life: 3000 })
-  }
+function handleSave() {
+  const params = new URLSearchParams()
+  params.set('tag_id', form.value.tag_id)
+  params.set('rule_type', form.value.rule_type)
+  params.set('pattern', form.value.pattern)
+  params.set('order', form.value.order)
+  params.set('enabled', String(form.value.enabled))
+  saveRule({ editId: editId.value, params })
 }
 
 function handleDelete(rule: Rule) {
@@ -94,22 +107,13 @@ function handleDelete(rule: Rule) {
     header: 'Delete rule',
     icon: 'pi pi-trash',
     acceptClass: 'p-button-danger',
-    accept: async () => {
-      await api.delete(`/tagmatchrule/${rule.id}`)
-      await loadRules()
-      toast.add({ severity: 'success', summary: 'Rule deleted', life: 2000 })
-    },
+    accept: () => deleteRule(rule.id),
   })
 }
 
 function getTagName(tagId: string) {
-  return tagStore.tags.find((t) => t.id === tagId)?.name ?? tagId
+  return tags.value?.find((t) => t.id === tagId)?.name ?? tagId
 }
-
-onMounted(() => {
-  loadRules()
-  tagStore.fetchTags()
-})
 </script>
 
 <template>
@@ -124,7 +128,7 @@ onMounted(() => {
       or extracted content matches a regex pattern.
     </p>
 
-    <DataTable :value="rules" :loading="loading" size="small" stripedRows>
+    <DataTable :value="rules ?? []" :loading="loading" size="small" stripedRows>
       <Column header="Tag" style="width: 150px">
         <template #body="{ data }">{{ getTagName(data.tag_id) }}</template>
       </Column>
@@ -155,7 +159,7 @@ onMounted(() => {
         <label>Tag</label>
         <Select
           v-model="form.tag_id"
-          :options="tagStore.tags"
+          :options="tags ?? []"
           optionLabel="name"
           optionValue="id"
           placeholder="Select a tag"

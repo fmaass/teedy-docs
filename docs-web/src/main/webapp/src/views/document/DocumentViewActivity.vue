@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, type Ref } from 'vue'
+import { computed, inject, type Ref } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { type DocumentDetail } from '../../api/document'
 import api from '../../api/client'
 import DataTable from 'primevue/datatable'
@@ -14,27 +15,22 @@ interface AuditEntry {
   message: string
 }
 
-const logs = ref<AuditEntry[]>([])
-const loading = ref(true)
+const docId = computed(() => doc.value?.id)
+
+const { data: logs, isLoading: loading } = useQuery({
+  queryKey: computed(() => ['auditlog', docId.value]),
+  queryFn: () => api.get('/auditlog', { params: { document: docId.value } }).then((r) => (r.data.logs || []) as AuditEntry[]),
+  enabled: computed(() => !!docId.value),
+})
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString()
 }
-
-onMounted(async () => {
-  if (!doc.value) return
-  try {
-    const { data } = await api.get('/auditlog', { params: { document: doc.value.id } })
-    logs.value = data.logs || []
-  } finally {
-    loading.value = false
-  }
-})
 </script>
 
 <template>
   <div>
-    <DataTable :value="logs" :loading="loading" size="small" stripedRows>
+    <DataTable :value="logs ?? []" :loading="loading" size="small" stripedRows>
       <Column header="Date" style="width: 180px">
         <template #body="{ data }">
           <span class="text-xs">{{ formatDate(data.create_date) }}</span>

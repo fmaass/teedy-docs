@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useTagStore } from '../../stores/tags'
-import { createTag } from '../../api/tag'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
+import { listTags, createTag } from '../../api/tag'
 import Tree from 'primevue/tree'
 import InputText from 'primevue/inputtext'
 import ColorPicker from 'primevue/colorpicker'
@@ -10,17 +10,23 @@ import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 
 const router = useRouter()
-const tagStore = useTagStore()
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const newTagName = ref('')
 const newTagColor = ref('2aabd2')
 
+const { data: tags } = useQuery({
+  queryKey: ['tags'],
+  queryFn: () => listTags().then((r) => r.data.tags),
+  staleTime: 60_000,
+})
+
 const tagTreeNodes = computed(() => {
-  const tags = tagStore.tags
-  const rootTags = tags.filter((t) => !t.parent)
-  function buildNode(tag: typeof tags[0]): any {
-    const children = tags.filter((t) => t.parent === tag.id)
+  const allTags = tags.value ?? []
+  const rootTags = allTags.filter((t) => !t.parent)
+  function buildNode(tag: typeof allTags[0]): any {
+    const children = allTags.filter((t) => t.parent === tag.id)
     return {
       key: tag.id,
       label: tag.name,
@@ -31,23 +37,26 @@ const tagTreeNodes = computed(() => {
   return rootTags.map(buildNode)
 })
 
-async function handleAddTag() {
-  if (!newTagName.value.trim()) return
-  try {
-    await createTag(newTagName.value.trim(), '#' + newTagColor.value)
+const { mutate: addTag } = useMutation({
+  mutationFn: () => createTag(newTagName.value.trim(), '#' + newTagColor.value),
+  onSuccess: () => {
     newTagName.value = ''
-    await tagStore.fetchTags()
+    queryClient.invalidateQueries({ queryKey: ['tags'] })
     toast.add({ severity: 'success', summary: 'Tag created', life: 2000 })
-  } catch (e: any) {
+  },
+  onError: (e: any) => {
     toast.add({ severity: 'error', summary: e.response?.data?.message || 'Failed to create tag', life: 3000 })
-  }
+  },
+})
+
+function handleAddTag() {
+  if (!newTagName.value.trim()) return
+  addTag()
 }
 
 function selectTag(node: any) {
   router.push({ name: 'tag-edit', params: { id: node.key } })
 }
-
-onMounted(() => tagStore.fetchTags())
 </script>
 
 <template>

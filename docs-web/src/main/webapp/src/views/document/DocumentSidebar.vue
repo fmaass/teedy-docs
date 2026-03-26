@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useTagStore } from '../../stores/tags'
+import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { listDocuments, type DocumentListItem } from '../../api/document'
+import { listTags } from '../../api/tag'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Tree from 'primevue/tree'
@@ -12,15 +13,31 @@ import TagBadge from '../../components/TagBadge.vue'
 const emit = defineEmits<{ navigate: [] }>()
 const router = useRouter()
 const route = useRoute()
-const tagStore = useTagStore()
 
-const search = ref('')
-const documents = ref<DocumentListItem[]>([])
-const loading = ref(true)
 const showTags = ref(true)
+const debouncedSearch = ref((route.query.search as string) || '')
+const searchInput = ref(debouncedSearch.value)
+
+const { data: tagsData } = useQuery({
+  queryKey: ['tags'],
+  queryFn: () => listTags().then((r) => r.data.tags),
+  staleTime: 60_000,
+})
+
+const { data: documentsData, isLoading } = useQuery({
+  queryKey: computed(() => ['documents', { search: debouncedSearch.value }]),
+  queryFn: () =>
+    listDocuments({
+      limit: 50,
+      sort_column: 3,
+      asc: false,
+      search: debouncedSearch.value || undefined,
+    }).then((r) => r.data.documents),
+  placeholderData: keepPreviousData,
+})
 
 const tagTreeNodes = computed(() => {
-  const tags = tagStore.tags
+  const tags = tagsData.value ?? []
   const rootTags = tags.filter((t) => !t.parent)
   function buildNode(tag: typeof tags[0]): any {
     const children = tags.filter((t) => t.parent === tag.id)
@@ -34,20 +51,24 @@ const tagTreeNodes = computed(() => {
   return rootTags.map(buildNode)
 })
 
-async function loadDocuments() {
-  loading.value = true
-  try {
-    const { data } = await listDocuments({
-      limit: 50,
-      sort_column: 3,
-      asc: false,
-      search: search.value || undefined,
-    })
-    documents.value = data.documents
-  } finally {
-    loading.value = false
+const documents = computed(() => documentsData.value ?? [])
+
+let searchTimeout: ReturnType<typeof setTimeout>
+watch(searchInput, (val) => {
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    debouncedSearch.value = val
+    router.replace({ query: val ? { search: val } : {} })
+  }, 300)
+})
+
+watch(() => route.query.search, (val) => {
+  const s = (val as string) || ''
+  if (s !== searchInput.value) {
+    searchInput.value = s
+    debouncedSearch.value = s
   }
-}
+})
 
 function openDocument(doc: DocumentListItem) {
   router.push({ name: 'document-view', params: { id: doc.id } })
@@ -59,7 +80,9 @@ function isActive(doc: DocumentListItem) {
 }
 
 function searchByTag(node: any) {
-  search.value = 'tag:' + node.data.name
+  searchInput.value = 'tag:' + node.data.name
+  debouncedSearch.value = searchInput.value
+  router.replace({ query: { search: searchInput.value } })
 }
 
 function formatDate(ts: number) {
@@ -75,17 +98,6 @@ function formatDate(ts: number) {
   if (diffDays < 30) return `${diffDays}d ago`
   return d.toLocaleDateString()
 }
-
-let searchTimeout: ReturnType<typeof setTimeout>
-watch(search, () => {
-  clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(loadDocuments, 300)
-})
-
-onMounted(() => {
-  tagStore.fetchTags()
-  loadDocuments()
-})
 </script>
 
 <template>
@@ -106,7 +118,7 @@ onMounted(() => {
       <span class="p-input-icon-left w-full">
         <i class="pi pi-search" />
         <InputText
-          v-model="search"
+          v-model="searchInput"
           placeholder="Search..."
           class="w-full"
           size="small"
@@ -140,7 +152,7 @@ onMounted(() => {
 
     <!-- Document list -->
     <div class="sidebar-doclist">
-      <div v-if="loading" class="p-4">
+      <div v-if="isLoading" class="p-4">
         <Skeleton v-for="i in 6" :key="i" height="3rem" class="mb-2" />
       </div>
       <template v-else>

@@ -1,15 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch } from 'vue'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../../api/client'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const defaultLanguage = ref('eng')
 const tagSearchMode = ref('PREFIX')
-const saving = ref(false)
+
+const { data: appConfig } = useQuery({
+  queryKey: ['app-config'],
+  queryFn: () => api.get('/app').then((r) => r.data),
+})
+
+watch(appConfig, (config) => {
+  if (config) {
+    defaultLanguage.value = config.default_language || 'eng'
+    tagSearchMode.value = config.tag_search_mode || 'PREFIX'
+  }
+}, { immediate: true })
 
 const languages = [
   { label: 'English', value: 'eng' },
@@ -23,28 +36,21 @@ const searchModes = [
   { label: 'Exact match', value: 'EXACT' },
 ]
 
-onMounted(async () => {
-  try {
-    const { data } = await api.get('/app')
-    defaultLanguage.value = data.default_language || 'eng'
-    tagSearchMode.value = data.tag_search_mode || 'PREFIX'
-  } catch { /* ignore */ }
-})
-
-async function handleSave() {
-  saving.value = true
-  try {
+const { mutate: saveConfig, isPending: saving } = useMutation({
+  mutationFn: () => {
     const params = new URLSearchParams()
     params.set('default_language', defaultLanguage.value)
     params.set('tag_search_mode', tagSearchMode.value)
-    await api.post('/app/config', params)
+    return api.post('/app/config', params)
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['app-config'] })
     toast.add({ severity: 'success', summary: 'Configuration saved', life: 2000 })
-  } catch {
+  },
+  onError: () => {
     toast.add({ severity: 'error', summary: 'Failed to save configuration', life: 3000 })
-  } finally {
-    saving.value = false
-  }
-}
+  },
+})
 </script>
 
 <template>
@@ -61,7 +67,7 @@ async function handleSave() {
         <label>Tag search mode</label>
         <Select v-model="tagSearchMode" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
-      <Button label="Save" icon="pi pi-check" :loading="saving" @click="handleSave" />
+      <Button label="Save" icon="pi pi-check" :loading="saving" @click="saveConfig()" />
     </section>
   </div>
 </template>

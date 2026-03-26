@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, provide, watch } from 'vue'
+import { ref, computed, provide, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
 import Button from 'primevue/button'
 import TabMenu from 'primevue/tabmenu'
@@ -14,11 +15,21 @@ const router = useRouter()
 const route = useRoute()
 const toast = useToast()
 const confirm = useConfirm()
+const queryClient = useQueryClient()
 
-const doc = ref<DocumentDetail | null>(null)
-const loading = ref(true)
+const { data: doc, isLoading: loading, error } = useQuery({
+  queryKey: computed(() => ['document', props.id]),
+  queryFn: () => getDocument(props.id).then((r) => r.data),
+})
 
 provide('document', doc)
+
+watch(error, (err) => {
+  if (err) {
+    toast.add({ severity: 'error', summary: 'Document not found', life: 3000 })
+    router.push({ name: 'documents' })
+  }
+})
 
 const tabs = [
   { label: 'Content', icon: 'pi pi-file', route: 'document-view-content' },
@@ -55,6 +66,7 @@ function handleDelete() {
     accept: async () => {
       try {
         await deleteDocument(props.id)
+        queryClient.invalidateQueries({ queryKey: ['documents'] })
         toast.add({ severity: 'success', summary: 'Document deleted', life: 2000 })
         router.push({ name: 'documents' })
       } catch {
@@ -63,22 +75,6 @@ function handleDelete() {
     },
   })
 }
-
-async function loadDocument() {
-  loading.value = true
-  try {
-    const { data } = await getDocument(props.id)
-    doc.value = data
-  } catch {
-    toast.add({ severity: 'error', summary: 'Document not found', life: 3000 })
-    router.push({ name: 'documents' })
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadDocument)
-watch(() => props.id, loadDocument)
 </script>
 
 <template>
