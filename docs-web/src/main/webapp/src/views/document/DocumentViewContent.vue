@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { inject, type Ref } from 'vue'
+import { inject, computed, type Ref } from 'vue'
+import DOMPurify from 'dompurify'
 import { type DocumentDetail } from '../../api/document'
 import { getFileUrl } from '../../api/file'
-import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 
 const doc = inject<Ref<DocumentDetail | null>>('document')!
+
+const sanitizedDescription = computed(() => {
+  if (!doc.value?.description) return ''
+  return DOMPurify.sanitize(doc.value.description)
+})
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return bytes + ' B'
@@ -26,7 +31,7 @@ function isImage(mime: string) {
 <template>
   <div v-if="doc">
     <!-- Description -->
-    <div v-if="doc.description" class="doc-description" v-html="doc.description" />
+    <div v-if="doc.description" class="doc-description" v-html="sanitizedDescription" />
 
     <!-- Primary file preview -->
     <div v-if="doc.files?.length" class="file-preview-section">
