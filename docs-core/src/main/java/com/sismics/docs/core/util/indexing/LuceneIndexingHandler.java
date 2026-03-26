@@ -46,9 +46,9 @@ import org.apache.lucene.search.spell.LuceneDictionary;
 import org.apache.lucene.search.suggest.Lookup;
 import org.apache.lucene.search.suggest.analyzing.FuzzySuggester;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.store.NoLockFactory;
-import org.apache.lucene.store.RAMDirectory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,7 +125,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
 
         // RAM directory storage by default
         if (luceneStorage == null || luceneStorage.equals("RAM")) {
-            directory = new RAMDirectory();
+            directory = new ByteBuffersDirectory();
             log.info("Using RAM Lucene storage");
         } else if (luceneStorage.equals("FILE")) {
             Path luceneDirectory = DirectoryUtil.getLuceneDirectory();
@@ -463,7 +463,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
 
         // Extract document IDs and highlights
         for (ScoreDoc doc : docs) {
-            org.apache.lucene.document.Document document = searcher.doc(doc.doc);
+            org.apache.lucene.document.Document document = searcher.storedFields().document(doc.doc);
             String type = document.get("doctype");
             String documentId = null;
             String highlight = null;
