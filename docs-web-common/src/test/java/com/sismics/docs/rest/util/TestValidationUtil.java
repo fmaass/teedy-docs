@@ -2,8 +2,8 @@ package com.sismics.docs.rest.util;
 
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.util.ValidationUtil;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 /**
  * Test the validations.
@@ -18,13 +18,13 @@ public class TestValidationUtil {
         ValidationUtil.validateHttpUrl(" https://www.google.com ", "url");
         try {
             ValidationUtil.validateHttpUrl("ftp://www.google.com", "url");
-            Assert.fail();
+            Assertions.fail();
         } catch (ClientException e) {
             // NOP
         }
         try {
             ValidationUtil.validateHttpUrl("http://", "url");
-            Assert.fail();
+            Assertions.fail();
         } catch (ClientException e) {
             // NOP
         }

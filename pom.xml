@@ -27,7 +27,7 @@
     <org.slf4j-reload4j.version>2.0.17</org.slf4j-reload4j.version>
     <org.slf4j.jcl-over-slf4j.version>2.0.17</org.slf4j.jcl-over-slf4j.version>
     <org.slf4j.jul-to-slf4j.version>2.0.17</org.slf4j.jul-to-slf4j.version>
-    <junit.junit.version>4.13.2</junit.junit.version>
+    <org.junit.junit-jupiter.version>5.12.2</org.junit.junit-jupiter.version>
     <com.h2database.h2.version>2.3.232</com.h2database.h2.version>
     <jakarta.json.jakarta.json-api.version>2.1.1</jakarta.json.jakarta.json-api.version>
     <at.favre.lib.bcrypt.version>0.10.2</at.favre.lib.bcrypt.version>
@@ -237,9 +237,9 @@
       </dependency>
 
       <dependency>
-        <groupId>junit</groupId>
-        <artifactId>junit</artifactId>
-        <version>${junit.junit.version}</version>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${org.junit.junit-jupiter.version}</version>
       </dependency>
 
       <dependency>

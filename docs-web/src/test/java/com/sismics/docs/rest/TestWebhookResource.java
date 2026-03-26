@@ -2,8 +2,8 @@ package com.sismics.docs.rest;
 
 import com.sismics.docs.rest.resource.ThirdPartyWebhookResource;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -36,7 +36,7 @@ public class TestWebhookResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         JsonArray webhooks = json.getJsonArray("webhooks");
-        Assert.assertEquals(0, webhooks.size());
+        Assertions.assertEquals(0, webhooks.size());
 
         // Create a webhook
         target().path("/webhook").request()
@@ -56,8 +56,8 @@ public class TestWebhookResource extends BaseJerseyTest {
 
         // Check the webhook payload
         JsonObject payload = ThirdPartyWebhookResource.getLastPayload();
-        Assert.assertEquals("DOCUMENT_CREATED", payload.getString("event"));
-        Assert.assertEquals(document1Id, payload.getString("id"));
+        Assertions.assertEquals("DOCUMENT_CREATED", payload.getString("event"));
+        Assertions.assertEquals(document1Id, payload.getString("id"));
 
         // Get all webhooks
         json = target().path("/webhook")
@@ -65,12 +65,12 @@ public class TestWebhookResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         webhooks = json.getJsonArray("webhooks");
-        Assert.assertEquals(1, webhooks.size());
+        Assertions.assertEquals(1, webhooks.size());
         JsonObject webhook = webhooks.getJsonObject(0);
         String webhookId = webhook.getString("id");
-        Assert.assertEquals("DOCUMENT_CREATED", webhook.getString("event"));
-        Assert.assertEquals("http://localhost:" + getPort() + "/docs/thirdpartywebhook", webhook.getString("url"));
-        Assert.assertNotNull(webhook.getJsonNumber("create_date"));
+        Assertions.assertEquals("DOCUMENT_CREATED", webhook.getString("event"));
+        Assertions.assertEquals("http://localhost:" + getPort() + "/docs/thirdpartywebhook", webhook.getString("url"));
+        Assertions.assertNotNull(webhook.getJsonNumber("create_date"));
 
         // Delete a webhook
         target().path("/webhook/" + webhookId).request()
@@ -83,7 +83,7 @@ public class TestWebhookResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         webhooks = json.getJsonArray("webhooks");
-        Assert.assertEquals(0, webhooks.size());
+        Assertions.assertEquals(0, webhooks.size());
 
         // Deletes webhook1
         target().path("/user/webhook1").request()

@@ -8,8 +8,8 @@ import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 
@@ -42,7 +42,7 @@ public class TestCommentResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("create_date", Long.toString(create1Date))), JsonObject.class);
         String document1Id = json.getString("id");
-        Assert.assertNotNull(document1Id);
+        Assertions.assertNotNull(document1Id);
         
         // Create a comment with comment2 (fail, no read access)
         Response response = target().path("/comment").request()
@@ -50,19 +50,19 @@ public class TestCommentResource extends BaseJerseyTest {
                 .put(Entity.form(new Form()
                         .param("id", document1Id)
                         .param("content", "Comment by comment2")));
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
         
         // Read comments with comment2 (fail, no read access)
         response = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment2Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
         
         // Read comments with comment 1
         json = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(0, json.getJsonArray("comments").size());
+        Assertions.assertEquals(0, json.getJsonArray("comments").size());
         
         // Create a comment with comment1
         json = target().path("/comment").request()
@@ -71,23 +71,23 @@ public class TestCommentResource extends BaseJerseyTest {
                         .param("id", document1Id)
                         .param("content", "Comment by comment1")), JsonObject.class);
         String comment1Id = json.getString("id");
-        Assert.assertNotNull(comment1Id);
-        Assert.assertEquals("Comment by comment1", json.getString("content"));
-        Assert.assertEquals("comment1", json.getString("creator"));
-        Assert.assertNotNull(json.getJsonNumber("create_date"));
+        Assertions.assertNotNull(comment1Id);
+        Assertions.assertEquals("Comment by comment1", json.getString("content"));
+        Assertions.assertEquals("comment1", json.getString("creator"));
+        Assertions.assertNotNull(json.getJsonNumber("create_date"));
         
         // Read comments with comment1
         json = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("comments").size());
-        Assert.assertEquals(comment1Id, json.getJsonArray("comments").getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, json.getJsonArray("comments").size());
+        Assertions.assertEquals(comment1Id, json.getJsonArray("comments").getJsonObject(0).getString("id"));
         
         // Delete a comment with comment2 (fail, no write access)
         response = target().path("/comment/" + comment1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment2Token)
                 .delete();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
         
         // Delete a comment with comment1
         json = target().path("/comment/" + comment1Id).request()
@@ -98,7 +98,7 @@ public class TestCommentResource extends BaseJerseyTest {
         json = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(0, json.getJsonArray("comments").size());
+        Assertions.assertEquals(0, json.getJsonArray("comments").size());
         
         // Add an ACL READ for comment2 with comment1
         json = target().path("/acl").request()
@@ -121,13 +121,13 @@ public class TestCommentResource extends BaseJerseyTest {
         json = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("comments").size());
+        Assertions.assertEquals(1, json.getJsonArray("comments").size());
         JsonObject comment = json.getJsonArray("comments").getJsonObject(0);
-        Assert.assertEquals(comment2Id, comment.getString("id"));
-        Assert.assertEquals("Comment by comment2", comment.getString("content"));
-        Assert.assertEquals("comment2", comment.getString("creator"));
-        Assert.assertEquals("d6e56c42f61983bba80d370138763420", comment.getString("creator_gravatar"));
-        Assert.assertNotNull(comment.getJsonNumber("create_date"));
+        Assertions.assertEquals(comment2Id, comment.getString("id"));
+        Assertions.assertEquals("Comment by comment2", comment.getString("content"));
+        Assertions.assertEquals("comment2", comment.getString("creator"));
+        Assertions.assertEquals("d6e56c42f61983bba80d370138763420", comment.getString("creator_gravatar"));
+        Assertions.assertNotNull(comment.getJsonNumber("create_date"));
         
         // Delete a comment with comment2
         json = target().path("/comment/" + comment2Id).request()
@@ -138,6 +138,6 @@ public class TestCommentResource extends BaseJerseyTest {
         json = target().path("/comment/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, comment2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(0, json.getJsonArray("comments").size());
+        Assertions.assertEquals(0, json.getJsonArray("comments").size());
     }
 }

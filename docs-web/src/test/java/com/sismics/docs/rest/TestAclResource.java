@@ -1,8 +1,8 @@
 package com.sismics.docs.rest;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -48,15 +48,15 @@ public class TestAclResource extends BaseJerseyTest {
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         JsonArray acls = json.getJsonArray("acls");
-        Assert.assertEquals(2, acls.size());
+        Assertions.assertEquals(2, acls.size());
 
         // Get the document as acl2
         Response response = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
 
         // List all documents with acl2
         json = target().path("/document/list")
@@ -66,7 +66,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
         JsonArray documents = json.getJsonArray("documents");
-        Assert.assertEquals(0, documents.size());
+        Assertions.assertEquals(0, documents.size());
 
         // Add an ACL READ for acl2 with acl1
         json = target().path("/acl").request()
@@ -95,7 +95,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(1, documents.size());
+        Assertions.assertEquals(1, documents.size());
 
         // Add an ACL WRITE for acl2 with acl1 (again)
         target().path("/acl").request()
@@ -133,25 +133,25 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(1, documents.size());
+        Assertions.assertEquals(1, documents.size());
 
         // Get the document as acl1
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         acls = json.getJsonArray("acls");
-        Assert.assertEquals(6, acls.size());
-        Assert.assertTrue(json.getBoolean("writable"));
+        Assertions.assertEquals(6, acls.size());
+        Assertions.assertTrue(json.getBoolean("writable"));
 
         // Get the document as acl2
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         acls = json.getJsonArray("acls");
-        Assert.assertEquals(6, acls.size());
-        Assert.assertTrue(json.getBoolean("writable"));
+        Assertions.assertEquals(6, acls.size());
+        Assertions.assertTrue(json.getBoolean("writable"));
 
         // Update the document as acl2
         json = target().path("/document/" + document1Id).request()
@@ -159,15 +159,15 @@ public class TestAclResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("title", "My new super document 1")
                         .param("language", "eng")), JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
 
         // Get the document as acl2
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         JsonArray contributors = json.getJsonArray("contributors");
-        Assert.assertEquals(2, contributors.size());
+        Assertions.assertEquals(2, contributors.size());
 
         // Delete the ACL WRITE for acl2 with acl2
         target().path("/acl/" + document1Id + "/WRITE/" + acl2Id).request()
@@ -178,10 +178,10 @@ public class TestAclResource extends BaseJerseyTest {
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         acls = json.getJsonArray("acls");
-        Assert.assertEquals(5, acls.size());
-        Assert.assertTrue(json.getBoolean("writable")); // Writable by aclGroup2
+        Assertions.assertEquals(5, acls.size());
+        Assertions.assertTrue(json.getBoolean("writable")); // Writable by aclGroup2
 
         // Delete the ACL WRITE for aclGroup2 with acl2
         target().path("/acl/" + document1Id + "/WRITE/" + aclGroup2Id).request()
@@ -192,16 +192,16 @@ public class TestAclResource extends BaseJerseyTest {
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         acls = json.getJsonArray("acls");
-        Assert.assertEquals(4, acls.size());
-        Assert.assertFalse(json.getBoolean("writable"));
+        Assertions.assertEquals(4, acls.size());
+        Assertions.assertFalse(json.getBoolean("writable"));
 
         // Delete the ACL READ for acl2 with acl2 (not authorized)
         response = target().path("/acl/" + document1Id + "/READ/" + acl2Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .delete();
-        Assert.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
 
         // Delete the ACL READ for acl2 with acl1
         target().path("/acl/" + document1Id + "/READ/" + acl2Id).request()
@@ -222,28 +222,28 @@ public class TestAclResource extends BaseJerseyTest {
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         acls = json.getJsonArray("acls");
-        Assert.assertEquals(2, acls.size());
+        Assertions.assertEquals(2, acls.size());
         String acl1Id = acls.getJsonObject(0).getString("id");
 
         // Get the document as acl2
         response = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl2Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
 
         // Delete the ACL READ for acl1 with acl1
         response = target().path("/acl/" + document1Id + "/READ/" + acl1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .delete();
-        Assert.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
 
         // Delete the ACL WRITE for acl1 with acl1
         response = target().path("/acl/" + document1Id + "/WRITE/" + acl1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .delete();
-        Assert.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
 
         // Search target list (acl)
         json = target().path("/acl/target/search")
@@ -252,9 +252,9 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .get(JsonObject.class);
         JsonArray users = json.getJsonArray("users");
-        Assert.assertTrue(users.size() > 0);
+        Assertions.assertTrue(users.size() > 0);
         JsonArray groups = json.getJsonArray("groups");
-        Assert.assertTrue(groups.size() > 0);
+        Assertions.assertTrue(groups.size() > 0);
 
         // Search target list (admin)
         json = target().path("/acl/target/search")
@@ -263,9 +263,9 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acl1Token)
                 .get(JsonObject.class);
         users = json.getJsonArray("users");
-        Assert.assertEquals(0, users.size());
+        Assertions.assertEquals(0, users.size());
         groups = json.getJsonArray("groups");
-        Assert.assertEquals(0, groups.size());
+        Assertions.assertEquals(0, groups.size());
     }
 
     @Test
@@ -285,7 +285,7 @@ public class TestAclResource extends BaseJerseyTest {
                         .param("name", "AclTag1")
                         .param("color", "#ff0000")), JsonObject.class);
         String tag1Id = json.getString("id");
-        Assert.assertNotNull(tag1Id);
+        Assertions.assertNotNull(tag1Id);
 
         // Create document1 with acltag1 tagged with tag1
         json = target().path("/document").request()
@@ -300,20 +300,20 @@ public class TestAclResource extends BaseJerseyTest {
         Response response = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
 
         // acltag2 cannot see any tag
         json = target().path("/tag/list").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         JsonArray tags = json.getJsonArray("tags");
-        Assert.assertEquals(0, tags.size());
+        Assertions.assertEquals(0, tags.size());
 
         // acltag2 cannot see tag1
         response = target().path("/tag/" + tag1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
 
         // acltag2 cannot see any document
         json = target().path("/document/list")
@@ -323,7 +323,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         JsonArray documents = json.getJsonArray("documents");
-        Assert.assertEquals(0, documents.size());
+        Assertions.assertEquals(0, documents.size());
 
         // acltag2 cannot edit tag1
         response = target().path("/tag/" + tag1Id).request()
@@ -331,7 +331,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("name", "AclTag1")
                         .param("color", "#ff0000")));
-        Assert.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
 
         // acltag2 cannot edit document1
         response = target().path("/document/" + document1Id).request()
@@ -340,7 +340,7 @@ public class TestAclResource extends BaseJerseyTest {
                         .param("title", "My super document 1")
                         .param("tags", tag1Id)
                         .param("language", "eng")));
-        Assert.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
 
         // Add an ACL READ for acltag2 with acltag1 on tag1
         target().path("/acl").request()
@@ -355,8 +355,8 @@ public class TestAclResource extends BaseJerseyTest {
         json = target().path("/tag/" + tag1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
-        Assert.assertFalse(json.getBoolean("writable"));
-        Assert.assertEquals(3, json.getJsonArray("acls").size());
+        Assertions.assertFalse(json.getBoolean("writable"));
+        Assertions.assertEquals(3, json.getJsonArray("acls").size());
 
         // acltag2 still cannot edit tag1
         response = target().path("/tag/" + tag1Id).request()
@@ -364,7 +364,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("name", "AclTag1")
                         .param("color", "#ff0000")));
-        Assert.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.NOT_FOUND.getStatusCode(), response.getStatus());
 
         // acltag2 still cannot edit document1
         response = target().path("/document/" + document1Id).request()
@@ -373,28 +373,28 @@ public class TestAclResource extends BaseJerseyTest {
                         .param("title", "My super document 1")
                         .param("tags", tag1Id)
                         .param("language", "eng")));
-        Assert.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
 
         // acltag2 can see document1 with tag1 (non-writable)
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         tags = json.getJsonArray("tags");
-        Assert.assertEquals(1, tags.size());
-        Assert.assertFalse(json.getBoolean("writable"));
-        Assert.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, tags.size());
+        Assertions.assertFalse(json.getBoolean("writable"));
+        Assertions.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
         JsonArray inheritedAcls = json.getJsonArray("inherited_acls");
-        Assert.assertEquals(3, inheritedAcls.size());
-        Assert.assertEquals("AclTag1", inheritedAcls.getJsonObject(0).getString("source_name"));
-        Assert.assertEquals(tag1Id, inheritedAcls.getJsonObject(0).getString("source_id"));
+        Assertions.assertEquals(3, inheritedAcls.size());
+        Assertions.assertEquals("AclTag1", inheritedAcls.getJsonObject(0).getString("source_name"));
+        Assertions.assertEquals(tag1Id, inheritedAcls.getJsonObject(0).getString("source_id"));
 
         // acltag2 can see tag1
         json = target().path("/tag/list").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         tags = json.getJsonArray("tags");
-        Assert.assertEquals(1, tags.size());
-        Assert.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, tags.size());
+        Assertions.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
 
         // acltag2 can see exactly one document
         json = target().path("/document/list")
@@ -404,7 +404,7 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(1, documents.size());
+        Assertions.assertEquals(1, documents.size());
 
         // Add an ACL WRITE for acltag2 with acltag1 on tag1
         target().path("/acl").request()
@@ -420,20 +420,20 @@ public class TestAclResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
         tags = json.getJsonArray("tags");
-        Assert.assertEquals(1, tags.size());
-        Assert.assertTrue(json.getBoolean("writable"));
-        Assert.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, tags.size());
+        Assertions.assertTrue(json.getBoolean("writable"));
+        Assertions.assertEquals(tag1Id, tags.getJsonObject(0).getString("id"));
         inheritedAcls = json.getJsonArray("inherited_acls");
-        Assert.assertEquals(4, inheritedAcls.size());
-        Assert.assertEquals("AclTag1", inheritedAcls.getJsonObject(0).getString("source_name"));
-        Assert.assertEquals(tag1Id, inheritedAcls.getJsonObject(0).getString("source_id"));
+        Assertions.assertEquals(4, inheritedAcls.size());
+        Assertions.assertEquals("AclTag1", inheritedAcls.getJsonObject(0).getString("source_name"));
+        Assertions.assertEquals(tag1Id, inheritedAcls.getJsonObject(0).getString("source_id"));
 
         // acltag2 can see and edit tag1
         json = target().path("/tag/" + tag1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acltag2Token)
                 .get(JsonObject.class);
-        Assert.assertTrue(json.getBoolean("writable"));
-        Assert.assertEquals(4, json.getJsonArray("acls").size());
+        Assertions.assertTrue(json.getBoolean("writable"));
+        Assertions.assertEquals(4, json.getJsonArray("acls").size());
 
         // acltag2 can edit tag1
         target().path("/tag/" + tag1Id).request()

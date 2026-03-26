@@ -1,7 +1,7 @@
 package com.sismics.util;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
@@ -14,16 +14,16 @@ public class TestResourceUtil {
 
     @Test
     public void listFilesTest() throws Exception {
-        List<String> fileList = ResourceUtil.list(Test.class, "/junit/framework");
-        Assert.assertTrue(fileList.contains("Test.class"));
+        List<String> fileList = ResourceUtil.list(Assertions.class, "/org/junit/jupiter/api");
+        Assertions.assertTrue(fileList.contains("Assertions.class"));
 
-        fileList = ResourceUtil.list(Test.class, "/junit/framework/");
-        Assert.assertTrue(fileList.contains("Test.class"));
+        fileList = ResourceUtil.list(Assertions.class, "/org/junit/jupiter/api/");
+        Assertions.assertTrue(fileList.contains("Assertions.class"));
 
-        fileList = ResourceUtil.list(Test.class, "junit/framework/");
-        Assert.assertTrue(fileList.contains("Test.class"));
+        fileList = ResourceUtil.list(Assertions.class, "org/junit/jupiter/api/");
+        Assertions.assertTrue(fileList.contains("Assertions.class"));
 
-        fileList = ResourceUtil.list(Test.class, "junit/framework/");
-        Assert.assertTrue(fileList.contains("Test.class"));
+        fileList = ResourceUtil.list(Assertions.class, "org/junit/jupiter/api/");
+        Assertions.assertTrue(fileList.contains("Assertions.class"));
     }
 }

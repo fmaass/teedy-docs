@@ -9,8 +9,8 @@ import com.sismics.util.mime.MimeTypeUtil;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -57,7 +57,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0);
+        Assertions.assertTrue(fileBytes.length > 0);
         
         // Get the thumbnail data
         response = target().path("/file/" + file1Id + "/data")
@@ -65,10 +65,10 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0);
+        Assertions.assertTrue(fileBytes.length > 0);
         
         // Get the content data
         response = target().path("/file/" + file1Id + "/data")
@@ -76,7 +76,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
 
         // Get the web data
         response = target().path("/file/" + file1Id + "/data")
@@ -84,14 +84,14 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0);
+        Assertions.assertTrue(fileBytes.length > 0);
         
         // Check that the files are not readable directly from FS
         Path storedFile = DirectoryUtil.getStorageDirectory().resolve(file1Id);
-        Assert.assertEquals(MimeType.DEFAULT, MimeTypeUtil.guessMimeType(storedFile, null));
+        Assertions.assertEquals(MimeType.DEFAULT, MimeTypeUtil.guessMimeType(storedFile, null));
 
         // Get all files from a document
         JsonObject json = target().path("/file/list")
@@ -100,15 +100,15 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         JsonArray files = json.getJsonArray("files");
-        Assert.assertEquals(2, files.size());
-        Assert.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals("PIA00452.jpg", files.getJsonObject(0).getString("name"));
-        Assert.assertEquals("image/jpeg", files.getJsonObject(0).getString("mimetype"));
-        Assert.assertEquals(0, files.getJsonObject(0).getInt("version"));
-        Assert.assertEquals(FILE_PIA_00452_JPG_SIZE, files.getJsonObject(0).getJsonNumber("size").longValue());
-        Assert.assertEquals(file2Id, files.getJsonObject(1).getString("id"));
-        Assert.assertEquals("PIA00452.jpg", files.getJsonObject(1).getString("name"));
-        Assert.assertEquals(0, files.getJsonObject(1).getInt("version"));
+        Assertions.assertEquals(2, files.size());
+        Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("PIA00452.jpg", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals("image/jpeg", files.getJsonObject(0).getString("mimetype"));
+        Assertions.assertEquals(0, files.getJsonObject(0).getInt("version"));
+        Assertions.assertEquals(FILE_PIA_00452_JPG_SIZE, files.getJsonObject(0).getJsonNumber("size").longValue());
+        Assertions.assertEquals(file2Id, files.getJsonObject(1).getString("id"));
+        Assertions.assertEquals("PIA00452.jpg", files.getJsonObject(1).getString("name"));
+        Assertions.assertEquals(0, files.getJsonObject(1).getInt("version"));
 
         // Rename a file
         target().path("file/" + file1Id)
@@ -124,9 +124,9 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(2, files.size());
-        Assert.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals("Pale Blue Dot", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals(2, files.size());
+        Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("Pale Blue Dot", files.getJsonObject(0).getString("name"));
 
         // Reorder files
         target().path("/file/reorder").request()
@@ -143,9 +143,9 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(2, files.size());
-        Assert.assertEquals(file2Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals(file1Id, files.getJsonObject(1).getString("id"));
+        Assertions.assertEquals(2, files.size());
+        Assertions.assertEquals(file2Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(file1Id, files.getJsonObject(1).getString("id"));
         
         // Get a ZIP from all files
         response = target().path("/file/zip")
@@ -153,27 +153,27 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
 
         // Deletes a file
         json = target().path("/file/" + file1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
         
         // Get the file data (not found)
         response = target().path("/file/" + file1Id + "/data").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
         
         // Check that files are deleted from FS
         storedFile = DirectoryUtil.getStorageDirectory().resolve(file1Id);
         Path webFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_web");
         Path thumbnailFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_thumb");
-        Assert.assertFalse(Files.exists(storedFile));
-        Assert.assertFalse(Files.exists(webFile));
-        Assert.assertFalse(Files.exists(thumbnailFile));
+        Assertions.assertFalse(Files.exists(storedFile));
+        Assertions.assertFalse(Files.exists(webFile));
+        Assertions.assertFalse(Files.exists(thumbnailFile));
         
         // Get all files from a document
         json = target().path("/file/list")
@@ -182,7 +182,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
+        Assertions.assertEquals(1, files.size());
 
         // Process a file
         target().path("/file/" + file2Id + "/process").request()
@@ -195,12 +195,12 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
+        Assertions.assertEquals(1, files.size());
         JsonObject file = files.getJsonObject(0);
-        Assert.assertEquals(file2Id, file.getString("id"));
-        Assert.assertEquals("PIA00452.jpg", file.getString("name"));
-        Assert.assertEquals("image/jpeg", file.getString("mimetype"));
-        Assert.assertEquals(0, file.getInt("version"));
+        Assertions.assertEquals(file2Id, file.getString("id"));
+        Assertions.assertEquals("PIA00452.jpg", file.getString("name"));
+        Assertions.assertEquals("image/jpeg", file.getString("mimetype"));
+        Assertions.assertEquals(0, file.getInt("version"));
 
         // Add a new version to a file
         String file3Id;
@@ -218,7 +218,7 @@ public class TestFileResource extends BaseJerseyTest {
                                         .bodyPart(streamDataBodyPart),
                                 MediaType.MULTIPART_FORM_DATA_TYPE), JsonObject.class);
                 file3Id = json.getString("id");
-                Assert.assertNotNull(file2Id);
+                Assertions.assertNotNull(file2Id);
             }
         }
 
@@ -228,18 +228,18 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(2, files.size());
+        Assertions.assertEquals(2, files.size());
         file = files.getJsonObject(1);
-        Assert.assertEquals(file3Id, file.getString("id"));
-        Assert.assertEquals("document.txt", file.getString("name"));
-        Assert.assertEquals("text/plain", file.getString("mimetype"));
-        Assert.assertEquals(1, file.getInt("version"));
+        Assertions.assertEquals(file3Id, file.getString("id"));
+        Assertions.assertEquals("document.txt", file.getString("name"));
+        Assertions.assertEquals("text/plain", file.getString("mimetype"));
+        Assertions.assertEquals(1, file.getInt("version"));
 
         // Delete the previous version
         json = target().path("/file/" + file2Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
 
         // Check the newly created version
         json = target().path("/file/list")
@@ -248,10 +248,10 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
-        Assert.assertEquals(file3Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals("document.txt", files.getJsonObject(0).getString("name"));
-        Assert.assertEquals(1, files.getJsonObject(0).getInt("version"));
+        Assertions.assertEquals(1, files.size());
+        Assertions.assertEquals(file3Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("document.txt", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals(1, files.getJsonObject(0).getInt("version"));
     }
     
     @Test
@@ -272,18 +272,18 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, file1Token)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         InputStream is = (InputStream) response.getEntity();
         ZipInputStream zipInputStream = new ZipInputStream(is);
-        Assert.assertEquals(zipInputStream.getNextEntry().getName(), "0-PIA00452.jpg");
-        Assert.assertNull(zipInputStream.getNextEntry());
+        Assertions.assertEquals(zipInputStream.getNextEntry().getName(), "0-PIA00452.jpg");
+        Assertions.assertNull(zipInputStream.getNextEntry());
 
         // Fail if we don't have access to the document
         response = target().path("/file/zip")
                 .queryParam("id", document1Id)
                 .request()
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
 
         // Create a document
         String document2Id = clientUtil.createDocument(file1Token);
@@ -298,12 +298,12 @@ public class TestFileResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("files", file1Id)
                         .param("files", file2Id)));
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         zipInputStream = new ZipInputStream(is);
-        Assert.assertNotNull(zipInputStream.getNextEntry().getName());
-        Assert.assertNotNull(zipInputStream.getNextEntry().getName());
-        Assert.assertNull(zipInputStream.getNextEntry());
+        Assertions.assertNotNull(zipInputStream.getNextEntry().getName());
+        Assertions.assertNotNull(zipInputStream.getNextEntry().getName());
+        Assertions.assertNull(zipInputStream.getNextEntry());
         
         // Fail if we don't have access to the files
         response = target().path("/file/zip")
@@ -311,7 +311,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("files", file1Id)
                         .param("files", file2Id)));
-        Assert.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
     }
 
     /**
@@ -351,7 +351,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileOrphanToken)
                 .get(JsonObject.class);
         JsonArray files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
+        Assertions.assertEquals(1, files.size());
 
         // Get the thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -359,10 +359,10 @@ public class TestFileResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileOrphanToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0);
+        Assertions.assertTrue(fileBytes.length > 0);
 
         // Get the file data
         response = target().path("/file/" + file1Id + "/data").request()
@@ -370,7 +370,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .get();
         is = (InputStream) response.getEntity();
         fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertEquals(FILE_PIA_00452_JPG_SIZE, fileBytes.length);
+        Assertions.assertEquals(FILE_PIA_00452_JPG_SIZE, fileBytes.length);
         
         // Create another document
         String document2Id = clientUtil.createDocument(fileOrphanToken);
@@ -388,7 +388,7 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileOrphanToken)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
+        Assertions.assertEquals(1, files.size());
         
         // Add a file
         String file2Id = clientUtil.addFileToDocument(FILE_PIA_00452_JPG, fileOrphanToken, null);
@@ -397,7 +397,7 @@ public class TestFileResource extends BaseJerseyTest {
         json = target().path("/file/" + file2Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileOrphanToken)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
     }
     
     /**
@@ -415,24 +415,24 @@ public class TestFileResource extends BaseJerseyTest {
         String file1Id = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, fileQuotaToken, null);
 
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(fileQuotaToken));
         
         // Add a file (292641 bytes large)
         clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, fileQuotaToken, null);
         
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
         
         // Add a file (292641 bytes large)
         clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, fileQuotaToken, null);
         
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 3, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 3, getUserQuota(fileQuotaToken));
         
         // Add a file (292641 bytes large)
         try {
             clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, fileQuotaToken, null);
-            Assert.fail();
+            Assertions.fail();
         } catch (jakarta.ws.rs.BadRequestException ignored) {
         }
         
@@ -440,10 +440,10 @@ public class TestFileResource extends BaseJerseyTest {
         JsonObject json = target().path("/file/" + file1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileQuotaToken)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
         
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
 
         // Create a document
         long create1Date = new Date().getTime();
@@ -454,22 +454,22 @@ public class TestFileResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("create_date", Long.toString(create1Date))), JsonObject.class);
         String document1Id = json.getString("id");
-        Assert.assertNotNull(document1Id);
+        Assertions.assertNotNull(document1Id);
 
         // Add a file to this document (163510 bytes large)
         clientUtil.addFileToDocument(FILE_PIA_00452_JPG, fileQuotaToken, document1Id);
 
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2 + FILE_PIA_00452_JPG_SIZE, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2 + FILE_PIA_00452_JPG_SIZE, getUserQuota(fileQuotaToken));
 
         // Deletes the document
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileQuotaToken)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
 
         // Check current quota
-        Assert.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
     }
 
     private long getUserQuota(String userToken) {

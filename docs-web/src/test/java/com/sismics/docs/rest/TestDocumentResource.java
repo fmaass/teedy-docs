@@ -8,8 +8,8 @@ import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
 import org.joda.time.format.DateTimeFormat;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -49,7 +49,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("name", "SuperTag")
                         .param("color", "#ffff00")), JsonObject.class);
         String tag1Id = json.getString("id");
-        Assert.assertNotNull(tag1Id);
+        Assertions.assertNotNull(tag1Id);
 
         // Create a tag
         json = target().path("/tag").request()
@@ -58,7 +58,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("name", "HR")
                         .param("color", "#0000ff")), JsonObject.class);
         String tag2Id = json.getString("id");
-        Assert.assertNotNull(tag2Id);
+        Assertions.assertNotNull(tag2Id);
 
         // Create a document with document1
         long create1Date = new Date().getTime();
@@ -80,7 +80,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("create_date", Long.toString(create1Date))), JsonObject.class);
         String document1Id = json.getString("id");
-        Assert.assertNotNull(document1Id);
+        Assertions.assertNotNull(document1Id);
 
         // Add a file to this document
         String file1Id = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG,
@@ -100,7 +100,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("tags", tag2Id)
                         .param("relations", document1Id)), JsonObject.class);
         String document2Id = json.getString("id");
-        Assert.assertNotNull(document2Id);
+        Assertions.assertNotNull(document2Id);
 
         // List all documents
         json = target().path("/document/list")
@@ -111,20 +111,20 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get(JsonObject.class);
         JsonArray documents = json.getJsonArray("documents");
         JsonArray tags = documents.getJsonObject(0).getJsonArray("tags");
-        Assert.assertEquals(2, documents.size());
-        Assert.assertNotNull(documents.getJsonObject(0).get("update_date"));
-        Assert.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
-        Assert.assertEquals("eng", documents.getJsonObject(0).getString("language"));
-        Assert.assertEquals(file1Id, documents.getJsonObject(0).getString("file_id"));
-        Assert.assertEquals(1, documents.getJsonObject(0).getInt("file_count"));
-        Assert.assertEquals(2, tags.size());
-        Assert.assertEquals(tag2Id, tags.getJsonObject(0).getString("id"));
-        Assert.assertEquals("HR", tags.getJsonObject(0).getString("name"));
-        Assert.assertEquals("#0000ff", tags.getJsonObject(0).getString("color"));
-        Assert.assertEquals(tag1Id, tags.getJsonObject(1).getString("id"));
-        Assert.assertEquals("SuperTag", tags.getJsonObject(1).getString("name"));
-        Assert.assertEquals("#ffff00", tags.getJsonObject(1).getString("color"));
-        Assert.assertFalse(documents.getJsonObject(0).getBoolean("active_route"));
+        Assertions.assertEquals(2, documents.size());
+        Assertions.assertNotNull(documents.getJsonObject(0).get("update_date"));
+        Assertions.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("eng", documents.getJsonObject(0).getString("language"));
+        Assertions.assertEquals(file1Id, documents.getJsonObject(0).getString("file_id"));
+        Assertions.assertEquals(1, documents.getJsonObject(0).getInt("file_count"));
+        Assertions.assertEquals(2, tags.size());
+        Assertions.assertEquals(tag2Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("HR", tags.getJsonObject(0).getString("name"));
+        Assertions.assertEquals("#0000ff", tags.getJsonObject(0).getString("color"));
+        Assertions.assertEquals(tag1Id, tags.getJsonObject(1).getString("id"));
+        Assertions.assertEquals("SuperTag", tags.getJsonObject(1).getString("name"));
+        Assertions.assertEquals("#ffff00", tags.getJsonObject(1).getString("color"));
+        Assertions.assertFalse(documents.getJsonObject(0).getBoolean("active_route"));
 
         // List all documents from document3
         json = target().path("/document/list")
@@ -134,7 +134,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document3Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertTrue(documents.isEmpty());
+        Assertions.assertTrue(documents.isEmpty());
         
         // Create a document with document3
         long create3Date = new Date().getTime();
@@ -146,7 +146,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("create_date", Long.toString(create3Date))), JsonObject.class);
         String document3Id = json.getString("id");
-        Assert.assertNotNull(document3Id);
+        Assertions.assertNotNull(document3Id);
         
         // Add a file to this document
         clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG,
@@ -159,7 +159,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("title", "My_super_title_document_4")
                         .param("language", "eng")), JsonObject.class);
         String document4Id = json.getString("id");
-        Assert.assertNotNull(document4Id);
+        Assertions.assertNotNull(document4Id);
 
         // List all documents from document3
         json = target().path("/document/list")
@@ -169,7 +169,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document3Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(2, documents.size());
+        Assertions.assertEquals(2, documents.size());
 
         // Check highlights
         json = target().path("/document/list")
@@ -178,7 +178,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         String highlight = json.getJsonArray("documents").getJsonObject(0).getString("highlight");
-        Assert.assertTrue(highlight.contains("<strong>"));
+        Assertions.assertTrue(highlight.contains("<strong>"));
 
         // Check suggestions
         json = target().path("/document/list")
@@ -187,113 +187,113 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         String suggestion = json.getJsonArray("suggestions").getString(0);
-        Assert.assertEquals("document", suggestion);
+        Assertions.assertEquals("document", suggestion);
 
         // Search documents
-        Assert.assertEquals(1, searchDocuments("full:uranium full:einstein", document1Token));
-        Assert.assertEquals(2, searchDocuments("tit*", document1Token));
-        Assert.assertEquals(2, searchDocuments("docu*", document1Token));
-        Assert.assertEquals(2, searchDocuments("full:title", document1Token));
-        Assert.assertEquals(2, searchDocuments("title", document1Token));
-        Assert.assertEquals(1, searchDocuments("super description", document1Token));
-        Assert.assertEquals(1, searchDocuments("subject", document1Token));
-        Assert.assertEquals(1, searchDocuments("identifier", document1Token));
-        Assert.assertEquals(1, searchDocuments("publisher", document1Token));
-        Assert.assertEquals(1, searchDocuments("format", document1Token));
-        Assert.assertEquals(1, searchDocuments("source", document1Token));
-        Assert.assertEquals(1, searchDocuments("software", document1Token));
-        Assert.assertEquals(1, searchDocuments("greenland", document1Token));
-        Assert.assertEquals(1, searchDocuments("public domain", document1Token));
-        Assert.assertEquals(0, searchDocuments("by:document3", document1Token));
-        Assert.assertEquals(2, searchDocuments("by:document1", document1Token));
-        Assert.assertEquals(0, searchDocuments("by:nobody", document1Token));
-        Assert.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("after:2010 before:2040-08", document1Token));
-        Assert.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
-        Assert.assertEquals(2, searchDocuments("uafter:2010 ubefore:2040-08", document1Token));
-        Assert.assertEquals(1, searchDocuments("tag:super", document1Token));
-        Assert.assertEquals(1, searchDocuments("!tag:super", document1Token));
-        Assert.assertEquals(1, searchDocuments("tag:super tag:hr", document1Token));
-        Assert.assertEquals(0, searchDocuments("tag:super !tag:hr", document1Token));
-        Assert.assertEquals(1, searchDocuments("shared:yes", document1Token));
-        Assert.assertEquals(2, searchDocuments("lang:eng", document1Token));
-        Assert.assertEquals(1, searchDocuments("mime:image/png", document1Token));
-        Assert.assertEquals(0, searchDocuments("mime:empty/void", document1Token));
-        Assert.assertEquals(1, searchDocuments("after:2010 before:2040-08 tag:super shared:yes lang:eng simple:title simple:description full:uranium", document1Token));
-        Assert.assertEquals(1, searchDocuments("title:My_super_title_document_3", document3Token));
-        Assert.assertEquals(2, searchDocuments("title:My_super_title_document_3 title:My_super_title_document_4", document3Token));
+        Assertions.assertEquals(1, searchDocuments("full:uranium full:einstein", document1Token));
+        Assertions.assertEquals(2, searchDocuments("tit*", document1Token));
+        Assertions.assertEquals(2, searchDocuments("docu*", document1Token));
+        Assertions.assertEquals(2, searchDocuments("full:title", document1Token));
+        Assertions.assertEquals(2, searchDocuments("title", document1Token));
+        Assertions.assertEquals(1, searchDocuments("super description", document1Token));
+        Assertions.assertEquals(1, searchDocuments("subject", document1Token));
+        Assertions.assertEquals(1, searchDocuments("identifier", document1Token));
+        Assertions.assertEquals(1, searchDocuments("publisher", document1Token));
+        Assertions.assertEquals(1, searchDocuments("format", document1Token));
+        Assertions.assertEquals(1, searchDocuments("source", document1Token));
+        Assertions.assertEquals(1, searchDocuments("software", document1Token));
+        Assertions.assertEquals(1, searchDocuments("greenland", document1Token));
+        Assertions.assertEquals(1, searchDocuments("public domain", document1Token));
+        Assertions.assertEquals(0, searchDocuments("by:document3", document1Token));
+        Assertions.assertEquals(2, searchDocuments("by:document1", document1Token));
+        Assertions.assertEquals(0, searchDocuments("by:nobody", document1Token));
+        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("after:2010 before:2040-08", document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uafter:2010 ubefore:2040-08", document1Token));
+        Assertions.assertEquals(1, searchDocuments("tag:super", document1Token));
+        Assertions.assertEquals(1, searchDocuments("!tag:super", document1Token));
+        Assertions.assertEquals(1, searchDocuments("tag:super tag:hr", document1Token));
+        Assertions.assertEquals(0, searchDocuments("tag:super !tag:hr", document1Token));
+        Assertions.assertEquals(1, searchDocuments("shared:yes", document1Token));
+        Assertions.assertEquals(2, searchDocuments("lang:eng", document1Token));
+        Assertions.assertEquals(1, searchDocuments("mime:image/png", document1Token));
+        Assertions.assertEquals(0, searchDocuments("mime:empty/void", document1Token));
+        Assertions.assertEquals(1, searchDocuments("after:2010 before:2040-08 tag:super shared:yes lang:eng simple:title simple:description full:uranium", document1Token));
+        Assertions.assertEquals(1, searchDocuments("title:My_super_title_document_3", document3Token));
+        Assertions.assertEquals(2, searchDocuments("title:My_super_title_document_3 title:My_super_title_document_4", document3Token));
 
         // Search documents (nothing)
-        Assert.assertEquals(0, searchDocuments("random", document1Token));
-        Assert.assertEquals(0, searchDocuments("full:random", document1Token));
-        Assert.assertEquals(0, searchDocuments("after:2010 before:2011-05-20", document1Token));
-        Assert.assertEquals(0, searchDocuments("at:2040-05-35", document1Token));
-        Assert.assertEquals(0, searchDocuments("after:2010-18 before:2040-05-38", document1Token));
-        Assert.assertEquals(0, searchDocuments("after:2010-18", document1Token));
-        Assert.assertEquals(0, searchDocuments("before:2040-05-38", document1Token));
-        Assert.assertEquals(0, searchDocuments("tag:Nop", document1Token));
-        Assert.assertEquals(0, searchDocuments("lang:fra", document1Token));
-        Assert.assertEquals(0, searchDocuments("title:Unknown title", document3Token));
+        Assertions.assertEquals(0, searchDocuments("random", document1Token));
+        Assertions.assertEquals(0, searchDocuments("full:random", document1Token));
+        Assertions.assertEquals(0, searchDocuments("after:2010 before:2011-05-20", document1Token));
+        Assertions.assertEquals(0, searchDocuments("at:2040-05-35", document1Token));
+        Assertions.assertEquals(0, searchDocuments("after:2010-18 before:2040-05-38", document1Token));
+        Assertions.assertEquals(0, searchDocuments("after:2010-18", document1Token));
+        Assertions.assertEquals(0, searchDocuments("before:2040-05-38", document1Token));
+        Assertions.assertEquals(0, searchDocuments("tag:Nop", document1Token));
+        Assertions.assertEquals(0, searchDocuments("lang:fra", document1Token));
+        Assertions.assertEquals(0, searchDocuments("title:Unknown title", document3Token));
 
         // Get document 1
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
-        Assert.assertEquals("document1", json.getString("creator"));
-        Assert.assertEquals(1, json.getInt("file_count"));
-        Assert.assertTrue(json.getBoolean("shared"));
-        Assert.assertEquals("My super title document 1", json.getString("title"));
-        Assert.assertEquals("My super description for document 1", json.getString("description"));
-        Assert.assertEquals("Subject document 1", json.getString("subject"));
-        Assert.assertEquals("Identifier document 1", json.getString("identifier"));
-        Assert.assertEquals("Publisher document 1", json.getString("publisher"));
-        Assert.assertEquals("Format document 1", json.getString("format"));
-        Assert.assertEquals("Source document 1", json.getString("source"));
-        Assert.assertEquals("Software", json.getString("type"));
-        Assert.assertEquals("Greenland", json.getString("coverage"));
-        Assert.assertEquals("Public Domain", json.getString("rights"));
-        Assert.assertEquals("eng", json.getString("language"));
-        Assert.assertEquals(create1Date, json.getJsonNumber("create_date").longValue());
-        Assert.assertNotNull(json.get("update_date"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals("document1", json.getString("creator"));
+        Assertions.assertEquals(1, json.getInt("file_count"));
+        Assertions.assertTrue(json.getBoolean("shared"));
+        Assertions.assertEquals("My super title document 1", json.getString("title"));
+        Assertions.assertEquals("My super description for document 1", json.getString("description"));
+        Assertions.assertEquals("Subject document 1", json.getString("subject"));
+        Assertions.assertEquals("Identifier document 1", json.getString("identifier"));
+        Assertions.assertEquals("Publisher document 1", json.getString("publisher"));
+        Assertions.assertEquals("Format document 1", json.getString("format"));
+        Assertions.assertEquals("Source document 1", json.getString("source"));
+        Assertions.assertEquals("Software", json.getString("type"));
+        Assertions.assertEquals("Greenland", json.getString("coverage"));
+        Assertions.assertEquals("Public Domain", json.getString("rights"));
+        Assertions.assertEquals("eng", json.getString("language"));
+        Assertions.assertEquals(create1Date, json.getJsonNumber("create_date").longValue());
+        Assertions.assertNotNull(json.get("update_date"));
         tags = json.getJsonArray("tags");
-        Assert.assertEquals(2, tags.size());
-        Assert.assertEquals(tag2Id, tags.getJsonObject(0).getString("id"));
-        Assert.assertEquals(tag1Id, tags.getJsonObject(1).getString("id"));
+        Assertions.assertEquals(2, tags.size());
+        Assertions.assertEquals(tag2Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(tag1Id, tags.getJsonObject(1).getString("id"));
         JsonArray contributors = json.getJsonArray("contributors");
-        Assert.assertEquals(1, contributors.size());
-        Assert.assertEquals("document1", contributors.getJsonObject(0).getString("username"));
+        Assertions.assertEquals(1, contributors.size());
+        Assertions.assertEquals("document1", contributors.getJsonObject(0).getString("username"));
         JsonArray relations = json.getJsonArray("relations");
-        Assert.assertEquals(1, relations.size());
-        Assert.assertEquals(document2Id, relations.getJsonObject(0).getString("id"));
-        Assert.assertFalse(relations.getJsonObject(0).getBoolean("source"));
-        Assert.assertEquals("My super title document 2", relations.getJsonObject(0).getString("title"));
-        Assert.assertFalse(json.containsKey("files"));
-        Assert.assertEquals(file1Id, json.getString("file_id"));
+        Assertions.assertEquals(1, relations.size());
+        Assertions.assertEquals(document2Id, relations.getJsonObject(0).getString("id"));
+        Assertions.assertFalse(relations.getJsonObject(0).getBoolean("source"));
+        Assertions.assertEquals("My super title document 2", relations.getJsonObject(0).getString("title"));
+        Assertions.assertFalse(json.containsKey("files"));
+        Assertions.assertEquals(file1Id, json.getString("file_id"));
 
         // Get document 2
         json = target().path("/document/" + document2Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
-        Assert.assertEquals(document2Id, json.getString("id"));
+        Assertions.assertEquals(document2Id, json.getString("id"));
         relations = json.getJsonArray("relations");
-        Assert.assertEquals(1, relations.size());
-        Assert.assertEquals(document1Id, relations.getJsonObject(0).getString("id"));
-        Assert.assertTrue(relations.getJsonObject(0).getBoolean("source"));
-        Assert.assertEquals("My super title document 1", relations.getJsonObject(0).getString("title"));
-        Assert.assertFalse(json.containsKey("files"));
-        Assert.assertTrue(json.isNull("file_id"));
+        Assertions.assertEquals(1, relations.size());
+        Assertions.assertEquals(document1Id, relations.getJsonObject(0).getString("id"));
+        Assertions.assertTrue(relations.getJsonObject(0).getBoolean("source"));
+        Assertions.assertEquals("My super title document 1", relations.getJsonObject(0).getString("title"));
+        Assertions.assertFalse(json.containsKey("files"));
+        Assertions.assertTrue(json.isNull("file_id"));
 
         // Create a tag
         json = target().path("/tag").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .put(Entity.form(new Form().param("name", "SuperTag2").param("color", "#00ffff")), JsonObject.class);
         String tag3Id = json.getString("id");
-        Assert.assertNotNull(tag3Id);
+        Assertions.assertNotNull(tag3Id);
         
         // Update document 1
         json = target().path("/document/" + document1Id).request()
@@ -311,7 +311,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .param("language", "eng")
                         .param("rights", "All Rights Reserved")
                         .param("tags", tag3Id)), JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(document1Id, json.getString("id"));
         
         // Update document 2
         json = target().path("/document/" + document2Id).request()
@@ -319,7 +319,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .post(Entity.form(new Form()
                         .param("title", "My super title document 2")
                         .param("language", "eng")), JsonObject.class);
-        Assert.assertEquals(document2Id, json.getString("id"));
+        Assertions.assertEquals(document2Id, json.getString("id"));
 
         // Export a document in PDF format
         Response response = target().path("/document/" + document1Id + "/pdf")
@@ -332,7 +332,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
 
         // Search documents by query
         json = target().path("/document/list")
@@ -341,9 +341,9 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(1, documents.size());
-        Assert.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
-        Assert.assertFalse(documents.getJsonObject(0).containsKey("files"));
+        Assertions.assertEquals(1, documents.size());
+        Assertions.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
+        Assertions.assertFalse(documents.getJsonObject(0).containsKey("files"));
 
         // Search documents by query with files
         json = target().path("/document/list")
@@ -353,38 +353,38 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         documents = json.getJsonArray("documents");
-        Assert.assertEquals(1, documents.size());
-        Assert.assertEquals(1, documents.size());
-        Assert.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, documents.size());
+        Assertions.assertEquals(1, documents.size());
+        Assertions.assertEquals(document1Id, documents.getJsonObject(0).getString("id"));
         JsonArray files = documents.getJsonObject(0).getJsonArray("files");
-        Assert.assertEquals(1, files.size());
-        Assert.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
-        Assert.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        Assertions.assertEquals(1, files.size());
+        Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
 
         // Get document 1
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
-        Assert.assertTrue(json.getString("title").contains("new"));
-        Assert.assertTrue(json.getString("description").contains("new"));
-        Assert.assertTrue(json.getString("subject").contains("new"));
-        Assert.assertTrue(json.getString("identifier").contains("new"));
-        Assert.assertTrue(json.getString("publisher").contains("new"));
-        Assert.assertTrue(json.getString("format").contains("new"));
-        Assert.assertTrue(json.getString("source").contains("new"));
-        Assert.assertEquals("Image", json.getString("type"));
-        Assert.assertEquals("France", json.getString("coverage"));
-        Assert.assertEquals("All Rights Reserved", json.getString("rights"));
+        Assertions.assertTrue(json.getString("title").contains("new"));
+        Assertions.assertTrue(json.getString("description").contains("new"));
+        Assertions.assertTrue(json.getString("subject").contains("new"));
+        Assertions.assertTrue(json.getString("identifier").contains("new"));
+        Assertions.assertTrue(json.getString("publisher").contains("new"));
+        Assertions.assertTrue(json.getString("format").contains("new"));
+        Assertions.assertTrue(json.getString("source").contains("new"));
+        Assertions.assertEquals("Image", json.getString("type"));
+        Assertions.assertEquals("France", json.getString("coverage"));
+        Assertions.assertEquals("All Rights Reserved", json.getString("rights"));
         tags = json.getJsonArray("tags");
-        Assert.assertEquals(1, tags.size());
-        Assert.assertEquals(tag3Id, tags.getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, tags.size());
+        Assertions.assertEquals(tag3Id, tags.getJsonObject(0).getString("id"));
         contributors = json.getJsonArray("contributors");
-        Assert.assertEquals(1, contributors.size());
-        Assert.assertEquals("document1", contributors.getJsonObject(0).getString("username"));
+        Assertions.assertEquals(1, contributors.size());
+        Assertions.assertEquals("document1", contributors.getJsonObject(0).getString("username"));
         relations = json.getJsonArray("relations");
-        Assert.assertEquals(0, relations.size());
-        Assert.assertFalse(json.containsKey("files"));
+        Assertions.assertEquals(0, relations.size());
+        Assertions.assertFalse(json.containsKey("files"));
 
         // Get document 1 with its files
         json = target().path("/document/" + document1Id)
@@ -393,43 +393,43 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
-        Assert.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
-        Assert.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
-        Assert.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        Assertions.assertEquals(1, files.size());
+        Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
 
         // Get document 2
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         relations = json.getJsonArray("relations");
-        Assert.assertEquals(0, relations.size());
+        Assertions.assertEquals(0, relations.size());
         
         // Deletes a document
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
 
         // Deletes a non-existing document
         response = target().path("/document/69b79238-84bb-4263-a32f-9cbdf8c92188").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .delete();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
 
         // Check that the associated files are deleted from FS
         java.io.File storedFile = DirectoryUtil.getStorageDirectory().resolve(file1Id).toFile();
         java.io.File webFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_web").toFile();
         java.io.File thumbnailFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_thumb").toFile();
-        Assert.assertFalse(storedFile.exists());
-        Assert.assertFalse(webFile.exists());
-        Assert.assertFalse(thumbnailFile.exists());
+        Assertions.assertFalse(storedFile.exists());
+        Assertions.assertFalse(webFile.exists());
+        Assertions.assertFalse(thumbnailFile.exists());
         
         // Get a document (KO)
         response = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get();
-        Assert.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
     }
     
     /**
@@ -471,7 +471,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentOdtToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
         
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -481,7 +481,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -492,10 +492,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentOdtToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
     
     /**
@@ -521,7 +521,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentDocxToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
         
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -531,7 +531,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -542,10 +542,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentDocxToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
     
     /**
@@ -571,7 +571,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
         
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -581,7 +581,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -592,10 +592,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
 
     /**
@@ -621,7 +621,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPlainToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
 
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -631,7 +631,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Get the content data
         response = target().path("/file/" + file1Id + "/data")
@@ -639,9 +639,9 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPlainToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
-        Assert.assertTrue(new String(ByteStreams.toByteArray(is)).contains("love"));
+        Assertions.assertTrue(new String(ByteStreams.toByteArray(is)).contains("love"));
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -652,10 +652,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPlainToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
 
     /**
@@ -681,7 +681,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentVideoToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
 
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -691,7 +691,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -702,10 +702,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentVideoToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
 
     /**
@@ -731,7 +731,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPptxToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(1, json.getJsonArray("documents").size());
+        Assertions.assertEquals(1, json.getJsonArray("documents").size());
 
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
@@ -741,7 +741,7 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
+        Assertions.assertTrue(fileBytes.length > 0); // Images rendered from PDF differ in size from OS to OS due to font issues
 
         // Export a document in PDF format
         response = target().path("/document/" + document1Id + "/pdf")
@@ -752,10 +752,10 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPptxToken)
                 .get();
-        Assert.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         is = (InputStream) response.getEntity();
         byte[] pdfBytes = ByteStreams.toByteArray(is);
-        Assert.assertTrue(pdfBytes.length > 0);
+        Assertions.assertTrue(pdfBytes.length > 0);
     }
 
     /**
@@ -784,19 +784,19 @@ public class TestDocumentResource extends BaseJerseyTest {
         }
 
         String documentId = json.getString("id");
-        Assert.assertNotNull(documentId);
+        Assertions.assertNotNull(documentId);
 
         // Get the document
         json = target().path("/document/" + documentId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentEmlToken)
                 .get(JsonObject.class);
-        Assert.assertEquals("subject here", json.getString("title"));
-        Assert.assertTrue(json.getString("description").contains("content here"));
-        Assert.assertEquals("subject here", json.getString("subject"));
-        Assert.assertEquals("EML", json.getString("format"));
-        Assert.assertEquals("Email", json.getString("source"));
-        Assert.assertEquals("eng", json.getString("language"));
-        Assert.assertEquals(1519222261000L, json.getJsonNumber("create_date").longValue());
+        Assertions.assertEquals("subject here", json.getString("title"));
+        Assertions.assertTrue(json.getString("description").contains("content here"));
+        Assertions.assertEquals("subject here", json.getString("subject"));
+        Assertions.assertEquals("EML", json.getString("format"));
+        Assertions.assertEquals("Email", json.getString("source"));
+        Assertions.assertEquals("eng", json.getString("language"));
+        Assertions.assertEquals(1519222261000L, json.getJsonNumber("create_date").longValue());
 
         // Get all files from a document
         json = target().path("/file/list")
@@ -805,13 +805,13 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentEmlToken)
                 .get(JsonObject.class);
         JsonArray files = json.getJsonArray("files");
-        Assert.assertEquals(2, files.size());
-        Assert.assertEquals("14_UNHCR_nd.pdf", files.getJsonObject(0).getString("name"));
-        Assert.assertEquals(251216L, files.getJsonObject(0).getJsonNumber("size").longValue());
-        Assert.assertEquals("application/pdf", files.getJsonObject(0).getString("mimetype"));
-        Assert.assertEquals("refugee status determination.pdf", files.getJsonObject(1).getString("name"));
-        Assert.assertEquals(279276L, files.getJsonObject(1).getJsonNumber("size").longValue());
-        Assert.assertEquals("application/pdf", files.getJsonObject(1).getString("mimetype"));
+        Assertions.assertEquals(2, files.size());
+        Assertions.assertEquals("14_UNHCR_nd.pdf", files.getJsonObject(0).getString("name"));
+        Assertions.assertEquals(251216L, files.getJsonObject(0).getJsonNumber("size").longValue());
+        Assertions.assertEquals("application/pdf", files.getJsonObject(0).getString("mimetype"));
+        Assertions.assertEquals("refugee status determination.pdf", files.getJsonObject(1).getString("name"));
+        Assertions.assertEquals(279276L, files.getJsonObject(1).getJsonNumber("size").longValue());
+        Assertions.assertEquals("application/pdf", files.getJsonObject(1).getString("mimetype"));
     }
 
     /**
@@ -877,32 +877,32 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, metadata1Token)
                 .get(JsonObject.class);
         JsonArray metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(5, metadata.size());
+        Assertions.assertEquals(5, metadata.size());
         JsonObject meta = metadata.getJsonObject(0);
-        Assert.assertEquals(metadataStrId, meta.getString("id"));
-        Assert.assertEquals("0str", meta.getString("name"));
-        Assert.assertEquals("STRING", meta.getString("type"));
-        Assert.assertEquals("my string", meta.getString("value"));
+        Assertions.assertEquals(metadataStrId, meta.getString("id"));
+        Assertions.assertEquals("0str", meta.getString("name"));
+        Assertions.assertEquals("STRING", meta.getString("type"));
+        Assertions.assertEquals("my string", meta.getString("value"));
         meta = metadata.getJsonObject(1);
-        Assert.assertEquals(metadataIntId, meta.getString("id"));
-        Assert.assertEquals("1int", meta.getString("name"));
-        Assert.assertEquals("INTEGER", meta.getString("type"));
-        Assert.assertEquals(50, meta.getInt("value"));
+        Assertions.assertEquals(metadataIntId, meta.getString("id"));
+        Assertions.assertEquals("1int", meta.getString("name"));
+        Assertions.assertEquals("INTEGER", meta.getString("type"));
+        Assertions.assertEquals(50, meta.getInt("value"));
         meta = metadata.getJsonObject(2);
-        Assert.assertEquals(metadataFloatId, meta.getString("id"));
-        Assert.assertEquals("2float", meta.getString("name"));
-        Assert.assertEquals("FLOAT", meta.getString("type"));
-        Assert.assertEquals(12.4, meta.getJsonNumber("value").doubleValue(), 0);
+        Assertions.assertEquals(metadataFloatId, meta.getString("id"));
+        Assertions.assertEquals("2float", meta.getString("name"));
+        Assertions.assertEquals("FLOAT", meta.getString("type"));
+        Assertions.assertEquals(12.4, meta.getJsonNumber("value").doubleValue(), 0);
         meta = metadata.getJsonObject(3);
-        Assert.assertEquals(metadataDateId, meta.getString("id"));
-        Assert.assertEquals("3date", meta.getString("name"));
-        Assert.assertEquals("DATE", meta.getString("type"));
-        Assert.assertFalse(meta.containsKey("value"));
+        Assertions.assertEquals(metadataDateId, meta.getString("id"));
+        Assertions.assertEquals("3date", meta.getString("name"));
+        Assertions.assertEquals("DATE", meta.getString("type"));
+        Assertions.assertFalse(meta.containsKey("value"));
         meta = metadata.getJsonObject(4);
-        Assert.assertEquals(metadataBoolId, meta.getString("id"));
-        Assert.assertEquals("4bool", meta.getString("name"));
-        Assert.assertEquals("BOOLEAN", meta.getString("type"));
-        Assert.assertFalse(meta.containsKey("value"));
+        Assertions.assertEquals(metadataBoolId, meta.getString("id"));
+        Assertions.assertEquals("4bool", meta.getString("name"));
+        Assertions.assertEquals("BOOLEAN", meta.getString("type"));
+        Assertions.assertFalse(meta.containsKey("value"));
 
         // Update the document with metadata1 (add more metadata)
         long dateValue = new Date().getTime();
@@ -927,32 +927,32 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, metadata1Token)
                 .get(JsonObject.class);
         metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(5, metadata.size());
+        Assertions.assertEquals(5, metadata.size());
         meta = metadata.getJsonObject(0);
-        Assert.assertEquals(metadataStrId, meta.getString("id"));
-        Assert.assertEquals("0str", meta.getString("name"));
-        Assert.assertEquals("STRING", meta.getString("type"));
-        Assert.assertEquals("my string 2", meta.getString("value"));
+        Assertions.assertEquals(metadataStrId, meta.getString("id"));
+        Assertions.assertEquals("0str", meta.getString("name"));
+        Assertions.assertEquals("STRING", meta.getString("type"));
+        Assertions.assertEquals("my string 2", meta.getString("value"));
         meta = metadata.getJsonObject(1);
-        Assert.assertEquals(metadataIntId, meta.getString("id"));
-        Assert.assertEquals("1int", meta.getString("name"));
-        Assert.assertEquals("INTEGER", meta.getString("type"));
-        Assert.assertEquals(52, meta.getInt("value"));
+        Assertions.assertEquals(metadataIntId, meta.getString("id"));
+        Assertions.assertEquals("1int", meta.getString("name"));
+        Assertions.assertEquals("INTEGER", meta.getString("type"));
+        Assertions.assertEquals(52, meta.getInt("value"));
         meta = metadata.getJsonObject(2);
-        Assert.assertEquals(metadataFloatId, meta.getString("id"));
-        Assert.assertEquals("2float", meta.getString("name"));
-        Assert.assertEquals("FLOAT", meta.getString("type"));
-        Assert.assertEquals(14.4, meta.getJsonNumber("value").doubleValue(), 0);
+        Assertions.assertEquals(metadataFloatId, meta.getString("id"));
+        Assertions.assertEquals("2float", meta.getString("name"));
+        Assertions.assertEquals("FLOAT", meta.getString("type"));
+        Assertions.assertEquals(14.4, meta.getJsonNumber("value").doubleValue(), 0);
         meta = metadata.getJsonObject(3);
-        Assert.assertEquals(metadataDateId, meta.getString("id"));
-        Assert.assertEquals("3date", meta.getString("name"));
-        Assert.assertEquals("DATE", meta.getString("type"));
-        Assert.assertEquals(dateValue, meta.getJsonNumber("value").longValue());
+        Assertions.assertEquals(metadataDateId, meta.getString("id"));
+        Assertions.assertEquals("3date", meta.getString("name"));
+        Assertions.assertEquals("DATE", meta.getString("type"));
+        Assertions.assertEquals(dateValue, meta.getJsonNumber("value").longValue());
         meta = metadata.getJsonObject(4);
-        Assert.assertEquals(metadataBoolId, meta.getString("id"));
-        Assert.assertEquals("4bool", meta.getString("name"));
-        Assert.assertEquals("BOOLEAN", meta.getString("type"));
-        Assert.assertTrue(meta.getBoolean("value"));
+        Assertions.assertEquals(metadataBoolId, meta.getString("id"));
+        Assertions.assertEquals("4bool", meta.getString("name"));
+        Assertions.assertEquals("BOOLEAN", meta.getString("type"));
+        Assertions.assertTrue(meta.getBoolean("value"));
 
         // Update the document with metadata1 (remove some metadata)
         target().path("/document/" + document1Id).request()
@@ -972,31 +972,31 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, metadata1Token)
                 .get(JsonObject.class);
         metadata = json.getJsonArray("metadata");
-        Assert.assertEquals(5, metadata.size());
+        Assertions.assertEquals(5, metadata.size());
         meta = metadata.getJsonObject(0);
-        Assert.assertEquals(metadataStrId, meta.getString("id"));
-        Assert.assertEquals("0str", meta.getString("name"));
-        Assert.assertEquals("STRING", meta.getString("type"));
-        Assert.assertFalse(meta.containsKey("value"));
+        Assertions.assertEquals(metadataStrId, meta.getString("id"));
+        Assertions.assertEquals("0str", meta.getString("name"));
+        Assertions.assertEquals("STRING", meta.getString("type"));
+        Assertions.assertFalse(meta.containsKey("value"));
         meta = metadata.getJsonObject(1);
-        Assert.assertEquals(metadataIntId, meta.getString("id"));
-        Assert.assertEquals("1int", meta.getString("name"));
-        Assert.assertEquals("INTEGER", meta.getString("type"));
-        Assert.assertFalse(meta.containsKey("value"));
+        Assertions.assertEquals(metadataIntId, meta.getString("id"));
+        Assertions.assertEquals("1int", meta.getString("name"));
+        Assertions.assertEquals("INTEGER", meta.getString("type"));
+        Assertions.assertFalse(meta.containsKey("value"));
         meta = metadata.getJsonObject(2);
-        Assert.assertEquals(metadataFloatId, meta.getString("id"));
-        Assert.assertEquals("2float", meta.getString("name"));
-        Assert.assertEquals("FLOAT", meta.getString("type"));
-        Assert.assertEquals(14.4, meta.getJsonNumber("value").doubleValue(), 0);
+        Assertions.assertEquals(metadataFloatId, meta.getString("id"));
+        Assertions.assertEquals("2float", meta.getString("name"));
+        Assertions.assertEquals("FLOAT", meta.getString("type"));
+        Assertions.assertEquals(14.4, meta.getJsonNumber("value").doubleValue(), 0);
         meta = metadata.getJsonObject(3);
-        Assert.assertEquals(metadataDateId, meta.getString("id"));
-        Assert.assertEquals("3date", meta.getString("name"));
-        Assert.assertEquals("DATE", meta.getString("type"));
-        Assert.assertEquals(dateValue, meta.getJsonNumber("value").longValue());
+        Assertions.assertEquals(metadataDateId, meta.getString("id"));
+        Assertions.assertEquals("3date", meta.getString("name"));
+        Assertions.assertEquals("DATE", meta.getString("type"));
+        Assertions.assertEquals(dateValue, meta.getJsonNumber("value").longValue());
         meta = metadata.getJsonObject(4);
-        Assert.assertEquals(metadataBoolId, meta.getString("id"));
-        Assert.assertEquals("4bool", meta.getString("name"));
-        Assert.assertEquals("BOOLEAN", meta.getString("type"));
-        Assert.assertTrue(meta.getBoolean("value"));
+        Assertions.assertEquals(metadataBoolId, meta.getString("id"));
+        Assertions.assertEquals("4bool", meta.getString("name"));
+        Assertions.assertEquals("BOOLEAN", meta.getString("type"));
+        Assertions.assertTrue(meta.getBoolean("value"));
     }
 }

@@ -13,8 +13,8 @@ import jakarta.ws.rs.core.Response.Status;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Resources;
@@ -44,7 +44,7 @@ public class TestShareResource extends BaseJerseyTest {
                         .param("title", "File test document 1")
                         .param("language", "eng")), JsonObject.class);
         String document1Id = json.getString("id");
-        Assert.assertNotNull(document1Id);
+        Assertions.assertNotNull(document1Id);
         
         // Add a file
         String file1Id;
@@ -74,8 +74,8 @@ public class TestShareResource extends BaseJerseyTest {
                 .queryParam("share", share1Id)
                 .request()
                 .get(JsonObject.class);
-        Assert.assertEquals(document1Id, json.getString("id"));
-        Assert.assertEquals(3, json.getJsonArray("acls").size()); // 2 for the creator, 1 for the share
+        Assertions.assertEquals(document1Id, json.getString("id"));
+        Assertions.assertEquals(3, json.getJsonArray("acls").size()); // 2 for the creator, 1 for the share
 
         // Get all comments from this document anonymously
         json = target().path("/comment/" + document1Id)
@@ -83,7 +83,7 @@ public class TestShareResource extends BaseJerseyTest {
                 .request()
                 .get(JsonObject.class);
         JsonArray comments = json.getJsonArray("comments");
-        Assert.assertEquals(0, comments.size());
+        Assertions.assertEquals(0, comments.size());
         
         // Get all files from this document anonymously
         json = target().path("/file/list")
@@ -92,7 +92,7 @@ public class TestShareResource extends BaseJerseyTest {
                 .request()
                 .get(JsonObject.class);
         JsonArray files = json.getJsonArray("files");
-        Assert.assertEquals(1, files.size());
+        Assertions.assertEquals(1, files.size());
         
         // Get the file data anonymously
         Response response = target().path("/file/" + file1Id + "/data")
@@ -102,7 +102,7 @@ public class TestShareResource extends BaseJerseyTest {
                 .get();
         InputStream is = (InputStream) response.getEntity();
         byte[] fileBytes = ByteStreams.toByteArray(is);
-        Assert.assertEquals(163510, fileBytes.length);
+        Assertions.assertEquals(163510, fileBytes.length);
         
         // Deletes the share (not allowed)
         clientUtil.createUser("share2");
@@ -110,23 +110,23 @@ public class TestShareResource extends BaseJerseyTest {
         response = target().path("/share/" + share1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, share2Token)
                 .delete();
-        Assert.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
-        Assert.assertEquals("DocumentNotFound", json.getString("type"));
+        Assertions.assertEquals("DocumentNotFound", json.getString("type"));
         
         // Deletes the share
         json = target().path("/share/" + share1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, share1Token)
                 .delete(JsonObject.class);
-        Assert.assertEquals("ok", json.getString("status"));
+        Assertions.assertEquals("ok", json.getString("status"));
 
         // Deletes the share again
         response = target().path("/share/" + share1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, share1Token)
                 .delete();
-        Assert.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
-        Assert.assertEquals("ShareNotFound", json.getString("type"));
+        Assertions.assertEquals("ShareNotFound", json.getString("type"));
 
         // Deletes share1 and share 2
         String adminToken = adminToken();

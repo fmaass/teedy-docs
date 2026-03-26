@@ -1,8 +1,8 @@
 package com.sismics.docs.rest;
 
 import com.sismics.util.filter.TokenBasedSecurityFilter;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -44,7 +44,7 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         JsonArray routeModels = json.getJsonArray("routemodels");
-        Assert.assertEquals(1, routeModels.size());
+        Assertions.assertEquals(1, routeModels.size());
 
         // Create a route model without actions
         json = target().path("/routemodel").request()
@@ -62,9 +62,9 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         routeModels = json.getJsonArray("routemodels");
-        Assert.assertEquals(2, routeModels.size());
-        Assert.assertEquals(routeModelId, routeModels.getJsonObject(0).getString("id"));
-        Assert.assertEquals("Workflow validation 1", routeModels.getJsonObject(0).getString("name"));
+        Assertions.assertEquals(2, routeModels.size());
+        Assertions.assertEquals(routeModelId, routeModels.getJsonObject(0).getString("id"));
+        Assertions.assertEquals("Workflow validation 1", routeModels.getJsonObject(0).getString("name"));
 
         // Get all route models with routeModel1
         json = target().path("/routemodel")
@@ -74,7 +74,7 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, routeModel1Token)
                 .get(JsonObject.class);
         routeModels = json.getJsonArray("routemodels");
-        Assert.assertEquals(0, routeModels.size());
+        Assertions.assertEquals(0, routeModels.size());
 
         // Add an ACL READ for routeModel1 with admin
         target().path("/acl").request()
@@ -93,18 +93,18 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, routeModel1Token)
                 .get(JsonObject.class);
         routeModels = json.getJsonArray("routemodels");
-        Assert.assertEquals(1, routeModels.size());
+        Assertions.assertEquals(1, routeModels.size());
 
         // Get the route model
         json = target().path("/routemodel/" + routeModelId)
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(routeModelId, json.getString("id"));
-        Assert.assertEquals("Workflow validation 1", json.getString("name"));
-        Assert.assertEquals("[{\"type\":\"VALIDATE\",\"transitions\":[{\"name\":\"VALIDATED\",\"actions\":[]}],\"target\":{\"name\":\"administrators\",\"type\":\"GROUP\"},\"name\":\"Check the document's metadata\"}]", json.getString("steps"));
+        Assertions.assertEquals(routeModelId, json.getString("id"));
+        Assertions.assertEquals("Workflow validation 1", json.getString("name"));
+        Assertions.assertEquals("[{\"type\":\"VALIDATE\",\"transitions\":[{\"name\":\"VALIDATED\",\"actions\":[]}],\"target\":{\"name\":\"administrators\",\"type\":\"GROUP\"},\"name\":\"Check the document's metadata\"}]", json.getString("steps"));
         JsonArray acls = json.getJsonArray("acls");
-        Assert.assertEquals(3, acls.size());// 2 for admin, 1 for routeModel1
+        Assertions.assertEquals(3, acls.size());// 2 for admin, 1 for routeModel1
 
         // Update the route model with actions
         target().path("/routemodel/" + routeModelId).request()
@@ -118,9 +118,9 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
-        Assert.assertEquals(routeModelId, json.getString("id"));
-        Assert.assertEquals("Workflow validation 2", json.getString("name"));
-        Assert.assertEquals("[{\"type\":\"APPROVE\",\"transitions\":[{\"name\":\"APPROVED\",\"actions\":[{\"type\":\"ADD_TAG\",\"tag\":\"" + tagRouteId + "\"}]},{\"name\":\"REJECTED\",\"actions\":[]}],\"target\":{\"name\":\"administrators\",\"type\":\"GROUP\"},\"name\":\"Check the document's metadata\"}]", json.getString("steps"));
+        Assertions.assertEquals(routeModelId, json.getString("id"));
+        Assertions.assertEquals("Workflow validation 2", json.getString("name"));
+        Assertions.assertEquals("[{\"type\":\"APPROVE\",\"transitions\":[{\"name\":\"APPROVED\",\"actions\":[{\"type\":\"ADD_TAG\",\"tag\":\"" + tagRouteId + "\"}]},{\"name\":\"REJECTED\",\"actions\":[]}],\"target\":{\"name\":\"administrators\",\"type\":\"GROUP\"},\"name\":\"Check the document's metadata\"}]", json.getString("steps"));
 
         // Delete the route model
         target().path("/routemodel/" + routeModelId)
@@ -136,7 +136,7 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         routeModels = json.getJsonArray("routemodels");
-        Assert.assertEquals(1, routeModels.size());
+        Assertions.assertEquals(1, routeModels.size());
 
         // Deletes routeModel1 user
         target().path("/user/routeModel1").request()
