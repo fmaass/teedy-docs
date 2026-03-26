@@ -14,40 +14,98 @@ const router = createRouter({
       path: '/',
       component: () => import('../views/AppLayout.vue'),
       children: [
+        // Documents
         {
           path: '',
-          name: 'documents',
-          component: () => import('../views/document/DocumentList.vue'),
+          redirect: { name: 'documents' },
         },
         {
-          path: 'document/add',
-          name: 'document-add',
-          component: () => import('../views/document/DocumentEdit.vue'),
-        },
-        {
-          path: 'document/:id',
-          name: 'document-view',
-          component: () => import('../views/document/DocumentView.vue'),
-          props: true,
-        },
-        {
-          path: 'document/:id/edit',
-          name: 'document-edit',
-          component: () => import('../views/document/DocumentEdit.vue'),
-          props: true,
-        },
-        {
-          path: 'tag',
-          name: 'tags',
-          component: () => import('../views/tag/TagList.vue'),
-        },
-        {
-          path: 'settings',
-          name: 'settings',
-          component: () => import('../views/settings/Settings.vue'),
+          path: 'document',
+          component: () => import('../views/document/DocumentShell.vue'),
           children: [
             {
               path: '',
+              name: 'documents',
+              component: () => import('../views/document/DocumentDefault.vue'),
+            },
+            {
+              path: 'add',
+              name: 'document-add',
+              component: () => import('../views/document/DocumentEdit.vue'),
+            },
+            {
+              path: 'edit/:id',
+              name: 'document-edit',
+              component: () => import('../views/document/DocumentEdit.vue'),
+              props: true,
+            },
+            {
+              path: 'view/:id',
+              name: 'document-view',
+              component: () => import('../views/document/DocumentView.vue'),
+              props: true,
+              redirect: (to) => ({ name: 'document-view-content', params: to.params }),
+              children: [
+                {
+                  path: 'content',
+                  name: 'document-view-content',
+                  component: () => import('../views/document/DocumentViewContent.vue'),
+                },
+                {
+                  path: 'permissions',
+                  name: 'document-view-permissions',
+                  component: () => import('../views/document/DocumentViewPermissions.vue'),
+                },
+                {
+                  path: 'activity',
+                  name: 'document-view-activity',
+                  component: () => import('../views/document/DocumentViewActivity.vue'),
+                },
+              ],
+            },
+          ],
+        },
+        // Tags
+        {
+          path: 'tag',
+          component: () => import('../views/tag/TagShell.vue'),
+          children: [
+            {
+              path: '',
+              name: 'tags',
+              component: () => import('../views/tag/TagDefault.vue'),
+            },
+            {
+              path: ':id',
+              name: 'tag-edit',
+              component: () => import('../views/tag/TagEdit.vue'),
+              props: true,
+            },
+          ],
+        },
+        // Users & Groups
+        {
+          path: 'user',
+          component: () => import('../views/user/UserGroupShell.vue'),
+          children: [
+            {
+              path: '',
+              name: 'user-groups',
+              component: () => import('../views/user/UserGroupDefault.vue'),
+            },
+          ],
+        },
+        // Settings
+        {
+          path: 'settings',
+          component: () => import('../views/settings/SettingsShell.vue'),
+          children: [
+            {
+              path: '',
+              redirect: { name: 'settings-account' },
+            },
+            {
+              path: 'account',
               name: 'settings-account',
               component: () => import('../views/settings/SettingsAccount.vue'),
             },

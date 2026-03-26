@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import EmptyState from '../../components/EmptyState.vue'
 </script>
 
 <template>
   <div>
-    <h3>Users</h3>
-    <p>User management will be available here.</p>
+    <h2>Users</h2>
+    <EmptyState icon="pi pi-users" message="User management will be available in a future update" />
   </div>
 </template>

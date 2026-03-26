@@ -1,84 +1,41 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
-import { useTagStore } from '../stores/tags'
-import { onMounted } from 'vue'
-import Button from 'primevue/button'
-import Menubar from 'primevue/menubar'
+import { ref, provide } from 'vue'
+import AppNavbar from '../components/AppNavbar.vue'
+import AppFooter from '../components/AppFooter.vue'
 
-const router = useRouter()
-const auth = useAuthStore()
-const tagStore = useTagStore()
+const sidebarOpen = ref(false)
 
-onMounted(() => {
-  tagStore.fetchTags()
-})
-
-async function handleLogout() {
-  await auth.logout()
-  router.push({ name: 'login' })
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
 }
+
+function closeSidebar() {
+  sidebarOpen.value = false
+}
+
+provide('sidebarOpen', sidebarOpen)
+provide('closeSidebar', closeSidebar)
 </script>
 
 <template>
-  <div class="app-layout">
-    <header class="app-header">
-      <Menubar>
-        <template #start>
-          <router-link to="/" class="app-brand">Teedy</router-link>
-        </template>
-        <template #end>
-          <div class="header-actions">
-            <Button
-              v-if="auth.isAdmin"
-              icon="pi pi-cog"
-              severity="secondary"
-              text
-              rounded
-              @click="router.push({ name: 'settings-account' })"
-            />
-            <span class="username">{{ auth.username }}</span>
-            <Button
-              icon="pi pi-sign-out"
-              severity="secondary"
-              text
-              rounded
-              @click="handleLogout"
-            />
-          </div>
-        </template>
-      </Menubar>
-    </header>
-    <main class="app-main">
+  <div class="teedy-app">
+    <AppNavbar @toggle-sidebar="toggleSidebar" />
+    <div class="teedy-app-body">
       <router-view />
-    </main>
+    </div>
+    <AppFooter />
   </div>
 </template>
 
 <style scoped>
-.app-layout {
-  min-height: 100vh;
-  background: var(--p-surface-50);
-}
-.app-brand {
-  font-size: 1.25rem;
-  font-weight: 700;
-  text-decoration: none;
-  color: var(--p-primary-color);
-  margin-right: 1rem;
-}
-.header-actions {
+.teedy-app {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  min-height: 100vh;
 }
-.username {
-  font-size: 0.875rem;
-  color: var(--p-text-muted-color);
-}
-.app-main {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 1.5rem;
+.teedy-app-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 </style>
