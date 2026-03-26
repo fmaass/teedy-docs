@@ -22,11 +22,15 @@ angular.module('docs').controller('Navigation', function($scope, $state, $stateP
    * User logout.
    */
   $scope.logout = function($event) {
-    User.logout().then(function() {
+    User.logout().then(function(response) {
       User.userInfo(true).then(function(data) {
         $rootScope.userInfo = data;
       });
-      $state.go('main');
+      if (response.logout_url) {
+        window.location.href = response.logout_url;
+      } else {
+        $state.go('main');
+      }
     });
     $event.preventDefault();
   };

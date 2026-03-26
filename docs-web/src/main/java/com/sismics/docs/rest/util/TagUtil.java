@@ -33,9 +33,9 @@ public class TagUtil {
     }
 
     /**
-     * Find tags by name (start with, ignore case).
+     * Find tags by name prefix (case-insensitive).
      *
-     * @param name Name
+     * @param name Name prefix
      * @param allTagDtoList List of all tags
      * @return List of filtered tags
      */

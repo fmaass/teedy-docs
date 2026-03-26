@@ -40,6 +40,8 @@ import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.lang3.StringUtils;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -368,30 +370,45 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Get the value of the session token
+        // Delete the session token if one exists (absent for header-auth users)
         String authToken = getAuthToken();
-        
-        AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
-        AuthenticationToken authenticationToken = null;
+        String oidcIdToken = null;
+
         if (authToken != null) {
-            authenticationToken = authenticationTokenDao.get(authToken);
+            AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+            AuthenticationToken authenticationToken = authenticationTokenDao.get(authToken);
+            if (authenticationToken != null) {
+                oidcIdToken = authenticationToken.getOidcIdToken();
+                try {
+                    authenticationTokenDao.delete(authToken);
+                } catch (Exception e) {
+                    throw new ServerException("AuthenticationTokenError", "Error deleting the authentication token: " + authToken, e);
+                }
+            }
         }
-        
-        // No token : nothing to do
-        if (authenticationToken == null) {
-            throw new ForbiddenClientException();
-        }
-        
-        // Deletes the server token
-        try {
-            authenticationTokenDao.delete(authToken);
-        } catch (Exception e) {
-            throw new ServerException("AuthenticationTokenError", "Error deleting the authentication token: " + authToken, e);
-        }
-        
-        // Deletes the client token in the HTTP response
+
+        // Build response with cleared cookie
         JsonObjectBuilder response = Json.createObjectBuilder();
         NewCookie cookie = new NewCookie(TokenBasedSecurityFilter.COOKIE_NAME, null, "/", null, 1, null, -1, new Date(1), false, false);
+
+        // Determine external logout redirect (priority: explicit URL > OIDC end_session > none)
+        String logoutUrl = System.getProperty("docs.logout_url");
+
+        if (logoutUrl == null && oidcIdToken != null) {
+            String endSessionEndpoint = OidcResource.getEndSessionEndpoint();
+            if (endSessionEndpoint != null) {
+                String redirectUri = System.getProperty("docs.oidc_redirect_uri", "");
+                String baseUrl = redirectUri.replaceAll("/api/oidc/callback$", "");
+                logoutUrl = endSessionEndpoint
+                        + "?id_token_hint=" + URLEncoder.encode(oidcIdToken, StandardCharsets.UTF_8)
+                        + "&post_logout_redirect_uri=" + URLEncoder.encode(baseUrl, StandardCharsets.UTF_8);
+            }
+        }
+
+        if (logoutUrl != null) {
+            response.add("logout_url", logoutUrl);
+        }
+
         return Response.ok().entity(response.build()).cookie(cookie).build();
     }
 
