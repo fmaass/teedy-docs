@@ -31,7 +31,7 @@
     <com.h2database.h2.version>2.2.224</com.h2database.h2.version>
     <jakarta.json.jakarta.json-api.version>2.1.1</jakarta.json.jakarta.json-api.version>
     <at.favre.lib.bcrypt.version>0.10.2</at.favre.lib.bcrypt.version>
-    <org.apache.lucene.version>9.12.3</org.apache.lucene.version>
+    <org.apache.lucene.version>10.4.0</org.apache.lucene.version>
     <org.imgscalr.imgscalr-lib.version>4.2</org.imgscalr.imgscalr-lib.version>
     <org.apache.pdfbox.pdfbox.version>2.0.29</org.apache.pdfbox.pdfbox.version>
     <org.bouncycastle.bcprov-jdk18on.version>1.83</org.bouncycastle.bcprov-jdk18on.version>
