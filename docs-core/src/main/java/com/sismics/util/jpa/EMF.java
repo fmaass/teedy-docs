@@ -2,9 +2,6 @@ package com.sismics.util.jpa;
 
 import com.google.common.base.Strings;
 import com.sismics.docs.core.util.DirectoryUtil;
-import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
-import org.hibernate.internal.util.config.ConfigurationHelper;
-import org.hibernate.service.ServiceRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,8 +11,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.Map;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.util.Properties;
 
 /**
@@ -34,26 +31,36 @@ public final class EMF {
         try {
             properties = getEntityManagerProperties();
 
-            ConfigurationHelper.resolvePlaceHolders(properties);
-            ServiceRegistry reg = new StandardServiceRegistryBuilder().applySettings(properties).build();
+            String jdbcUrl = (String) properties.get("hibernate.connection.url");
+            String jdbcUser = (String) properties.get("hibernate.connection.username");
+            String jdbcPassword = (String) properties.getOrDefault("hibernate.connection.password", "");
 
-            DbOpenHelper openHelper = new DbOpenHelper(reg) {
-                @Override
-                public void onCreate() throws Exception {
-                    executeAllScript(0);
-                }
+            // Keep the bootstrap connection open until the EMF is created.
+            // This is required for in-memory databases (H2 mem:) where the
+            // schema would be lost when the last connection closes.
+            Connection bootstrapConnection = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword);
+            bootstrapConnection.setAutoCommit(false);
 
-                @Override
-                public void onUpgrade(int oldVersion, int newVersion) throws Exception {
-                    for (int version = oldVersion + 1; version <= newVersion; version++) {
-                        executeAllScript(version);
+            try {
+                DbOpenHelper openHelper = new DbOpenHelper(bootstrapConnection) {
+                    @Override
+                    public void onCreate() throws Exception {
+                        executeAllScript(0);
                     }
-                }
-            };
-            openHelper.open();
-            
-            emfInstance = Persistence.createEntityManagerFactory("transactions-optional", getEntityManagerProperties());
-            
+
+                    @Override
+                    public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                        for (int version = oldVersion + 1; version <= newVersion; version++) {
+                            executeAllScript(version);
+                        }
+                    }
+                };
+                openHelper.open();
+
+                emfInstance = Persistence.createEntityManagerFactory("transactions-optional", properties);
+            } finally {
+                bootstrapConnection.close();
+            }
         } catch (Throwable t) {
             log.error("Error creating EMF", t);
         }
