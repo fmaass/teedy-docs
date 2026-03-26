@@ -28,7 +28,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get -y -q --no-install-recommends install ffmpeg mediainfo tesseract-ocr tesseract-ocr-deu
 
       - name: Run tests
-        run: mvn --batch-mode test
+        run: ./mvnw --batch-mode test
 
   build:
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
           cd docs-web/src/main/webapp && npm install
 
       - name: Build with Maven
-        run: mvn --batch-mode -Pprod clean install -DskipTests
+        run: ./mvnw --batch-mode -Pprod clean install -DskipTests
 
       - name: Upload war artifact
         uses: actions/upload-artifact@v4
