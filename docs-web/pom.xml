@@ -182,14 +182,11 @@
 
         <plugins>
           <plugin>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-maven-plugin</artifactId>
+            <groupId>org.eclipse.jetty.ee10</groupId>
+            <artifactId>jetty-ee10-maven-plugin</artifactId>
             <configuration>
               <systemProperties>
-                <systemProperty>
-                  <name>application.mode</name>
-                  <value>dev</value>
-                </systemProperty>
+                <application.mode>dev</application.mode>
               </systemProperties>
               <webApp>
                 <contextPath>/docs-web</contextPath>

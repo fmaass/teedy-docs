@@ -53,17 +53,14 @@
 
     <org.glassfish.jersey.version>3.1.5</org.glassfish.jersey.version>
     <parsson.version>1.1.5</parsson.version>
-    <jakarta.servlet.jakarta.servlet-api.version>5.0.0</jakarta.servlet.jakarta.servlet-api.version>
-    <org.eclipse.jetty.jetty-server.version>11.0.20</org.eclipse.jetty.jetty-server.version>
-    <org.eclipse.jetty.jetty-webapp.version>11.0.20</org.eclipse.jetty.jetty-webapp.version>
-    <org.eclipse.jetty.jetty-servlet.version>11.0.20</org.eclipse.jetty.jetty-servlet.version>
+    <jakarta.servlet.jakarta.servlet-api.version>6.0.0</jakarta.servlet.jakarta.servlet-api.version>
+    <org.eclipse.jetty.version>12.0.21</org.eclipse.jetty.version>
 
     <!-- Plugins version -->
     <org.apache.maven.plugins.maven-antrun-plugin.version>3.1.0</org.apache.maven.plugins.maven-antrun-plugin.version>
     <org.apache.maven.plugins.maven-jar-plugin.version>3.3.0</org.apache.maven.plugins.maven-jar-plugin.version>
     <org.apache.maven.plugins.maven-war-plugin.version>3.3.2</org.apache.maven.plugins.maven-war-plugin.version>
     <org.apache.maven.plugins.maven-surefire-plugin.version>3.0.0</org.apache.maven.plugins.maven-surefire-plugin.version>
-    <org.eclipse.jetty.jetty-maven-plugin.version>11.0.20</org.eclipse.jetty.jetty-maven-plugin.version>
   </properties>
 
   <scm>
@@ -115,9 +112,9 @@
       </plugin>
 
       <plugin>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-maven-plugin</artifactId>
-        <version>${org.eclipse.jetty.jetty-maven-plugin.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-maven-plugin</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </plugin>
     </plugins>
   </build>
@@ -158,19 +155,19 @@
       <dependency>
         <groupId>org.eclipse.jetty</groupId>
         <artifactId>jetty-server</artifactId>
-        <version>${org.eclipse.jetty.jetty-server.version}</version>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-webapp</artifactId>
-        <version>${org.eclipse.jetty.jetty-webapp.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-webapp</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-servlet</artifactId>
-        <version>${org.eclipse.jetty.jetty-servlet.version}</version>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-servlet</artifactId>
+        <version>${org.eclipse.jetty.version}</version>
       </dependency>
 
       <dependency>
