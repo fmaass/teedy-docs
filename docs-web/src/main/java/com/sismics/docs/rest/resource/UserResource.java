@@ -657,7 +657,7 @@ public class UserResource extends BaseResource {
     @Path("{username: [a-zA-Z0-9_@.-]+}")
     @Produces(MediaType.APPLICATION_JSON)
     public Response view(@PathParam("username") String username) {
-        if (!authenticate()) {
+        if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
         
@@ -721,7 +721,7 @@ public class UserResource extends BaseResource {
             @QueryParam("sort_column") Integer sortColumn,
             @QueryParam("asc") Boolean asc,
             @QueryParam("group") String groupName) {
-        if (!authenticate()) {
+        if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
         
