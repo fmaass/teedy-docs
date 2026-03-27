@@ -105,42 +105,34 @@ function handleDelete() {
           </div>
         </div>
 
-        <!-- Action buttons: icon-only on small screens, labelled on large -->
         <div class="doc-header-actions">
-          <a
+          <Button
             v-if="doc.file_id"
+            :as="'a'"
             :href="getFileUrl(doc.file_id)"
             target="_blank"
-            class="p-button p-button-outlined p-button-secondary p-button-sm doc-action-btn"
-            v-tooltip.bottom="'Download'"
-          >
-            <i class="pi pi-download" />
-            <span class="action-label">Download</span>
-          </a>
-          <Button
-            icon="pi pi-pencil"
+            icon="pi pi-download"
+            label="Download"
             severity="secondary"
             outlined
             size="small"
-            class="doc-action-btn"
-            v-tooltip.bottom="'Edit'"
+          />
+          <Button
+            icon="pi pi-pencil"
+            label="Edit"
+            severity="secondary"
+            outlined
+            size="small"
             @click="router.push({ name: 'document-edit', params: { id } })"
-          >
-            <template #icon><i class="pi pi-pencil" /></template>
-            <span class="action-label">Edit</span>
-          </Button>
+          />
           <Button
             icon="pi pi-trash"
+            label="Delete"
             severity="danger"
             outlined
             size="small"
-            class="doc-action-btn"
-            v-tooltip.bottom="'Delete'"
             @click="handleDelete"
-          >
-            <template #icon><i class="pi pi-trash" /></template>
-            <span class="action-label">Delete</span>
-          </Button>
+          />
         </div>
       </header>
 
@@ -217,20 +209,10 @@ function handleDelete() {
   gap: 0.375rem;
   flex-shrink: 0;
   align-items: center;
-}
-
-/* icon-only buttons — hide label below 640px */
-.doc-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  text-decoration: none;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {
-  .action-label {
-    display: none;
-  }
   .doc-header {
     flex-direction: column;
   }

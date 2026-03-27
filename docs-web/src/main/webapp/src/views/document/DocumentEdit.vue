@@ -166,8 +166,8 @@ async function handleSubmit() {
       await uploadFile(resultId, file)
     }
 
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-    queryClient.invalidateQueries({ queryKey: ['document', resultId] })
+    await queryClient.invalidateQueries({ queryKey: ['documents'] })
+    await queryClient.invalidateQueries({ queryKey: ['document', resultId] })
     toast.add({ severity: 'success', summary: isEdit.value ? 'Document updated' : 'Document created', life: 2000 })
     router.push({ name: 'document-view', params: { id: resultId } })
   } catch {
@@ -196,7 +196,7 @@ async function handleSubmit() {
       </div>
 
       <div class="form-field">
-        <label for="edit-desc">Description</label>
+        <label for="edit-desc">Description <span class="label-hint">(HTML supported)</span></label>
         <Textarea id="edit-desc" v-model="form.description" rows="4" class="w-full" autoResize />
       </div>
 
@@ -373,6 +373,10 @@ async function handleSubmit() {
   font-size: 0.8125rem;
   font-weight: 500;
   color: #374151;
+}
+.label-hint {
+  font-weight: 400;
+  color: #9ca3af;
 }
 
 .form-row {
