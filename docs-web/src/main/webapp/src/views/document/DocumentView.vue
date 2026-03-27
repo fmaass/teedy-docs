@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
 import { getFileUrl } from '../../api/file'
+import { languageLabel } from '../../constants/languages'
 import Button from 'primevue/button'
 import TabMenu from 'primevue/tabmenu'
 import Skeleton from 'primevue/skeleton'
@@ -95,6 +96,7 @@ function handleDelete() {
           <p class="doc-header-meta">
             {{ formatDate(doc.create_date) }}
             <span v-if="doc.creator"> · <strong>{{ doc.creator }}</strong></span>
+            <span v-if="doc.language" class="lang-badge">{{ languageLabel(doc.language) }}</span>
             <span v-if="doc.file_count"> · {{ doc.file_count }} file{{ doc.file_count !== 1 ? 's' : '' }}</span>
           </p>
           <div v-if="doc.tags?.length" class="doc-header-tags">
@@ -188,6 +190,18 @@ function handleDelete() {
   margin: 0.3rem 0 0;
   font-size: 0.8125rem;
   color: #6b7280;
+}
+
+.lang-badge {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  vertical-align: baseline;
 }
 
 .doc-header-tags {

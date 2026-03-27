@@ -5,6 +5,8 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { useTagStore } from '../../stores/tags'
+import { SUPPORTED_LANGUAGES } from '../../constants/languages'
+import api from '../../api/client'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
@@ -50,20 +52,7 @@ const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
 
-const languages = [
-  { label: 'English', value: 'eng' },
-  { label: 'French', value: 'fra' },
-  { label: 'German', value: 'deu' },
-  { label: 'Spanish', value: 'spa' },
-  { label: 'Italian', value: 'ita' },
-  { label: 'Portuguese', value: 'por' },
-  { label: 'Chinese (Simplified)', value: 'zho' },
-  { label: 'Japanese', value: 'jpn' },
-  { label: 'Korean', value: 'kor' },
-  { label: 'Arabic', value: 'ara' },
-  { label: 'Russian', value: 'rus' },
-  { label: 'Polish', value: 'pol' },
-]
+const languages = SUPPORTED_LANGUAGES
 
 const tagOptions = computed(() =>
   tagStore.tags.map((t) => ({ label: t.name, value: t.id }))
@@ -87,6 +76,13 @@ onMounted(async () => {
     form.value.create_date = new Date(data.create_date)
     form.value.tags = data.tags?.map((t) => t.id) || []
     existingFiles.value = data.files || []
+  } else {
+    try {
+      const { data: appConfig } = await api.get('/app')
+      if (appConfig.default_language) {
+        form.value.language = appConfig.default_language
+      }
+    } catch { /* fall back to 'eng' */ }
   }
 })
 

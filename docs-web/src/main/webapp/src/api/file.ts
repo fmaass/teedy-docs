@@ -23,3 +23,7 @@ export function renameFile(fileId: string, name: string) {
   params.set('name', name)
   return api.post(`/file/${fileId}`, params)
 }
+
+export function reprocessFile(fileId: string) {
+  return api.post(`/file/${fileId}/process`)
+}
