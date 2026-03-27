@@ -3,6 +3,7 @@ import { inject, ref, watch, type Ref } from 'vue'
 import { type DocumentDetail } from '../../api/document'
 import { getFileContent, reprocessFile } from '../../api/file'
 import Button from 'primevue/button'
+import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 
 const doc = inject<Ref<DocumentDetail | null>>('document')!
@@ -106,7 +107,9 @@ function fileIcon(mime: string) {
       </div>
 
       <div v-if="ft.loading" class="file-text-loading">
-        <i class="pi pi-spinner pi-spin" /> Loading extracted text…
+        <Skeleton height="1rem" class="mb-2" />
+        <Skeleton height="1rem" width="80%" class="mb-2" />
+        <Skeleton height="1rem" width="60%" />
       </div>
       <pre v-else-if="hasContent(ft)" class="file-text-content">{{ ft.content }}</pre>
       <div v-else class="file-text-empty">

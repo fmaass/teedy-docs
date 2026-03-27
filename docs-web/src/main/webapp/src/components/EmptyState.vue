@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Button from 'primevue/button'
+
 defineProps<{
   icon?: string
   message: string
@@ -13,9 +15,7 @@ const emit = defineEmits<{ action: [] }>()
     <i :class="icon || 'pi pi-inbox'" />
     <p>{{ message }}</p>
     <slot>
-      <button v-if="actionLabel" class="p-button p-button-outlined" @click="emit('action')">
-        {{ actionLabel }}
-      </button>
+      <Button v-if="actionLabel" :label="actionLabel" outlined @click="emit('action')" />
     </slot>
   </div>
 </template>

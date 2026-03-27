@@ -7,8 +7,9 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
-import InputSwitch from 'primevue/inputswitch'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
@@ -33,7 +34,7 @@ const form = ref({
   tag_id: '',
   rule_type: 'TITLE_REGEX',
   pattern: '',
-  order: '0',
+  order: 0,
   enabled: true,
 })
 
@@ -81,13 +82,13 @@ const { mutate: deleteRule } = useMutation({
 
 function openCreate() {
   editId.value = null
-  form.value = { tag_id: '', rule_type: 'TITLE_REGEX', pattern: '', order: '0', enabled: true }
+  form.value = { tag_id: '', rule_type: 'TITLE_REGEX', pattern: '', order: 0, enabled: true }
   showDialog.value = true
 }
 
 function openEdit(rule: Rule) {
   editId.value = rule.id
-  form.value = { ...rule, order: String(rule.order) }
+  form.value = { ...rule }
   showDialog.value = true
 }
 
@@ -96,7 +97,7 @@ function handleSave() {
   params.set('tag_id', form.value.tag_id)
   params.set('rule_type', form.value.rule_type)
   params.set('pattern', form.value.pattern)
-  params.set('order', form.value.order)
+  params.set('order', String(form.value.order))
   params.set('enabled', String(form.value.enabled))
   saveRule({ editId: editId.value, params })
 }
@@ -176,11 +177,11 @@ function getTagName(tagId: string) {
       </div>
       <div class="form-field">
         <label>Execution order</label>
-        <InputText v-model="form.order" type="number" class="w-full" />
+        <InputNumber v-model="form.order" :min="0" class="w-full" />
       </div>
       <div class="form-field">
         <label class="flex items-center gap-2">
-          <InputSwitch v-model="form.enabled" />
+          <ToggleSwitch v-model="form.enabled" />
           Enabled
         </label>
       </div>

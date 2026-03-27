@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
+import api from '../api/client'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
@@ -21,6 +22,17 @@ const remember = ref(false)
 const loading = ref(false)
 const error = ref('')
 
+const oidcEnabled = ref(false)
+const guestLogin = ref(false)
+
+onMounted(async () => {
+  try {
+    const { data } = await api.get('/app')
+    oidcEnabled.value = !!data.oidc_enabled
+    guestLogin.value = !!data.guest_login
+  } catch { /* non-critical — buttons just stay hidden */ }
+})
+
 async function handleLogin() {
   error.value = ''
   loading.value = true
@@ -29,6 +41,24 @@ async function handleLogin() {
     router.push({ name: 'documents' })
   } catch (e: any) {
     error.value = e.response?.data?.message || 'Invalid username or password'
+  } finally {
+    loading.value = false
+  }
+}
+
+function handleOidcLogin() {
+  const returnUrl = encodeURIComponent('/#/document')
+  window.location.href = `api/oidc/login?returnUrl=${returnUrl}`
+}
+
+async function handleGuestLogin() {
+  error.value = ''
+  loading.value = true
+  try {
+    await auth.login('guest', '', false)
+    router.push({ name: 'documents' })
+  } catch (e: any) {
+    error.value = e.response?.data?.message || 'Guest login failed'
   } finally {
     loading.value = false
   }
@@ -108,6 +138,28 @@ async function handleForgot() {
           class="w-full"
         />
       </form>
+
+      <div v-if="guestLogin || oidcEnabled" class="login-alt-actions">
+        <Button
+          v-if="guestLogin"
+          label="Login as guest"
+          icon="pi pi-user"
+          severity="secondary"
+          outlined
+          class="w-full"
+          :loading="loading"
+          @click="handleGuestLogin"
+        />
+        <Button
+          v-if="oidcEnabled"
+          label="Login with SSO"
+          icon="pi pi-sign-in"
+          severity="secondary"
+          outlined
+          class="w-full"
+          @click="handleOidcLogin"
+        />
+      </div>
     </div>
 
     <!-- Forgot password dialog -->
@@ -148,5 +200,14 @@ async function handleForgot() {
 }
 .forgot-link:hover {
   text-decoration: underline;
+}
+
+.login-alt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
 }
 </style>
