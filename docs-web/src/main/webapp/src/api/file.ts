@@ -17,3 +17,9 @@ export function getFileUrl(fileId: string, size?: 'web' | 'thumb' | 'content') {
 export function deleteFile(fileId: string) {
   return api.delete(`/file/${fileId}`)
 }
+
+export function renameFile(fileId: string, name: string) {
+  const params = new URLSearchParams()
+  params.set('name', name)
+  return api.post(`/file/${fileId}`, params)
+}

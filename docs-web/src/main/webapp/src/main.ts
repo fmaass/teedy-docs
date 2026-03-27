@@ -11,7 +11,13 @@ import './assets/teedy-theme.css'
 
 import App from './App.vue'
 import router from './router'
-import { i18n } from './i18n'
+import { i18n, setLocale } from './i18n'
+
+// Restore persisted locale
+const savedLocale = localStorage.getItem('teedy-locale')
+if (savedLocale && savedLocale !== 'en') {
+  setLocale(savedLocale)
+}
 
 const TeedyPreset = definePreset(Aura, {
   semantic: {

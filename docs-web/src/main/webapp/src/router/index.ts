@@ -11,6 +11,13 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/password-reset/:key',
+      name: 'password-reset',
+      component: () => import('../views/PasswordReset.vue'),
+      props: true,
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('../views/AppLayout.vue'),
       children: [

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
+import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { useTagStore } from '../../stores/tags'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
@@ -9,13 +11,15 @@ import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import MultiSelect from 'primevue/multiselect'
 import Button from 'primevue/button'
-import FileUpload from 'primevue/fileupload'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 
 const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const toast = useToast()
+const confirm = useConfirm()
 const tagStore = useTagStore()
+const queryClient = useQueryClient()
 const isEdit = computed(() => !!props.id)
 
 const form = ref({
@@ -34,8 +38,17 @@ const form = ref({
   tags: [] as string[],
 })
 
+interface AttachedFile {
+  id: string
+  name: string
+  mimetype: string
+  size: number
+}
+
 const loading = ref(false)
 const showAdvanced = ref(false)
+const existingFiles = ref<AttachedFile[]>([])
+const pendingFiles = ref<File[]>([])
 
 const languages = [
   { label: 'English', value: 'eng' },
@@ -59,7 +72,7 @@ const tagOptions = computed(() =>
 onMounted(async () => {
   tagStore.fetchTags()
   if (isEdit.value && props.id) {
-    const { data } = await getDocument(props.id, false)
+    const { data } = await getDocument(props.id, true)
     form.value.title = data.title || ''
     form.value.description = data.description || ''
     form.value.subject = data.subject || ''
@@ -73,8 +86,66 @@ onMounted(async () => {
     form.value.language = data.language || 'eng'
     form.value.create_date = new Date(data.create_date)
     form.value.tags = data.tags?.map((t) => t.id) || []
+    existingFiles.value = data.files || []
   }
 })
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+function onFilesSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files) {
+    pendingFiles.value.push(...Array.from(input.files))
+    input.value = ''
+  }
+}
+
+function removePending(index: number) {
+  pendingFiles.value.splice(index, 1)
+}
+
+function confirmDeleteExisting(file: AttachedFile) {
+  confirm.require({
+    message: `Remove "${file.name}" from this document?`,
+    header: 'Remove file',
+    icon: 'pi pi-trash',
+    acceptClass: 'p-button-danger',
+    accept: async () => {
+      try {
+        await deleteFile(file.id)
+        existingFiles.value = existingFiles.value.filter((f) => f.id !== file.id)
+        toast.add({ severity: 'success', summary: 'File removed', life: 2000 })
+      } catch {
+        toast.add({ severity: 'error', summary: 'Failed to remove file', life: 3000 })
+      }
+    },
+  })
+}
+
+function buildDocParams() {
+  const params = new URLSearchParams()
+  const fields: Record<string, string> = {
+    title: form.value.title,
+    description: form.value.description,
+    language: form.value.language,
+    create_date: String(form.value.create_date.getTime()),
+  }
+  if (form.value.subject) fields.subject = form.value.subject
+  if (form.value.identifier) fields.identifier = form.value.identifier
+  if (form.value.publisher) fields.publisher = form.value.publisher
+  if (form.value.format) fields.format = form.value.format
+  if (form.value.source) fields.source = form.value.source
+  if (form.value.type) fields.type = form.value.type
+  if (form.value.coverage) fields.coverage = form.value.coverage
+  if (form.value.rights) fields.rights = form.value.rights
+  Object.entries(fields).forEach(([k, v]) => params.append(k, v))
+  form.value.tags.forEach((tagId) => params.append('tags', tagId))
+  return params
+}
 
 async function handleSubmit() {
   if (!form.value.title.trim()) {
@@ -84,36 +155,24 @@ async function handleSubmit() {
 
   loading.value = true
   try {
-    const data: Record<string, string> = {
-      title: form.value.title,
-      description: form.value.description,
-      language: form.value.language,
-      create_date: String(form.value.create_date.getTime()),
-    }
-
-    if (form.value.subject) data.subject = form.value.subject
-    if (form.value.identifier) data.identifier = form.value.identifier
-    if (form.value.publisher) data.publisher = form.value.publisher
-    if (form.value.format) data.format = form.value.format
-    if (form.value.source) data.source = form.value.source
-    if (form.value.type) data.type = form.value.type
-    if (form.value.coverage) data.coverage = form.value.coverage
-    if (form.value.rights) data.rights = form.value.rights
-
-    const params = new URLSearchParams()
-    Object.entries(data).forEach(([k, v]) => params.append(k, v))
-    form.value.tags.forEach((tagId) => params.append('tags', tagId))
-
+    const params = buildDocParams()
     let resultId: string
+
     if (isEdit.value && props.id) {
-      await updateDocument(props.id, data)
+      await updateDocument(props.id, params)
       resultId = props.id
-      toast.add({ severity: 'success', summary: 'Document updated', life: 2000 })
     } else {
-      const { data: result } = await createDocument(data)
+      const { data: result } = await createDocument(params)
       resultId = result.id
-      toast.add({ severity: 'success', summary: 'Document created', life: 2000 })
     }
+
+    for (const file of pendingFiles.value) {
+      await uploadFile(resultId, file)
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+    queryClient.invalidateQueries({ queryKey: ['document', resultId] })
+    toast.add({ severity: 'success', summary: isEdit.value ? 'Document updated' : 'Document created', life: 2000 })
     router.push({ name: 'document-view', params: { id: resultId } })
   } catch {
     toast.add({ severity: 'error', summary: 'Failed to save document', life: 3000 })
@@ -226,6 +285,58 @@ async function handleSubmit() {
         </div>
       </div>
     </form>
+
+    <!-- Files section -->
+    <div class="doc-edit-files teedy-card p-4 mt-3">
+      <h3 class="files-heading">Files</h3>
+
+      <!-- Existing files (edit mode) -->
+      <div v-if="existingFiles.length" class="existing-files">
+        <div v-for="file in existingFiles" :key="file.id" class="file-row">
+          <i :class="file.mimetype.startsWith('image/') ? 'pi pi-image' : file.mimetype === 'application/pdf' ? 'pi pi-file-pdf' : 'pi pi-file'" class="file-icon" />
+          <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ file.name }}</a>
+          <span class="file-size">{{ formatSize(file.size) }}</span>
+          <Button
+            icon="pi pi-times"
+            text
+            rounded
+            severity="danger"
+            size="small"
+            @click="confirmDeleteExisting(file)"
+            aria-label="Remove file"
+          />
+        </div>
+      </div>
+
+      <!-- Pending files to upload -->
+      <div v-if="pendingFiles.length" class="pending-files">
+        <div v-for="(file, index) in pendingFiles" :key="index" class="file-row pending">
+          <i class="pi pi-upload file-icon" />
+          <span class="file-name">{{ file.name }}</span>
+          <span class="file-size">{{ formatSize(file.size) }}</span>
+          <Button
+            icon="pi pi-times"
+            text
+            rounded
+            severity="secondary"
+            size="small"
+            @click="removePending(index)"
+            aria-label="Remove"
+          />
+        </div>
+      </div>
+
+      <!-- File picker -->
+      <label class="file-add-btn">
+        <i class="pi pi-plus" />
+        Add files
+        <input type="file" multiple @change="onFilesSelected" style="display: none" />
+      </label>
+
+      <p v-if="pendingFiles.length" class="upload-hint">
+        {{ pendingFiles.length }} file{{ pendingFiles.length > 1 ? 's' : '' }} will be uploaded on save.
+      </p>
+    </div>
   </div>
 </template>
 
@@ -294,6 +405,84 @@ async function handleSubmit() {
 .advanced-fields {
   border-top: 1px solid #e5e7eb;
   padding-top: 1rem;
+}
+
+/* Files section */
+.doc-edit-files {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.files-heading {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.file-row:last-of-type {
+  border-bottom: none;
+}
+.file-row.pending {
+  opacity: 0.7;
+}
+
+.file-icon {
+  color: #6b7280;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 0.875rem;
+  color: #111827;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+a.file-name:hover {
+  text-decoration: underline;
+  color: var(--teedy-brand);
+}
+
+.file-size {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.file-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: #6b7280;
+  transition: border-color 0.15s, color 0.15s;
+  width: fit-content;
+}
+.file-add-btn:hover {
+  border-color: var(--teedy-brand);
+  color: var(--teedy-brand);
+}
+
+.upload-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: #6b7280;
 }
 
 @media (max-width: 640px) {

@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { listDocuments, type DocumentListItem } from '../../api/document'
 import { listTags } from '../../api/tag'
+import { getFileUrl } from '../../api/file'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Tree from 'primevue/tree'
@@ -17,6 +18,7 @@ const route = useRoute()
 const showTags = ref(true)
 const debouncedSearch = ref((route.query.search as string) || '')
 const searchInput = ref(debouncedSearch.value)
+const activeTagIds = ref<Set<string>>(new Set())
 
 const { data: tagsData } = useQuery({
   queryKey: ['tags'],
@@ -51,6 +53,9 @@ const tagTreeNodes = computed(() => {
   return rootTags.map(buildNode)
 })
 
+// Top-level tags as filter chips (max 12 to avoid overflow)
+const topTags = computed(() => (tagsData.value ?? []).filter((t) => !t.parent).slice(0, 12))
+
 const documents = computed(() => documentsData.value ?? [])
 
 let searchTimeout: ReturnType<typeof setTimeout>
@@ -67,6 +72,12 @@ watch(() => route.query.search, (val) => {
   if (s !== searchInput.value) {
     searchInput.value = s
     debouncedSearch.value = s
+    // Sync active tag chips from search string
+    const tagMatches = [...s.matchAll(/tag:(\S+)/g)].map((m) => m[1])
+    const tags = tagsData.value ?? []
+    activeTagIds.value = new Set(
+      tags.filter((t) => tagMatches.includes(t.name)).map((t) => t.id)
+    )
   }
 })
 
@@ -83,6 +94,27 @@ function searchByTag(node: any) {
   searchInput.value = 'tag:' + node.data.name
   debouncedSearch.value = searchInput.value
   router.replace({ query: { search: searchInput.value } })
+}
+
+function toggleTagChip(tag: { id: string; name: string }) {
+  const newActive = new Set(activeTagIds.value)
+  if (newActive.has(tag.id)) {
+    newActive.delete(tag.id)
+  } else {
+    newActive.add(tag.id)
+  }
+  activeTagIds.value = newActive
+
+  const allTags = tagsData.value ?? []
+  const parts = [...newActive].map((id) => {
+    const t = allTags.find((x) => x.id === id)
+    return t ? `tag:${t.name}` : ''
+  }).filter(Boolean)
+
+  const newSearch = parts.join(' ')
+  searchInput.value = newSearch
+  debouncedSearch.value = newSearch
+  router.replace({ query: newSearch ? { search: newSearch } : {} })
 }
 
 function formatDate(ts: number) {
@@ -119,11 +151,25 @@ function formatDate(ts: number) {
         <i class="pi pi-search" />
         <InputText
           v-model="searchInput"
-          placeholder="Search..."
+          placeholder="Search…"
           class="w-full"
           size="small"
         />
       </span>
+    </div>
+
+    <!-- Tag chips (quick filter) -->
+    <div v-if="topTags.length" class="tag-chips">
+      <button
+        v-for="tag in topTags"
+        :key="tag.id"
+        class="tag-chip"
+        :class="{ active: activeTagIds.has(tag.id) }"
+        @click="toggleTagChip(tag)"
+      >
+        <span class="tag-chip-dot" :style="{ background: tag.color }" />
+        {{ tag.name }}
+      </button>
     </div>
 
     <!-- Tag tree toggle + tree -->
@@ -163,21 +209,44 @@ function formatDate(ts: number) {
           :class="{ active: isActive(doc) }"
           @click="openDocument(doc)"
         >
-          <div class="teedy-doc-item-header">
-            <span class="teedy-doc-item-title">{{ doc.title }}</span>
-            <span v-if="doc.file_count" class="teedy-doc-item-meta">({{ doc.file_count }})</span>
-            <i v-if="doc.shared" class="pi pi-link teedy-doc-item-meta" />
+          <!-- Thumbnail -->
+          <div v-if="doc.file_id" class="doc-thumb">
+            <img
+              :src="getFileUrl(doc.file_id, 'thumb')"
+              alt=""
+              loading="lazy"
+              @error="($event.target as HTMLImageElement).style.display = 'none'"
+            />
           </div>
-          <div class="flex items-center gap-2">
-            <span class="teedy-doc-item-meta">{{ formatDate(doc.create_date) }}</span>
-            <div v-if="doc.tags?.length" class="teedy-doc-item-tags">
-              <TagBadge v-for="tag in doc.tags" :key="tag.id" :name="tag.name" :color="tag.color" />
+          <div v-else class="doc-thumb doc-thumb-empty">
+            <i class="pi pi-file" />
+          </div>
+
+          <div class="teedy-doc-item-body">
+            <div class="teedy-doc-item-header">
+              <span class="teedy-doc-item-title">{{ doc.title }}</span>
+              <span v-if="doc.file_count > 1" class="teedy-doc-item-count">{{ doc.file_count }}</span>
+            </div>
+            <div class="teedy-doc-item-footer">
+              <span class="teedy-doc-item-meta">{{ formatDate(doc.create_date) }}</span>
+              <div v-if="doc.tags?.length" class="teedy-doc-item-tags">
+                <TagBadge v-for="tag in doc.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
+                <span v-if="doc.tags.length > 3" class="tag-overflow">+{{ doc.tags.length - 3 }}</span>
+              </div>
             </div>
           </div>
         </div>
-        <div v-if="!documents.length" class="teedy-empty">
+
+        <div v-if="!documents.length && !isLoading" class="teedy-empty sidebar-empty">
           <i class="pi pi-search" />
-          <p>No documents found</p>
+          <p>{{ debouncedSearch ? 'No results' : 'No documents yet' }}</p>
+          <button
+            v-if="!debouncedSearch"
+            class="empty-add-btn"
+            @click="router.push({ name: 'document-add' }); emit('navigate')"
+          >
+            <i class="pi pi-plus" /> Add your first document
+          </button>
         </div>
       </template>
     </div>
@@ -200,6 +269,46 @@ function formatDate(ts: number) {
   padding: 0.5rem 1rem;
 }
 
+/* Tag chips */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0 1rem 0.5rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #374151;
+  transition: border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.tag-chip:hover {
+  border-color: #9ca3af;
+  background: #f9fafb;
+}
+.tag-chip.active {
+  border-color: var(--teedy-brand);
+  background: color-mix(in srgb, var(--teedy-brand) 10%, transparent);
+  color: var(--teedy-brand);
+}
+
+.tag-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Tree section */
 .sidebar-section {
   padding: 0 0.5rem;
 }
@@ -251,10 +360,128 @@ function formatDate(ts: number) {
   flex-shrink: 0;
 }
 
+/* Document list */
 .sidebar-doclist {
   flex: 1;
   overflow-y: auto;
   border-top: 1px solid #e5e7eb;
   margin-top: 0.25rem;
+}
+
+.teedy-doc-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.1s;
+}
+.teedy-doc-item:hover {
+  background: #f9fafb;
+}
+.teedy-doc-item.active {
+  background: color-mix(in srgb, var(--teedy-brand) 8%, transparent);
+  border-left: 3px solid var(--teedy-brand);
+}
+
+/* Thumbnail */
+.doc-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.doc-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.doc-thumb-empty {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.teedy-doc-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.teedy-doc-item-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+
+.teedy-doc-item-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.teedy-doc-item-count {
+  font-size: 0.6875rem;
+  background: #e5e7eb;
+  color: #6b7280;
+  border-radius: 999px;
+  padding: 0.05rem 0.375rem;
+  flex-shrink: 0;
+}
+
+.teedy-doc-item-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+  flex-wrap: wrap;
+}
+
+.teedy-doc-item-meta {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.teedy-doc-item-tags {
+  display: flex;
+  gap: 0.2rem;
+  flex-wrap: wrap;
+}
+
+.tag-overflow {
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  align-self: center;
+}
+
+/* Empty state */
+.sidebar-empty {
+  padding: 2rem 1rem;
+}
+
+.empty-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.75rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px dashed var(--teedy-brand);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--teedy-brand);
+}
+.empty-add-btn:hover {
+  background: color-mix(in srgb, var(--teedy-brand) 8%, transparent);
 }
 </style>

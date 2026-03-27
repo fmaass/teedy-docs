@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
+import { setLocale } from '../../i18n'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
+import Select from 'primevue/select'
 import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
@@ -13,6 +15,27 @@ const toast = useToast()
 const password = ref('')
 const passwordConfirm = ref('')
 const saving = ref(false)
+
+const languages = [
+  { label: 'English', value: 'en' },
+  { label: 'Deutsch', value: 'de' },
+  { label: 'Español', value: 'es' },
+  { label: 'Français', value: 'fr' },
+  { label: 'Italiano', value: 'it' },
+  { label: 'Português', value: 'pt' },
+  { label: 'Polski', value: 'pl' },
+  { label: 'Ελληνικά', value: 'el' },
+  { label: 'Русский', value: 'ru' },
+  { label: '中文（简体）', value: 'zh_CN' },
+  { label: '中文（繁體）', value: 'zh_TW' },
+  { label: 'Shqip', value: 'sq_AL' },
+]
+
+const selectedLocale = ref(localStorage.getItem('teedy-locale') || 'en')
+
+onMounted(() => {
+  selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
+})
 
 async function handleSave() {
   if (password.value !== passwordConfirm.value) {
@@ -35,6 +58,12 @@ async function handleSave() {
     saving.value = false
   }
 }
+
+async function handleLocaleChange(locale: string) {
+  await setLocale(locale)
+  localStorage.setItem('teedy-locale', locale)
+  toast.add({ severity: 'success', summary: 'Language updated', life: 2000 })
+}
 </script>
 
 <template>
@@ -45,7 +74,22 @@ async function handleSave() {
       <span v-if="auth.user?.email"> ({{ auth.user.email }})</span>
     </p>
 
+    <!-- Language -->
+    <div class="teedy-card p-4 mb-3" style="max-width: 400px">
+      <h3 class="section-title">Language</h3>
+      <Select
+        v-model="selectedLocale"
+        :options="languages"
+        optionLabel="label"
+        optionValue="value"
+        class="w-full"
+        @change="(e: any) => handleLocaleChange(e.value)"
+      />
+    </div>
+
+    <!-- Password -->
     <div class="teedy-card p-4" style="max-width: 400px">
+      <h3 class="section-title">Change password</h3>
       <div class="form-field">
         <label>New password</label>
         <Password v-model="password" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
@@ -60,6 +104,11 @@ async function handleSave() {
 </template>
 
 <style scoped>
+.section-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
 .form-field {
   margin-bottom: 1rem;
 }

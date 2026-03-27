@@ -3,6 +3,7 @@ import { ref, computed, provide, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
+import { getFileUrl } from '../../api/file'
 import Button from 'primevue/button'
 import TabMenu from 'primevue/tabmenu'
 import Skeleton from 'primevue/skeleton'
@@ -93,29 +94,50 @@ function handleDelete() {
           <h1>{{ doc.title }}</h1>
           <p class="doc-header-meta">
             {{ formatDate(doc.create_date) }}
-            <span v-if="doc.creator"> by <strong>{{ doc.creator }}</strong></span>
+            <span v-if="doc.creator"> · <strong>{{ doc.creator }}</strong></span>
+            <span v-if="doc.file_count"> · {{ doc.file_count }} file{{ doc.file_count !== 1 ? 's' : '' }}</span>
           </p>
           <div v-if="doc.tags?.length" class="doc-header-tags">
             <TagBadge v-for="tag in doc.tags" :key="tag.id" :name="tag.name" :color="tag.color" />
           </div>
         </div>
+
+        <!-- Action buttons: icon-only on small screens, labelled on large -->
         <div class="doc-header-actions">
+          <a
+            v-if="doc.file_id"
+            :href="getFileUrl(doc.file_id)"
+            target="_blank"
+            class="p-button p-button-outlined p-button-secondary p-button-sm doc-action-btn"
+            v-tooltip.bottom="'Download'"
+          >
+            <i class="pi pi-download" />
+            <span class="action-label">Download</span>
+          </a>
           <Button
             icon="pi pi-pencil"
-            label="Edit"
             severity="secondary"
             outlined
             size="small"
+            class="doc-action-btn"
+            v-tooltip.bottom="'Edit'"
             @click="router.push({ name: 'document-edit', params: { id } })"
-          />
+          >
+            <template #icon><i class="pi pi-pencil" /></template>
+            <span class="action-label">Edit</span>
+          </Button>
           <Button
             icon="pi pi-trash"
-            label="Delete"
             severity="danger"
             outlined
             size="small"
+            class="doc-action-btn"
+            v-tooltip.bottom="'Delete'"
             @click="handleDelete"
-          />
+          >
+            <template #icon><i class="pi pi-trash" /></template>
+            <span class="action-label">Delete</span>
+          </Button>
         </div>
       </header>
 
@@ -146,6 +168,13 @@ function handleDelete() {
   align-items: flex-start;
   gap: 1rem;
   margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.doc-header-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .doc-header-main h1 {
@@ -156,8 +185,8 @@ function handleDelete() {
 }
 
 .doc-header-meta {
-  margin: 0.25rem 0 0;
-  font-size: 0.875rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.8125rem;
   color: #6b7280;
 }
 
@@ -170,8 +199,29 @@ function handleDelete() {
 
 .doc-header-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.375rem;
   flex-shrink: 0;
+  align-items: center;
+}
+
+/* icon-only buttons — hide label below 640px */
+.doc-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .action-label {
+    display: none;
+  }
+  .doc-header {
+    flex-direction: column;
+  }
+  .doc-header-actions {
+    align-self: flex-end;
+  }
 }
 
 .doc-tabs {
@@ -180,11 +230,5 @@ function handleDelete() {
 
 .doc-tab-content {
   min-height: 300px;
-}
-
-@media (max-width: 640px) {
-  .doc-header {
-    flex-direction: column;
-  }
 }
 </style>
