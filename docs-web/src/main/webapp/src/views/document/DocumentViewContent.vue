@@ -3,7 +3,7 @@ import { inject, computed, ref, type Ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { type DocumentDetail } from '../../api/document'
-import { getFileUrl, deleteFile, renameFile, reprocessFile } from '../../api/file'
+import { getFileUrl, deleteFile, renameFile } from '../../api/file'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { useToast } from 'primevue/usetoast'
@@ -21,7 +21,6 @@ const sanitizedDescription = computed(() => {
 
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
-const reprocessingId = ref<string | null>(null)
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return bytes + ' B'
@@ -81,17 +80,6 @@ function confirmDelete(file: { id: string; name: string }) {
   })
 }
 
-async function handleReprocess(file: { id: string; name: string }) {
-  reprocessingId.value = file.id
-  try {
-    await reprocessFile(file.id)
-    toast.add({ severity: 'success', summary: `"${file.name}" queued for reprocessing`, life: 3000 })
-  } catch {
-    toast.add({ severity: 'error', summary: 'Failed to reprocess file', life: 3000 })
-  } finally {
-    reprocessingId.value = null
-  }
-}
 </script>
 
 <template>
@@ -144,16 +132,6 @@ async function handleReprocess(file: { id: string; name: string }) {
               <Button icon="pi pi-times" text rounded size="small" severity="secondary" @click="cancelRename" />
             </template>
             <template v-else>
-              <Button
-                icon="pi pi-sync"
-                text
-                rounded
-                size="small"
-                severity="secondary"
-                :loading="reprocessingId === file.id"
-                @click="handleReprocess(file)"
-                v-tooltip="'Reprocess (re-run OCR)'"
-              />
               <Button
                 icon="pi pi-pencil"
                 text

@@ -59,6 +59,11 @@ const router = createRouter({
                   component: () => import('../views/document/DocumentViewContent.vue'),
                 },
                 {
+                  path: 'text',
+                  name: 'document-view-text',
+                  component: () => import('../views/document/DocumentViewText.vue'),
+                },
+                {
                   path: 'permissions',
                   name: 'document-view-permissions',
                   component: () => import('../views/document/DocumentViewPermissions.vue'),

@@ -34,7 +34,8 @@ watch(error, (err) => {
 })
 
 const tabs = [
-  { label: 'Content', icon: 'pi pi-file', route: 'document-view-content' },
+  { label: 'Files', icon: 'pi pi-file', route: 'document-view-content' },
+  { label: 'Extracted Text', icon: 'pi pi-align-left', route: 'document-view-text' },
   { label: 'Permissions', icon: 'pi pi-lock', route: 'document-view-permissions' },
   { label: 'Activity', icon: 'pi pi-history', route: 'document-view-activity' },
 ]

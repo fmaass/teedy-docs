@@ -27,3 +27,12 @@ export function renameFile(fileId: string, name: string) {
 export function reprocessFile(fileId: string) {
   return api.post(`/file/${fileId}/process`)
 }
+
+export async function getFileContent(fileId: string): Promise<string> {
+  const res = await api.get(`/file/${fileId}/data`, {
+    params: { size: 'content' },
+    responseType: 'text',
+    transformResponse: [(data: string) => data],
+  })
+  return res.data
+}
