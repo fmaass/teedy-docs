@@ -221,11 +221,11 @@ function typeIcon(type: string) {
 .section-hint {
   margin: 0 0 1rem;
   font-size: 0.8125rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
 }
 
 .acl-list {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 1.25rem;
@@ -239,14 +239,14 @@ function typeIcon(type: string) {
   align-items: center;
   gap: 0.625rem;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #f3f4f6;
+  border: 1px solid var(--p-content-border-color);
 }
 .acl-row:last-child {
   border-bottom: none;
 }
 
 .acl-icon {
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   font-size: 0.875rem;
   flex-shrink: 0;
 }
@@ -274,7 +274,7 @@ function typeIcon(type: string) {
 
 .no-acl {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   margin: 0 0 1.25rem;
 }
 
@@ -302,7 +302,7 @@ function typeIcon(type: string) {
   right: 0;
   z-index: 20;
   background: white;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--p-content-border-color);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   margin-top: 2px;
@@ -322,13 +322,13 @@ function typeIcon(type: string) {
 }
 .search-result:hover,
 .search-result.selected {
-  background: #f3f4f6;
+  background: var(--p-content-hover-background);
 }
 
 .result-type {
   margin-left: auto;
   font-size: 0.6875rem;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
   text-transform: uppercase;
 }
 

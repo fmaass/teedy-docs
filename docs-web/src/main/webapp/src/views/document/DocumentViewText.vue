@@ -130,11 +130,11 @@ function fileIcon(mime: string) {
 .text-view-hint {
   margin: 0;
   font-size: 0.8125rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
 }
 
 .file-text-block {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -145,8 +145,8 @@ function fileIcon(mime: string) {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.625rem 0.875rem;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--p-content-hover-background);
+  border: 1px solid var(--p-content-border-color);
 }
 
 .file-text-info {
@@ -157,7 +157,7 @@ function fileIcon(mime: string) {
 }
 
 .file-text-icon {
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   font-size: 0.875rem;
   flex-shrink: 0;
 }
@@ -191,7 +191,7 @@ function fileIcon(mime: string) {
   padding: 1.5rem;
   text-align: center;
   font-size: 0.8125rem;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
 }
 
 .file-text-content {
@@ -204,8 +204,8 @@ function fileIcon(mime: string) {
   word-break: break-word;
   max-height: 400px;
   overflow-y: auto;
-  color: #1f2937;
-  background: #fafafa;
+  color: var(--p-text-color);
+  background: var(--p-content-hover-background);
 }
 
 .file-text-empty {

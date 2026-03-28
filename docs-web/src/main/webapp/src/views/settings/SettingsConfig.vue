@@ -6,6 +6,7 @@ import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
+import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
@@ -99,7 +100,7 @@ function handleReindex() {
   <div>
     <h2>Configuration</h2>
 
-    <section class="teedy-card p-4 mb-4" style="max-width: 520px">
+    <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>General</h3>
       <div class="form-field">
         <label>Default language for new documents</label>
@@ -110,9 +111,9 @@ function handleReindex() {
         <Select v-model="tagSearchMode" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
       <Button label="Save" icon="pi pi-check" :loading="saving" @click="saveConfig()" />
-    </section>
+    </template></Card>
 
-    <section class="teedy-card p-4 mb-4" style="max-width: 520px">
+    <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>OCR (Optical Character Recognition)</h3>
       <p class="section-hint">
         When enabled, Teedy uses Tesseract to extract text from images and scanned PDFs. The document's language setting determines which OCR model is used.
@@ -125,9 +126,9 @@ function handleReindex() {
         />
         <span>{{ ocrEnabled ? 'OCR is enabled' : 'OCR is disabled' }}</span>
       </div>
-    </section>
+    </template></Card>
 
-    <section class="teedy-card p-4 mb-4" style="max-width: 520px">
+    <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>Maintenance</h3>
       <p class="section-hint">
         Rebuild the search index from the database. Use this if documents are missing from search results after a migration or configuration change.
@@ -140,7 +141,7 @@ function handleReindex() {
         :loading="reindexing"
         @click="handleReindex"
       />
-    </section>
+    </template></Card>
   </div>
 </template>
 
@@ -154,12 +155,12 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
   margin-bottom: 0.375rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--p-text-color);
 }
 .section-hint {
   margin: 0 0 1rem;
   font-size: 0.8125rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   line-height: 1.5;
 }
 .ocr-toggle {

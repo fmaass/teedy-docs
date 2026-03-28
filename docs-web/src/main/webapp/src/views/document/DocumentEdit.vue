@@ -13,6 +13,7 @@ import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import MultiSelect from 'primevue/multiselect'
 import Button from 'primevue/button'
+import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
@@ -188,7 +189,7 @@ async function handleSubmit() {
       </div>
     </header>
 
-    <form @submit.prevent="handleSubmit" class="doc-edit-form teedy-card p-4">
+    <Card><template #content><form @submit.prevent="handleSubmit" class="doc-edit-form">
       <!-- Primary fields -->
       <div class="form-field">
         <label for="edit-title">Title *</label>
@@ -280,10 +281,10 @@ async function handleSubmit() {
           </div>
         </div>
       </div>
-    </form>
+    </form></template></Card>
 
     <!-- Files section -->
-    <div class="doc-edit-files teedy-card p-4 mt-3">
+    <Card class="mt-3"><template #content><div class="doc-edit-files">
       <h3 class="files-heading">Files</h3>
 
       <!-- Existing files (edit mode) -->
@@ -332,7 +333,7 @@ async function handleSubmit() {
       <p v-if="pendingFiles.length" class="upload-hint">
         {{ pendingFiles.length }} file{{ pendingFiles.length > 1 ? 's' : '' }} will be uploaded on save.
       </p>
-    </div>
+    </div></template></Card>
   </div>
 </template>
 
@@ -372,11 +373,11 @@ async function handleSubmit() {
   margin-bottom: 0.375rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--p-text-color);
 }
 .label-hint {
   font-weight: 400;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
 }
 
 .form-row {
@@ -403,7 +404,7 @@ async function handleSubmit() {
 }
 
 .advanced-fields {
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--p-content-border-color);
   padding-top: 1rem;
 }
 
@@ -425,7 +426,7 @@ async function handleSubmit() {
   align-items: center;
   gap: 0.5rem;
   padding: 0.375rem 0;
-  border-bottom: 1px solid #f3f4f6;
+  border: 1px solid var(--p-content-border-color);
 }
 .file-row:last-of-type {
   border-bottom: none;
@@ -435,7 +436,7 @@ async function handleSubmit() {
 }
 
 .file-icon {
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   font-size: 0.875rem;
   flex-shrink: 0;
 }
@@ -443,7 +444,7 @@ async function handleSubmit() {
 .file-name {
   flex: 1;
   font-size: 0.875rem;
-  color: #111827;
+  color: var(--p-text-color);
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
@@ -456,7 +457,7 @@ a.file-name:hover {
 
 .file-size {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
   flex-shrink: 0;
 }
 
@@ -466,11 +467,11 @@ a.file-name:hover {
   gap: 0.375rem;
   margin-top: 0.5rem;
   padding: 0.375rem 0.75rem;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--p-content-border-color);
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   transition: border-color 0.15s, color 0.15s;
   width: fit-content;
 }
@@ -482,7 +483,7 @@ a.file-name:hover {
 .upload-hint {
   margin: 0.25rem 0 0;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
 }
 
 @media (max-width: 640px) {

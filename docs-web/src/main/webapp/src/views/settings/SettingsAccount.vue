@@ -2,15 +2,18 @@
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { setLocale } from '../../i18n'
-import InputText from 'primevue/inputtext'
+import { useThemeSwitch, themeNames, getStoredTheme } from '../../composables/useThemeSwitch'
 import Password from 'primevue/password'
 import Select from 'primevue/select'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
+import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
 
 const auth = useAuthStore()
 const toast = useToast()
+const { switchTheme } = useThemeSwitch()
 
 const password = ref('')
 const passwordConfirm = ref('')
@@ -31,7 +34,11 @@ const languages = [
   { label: 'Shqip', value: 'sq_AL' },
 ]
 
+const themeOptions = themeNames.map((n) => ({ label: n, value: n }))
+
 const selectedLocale = ref(localStorage.getItem('teedy-locale') || 'en')
+const selectedTheme = ref(getStoredTheme())
+const darkMode = ref(document.documentElement.classList.contains('dark-mode'))
 
 onMounted(() => {
   selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
@@ -64,6 +71,21 @@ async function handleLocaleChange(locale: string) {
   localStorage.setItem('teedy-locale', locale)
   toast.add({ severity: 'success', summary: 'Language updated', life: 2000 })
 }
+
+function handleThemeChange(name: string) {
+  switchTheme(name)
+  toast.add({ severity: 'success', summary: `Theme switched to ${name}`, life: 2000 })
+}
+
+function handleDarkModeToggle(val: boolean) {
+  darkMode.value = val
+  if (val) {
+    document.documentElement.classList.add('dark-mode')
+  } else {
+    document.documentElement.classList.remove('dark-mode')
+  }
+  localStorage.setItem('teedy-dark-mode', String(val))
+}
 </script>
 
 <template>
@@ -74,8 +96,30 @@ async function handleLocaleChange(locale: string) {
       <span v-if="auth.user?.email"> ({{ auth.user.email }})</span>
     </p>
 
+    <!-- Appearance -->
+    <Card class="mb-3" style="max-width: 400px"><template #content>
+      <h3 class="section-title">Appearance</h3>
+      <div class="form-field">
+        <label>Theme</label>
+        <Select
+          v-model="selectedTheme"
+          :options="themeOptions"
+          optionLabel="label"
+          optionValue="value"
+          class="w-full"
+          @change="(e: any) => handleThemeChange(e.value)"
+        />
+      </div>
+      <div class="form-field">
+        <label class="toggle-label">
+          <ToggleSwitch :modelValue="darkMode" @update:modelValue="handleDarkModeToggle" />
+          Dark mode
+        </label>
+      </div>
+    </template></Card>
+
     <!-- Language -->
-    <div class="teedy-card p-4 mb-3" style="max-width: 400px">
+    <Card class="mb-3" style="max-width: 400px"><template #content>
       <h3 class="section-title">Language</h3>
       <Select
         v-model="selectedLocale"
@@ -85,10 +129,10 @@ async function handleLocaleChange(locale: string) {
         class="w-full"
         @change="(e: any) => handleLocaleChange(e.value)"
       />
-    </div>
+    </template></Card>
 
     <!-- Password -->
-    <div class="teedy-card p-4" style="max-width: 400px">
+    <Card style="max-width: 400px"><template #content>
       <h3 class="section-title">Change password</h3>
       <div class="form-field">
         <label>New password</label>
@@ -99,7 +143,7 @@ async function handleLocaleChange(locale: string) {
         <Password v-model="passwordConfirm" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
       </div>
       <Button label="Save" icon="pi pi-check" :loading="saving" @click="handleSave" />
-    </div>
+    </template></Card>
   </div>
 </template>
 
@@ -117,6 +161,11 @@ async function handleLocaleChange(locale: string) {
   margin-bottom: 0.375rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--p-text-color);
+}
+.toggle-label {
+  display: flex !important;
+  align-items: center;
+  gap: 0.75rem;
 }
 </style>

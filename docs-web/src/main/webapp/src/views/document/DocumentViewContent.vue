@@ -90,10 +90,10 @@ function confirmDelete(file: { id: string; name: string }) {
     <!-- File previews -->
     <div v-if="doc.files?.length" class="file-preview-section">
       <template v-for="file in doc.files" :key="file.id">
-        <div v-if="isImage(file.mimetype)" class="file-preview teedy-card">
+        <div v-if="isImage(file.mimetype)" class="file-preview">
           <img :src="getFileUrl(file.id, 'web')" :alt="file.name" loading="lazy" />
         </div>
-        <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview teedy-card">
+        <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview">
           <iframe :src="getFileUrl(file.id)" :title="file.name" />
         </div>
       </template>
@@ -173,7 +173,7 @@ function confirmDelete(file: { id: string; name: string }) {
 <style scoped>
 .doc-description {
   margin: 0 0 1.5rem;
-  color: #374151;
+  color: var(--p-text-color);
   line-height: 1.6;
 }
 
@@ -186,17 +186,17 @@ function confirmDelete(file: { id: string; name: string }) {
 
 .file-preview {
   overflow: hidden;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
 }
 .file-preview img {
   width: 100%;
   display: block;
-  border-radius: var(--teedy-card-radius);
 }
 .file-preview iframe {
   width: 100%;
   height: 500px;
   border: none;
-  border-radius: var(--teedy-card-radius);
 }
 
 .file-list-section {
@@ -209,7 +209,7 @@ function confirmDelete(file: { id: string; name: string }) {
 }
 
 .file-table {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--p-content-border-color);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -219,18 +219,18 @@ function confirmDelete(file: { id: string; name: string }) {
   align-items: center;
   gap: 0.625rem;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #f3f4f6;
+  border: 1px solid var(--p-content-border-color);
   transition: background 0.1s;
 }
 .file-row:last-child {
   border-bottom: none;
 }
 .file-row:hover {
-  background: #f9fafb;
+  background: var(--p-content-hover-background);
 }
 
 .file-type-icon {
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   font-size: 0.9rem;
   flex-shrink: 0;
 }
@@ -242,7 +242,7 @@ function confirmDelete(file: { id: string; name: string }) {
 
 .file-link {
   font-size: 0.875rem;
-  color: #111827;
+  color: var(--p-text-color);
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
@@ -261,7 +261,7 @@ function confirmDelete(file: { id: string; name: string }) {
 
 .file-mime {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
   flex-shrink: 0;
   width: 140px;
   overflow: hidden;
@@ -271,7 +271,7 @@ function confirmDelete(file: { id: string; name: string }) {
 
 .file-size {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--p-text-muted-color);
   flex-shrink: 0;
   width: 70px;
   text-align: right;

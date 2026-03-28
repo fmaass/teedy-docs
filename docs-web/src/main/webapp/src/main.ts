@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import PrimeVue from 'primevue/config'
-import Aura from '@primeuix/themes/aura'
+import Lara from '@primeuix/themes/lara'
 import { definePreset } from '@primeuix/themes'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
@@ -13,13 +13,16 @@ import App from './App.vue'
 import router from './router'
 import { i18n, setLocale } from './i18n'
 
-// Restore persisted locale
+// Restore persisted preferences
 const savedLocale = localStorage.getItem('teedy-locale')
 if (savedLocale && savedLocale !== 'en') {
   setLocale(savedLocale)
 }
+if (localStorage.getItem('teedy-dark-mode') === 'true') {
+  document.documentElement.classList.add('dark-mode')
+}
 
-const TeedyPreset = definePreset(Aura, {
+const TeedyPreset = definePreset(Lara, {
   semantic: {
     primary: {
       50: '{sky.50}',
@@ -65,3 +68,12 @@ app.use(ToastService)
 app.use(ConfirmationService)
 
 app.mount('#app')
+
+// Restore saved theme (must be after mount so usePrimeVue works)
+const savedTheme = localStorage.getItem('teedy-theme')
+if (savedTheme && savedTheme !== 'Lara') {
+  import('./composables/useThemeSwitch').then(({ useThemeSwitch }) => {
+    const { switchTheme } = useThemeSwitch()
+    switchTheme(savedTheme)
+  })
+}

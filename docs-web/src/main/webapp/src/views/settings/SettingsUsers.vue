@@ -5,6 +5,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Dialog from 'primevue/dialog'
+import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
@@ -124,7 +125,7 @@ function formatDate(ts: number) {
 
     <div v-if="loading" class="p-4 text-center text-muted">Loading users…</div>
 
-    <div v-else-if="users.length" class="users-table teedy-card">
+    <Card v-else-if="users.length" class="users-table"><template #content>
       <div class="user-row user-row-head">
         <span>Username</span>
         <span>Email</span>
@@ -154,7 +155,7 @@ function formatDate(ts: number) {
           <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(user)" v-tooltip="'Delete'" />
         </span>
       </div>
-    </div>
+    </template></Card>
 
     <p v-else class="text-sm text-muted mt-4">No users found.</p>
 
@@ -221,7 +222,7 @@ function formatDate(ts: number) {
   align-items: center;
   gap: 0.75rem;
   padding: 0.625rem 1rem;
-  border-bottom: 1px solid #f3f4f6;
+  border: 1px solid var(--p-content-border-color);
   font-size: 0.875rem;
 }
 .user-row:last-child {
@@ -230,10 +231,10 @@ function formatDate(ts: number) {
 .user-row-head {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: #f9fafb;
+  background: var(--p-content-hover-background);
 }
 .user-row.disabled {
   opacity: 0.6;
@@ -267,7 +268,7 @@ function formatDate(ts: number) {
 .user-email,
 .user-storage,
 .user-date {
-  color: #6b7280;
+  color: var(--p-text-muted-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -293,7 +294,7 @@ function formatDate(ts: number) {
   margin-bottom: 0.375rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--p-text-color);
 }
 
 @media (max-width: 700px) {

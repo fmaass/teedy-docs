@@ -164,7 +164,7 @@ function handleDelete() {
   gap: 1rem;
   margin-bottom: 1.25rem;
   padding-bottom: 1.25rem;
-  border-bottom: 1px solid #e5e7eb;
+  border: 1px solid var(--p-content-border-color);
 }
 
 .doc-header-main {
@@ -182,7 +182,7 @@ function handleDelete() {
 .doc-header-meta {
   margin: 0.3rem 0 0;
   font-size: 0.8125rem;
-  color: #6b7280;
+  color: var(--p-text-muted-color);
 }
 
 .lang-badge {

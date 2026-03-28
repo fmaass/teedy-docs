@@ -20,11 +20,11 @@ export function createTag(name: string, color: string, parent?: string) {
   return api.put<{ id: string }>('/tag', params)
 }
 
-export function updateTag(id: string, name: string, color: string, parent?: string) {
+export function updateTag(id: string, name: string, color: string, parent?: string | null) {
   const params = new URLSearchParams()
   params.set('name', name)
   params.set('color', color)
-  if (parent) params.set('parent', parent)
+  params.set('parent', parent ?? '')
   return api.post<{ id: string }>(`/tag/${id}`, params)
 }
 

@@ -21,101 +21,80 @@ const router = createRouter({
       path: '/',
       component: () => import('../views/AppLayout.vue'),
       children: [
-        // Documents
         {
           path: '',
           redirect: { name: 'documents' },
         },
+        // Documents
         {
           path: 'document',
-          component: () => import('../views/document/DocumentShell.vue'),
+          name: 'documents',
+          component: () => import('../views/document/DocumentList.vue'),
+        },
+        {
+          path: 'document/add',
+          name: 'document-add',
+          component: () => import('../views/document/DocumentEdit.vue'),
+        },
+        {
+          path: 'document/edit/:id',
+          name: 'document-edit',
+          component: () => import('../views/document/DocumentEdit.vue'),
+          props: true,
+        },
+        {
+          path: 'document/view/:id',
+          name: 'document-view',
+          component: () => import('../views/document/DocumentView.vue'),
+          props: true,
+          redirect: (to) => ({ name: 'document-view-content', params: to.params }),
           children: [
             {
-              path: '',
-              name: 'documents',
-              component: () => import('../views/document/DocumentDefault.vue'),
+              path: 'content',
+              name: 'document-view-content',
+              component: () => import('../views/document/DocumentViewContent.vue'),
             },
             {
-              path: 'add',
-              name: 'document-add',
-              component: () => import('../views/document/DocumentEdit.vue'),
+              path: 'text',
+              name: 'document-view-text',
+              component: () => import('../views/document/DocumentViewText.vue'),
             },
             {
-              path: 'edit/:id',
-              name: 'document-edit',
-              component: () => import('../views/document/DocumentEdit.vue'),
-              props: true,
+              path: 'permissions',
+              name: 'document-view-permissions',
+              component: () => import('../views/document/DocumentViewPermissions.vue'),
             },
             {
-              path: 'view/:id',
-              name: 'document-view',
-              component: () => import('../views/document/DocumentView.vue'),
-              props: true,
-              redirect: (to) => ({ name: 'document-view-content', params: to.params }),
-              children: [
-                {
-                  path: 'content',
-                  name: 'document-view-content',
-                  component: () => import('../views/document/DocumentViewContent.vue'),
-                },
-                {
-                  path: 'text',
-                  name: 'document-view-text',
-                  component: () => import('../views/document/DocumentViewText.vue'),
-                },
-                {
-                  path: 'permissions',
-                  name: 'document-view-permissions',
-                  component: () => import('../views/document/DocumentViewPermissions.vue'),
-                },
-                {
-                  path: 'activity',
-                  name: 'document-view-activity',
-                  component: () => import('../views/document/DocumentViewActivity.vue'),
-                },
-              ],
+              path: 'activity',
+              name: 'document-view-activity',
+              component: () => import('../views/document/DocumentViewActivity.vue'),
             },
           ],
         },
         // Tags
         {
           path: 'tag',
-          component: () => import('../views/tag/TagShell.vue'),
-          children: [
-            {
-              path: '',
-              name: 'tags',
-              component: () => import('../views/tag/TagDefault.vue'),
-            },
-            {
-              path: ':id',
-              name: 'tag-edit',
-              component: () => import('../views/tag/TagEdit.vue'),
-              props: true,
-            },
-          ],
+          name: 'tags',
+          component: () => import('../views/tag/TagList.vue'),
+        },
+        {
+          path: 'tag/:id',
+          name: 'tag-edit',
+          component: () => import('../views/tag/TagEdit.vue'),
+          props: true,
         },
         // Users & Groups
         {
           path: 'user',
-          component: () => import('../views/user/UserGroupShell.vue'),
-          children: [
-            {
-              path: '',
-              name: 'user-groups',
-              component: () => import('../views/user/UserGroupDefault.vue'),
-            },
-          ],
+          name: 'user-groups',
+          component: () => import('../views/user/UserGroupDefault.vue'),
         },
         // Settings
         {
           path: 'settings',
-          component: () => import('../views/settings/SettingsShell.vue'),
+          component: () => import('../views/settings/SettingsLayout.vue'),
+          redirect: { name: 'settings-account' },
           children: [
-            {
-              path: '',
-              redirect: { name: 'settings-account' },
-            },
             {
               path: 'account',
               name: 'settings-account',

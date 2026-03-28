@@ -202,6 +202,6 @@ function getTagName(tagId: string) {
   margin-bottom: 0.375rem;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--p-text-color);
 }
 </style>
