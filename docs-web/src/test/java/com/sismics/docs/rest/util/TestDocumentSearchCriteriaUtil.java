@@ -8,14 +8,15 @@ import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.rest.BaseTransactionalTest;
 import com.sismics.util.mime.MimeType;
-import org.apache.poi.ss.formula.functions.T;
-import org.joda.time.DateTime;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 
 public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
@@ -88,7 +89,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assertions.assertEquals(documentCriteria.getCreateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getCreateDateMin(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
     }
 
     @Test
@@ -112,7 +113,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assertions.assertEquals(documentCriteria.getCreateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getCreateDateMax(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
     }
 
     @Test
@@ -438,7 +439,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assertions.assertEquals(documentCriteria.getUpdateDateMin(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getUpdateDateMin(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
     }
 
     @Test
@@ -462,7 +463,7 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null
         );
-        Assertions.assertEquals(documentCriteria.getUpdateDateMax(), new DateTime(2022, 3, 27, 0, 0, 0).toDate());
+        Assertions.assertEquals(documentCriteria.getUpdateDateMax(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
     }
 
     @Test

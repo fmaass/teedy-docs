@@ -3,12 +3,12 @@ package com.sismics.docs.core.dao;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.model.jpa.PasswordRecovery;
 import com.sismics.util.context.ThreadLocalContext;
-import org.joda.time.DateTime;
-import org.joda.time.DurationFieldType;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.UUID;
 
@@ -45,7 +45,7 @@ public class PasswordRecoveryDao {
         try {
             Query q = em.createQuery("select r from PasswordRecovery r where r.id = :id and r.createDate > :createDateMin and r.deleteDate is null");
             q.setParameter("id", id);
-            q.setParameter("createDateMin", new DateTime().withFieldAdded(DurationFieldType.hours(), -1 * Constants.PASSWORD_RECOVERY_EXPIRATION_HOUR).toDate());
+            q.setParameter("createDateMin", Date.from(Instant.now().minus(Constants.PASSWORD_RECOVERY_EXPIRATION_HOUR, ChronoUnit.HOURS)));
             return (PasswordRecovery) q.getSingleResult();
         } catch (NoResultException e) {
             return null;
@@ -62,7 +62,7 @@ public class PasswordRecoveryDao {
         Query q = em.createQuery("update PasswordRecovery r set r.deleteDate = :deleteDate where r.username = :username and r.createDate > :createDateMin and r.deleteDate is null");
         q.setParameter("username", username);
         q.setParameter("deleteDate", new Date());
-        q.setParameter("createDateMin", new DateTime().withFieldAdded(DurationFieldType.hours(), -1 * Constants.PASSWORD_RECOVERY_EXPIRATION_HOUR).toDate());
+        q.setParameter("createDateMin", Date.from(Instant.now().minus(Constants.PASSWORD_RECOVERY_EXPIRATION_HOUR, ChronoUnit.HOURS)));
         q.executeUpdate();
     }
 }

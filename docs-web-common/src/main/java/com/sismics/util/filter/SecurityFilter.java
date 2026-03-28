@@ -9,13 +9,13 @@ import com.sismics.docs.core.dao.dto.GroupDto;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.security.AnonymousPrincipal;
 import com.sismics.security.UserPrincipal;
-import org.joda.time.DateTimeZone;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -107,7 +107,7 @@ public abstract class SecurityFilter implements Filter {
      */
     private void injectAnonymousUser(HttpServletRequest request) {
         AnonymousPrincipal anonymousPrincipal = new AnonymousPrincipal();
-        anonymousPrincipal.setDateTimeZone(DateTimeZone.forID(Constants.DEFAULT_TIMEZONE_ID));
+        anonymousPrincipal.setDateTimeZone(ZoneId.of(Constants.DEFAULT_TIMEZONE_ID));
 
         request.setAttribute(PRINCIPAL_ATTRIBUTE, anonymousPrincipal);
     }

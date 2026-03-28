@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>2.3.0</version>
+    <version>2.4.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   
@@ -73,11 +73,6 @@
       <artifactId>log4j-core</artifactId>
     </dependency>
   
-    <dependency>
-      <groupId>joda-time</groupId>
-      <artifactId>joda-time</artifactId>
-    </dependency>
-
     <dependency>
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>
@@ -231,7 +226,7 @@
         
         <plugins>
         
-          <!-- Launch NPM & Grunt -->
+          <!-- Launch NPM & Vite build -->
           <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-antrun-plugin</artifactId>
@@ -240,19 +235,17 @@
                 <phase>generate-sources</phase>
                 <configuration>
                   <target name="building">
-                    <!-- npm install -->
                     <exec executable="cmd" dir="${project.basedir}/src/main/webapp" osfamily="windows" failonerror="true">
                       <arg line="/c npm install" />
                     </exec>
                     <exec executable="npm" dir="${project.basedir}/src/main/webapp" osfamily="unix" failonerror="true">
                       <arg line="install" />
                     </exec>
-                    <!-- grunt -->
                     <exec executable="cmd" dir="${project.basedir}/src/main/webapp" osfamily="windows" failonerror="true">
-                      <arg line="/c grunt --apiurl=api" />
+                      <arg line="/c npm run build" />
                     </exec>
-                    <exec executable="grunt" dir="${project.basedir}/src/main/webapp" osfamily="unix" failonerror="true">
-                      <arg line="--apiurl=api" />
+                    <exec executable="npm" dir="${project.basedir}/src/main/webapp" osfamily="unix" failonerror="true">
+                      <arg line="run build" />
                     </exec>
                   </target>
                 </configuration>

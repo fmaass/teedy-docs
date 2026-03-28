@@ -7,7 +7,6 @@ import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
 import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
-import org.joda.time.format.DateTimeFormat;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -19,6 +18,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import java.io.InputStream;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 
 /**
@@ -207,13 +209,14 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(0, searchDocuments("by:document3", document1Token));
         Assertions.assertEquals(2, searchDocuments("by:document1", document1Token));
         Assertions.assertEquals(0, searchDocuments("by:nobody", document1Token));
-        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
-        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
-        Assertions.assertEquals(2, searchDocuments("at:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
+        ZonedDateTime now = ZonedDateTime.now(ZoneId.systemDefault());
+        Assertions.assertEquals(2, searchDocuments("at:" + now.format(DateTimeFormatter.ofPattern("yyyy")), document1Token));
+        Assertions.assertEquals(2, searchDocuments("at:" + now.format(DateTimeFormatter.ofPattern("yyyy-MM")), document1Token));
+        Assertions.assertEquals(2, searchDocuments("at:" + now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")), document1Token));
         Assertions.assertEquals(2, searchDocuments("after:2010 before:2040-08", document1Token));
-        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy").print(new Date().getTime()), document1Token));
-        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM").print(new Date().getTime()), document1Token));
-        Assertions.assertEquals(2, searchDocuments("uat:" + DateTimeFormat.forPattern("yyyy-MM-dd").print(new Date().getTime()), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + now.format(DateTimeFormatter.ofPattern("yyyy")), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + now.format(DateTimeFormatter.ofPattern("yyyy-MM")), document1Token));
+        Assertions.assertEquals(2, searchDocuments("uat:" + now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")), document1Token));
         Assertions.assertEquals(2, searchDocuments("uafter:2010 ubefore:2040-08", document1Token));
         Assertions.assertEquals(1, searchDocuments("tag:super", document1Token));
         Assertions.assertEquals(1, searchDocuments("!tag:super", document1Token));

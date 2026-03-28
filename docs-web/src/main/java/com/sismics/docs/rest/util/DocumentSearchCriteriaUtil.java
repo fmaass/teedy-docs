@@ -8,12 +8,14 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.DocumentCriteria;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.model.jpa.User;
-import org.joda.time.DateTime;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
-import org.joda.time.format.DateTimeFormatterBuilder;
-import org.joda.time.format.DateTimeParser;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -21,18 +23,30 @@ import java.util.List;
 import java.util.UUID;
 
 public class DocumentSearchCriteriaUtil {
-    private static final DateTimeParser YEAR_PARSER = DateTimeFormat.forPattern("yyyy").getParser();
-    private static final DateTimeParser MONTH_PARSER = DateTimeFormat.forPattern("yyyy-MM").getParser();
-    private static final DateTimeParser DAY_PARSER = DateTimeFormat.forPattern("yyyy-MM-dd").getParser();
-    private static final DateTimeParser[] DATE_PARSERS = new DateTimeParser[]{
-            YEAR_PARSER,
-            MONTH_PARSER,
-            DAY_PARSER};
+    private static final DateTimeFormatter YEAR_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy")
+            .parseDefaulting(ChronoField.MONTH_OF_YEAR, 1)
+            .parseDefaulting(ChronoField.DAY_OF_MONTH, 1)
+            .toFormatter();
 
-    private static final DateTimeFormatter YEAR_FORMATTER = new DateTimeFormatter(null, YEAR_PARSER);
-    private static final DateTimeFormatter MONTH_FORMATTER = new DateTimeFormatter(null, MONTH_PARSER);
-    private static final DateTimeFormatter DAY_FORMATTER = new DateTimeFormatter(null, DAY_PARSER);
-    private static final DateTimeFormatter DATES_FORMATTER = new DateTimeFormatterBuilder().append(null, DATE_PARSERS).toFormatter();
+    private static final DateTimeFormatter MONTH_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy-MM")
+            .parseDefaulting(ChronoField.DAY_OF_MONTH, 1)
+            .toFormatter();
+
+    private static final DateTimeFormatter DAY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+    private static final DateTimeFormatter DATES_FORMATTER = new DateTimeFormatterBuilder()
+            .appendPattern("yyyy")
+            .optionalStart()
+            .appendPattern("-MM")
+            .optionalStart()
+            .appendPattern("-dd")
+            .optionalEnd()
+            .optionalEnd()
+            .parseDefaulting(ChronoField.MONTH_OF_YEAR, 1)
+            .parseDefaulting(ChronoField.DAY_OF_MONTH, 1)
+            .toFormatter();
 
     private static final String PARAMETER_WITH_MULTIPLE_VALUES_SEPARATOR = ",";
     private static final String WORKFLOW_ME = "me";
@@ -201,24 +215,27 @@ public class DocumentSearchCriteriaUtil {
         }
     }
 
+    private static Date toDate(LocalDate localDate) {
+        return Date.from(localDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
+    }
+
     private static void parseDateCriteria(DocumentCriteria documentCriteria, String value, DateTimeFormatter formatter, boolean isUpdated, boolean isBefore) {
         try {
-            DateTime date = formatter.parseDateTime(value);
+            Date date = toDate(LocalDate.parse(value, formatter));
             if (isBefore) {
                 if (isUpdated) {
-                    documentCriteria.setUpdateDateMax(date.toDate());
+                    documentCriteria.setUpdateDateMax(date);
                 } else {
-                    documentCriteria.setCreateDateMax(date.toDate());
+                    documentCriteria.setCreateDateMax(date);
                 }
             } else {
                 if (isUpdated) {
-                    documentCriteria.setUpdateDateMin(date.toDate());
+                    documentCriteria.setUpdateDateMin(date);
                 } else {
-                    documentCriteria.setCreateDateMin(date.toDate());
+                    documentCriteria.setCreateDateMin(date);
                 }
             }
-        } catch (IllegalArgumentException e) {
-            // Invalid date, returns no documents
+        } catch (DateTimeParseException e) {
             documentCriteria.setCreateDateMin(new Date(0));
             documentCriteria.setCreateDateMax(new Date(0));
         }
@@ -226,48 +243,40 @@ public class DocumentSearchCriteriaUtil {
 
     private static void parseDateAtCriteria(DocumentCriteria documentCriteria, String value, boolean isUpdated) {
         try {
+            LocalDate date;
+            LocalDate endDate;
             switch (value.length()) {
                 case 10: {
-                    DateTime date = DATES_FORMATTER.parseDateTime(value);
-                    if (isUpdated) {
-                        documentCriteria.setUpdateDateMin(date.toDate());
-                        documentCriteria.setUpdateDateMax(date.plusDays(1).minusSeconds(1).toDate());
-                    } else {
-                        documentCriteria.setCreateDateMin(date.toDate());
-                        documentCriteria.setCreateDateMax(date.plusDays(1).minusSeconds(1).toDate());
-                    }
+                    date = LocalDate.parse(value, DATES_FORMATTER);
+                    endDate = date.plusDays(1);
                     break;
                 }
                 case 7: {
-                    DateTime date = MONTH_FORMATTER.parseDateTime(value);
-                    if (isUpdated) {
-                        documentCriteria.setUpdateDateMin(date.toDate());
-                        documentCriteria.setUpdateDateMax(date.plusMonths(1).minusSeconds(1).toDate());
-                    } else {
-                        documentCriteria.setCreateDateMin(date.toDate());
-                        documentCriteria.setCreateDateMax(date.plusMonths(1).minusSeconds(1).toDate());
-                    }
+                    date = LocalDate.parse(value, MONTH_FORMATTER);
+                    endDate = date.plusMonths(1);
                     break;
                 }
                 case 4: {
-                    DateTime date = YEAR_FORMATTER.parseDateTime(value);
-                    if (isUpdated) {
-                        documentCriteria.setUpdateDateMin(date.toDate());
-                        documentCriteria.setUpdateDateMax(date.plusYears(1).minusSeconds(1).toDate());
-                    } else {
-                        documentCriteria.setCreateDateMin(date.toDate());
-                        documentCriteria.setCreateDateMax(date.plusYears(1).minusSeconds(1).toDate());
-                    }
+                    date = LocalDate.parse(value, YEAR_FORMATTER);
+                    endDate = date.plusYears(1);
                     break;
                 }
                 default: {
-                    // Invalid format, returns no documents
                     documentCriteria.setCreateDateMin(new Date(0));
                     documentCriteria.setCreateDateMax(new Date(0));
+                    return;
                 }
             }
-        } catch (IllegalArgumentException e) {
-            // Invalid date, returns no documents
+            ZonedDateTime startZdt = date.atStartOfDay(ZoneId.systemDefault());
+            ZonedDateTime endZdt = endDate.atStartOfDay(ZoneId.systemDefault()).minusSeconds(1);
+            if (isUpdated) {
+                documentCriteria.setUpdateDateMin(Date.from(startZdt.toInstant()));
+                documentCriteria.setUpdateDateMax(Date.from(endZdt.toInstant()));
+            } else {
+                documentCriteria.setCreateDateMin(Date.from(startZdt.toInstant()));
+                documentCriteria.setCreateDateMax(Date.from(endZdt.toInstant()));
+            }
+        } catch (DateTimeParseException e) {
             documentCriteria.setCreateDateMin(new Date(0));
             documentCriteria.setCreateDateMax(new Date(0));
         }

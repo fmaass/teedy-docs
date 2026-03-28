@@ -6,7 +6,7 @@
   <groupId>com.sismics.docs</groupId>
   <artifactId>docs-parent</artifactId>
   <packaging>pom</packaging>
-  <version>2.3.0</version>
+  <version>2.4.0</version>
 
   <name>Docs Parent</name>
 
@@ -35,7 +35,7 @@
     <org.imgscalr.imgscalr-lib.version>4.2</org.imgscalr.imgscalr-lib.version>
     <org.apache.pdfbox.pdfbox.version>2.0.36</org.apache.pdfbox.pdfbox.version>
     <org.bouncycastle.bcprov-jdk18on.version>1.83</org.bouncycastle.bcprov-jdk18on.version>
-    <joda-time.joda-time.version>2.14.0</joda-time.joda-time.version>
+
     <org.hibernate.hibernate.version>6.6.18.Final</org.hibernate.hibernate.version>
     <fr.opensagres.xdocreport.version>2.1.0</fr.opensagres.xdocreport.version>
     <xerces.xercesImpl.version>2.12.2</xerces.xercesImpl.version>
@@ -337,12 +337,6 @@
         <groupId>org.freemarker</groupId>
         <artifactId>freemarker</artifactId>
         <version>${org.freemarker.freemarker.version}</version>
-      </dependency>
-
-      <dependency>
-        <groupId>joda-time</groupId>
-        <artifactId>joda-time</artifactId>
-        <version>${joda-time.joda-time.version}</version>
       </dependency>
 
       <dependency>

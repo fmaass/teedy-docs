@@ -3,9 +3,9 @@ package com.sismics.rest.util;
 import com.google.common.base.Strings;
 import com.sismics.rest.exception.ClientException;
 import org.apache.commons.lang3.StringUtils;
-import org.joda.time.DateTime;
 
 import java.text.MessageFormat;
+import java.time.Instant;
 import java.util.Date;
 import java.util.regex.Pattern;
 
@@ -216,7 +216,7 @@ public class ValidationUtil {
             }
         }
         try {
-            return new DateTime(Long.parseLong(s)).toDate();
+            return Date.from(Instant.ofEpochMilli(Long.parseLong(s)));
         } catch (NumberFormatException e) {
             throw new ClientException("ValidationError", MessageFormat.format("{0} must be a date", name));
         }

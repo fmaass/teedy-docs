@@ -1,0 +1,2 @@
+create table T_TAG_MATCH_RULE ( TMR_ID_C varchar(36) not null, TMR_IDTAG_C varchar(36) not null, TMR_RULETYPE_C varchar(20) not null, TMR_PATTERN_C varchar(2000) not null, TMR_ORDER_N int default 0 not null, TMR_ENABLED_B boolean default true not null, TMR_CREATEDATE_D datetime not null, TMR_DELETEDATE_D datetime, primary key (TMR_ID_C) );
+update T_CONFIG set CFG_VALUE_C = '34' where CFG_ID_C = 'DB_VERSION';

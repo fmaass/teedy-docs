@@ -1,8 +1,8 @@
 package com.sismics.security;
 
 import com.google.common.collect.Sets;
-import org.joda.time.DateTimeZone;
 
+import java.time.ZoneId;
 import java.util.Set;
 
 /**
@@ -16,7 +16,7 @@ public class AnonymousPrincipal implements IPrincipal {
     /**
      * User timezone.
      */
-    private DateTimeZone dateTimeZone;
+    private ZoneId dateTimeZone;
     
     /**
      * Constructor of AnonymousPrincipal.
@@ -41,7 +41,7 @@ public class AnonymousPrincipal implements IPrincipal {
     }
 
     @Override
-    public DateTimeZone getDateTimeZone() {
+    public ZoneId getDateTimeZone() {
         return dateTimeZone;
     }
 
@@ -50,7 +50,7 @@ public class AnonymousPrincipal implements IPrincipal {
         return null;
     }
     
-    public void setDateTimeZone(DateTimeZone dateTimeZone) {
+    public void setDateTimeZone(ZoneId dateTimeZone) {
         this.dateTimeZone = dateTimeZone;
     }
 

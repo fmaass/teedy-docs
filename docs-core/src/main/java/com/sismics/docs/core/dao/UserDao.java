@@ -1,6 +1,8 @@
 package com.sismics.docs.core.dao;
 
 import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -8,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.joda.time.DateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -446,10 +447,10 @@ public class UserDao {
     public long getActiveUserCount() {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         Query query = em.createNativeQuery("select count(u.USE_ID_C) from T_USER u where u.USE_DELETEDATE_D is null and (u.USE_DISABLEDATE_D is null or u.USE_DISABLEDATE_D >= :fromDate and u.USE_DISABLEDATE_D < :toDate)");
-        DateTime fromDate = DateTime.now().minusMonths(1).dayOfMonth().withMinimumValue().withTimeAtStartOfDay();
-        DateTime toDate = fromDate.plusMonths(1);
-        query.setParameter("fromDate", fromDate.toDate());
-        query.setParameter("toDate", toDate.toDate());
+        LocalDate fromDate = LocalDate.now().minusMonths(1).withDayOfMonth(1);
+        LocalDate toDate = fromDate.plusMonths(1);
+        query.setParameter("fromDate", Date.from(fromDate.atStartOfDay(ZoneId.systemDefault()).toInstant()));
+        query.setParameter("toDate", Date.from(toDate.atStartOfDay(ZoneId.systemDefault()).toInstant()));
         return ((Number) query.getSingleResult()).longValue();
     }
 }

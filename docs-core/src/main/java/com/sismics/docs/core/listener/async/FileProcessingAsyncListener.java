@@ -2,13 +2,18 @@ package com.sismics.docs.core.listener.async;
 
 import com.google.common.eventbus.AllowConcurrentEvents;
 import com.google.common.eventbus.Subscribe;
+import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
+import com.sismics.docs.core.dao.TagMatchRuleDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.event.FileCreatedAsyncEvent;
 import com.sismics.docs.core.event.FileEvent;
 import com.sismics.docs.core.event.FileUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.DocumentTag;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.model.jpa.TagMatchRule;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
@@ -28,7 +33,12 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.MessageFormat;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * Listener on file processing.
@@ -104,25 +114,32 @@ public class FileProcessingAsyncListener {
         String content = extractContent(event, user.get(), file.get());
 
         // Open a new transaction to save the file content
+        AtomicReference<String> documentId = new AtomicReference<>();
+        AtomicReference<String> fileName = new AtomicReference<>();
         TransactionUtil.handle(() -> {
-            // Save the file to database
             FileDao fileDao = new FileDao();
             File freshFile = fileDao.getActiveById(event.getFileId());
             if (freshFile == null) {
-                // The file has been deleted since the text extraction started, ignore the result
                 return;
             }
 
             freshFile.setContent(content);
             fileDao.update(freshFile);
 
-            // Update index with the updated file
             if (isFileCreated) {
                 AppContext.getInstance().getIndexingHandler().createFile(freshFile);
             } else {
                 AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
             }
+
+            documentId.set(freshFile.getDocumentId());
+            fileName.set(freshFile.getName());
         });
+
+        // Apply auto-tagging rules
+        if (documentId.get() != null) {
+            applyAutoTagRules(documentId.get(), fileName.get(), content);
+        }
 
         FileUtil.endProcessingFile(event.getFileId());
     }
@@ -182,5 +199,80 @@ public class FileProcessingAsyncListener {
         log.info(MessageFormat.format("File content extracted in {0}ms: " + file.getId(), System.currentTimeMillis() - startTime));
 
         return content;
+    }
+
+    /**
+     * Evaluate all enabled tag match rules against a document's file and apply
+     * matching tags.
+     *
+     * @param docId Document ID
+     * @param fileName File name (may be null)
+     * @param content Extracted text content (may be null)
+     */
+    private void applyAutoTagRules(String docId, String fileName, String content) {
+        TransactionUtil.handle(() -> {
+            List<TagMatchRule> rules;
+            try {
+                rules = new TagMatchRuleDao().findAllEnabled();
+            } catch (Exception e) {
+                log.debug("Unable to load tag match rules (table may not exist yet)", e);
+                return;
+            }
+            if (rules.isEmpty()) {
+                return;
+            }
+
+            DocumentDao documentDao = new DocumentDao();
+            Document doc = documentDao.getById(docId);
+            if (doc == null) {
+                return;
+            }
+            String docTitle = doc.getTitle();
+
+            Set<String> newTagIds = new LinkedHashSet<>();
+            for (TagMatchRule rule : rules) {
+                String target = switch (rule.getRuleType()) {
+                    case "TITLE_REGEX" -> docTitle;
+                    case "FILENAME_REGEX" -> fileName;
+                    case "CONTENT_REGEX" -> content;
+                    default -> null;
+                };
+                if (target == null) {
+                    continue;
+                }
+                try {
+                    if (Pattern.compile(rule.getPattern(), Pattern.CASE_INSENSITIVE).matcher(target).find()) {
+                        newTagIds.add(rule.getTagId());
+                    }
+                } catch (Exception e) {
+                    log.warn("Invalid regex in tag match rule {}: {}", rule.getId(), rule.getPattern());
+                }
+            }
+
+            if (!newTagIds.isEmpty()) {
+                // Get existing tag links to avoid duplicates
+                jakarta.persistence.EntityManager em = com.sismics.util.context.ThreadLocalContext.get().getEntityManager();
+                jakarta.persistence.Query existingQuery = em.createQuery(
+                        "select dt.tagId from DocumentTag dt where dt.documentId = :documentId and dt.deleteDate is null");
+                existingQuery.setParameter("documentId", docId);
+                @SuppressWarnings("unchecked")
+                List<String> existingTagIds = existingQuery.getResultList();
+
+                int added = 0;
+                for (String tagId : newTagIds) {
+                    if (!existingTagIds.contains(tagId)) {
+                        DocumentTag dt = new DocumentTag();
+                        dt.setId(UUID.randomUUID().toString());
+                        dt.setDocumentId(docId);
+                        dt.setTagId(tagId);
+                        em.persist(dt);
+                        added++;
+                    }
+                }
+                if (added > 0) {
+                    log.info("Auto-tagging applied {} new tag(s) to document {}", added, docId);
+                }
+            }
+        });
     }
 }

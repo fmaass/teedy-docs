@@ -4,13 +4,6 @@ import com.google.common.base.Strings;
 import com.google.common.io.CharStreams;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.util.ResourceUtil;
-import org.hibernate.HibernateException;
-import org.hibernate.engine.jdbc.connections.spi.JdbcConnectionAccess;
-import org.hibernate.engine.jdbc.internal.FormatStyle;
-import org.hibernate.engine.jdbc.internal.Formatter;
-import org.hibernate.engine.jdbc.spi.JdbcServices;
-import org.hibernate.engine.jdbc.spi.SqlStatementLogger;
-import org.hibernate.service.ServiceRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,43 +26,29 @@ import java.util.ResourceBundle;
  * @author jtremeaux
  */
 abstract class DbOpenHelper {
-    /**
-     * Logger.
-     */
     private static final Logger log = LoggerFactory.getLogger(DbOpenHelper.class);
 
-    private final JdbcConnectionAccess jdbcConnectionAccess;
+    private final Connection connection;
 
     private final List<Exception> exceptions = new ArrayList<>();
 
-    private Formatter formatter;
-
     private Statement stmt;
 
-    DbOpenHelper(ServiceRegistry serviceRegistry) throws HibernateException {
-        final JdbcServices jdbcServices = serviceRegistry.getService(JdbcServices.class);
-        SqlStatementLogger sqlStatementLogger = jdbcServices.getSqlStatementLogger();
-        jdbcConnectionAccess = jdbcServices.getBootstrapJdbcConnectionAccess();
-        formatter = (sqlStatementLogger.isFormat() ? FormatStyle.DDL : FormatStyle.NONE).getFormatter();
+    /**
+     * @param connection JDBC connection to use for migrations. The caller is
+     *                   responsible for closing this connection after the EMF
+     *                   is created (important for in-memory databases).
+     */
+    DbOpenHelper(Connection connection) {
+        this.connection = connection;
     }
 
     public void open() {
         log.info("Opening database and executing incremental updates");
 
-        Connection connection = null;
-
         exceptions.clear();
 
         try {
-            try {
-                connection = jdbcConnectionAccess.obtainConnection();
-            } catch (SQLException sqle) {
-                exceptions.add(sqle);
-                log.error("Unable to get database metadata", sqle);
-                throw sqle;
-            }
-
-            // Check if database is already created
             Integer oldVersion = null;
             try {
                 stmt = connection.createStatement();
@@ -94,32 +73,30 @@ abstract class DbOpenHelper {
 
             stmt = connection.createStatement();
             if (oldVersion == null) {
-                // Execute creation script
                 log.info("Executing initial schema creation script");
                 onCreate();
                 oldVersion = 0;
             }
 
-            // Execute update script
             ResourceBundle configBundle = ConfigUtil.getConfigBundle();
             Integer currentVersion = Integer.parseInt(configBundle.getString("db.version"));
             log.info(MessageFormat.format("Found database version {0}, new version is {1}, executing database incremental update scripts", oldVersion, currentVersion));
             onUpgrade(oldVersion, currentVersion);
             log.info("Database upgrade complete");
+
+            connection.commit();
         } catch (Exception e) {
             exceptions.add(e);
             log.error("Unable to complete schema update", e);
         } finally {
             try {
-                connection.commit();
                 if (stmt != null) {
                     stmt.close();
                     stmt = null;
                 }
-                jdbcConnectionAccess.releaseConnection(connection);
             } catch (Exception e) {
                 exceptions.add(e);
-                log.error("Unable to close connection", e);
+                log.error("Unable to close statement", e);
             }
         }
     }
@@ -162,10 +139,9 @@ abstract class DbOpenHelper {
 
             String transformed = DialectUtil.transform(sql);
             if (transformed != null) {
-                String formatted = formatter.format(transformed);
                 try {
-                    log.debug(formatted);
-                    stmt.executeUpdate(formatted);
+                    log.debug(transformed);
+                    stmt.executeUpdate(transformed);
                 } catch (SQLException e) {
                     exceptions.add(e);
                     if (log.isErrorEnabled()) {
@@ -188,14 +164,5 @@ abstract class DbOpenHelper {
      */
     public List<?> getExceptions() {
         return exceptions;
-    }
-
-    /**
-     * Format the output SQL statements.
-     *
-     * @param format True to format
-     */
-    public void setFormat(boolean format) {
-        this.formatter = (format ? FormatStyle.DDL : FormatStyle.NONE).getFormatter();
     }
 }
