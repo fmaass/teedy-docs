@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
-import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
+import { listDocuments, getDocument, updateDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
 import { listTags, getTagStats, getTagFacets, type Tag } from '../../api/tag'
 import { getFileUrl } from '../../api/file'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -226,16 +226,45 @@ const queryClient = useQueryClient()
 const slideOverOpen = ref(false)
 const slideOverDoc = ref<DocumentDetail | null>(null)
 const slideOverLoading = ref(false)
+const slideOverTab = ref<'overview' | 'files'>('overview')
+const slideOverTagAdding = ref(false)
 
 async function openSlideOver(doc: DocumentListItem) {
   slideOverOpen.value = true
   slideOverLoading.value = true
+  slideOverTab.value = 'overview'
+  slideOverTagAdding.value = false
   try {
     const { data } = await getDocument(doc.id)
     slideOverDoc.value = data
     queryClient.setQueryData(['document', doc.id], data)
   } finally {
     slideOverLoading.value = false
+  }
+}
+
+const availableTagsForSlideOver = computed(() => {
+  if (!slideOverDoc.value) return []
+  const docTagIds = new Set(slideOverDoc.value.tags?.map((t) => t.id) ?? [])
+  return allTags.value.filter((t) => !docTagIds.has(t.id))
+})
+
+async function addTagToSlideOver(tagId: string) {
+  if (!slideOverDoc.value || !tagId) return
+  const doc = slideOverDoc.value
+  const currentTagIds = doc.tags?.map((t) => t.id) ?? []
+  const params = new URLSearchParams()
+  params.set('title', doc.title)
+  params.set('language', doc.language)
+  for (const id of [...currentTagIds, tagId]) params.append('tags', id)
+  try {
+    await updateDocument(doc.id, params)
+    const { data } = await getDocument(doc.id)
+    slideOverDoc.value = data
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+    slideOverTagAdding.value = false
+  } catch {
+    // silently fail -- user can retry
   }
 }
 
@@ -569,83 +598,140 @@ watch(searchText, (val) => {
         </div>
       </template>
       <div v-if="slideOverLoading" class="slide-over-loading">
-        <Skeleton height="2rem" class="mb-3" />
-        <Skeleton height="4rem" class="mb-3" />
+        <Skeleton height="10rem" class="mb-3" />
         <Skeleton height="1.5rem" width="60%" class="mb-2" />
         <Skeleton height="1.5rem" width="40%" />
       </div>
       <div v-else-if="slideOverDoc" class="slide-over-body">
-        <!-- Tags -->
-        <div v-if="slideOverDoc.tags?.length" class="slide-section">
-          <div class="slide-tags">
+        <!-- Thumbnail preview -->
+        <div v-if="slideOverDoc.file_id" class="slide-preview">
+          <img
+            :src="getFileUrl(slideOverDoc.file_id, 'web')"
+            alt=""
+            loading="lazy"
+            @error="($event.target as HTMLImageElement).style.display = 'none'"
+          />
+        </div>
+
+        <!-- Tags with inline add -->
+        <div class="slide-section">
+          <div class="slide-tags-row">
             <TagBadge
               v-for="tag in slideOverDoc.tags"
               :key="tag.id"
               :name="tag.name"
               :color="tag.color"
             />
-          </div>
-        </div>
-
-        <!-- Description -->
-        <div v-if="slideOverDoc.description" class="slide-section">
-          <h4 class="slide-label">Description</h4>
-          <div class="slide-description" v-html="slideOverDoc.description" />
-        </div>
-
-        <!-- Metadata -->
-        <div class="slide-section">
-          <h4 class="slide-label">Details</h4>
-          <div class="slide-meta-grid">
-            <div class="meta-item">
-              <span class="meta-key">Language</span>
-              <span class="meta-val">{{ languageLabel(slideOverDoc.language) }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-key">Created</span>
-              <span class="meta-val">{{ formatDate(slideOverDoc.create_date) }}</span>
-            </div>
-            <div class="meta-item" v-if="slideOverDoc.creator">
-              <span class="meta-key">Creator</span>
-              <span class="meta-val">{{ slideOverDoc.creator }}</span>
-            </div>
-            <div class="meta-item" v-if="slideOverDoc.subject">
-              <span class="meta-key">Subject</span>
-              <span class="meta-val">{{ slideOverDoc.subject }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Files -->
-        <div v-if="slideOverDoc.files?.length" class="slide-section">
-          <h4 class="slide-label">Files ({{ slideOverDoc.files.length }})</h4>
-          <div class="slide-file-list">
-            <a
-              v-for="file in slideOverDoc.files"
-              :key="file.id"
-              :href="getFileUrl(file.id)"
-              target="_blank"
-              class="slide-file-item"
+            <button
+              v-if="!slideOverTagAdding"
+              class="tag-add-btn"
+              @click="slideOverTagAdding = true"
+              title="Add tag"
             >
-              <i class="pi pi-download" />
-              <span class="file-name">{{ file.name }}</span>
-              <span class="file-size">{{ formatFileSize(file.size) }}</span>
-            </a>
+              <i class="pi pi-plus" />
+            </button>
+          </div>
+          <div v-if="slideOverTagAdding" class="tag-add-row">
+            <select
+              class="tag-add-select"
+              @change="addTagToSlideOver(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+            >
+              <option value="" disabled selected>Add a tag...</option>
+              <option
+                v-for="tag in availableTagsForSlideOver"
+                :key="tag.id"
+                :value="tag.id"
+              >{{ tag.name }}</option>
+            </select>
+            <button class="tag-add-cancel" @click="slideOverTagAdding = false">
+              <i class="pi pi-times" />
+            </button>
           </div>
         </div>
 
-        <!-- Open full view button -->
+        <!-- Tabs: Overview / Files -->
+        <div class="slide-tabs">
+          <button
+            class="slide-tab"
+            :class="{ active: slideOverTab === 'overview' }"
+            @click="slideOverTab = 'overview'"
+          >Overview</button>
+          <button
+            class="slide-tab"
+            :class="{ active: slideOverTab === 'files' }"
+            @click="slideOverTab = 'files'"
+          >Files{{ slideOverDoc.files?.length ? ` (${slideOverDoc.files.length})` : '' }}</button>
+        </div>
+
+        <!-- Overview tab -->
+        <div v-if="slideOverTab === 'overview'" class="slide-tab-content">
+          <div v-if="slideOverDoc.description" class="slide-section">
+            <h4 class="slide-label">Description</h4>
+            <div class="slide-description" v-html="slideOverDoc.description" />
+          </div>
+
+          <div class="slide-section">
+            <h4 class="slide-label">Details</h4>
+            <div class="slide-meta-grid">
+              <div class="meta-item">
+                <span class="meta-key">Language</span>
+                <span class="meta-val">{{ languageLabel(slideOverDoc.language) }}</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-key">Created</span>
+                <span class="meta-val">{{ formatDate(slideOverDoc.create_date) }}</span>
+              </div>
+              <div class="meta-item" v-if="slideOverDoc.creator">
+                <span class="meta-key">Creator</span>
+                <span class="meta-val">{{ slideOverDoc.creator }}</span>
+              </div>
+              <div class="meta-item" v-if="slideOverDoc.subject">
+                <span class="meta-key">Subject</span>
+                <span class="meta-val">{{ slideOverDoc.subject }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Files tab -->
+        <div v-if="slideOverTab === 'files'" class="slide-tab-content">
+          <div v-if="slideOverDoc.files?.length" class="slide-file-list">
+            <div v-for="file in slideOverDoc.files" :key="file.id" class="slide-file-card">
+              <div
+                v-if="file.mimetype?.startsWith('image/')"
+                class="file-inline-preview"
+              >
+                <img :src="getFileUrl(file.id, 'web')" alt="" loading="lazy" />
+              </div>
+              <div class="file-card-row">
+                <i class="pi pi-file" />
+                <span class="file-name">{{ file.name }}</span>
+                <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" title="Download">
+                  <i class="pi pi-download" />
+                </a>
+              </div>
+            </div>
+          </div>
+          <div v-else class="slide-empty-files">
+            <span class="meta">No files attached</span>
+          </div>
+        </div>
+
+        <!-- Actions -->
         <div class="slide-actions">
           <Button
             label="Open full view"
             icon="pi pi-external-link"
             outlined
+            size="small"
             @click="openFullView"
           />
           <Button
             label="Edit"
             icon="pi pi-pencil"
             text
+            size="small"
             @click="router.push({ name: 'document-edit', params: { id: slideOverDoc.id } })"
           />
         </div>
@@ -1012,7 +1098,22 @@ watch(searchText, (val) => {
 .slide-over-body {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
+}
+
+.slide-preview {
+  margin: -1rem -1.25rem 0;
+  max-height: 200px;
+  overflow: hidden;
+  background: var(--p-content-hover-background);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slide-preview img {
+  width: 100%;
+  height: 200px;
+  object-fit: contain;
 }
 
 .slide-section {
@@ -1021,10 +1122,87 @@ watch(searchText, (val) => {
   gap: 0.5rem;
 }
 
-.slide-tags {
+.slide-tags-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
+  align-items: center;
+}
+
+.tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 1px dashed var(--p-content-border-color);
+  background: none;
+  cursor: pointer;
+  color: var(--p-text-muted-color);
+  font-size: 0.625rem;
+  transition: border-color 0.12s, color 0.12s;
+}
+.tag-add-btn:hover {
+  border-color: var(--p-primary-color);
+  color: var(--p-primary-color);
+}
+
+.tag-add-row {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.tag-add-select {
+  flex: 1;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+}
+
+.tag-add-cancel {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--p-text-muted-color);
+  padding: 0.25rem;
+}
+
+.slide-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.slide-tab {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-family: inherit;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  color: var(--p-text-muted-color);
+  transition: color 0.12s, border-color 0.12s;
+}
+.slide-tab:hover {
+  color: var(--p-text-color);
+}
+.slide-tab.active {
+  color: var(--p-primary-color);
+  border-bottom-color: var(--p-primary-color);
+}
+
+.slide-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .slide-label {
@@ -1075,23 +1253,34 @@ watch(searchText, (val) => {
   gap: 0.25rem;
 }
 
-.slide-file-item {
+.slide-file-card {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.file-inline-preview {
+  background: var(--p-content-hover-background);
+  max-height: 150px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-inline-preview img {
+  width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+}
+
+.file-card-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.625rem;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  text-decoration: none;
-  color: var(--p-text-color);
   font-size: 0.8125rem;
-  transition: background 0.12s;
 }
-.slide-file-item:hover {
-  background: var(--p-content-hover-background);
-  text-decoration: none;
-}
-.slide-file-item i {
+.file-card-row i.pi-file {
   color: var(--p-text-muted-color);
   font-size: 0.875rem;
 }
@@ -1107,6 +1296,22 @@ watch(searchText, (val) => {
   color: var(--p-text-muted-color);
   font-size: 0.75rem;
   flex-shrink: 0;
+}
+.file-dl-btn {
+  color: var(--p-text-muted-color);
+  text-decoration: none;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+.file-dl-btn:hover {
+  color: var(--p-primary-color);
+  background: var(--p-content-hover-background);
+}
+
+.slide-empty-files {
+  padding: 1rem;
+  text-align: center;
 }
 
 .slide-actions {
