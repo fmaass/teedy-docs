@@ -22,6 +22,8 @@ const router = useRouter()
 const route = useRoute()
 
 const selectedTagIds = ref(new Set<string>())
+const excludedTagIds = ref(new Set<string>())
+const showUntagged = ref(false)
 const searchText = ref('')
 const debouncedText = ref('')
 const tagMode = ref<'and' | 'or'>('and')
@@ -95,29 +97,40 @@ const matchingTotal = computed(() => facetData.value?.total ?? 0)
 watch(tagsData, (tags) => {
   if (!tags?.length) return
   const raw = (route.query.tags as string) || ''
+  const rawExcl = (route.query.exclude as string) || ''
   const mode = (route.query.mode as string) || 'and'
   const search = (route.query.search as string) || ''
+  const untagged = (route.query.untagged as string) || ''
 
   if (raw) {
     const ids = raw.split(',').filter(Boolean)
     selectedTagIds.value = new Set(ids.filter((id) => tagMap.value.has(id)))
   }
+  if (rawExcl) {
+    const ids = rawExcl.split(',').filter(Boolean)
+    excludedTagIds.value = new Set(ids.filter((id) => tagMap.value.has(id)))
+  }
   if (mode === 'or') tagMode.value = 'or'
+  if (untagged === '1') showUntagged.value = true
   if (search) {
     searchText.value = search
     debouncedText.value = search
   }
 }, { immediate: true })
 
+const excludedTagIdArray = computed(() => [...excludedTagIds.value])
+
 function syncUrl() {
   const query: Record<string, string> = {}
   if (selectedTagIds.value.size) query.tags = [...selectedTagIds.value].join(',')
+  if (excludedTagIds.value.size) query.exclude = [...excludedTagIds.value].join(',')
   if (tagMode.value === 'or') query.mode = 'or'
+  if (showUntagged.value) query.untagged = '1'
   if (debouncedText.value.trim()) query.search = debouncedText.value.trim()
   router.replace({ query: Object.keys(query).length ? query : {} })
 }
 
-watch([selectedTagIdArray, tagMode, debouncedText], syncUrl)
+watch([selectedTagIdArray, excludedTagIdArray, tagMode, debouncedText, showUntagged], syncUrl)
 
 // --- Document search ---
 
@@ -127,15 +140,22 @@ const selectedTags = computed(() =>
     .filter((t): t is Tag => !!t),
 )
 
+const excludedTags = computed(() =>
+  [...excludedTagIds.value]
+    .map((id) => tagMap.value.get(id))
+    .filter((t): t is Tag => !!t),
+)
+
 const combinedSearch = computed(() => {
   const parts: string[] = selectedTags.value.map((t) => `tag:${t.name}`)
+  for (const t of excludedTags.value) parts.push(`!tag:${t.name}`)
   const text = debouncedText.value.trim()
   if (text) parts.push(text)
   return parts.join(' ')
 })
 
 const hasActiveFilters = computed(() =>
-  selectedTagIds.value.size > 0 || debouncedText.value.trim().length > 0,
+  selectedTagIds.value.size > 0 || excludedTagIds.value.size > 0 || showUntagged.value || debouncedText.value.trim().length > 0,
 )
 
 const { data: documentsData, isLoading } = useQuery({
@@ -200,24 +220,96 @@ const relatedTags = computed(() => {
 
 // --- Actions ---
 
+// Tri-state: click cycles neutral -> included -> excluded -> neutral
 function toggleTag(tagId: string) {
-  const next = new Set(selectedTagIds.value)
-  if (next.has(tagId)) next.delete(tagId)
-  else next.add(tagId)
-  selectedTagIds.value = next
+  if (selectedTagIds.value.has(tagId)) {
+    const next = new Set(selectedTagIds.value)
+    next.delete(tagId)
+    selectedTagIds.value = next
+    const excl = new Set(excludedTagIds.value)
+    excl.add(tagId)
+    excludedTagIds.value = excl
+  } else if (excludedTagIds.value.has(tagId)) {
+    const excl = new Set(excludedTagIds.value)
+    excl.delete(tagId)
+    excludedTagIds.value = excl
+  } else {
+    const next = new Set(selectedTagIds.value)
+    next.add(tagId)
+    selectedTagIds.value = next
+  }
 }
 
 function removeTag(tagId: string) {
-  const next = new Set(selectedTagIds.value)
-  next.delete(tagId)
-  selectedTagIds.value = next
+  const sel = new Set(selectedTagIds.value)
+  sel.delete(tagId)
+  selectedTagIds.value = sel
+  const excl = new Set(excludedTagIds.value)
+  excl.delete(tagId)
+  excludedTagIds.value = excl
 }
 
 function clearFilters() {
   selectedTagIds.value = new Set()
+  excludedTagIds.value = new Set()
+  showUntagged.value = false
   searchText.value = ''
   debouncedText.value = ''
   tagMode.value = 'and'
+}
+
+// --- Quick tagging context menu ---
+
+const contextMenuDoc = ref<DocumentListItem | null>(null)
+const contextMenuVisible = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+
+function onDocContextMenu(event: MouseEvent, doc: DocumentListItem) {
+  event.preventDefault()
+  contextMenuDoc.value = doc
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  contextMenuVisible.value = true
+}
+
+function closeContextMenu() {
+  contextMenuVisible.value = false
+}
+
+async function quickAddTag(tagId: string) {
+  const doc = contextMenuDoc.value
+  if (!doc) return
+  const currentTagIds = doc.tags?.map((t) => t.id) ?? []
+  if (currentTagIds.includes(tagId)) return
+  const params = new URLSearchParams()
+  params.set('title', doc.title)
+  params.set('language', doc.language)
+  for (const id of [...currentTagIds, tagId]) params.append('tags', id)
+  try {
+    await updateDocument(doc.id, params)
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  } catch {
+    // silently fail
+  }
+  contextMenuVisible.value = false
+}
+
+async function quickRemoveTag(tagId: string) {
+  const doc = contextMenuDoc.value
+  if (!doc) return
+  const currentTagIds = doc.tags?.map((t) => t.id).filter((id) => id !== tagId) ?? []
+  const params = new URLSearchParams()
+  params.set('title', doc.title)
+  params.set('language', doc.language)
+  for (const id of currentTagIds) params.append('tags', id)
+  try {
+    await updateDocument(doc.id, params)
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  } catch {
+    // silently fail
+  }
+  contextMenuVisible.value = false
 }
 
 // --- Slide-over panel ---
@@ -337,7 +429,7 @@ watch(searchText, (val) => {
         />
       </div>
 
-      <!-- Controls zone (reserved for AND/OR, untagged, search) -->
+      <!-- Controls zone -->
       <div class="sidebar-controls">
         <SelectButton
           v-model="tagMode"
@@ -347,6 +439,15 @@ watch(searchText, (val) => {
           :allowEmpty="false"
           class="mode-toggle-sidebar"
         />
+        <button
+          class="untagged-toggle"
+          :class="{ active: showUntagged }"
+          @click="showUntagged = !showUntagged"
+          title="Show untagged documents"
+        >
+          <i class="pi pi-circle" />
+          <span>Untagged</span>
+        </button>
       </div>
 
       <!-- Tag tree -->
@@ -361,10 +462,13 @@ watch(searchText, (val) => {
               class="tag-tree-node"
               :class="{
                 'tag-active': selectedTagIds.has(node.key),
-                'tag-dimmed': selectedTagIds.size > 0 && !selectedTagIds.has(node.key) && !(tagCounts[node.key] > 0),
+                'tag-excluded': excludedTagIds.has(node.key),
+                'tag-dimmed': !selectedTagIds.has(node.key) && !excludedTagIds.has(node.key) && selectedTagIds.size > 0 && !(tagCounts[node.key] > 0),
               }"
               @click.stop="toggleTag(node.key)"
             >
+              <i v-if="selectedTagIds.has(node.key)" class="pi pi-check-circle state-icon include" />
+              <i v-else-if="excludedTagIds.has(node.key)" class="pi pi-minus-circle state-icon exclude" />
               <span class="tag-dot" :style="{ background: node.data.color }" />
               <span class="tag-name">{{ node.label }}</span>
               <span class="tag-count" v-if="tagCounts[node.key] !== undefined">
@@ -424,10 +528,13 @@ watch(searchText, (val) => {
                 class="tag-tree-node"
                 :class="{
                   'tag-active': selectedTagIds.has(node.key),
-                  'tag-dimmed': selectedTagIds.size > 0 && !selectedTagIds.has(node.key) && !(tagCounts[node.key] > 0),
+                  'tag-excluded': excludedTagIds.has(node.key),
+                  'tag-dimmed': !selectedTagIds.has(node.key) && !excludedTagIds.has(node.key) && selectedTagIds.size > 0 && !(tagCounts[node.key] > 0),
                 }"
                 @click.stop="toggleTag(node.key)"
               >
+                <i v-if="selectedTagIds.has(node.key)" class="pi pi-check-circle state-icon include" />
+                <i v-else-if="excludedTagIds.has(node.key)" class="pi pi-minus-circle state-icon exclude" />
                 <span class="tag-dot" :style="{ background: node.data.color }" />
                 <span class="tag-name">{{ node.label }}</span>
                 <span class="tag-count" v-if="tagCounts[node.key] !== undefined">
@@ -480,8 +587,8 @@ watch(searchText, (val) => {
           <span v-if="totalCount" class="doc-count">{{ totalCount }} doc{{ totalCount !== 1 ? 's' : '' }}</span>
         </div>
 
-        <!-- Active tag chips + related tags -->
-        <div v-if="selectedTags.length || relatedTags.length" class="chip-row">
+        <!-- Active tag chips + excluded chips + related tags -->
+        <div v-if="selectedTags.length || excludedTags.length || relatedTags.length" class="chip-row">
           <Chip
             v-for="tag in selectedTags"
             :key="tag.id"
@@ -492,6 +599,19 @@ watch(searchText, (val) => {
             <template #default>
               <span class="chip-dot" :style="{ background: tag.color }" />
               <span class="chip-label">{{ tag.name }}</span>
+            </template>
+          </Chip>
+
+          <Chip
+            v-for="tag in excludedTags"
+            :key="'excl-' + tag.id"
+            removable
+            @remove="removeTag(tag.id)"
+            class="excluded-chip"
+          >
+            <template #default>
+              <i class="pi pi-minus-circle excl-icon" />
+              <span class="chip-label chip-excluded-label">{{ tag.name }}</span>
             </template>
           </Chip>
 
@@ -524,6 +644,7 @@ watch(searchText, (val) => {
           :rowHover="true"
           class="doc-table"
           @row-click="(e: any) => openDocument(e.data)"
+          @row-contextmenu="(e: any) => onDocContextMenu(e.originalEvent, e.data)"
           selectionMode="single"
         >
           <Column header="" style="width: 44px">
@@ -586,6 +707,43 @@ watch(searchText, (val) => {
     </div>
 
     <!-- Document slide-over panel -->
+    <!-- Quick-tag context menu -->
+    <div
+      v-if="contextMenuVisible"
+      class="ctx-menu-backdrop"
+      @click="closeContextMenu"
+      @contextmenu.prevent="closeContextMenu"
+    />
+    <div
+      v-if="contextMenuVisible && contextMenuDoc"
+      class="ctx-menu"
+      :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
+    >
+      <div class="ctx-menu-header">Add tag</div>
+      <template v-if="allTags.length">
+        <button
+          v-for="tag in allTags.filter(t => !(contextMenuDoc?.tags ?? []).some(dt => dt.id === t.id))"
+          :key="tag.id"
+          class="ctx-menu-item"
+          @click="quickAddTag(tag.id)"
+        >
+          <span class="tag-dot" :style="{ background: tag.color }" />
+          {{ tag.name }}
+        </button>
+      </template>
+      <div v-if="contextMenuDoc.tags?.length" class="ctx-menu-header" style="margin-top: 0.25rem">Remove tag</div>
+      <button
+        v-for="tag in (contextMenuDoc.tags ?? [])"
+        :key="'rm-' + tag.id"
+        class="ctx-menu-item ctx-menu-remove"
+        @click="quickRemoveTag(tag.id)"
+      >
+        <span class="tag-dot" :style="{ background: tag.color }" />
+        {{ tag.name }}
+        <i class="pi pi-times" />
+      </button>
+    </div>
+
     <Drawer
       v-model:visible="slideOverOpen"
       position="right"
@@ -793,6 +951,34 @@ watch(searchText, (val) => {
   font-weight: 600;
 }
 
+.untagged-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.untagged-toggle:hover {
+  border-color: var(--p-primary-color);
+  color: var(--p-text-color);
+}
+.untagged-toggle.active {
+  background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
+  border-color: var(--p-primary-color);
+  color: var(--p-primary-color);
+}
+.untagged-toggle i {
+  font-size: 0.625rem;
+}
+
 .sidebar-footer {
   border-top: 1px solid var(--p-content-border-color);
   padding: 0.5rem 0.75rem;
@@ -857,8 +1043,24 @@ watch(searchText, (val) => {
   background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
   font-weight: 600;
 }
+.tag-tree-node.tag-excluded {
+  background: color-mix(in srgb, var(--p-red-500, #ef4444) 10%, transparent);
+  text-decoration: line-through;
+  opacity: 0.7;
+}
 .tag-tree-node.tag-dimmed {
   opacity: 0.4;
+}
+
+.state-icon {
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+.state-icon.include {
+  color: var(--p-primary-color);
+}
+.state-icon.exclude {
+  color: var(--p-red-500, #ef4444);
 }
 
 .tag-dot {
@@ -954,6 +1156,21 @@ watch(searchText, (val) => {
 }
 .chip-label {
   font-size: 0.8125rem;
+}
+
+.excluded-chip {
+  opacity: 0.8;
+}
+.excluded-chip :deep(.p-chip) {
+  background: color-mix(in srgb, var(--p-red-500, #ef4444) 10%, transparent) !important;
+}
+.excl-icon {
+  font-size: 0.625rem;
+  color: var(--p-red-500, #ef4444);
+  margin-right: 0.25rem;
+}
+.chip-excluded-label {
+  text-decoration: line-through;
 }
 
 .chip-separator {
@@ -1319,6 +1536,66 @@ watch(searchText, (val) => {
   gap: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--p-content-border-color);
+}
+
+/* --- Context menu --- */
+
+.ctx-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  min-width: 180px;
+  max-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0.375rem;
+}
+
+.ctx-menu-header {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--p-text-muted-color);
+  padding: 0.375rem 0.5rem 0.25rem;
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  background: none;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  color: var(--p-text-color);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s;
+  text-align: left;
+}
+.ctx-menu-item:hover {
+  background: var(--p-content-hover-background);
+}
+
+.ctx-menu-remove {
+  color: var(--p-text-muted-color);
+}
+.ctx-menu-remove .pi-times {
+  margin-left: auto;
+  font-size: 0.625rem;
+  opacity: 0.5;
 }
 
 /* --- Mobile --- */
