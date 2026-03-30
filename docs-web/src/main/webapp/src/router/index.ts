@@ -31,11 +31,10 @@ const router = createRouter({
           name: 'documents',
           component: () => import('../views/document/DocumentList.vue'),
         },
-        // Browse (faceted tag navigation)
+        // Legacy browse route redirects to documents (merged in v2.6)
         {
           path: 'browse',
-          name: 'browse',
-          component: () => import('../views/tag/TagBrowser.vue'),
+          redirect: { name: 'documents' },
         },
         {
           path: 'document/trash',

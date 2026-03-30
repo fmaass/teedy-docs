@@ -16,7 +16,6 @@ function isActive(item: { prefix: string; exact?: boolean }) {
 
 const navItems = [
   { label: 'Documents', icon: 'pi pi-file', to: '/document', prefix: 'document', exact: true },
-  { label: 'Browse', icon: 'pi pi-folder', to: '/browse', prefix: 'browse' },
   { label: 'Trash', icon: 'pi pi-trash', to: '/document/trash', prefix: 'document/trash' },
   { label: 'Tags', icon: 'pi pi-tags', to: '/tag', prefix: 'tag' },
   { label: 'Users & Groups', icon: 'pi pi-users', to: '/user', prefix: 'user' },
