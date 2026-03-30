@@ -93,11 +93,10 @@ const router = createRouter({
           component: () => import('../views/tag/TagEdit.vue'),
           props: true,
         },
-        // Users & Groups
+        // Legacy user route redirects to settings (merged in v2.6)
         {
           path: 'user',
-          name: 'user-groups',
-          component: () => import('../views/user/UserGroupDefault.vue'),
+          redirect: { name: 'settings-users' },
         },
         // Settings
         {

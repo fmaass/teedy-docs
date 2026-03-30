@@ -6,8 +6,6 @@ import Button from 'primevue/button'
 const router = useRouter()
 const auth = useAuthStore()
 
-const emit = defineEmits<{ toggleSidebar: [] }>()
-
 function toggleDarkMode() {
   const isDark = document.documentElement.classList.toggle('dark-mode')
   localStorage.setItem('teedy-dark-mode', isDark ? 'true' : 'false')
@@ -21,13 +19,18 @@ async function handleLogout() {
 
 <template>
   <header class="action-bar" v-if="!auth.isAnonymous">
-    <button class="mobile-toggle" @click="emit('toggleSidebar')" aria-label="Toggle sidebar">
-      <i class="pi pi-bars" />
-    </button>
-
     <div class="action-spacer" />
 
     <div class="action-items">
+      <Button
+        icon="pi pi-trash"
+        text
+        rounded
+        size="small"
+        @click="router.push({ name: 'document-trash' })"
+        aria-label="Trash"
+        v-tooltip.bottom="'Trash'"
+      />
       <Button
         icon="pi pi-moon"
         text
@@ -35,6 +38,7 @@ async function handleLogout() {
         size="small"
         @click="toggleDarkMode"
         aria-label="Toggle dark mode"
+        v-tooltip.bottom="'Dark mode'"
       />
       <span class="user-name">{{ auth.username }}</span>
       <Button
@@ -44,6 +48,7 @@ async function handleLogout() {
         size="small"
         @click="handleLogout"
         aria-label="Logout"
+        v-tooltip.bottom="'Logout'"
       />
     </div>
   </header>
@@ -54,20 +59,10 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 1rem;
   border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
-  min-height: 48px;
-}
-
-.mobile-toggle {
-  display: none;
-  background: none;
-  border: none;
-  color: var(--p-text-color);
-  font-size: 1.125rem;
-  cursor: pointer;
-  padding: 0.375rem;
+  min-height: 40px;
 }
 
 .action-spacer {
@@ -77,18 +72,12 @@ async function handleLogout() {
 .action-items {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .user-name {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
   padding: 0 0.375rem;
-}
-
-@media (max-width: 768px) {
-  .mobile-toggle {
-    display: flex;
-  }
 }
 </style>

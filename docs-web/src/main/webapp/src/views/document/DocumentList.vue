@@ -274,11 +274,34 @@ watch(searchText, (val) => {
 
 <template>
   <div class="unified-view">
-    <!-- Tag tree sidebar (desktop) -->
+    <!-- Left panel (desktop) -->
     <aside v-if="!isMobile" class="tag-sidebar">
-      <div class="tag-sidebar-header">
-        <span class="tag-sidebar-title">Tags</span>
+      <!-- Top zone: brand + add document -->
+      <div class="sidebar-brand-row">
+        <router-link to="/document" class="sidebar-brand">teedy</router-link>
+        <Button
+          icon="pi pi-plus"
+          size="small"
+          rounded
+          @click="router.push({ name: 'document-add' })"
+          aria-label="Add document"
+          v-tooltip.right="'Add document'"
+        />
       </div>
+
+      <!-- Controls zone (reserved for AND/OR, untagged, search) -->
+      <div class="sidebar-controls">
+        <SelectButton
+          v-model="tagMode"
+          :options="modeOptions"
+          optionLabel="label"
+          optionValue="value"
+          :allowEmpty="false"
+          class="mode-toggle-sidebar"
+        />
+      </div>
+
+      <!-- Tag tree -->
       <div class="tag-tree-container">
         <Tree
           :value="tagTreeNodes"
@@ -306,39 +329,76 @@ watch(searchText, (val) => {
           <span class="meta">No tags yet</span>
         </div>
       </div>
+
+      <!-- Footer nav -->
+      <div class="sidebar-footer">
+        <router-link to="/tag" class="footer-link">
+          <i class="pi pi-tags" />
+          <span>Manage tags</span>
+        </router-link>
+        <router-link to="/settings" class="footer-link">
+          <i class="pi pi-cog" />
+          <span>Settings</span>
+        </router-link>
+      </div>
     </aside>
 
-    <!-- Mobile tag drawer toggle -->
+    <!-- Mobile drawer -->
     <Drawer
       v-if="isMobile"
       v-model:visible="tagDrawerOpen"
       position="left"
-      header="Tags"
+      :showCloseIcon="true"
       class="tag-drawer"
     >
-      <div class="tag-tree-container">
-        <Tree
-          :value="tagTreeNodes"
-          :expandedKeys="expandedKeys"
-          class="tag-tree"
-        >
-          <template #default="{ node }">
-            <div
-              class="tag-tree-node"
-              :class="{
-                'tag-active': selectedTagIds.has(node.key),
-                'tag-dimmed': selectedTagIds.size > 0 && !selectedTagIds.has(node.key) && !(tagCounts[node.key] > 0),
-              }"
-              @click.stop="toggleTag(node.key)"
-            >
-              <span class="tag-dot" :style="{ background: node.data.color }" />
-              <span class="tag-name">{{ node.label }}</span>
-              <span class="tag-count" v-if="tagCounts[node.key] !== undefined">
-                {{ tagCounts[node.key] }}
-              </span>
-            </div>
-          </template>
-        </Tree>
+      <template #header>
+        <router-link to="/document" class="sidebar-brand">teedy</router-link>
+      </template>
+      <div class="mobile-drawer-body">
+        <div class="sidebar-controls">
+          <SelectButton
+            v-model="tagMode"
+            :options="modeOptions"
+            optionLabel="label"
+            optionValue="value"
+            :allowEmpty="false"
+            class="mode-toggle-sidebar"
+          />
+        </div>
+        <div class="tag-tree-container">
+          <Tree
+            :value="tagTreeNodes"
+            :expandedKeys="expandedKeys"
+            class="tag-tree"
+          >
+            <template #default="{ node }">
+              <div
+                class="tag-tree-node"
+                :class="{
+                  'tag-active': selectedTagIds.has(node.key),
+                  'tag-dimmed': selectedTagIds.size > 0 && !selectedTagIds.has(node.key) && !(tagCounts[node.key] > 0),
+                }"
+                @click.stop="toggleTag(node.key)"
+              >
+                <span class="tag-dot" :style="{ background: node.data.color }" />
+                <span class="tag-name">{{ node.label }}</span>
+                <span class="tag-count" v-if="tagCounts[node.key] !== undefined">
+                  {{ tagCounts[node.key] }}
+                </span>
+              </div>
+            </template>
+          </Tree>
+        </div>
+        <div class="sidebar-footer">
+          <router-link to="/tag" class="footer-link" @click="tagDrawerOpen = false">
+            <i class="pi pi-tags" />
+            <span>Manage tags</span>
+          </router-link>
+          <router-link to="/settings" class="footer-link" @click="tagDrawerOpen = false">
+            <i class="pi pi-cog" />
+            <span>Settings</span>
+          </router-link>
+        </div>
       </div>
     </Drawer>
 
@@ -346,41 +406,19 @@ watch(searchText, (val) => {
     <div class="main-content">
       <!-- Address bar -->
       <div class="address-bar">
-        <div class="address-row">
-          <div class="address-left">
-            <Button
-              v-if="isMobile"
-              icon="pi pi-tags"
-              text
-              size="small"
-              @click="tagDrawerOpen = true"
-              class="mobile-tag-btn"
-            />
-            <h1 class="page-title">Documents</h1>
-            <span v-if="totalCount" class="doc-count">{{ totalCount }}</span>
-          </div>
-          <Button
-            label="Add document"
-            icon="pi pi-plus"
-            size="small"
-            @click="router.push({ name: 'document-add' })"
-          />
-        </div>
-
-        <!-- Search + mode toggle -->
         <div class="search-row">
+          <Button
+            v-if="isMobile"
+            icon="pi pi-bars"
+            text
+            size="small"
+            @click="tagDrawerOpen = true"
+            class="mobile-menu-btn"
+          />
           <InputText
             v-model="searchText"
             placeholder="Search documents..."
             class="search-input"
-          />
-          <SelectButton
-            v-model="tagMode"
-            :options="modeOptions"
-            optionLabel="label"
-            optionValue="value"
-            :allowEmpty="false"
-            class="mode-toggle"
           />
           <Button
             v-if="hasActiveFilters"
@@ -391,6 +429,7 @@ watch(searchText, (val) => {
             severity="secondary"
             @click="clearFilters"
           />
+          <span v-if="totalCount" class="doc-count">{{ totalCount }} doc{{ totalCount !== 1 ? 's' : '' }}</span>
         </div>
 
         <!-- Active tag chips + related tags -->
@@ -615,19 +654,69 @@ watch(searchText, (val) => {
   overflow: hidden;
 }
 
-.tag-sidebar-header {
-  padding: 1rem 1rem 0.5rem;
+.sidebar-brand-row {
+  padding: 0.75rem 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.tag-sidebar-title {
-  font-size: 0.75rem;
+.sidebar-brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--p-primary-color);
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+.sidebar-brand:hover {
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.sidebar-controls {
+  padding: 0 0.75rem 0.5rem;
+  display: flex;
+  gap: 0.375rem;
+}
+
+.mode-toggle-sidebar :deep(.p-selectbutton) {
+  height: 1.75rem;
+}
+.mode-toggle-sidebar :deep(.p-togglebutton) {
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--p-content-border-color);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+.footer-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8125rem;
   color: var(--p-text-muted-color);
+  text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.footer-link:hover {
+  background: var(--p-content-hover-background);
+  color: var(--p-text-color);
+  text-decoration: none;
+}
+.footer-link i {
+  font-size: 0.875rem;
+  width: 1.125rem;
+  text-align: center;
 }
 
 .tag-tree-container {
@@ -711,38 +800,17 @@ watch(searchText, (val) => {
 /* --- Address bar --- */
 
 .address-bar {
-  padding: 1rem 1.5rem 0;
+  padding: 0.75rem 1.5rem 0;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-  flex-shrink: 0;
-}
-
-.address-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.address-left {
-  display: flex;
-  align-items: center;
   gap: 0.5rem;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 1.375rem;
-  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .doc-count {
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
-  background: var(--p-content-hover-background);
-  padding: 0.125rem 0.5rem;
-  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .search-row {
@@ -756,15 +824,6 @@ watch(searchText, (val) => {
   flex: 1;
   min-width: 200px;
   max-width: 400px;
-}
-
-.mode-toggle :deep(.p-selectbutton) {
-  height: 2rem;
-}
-.mode-toggle :deep(.p-togglebutton) {
-  padding: 0.25rem 0.625rem;
-  font-size: 0.75rem;
-  font-weight: 600;
 }
 
 /* --- Chip row --- */
@@ -1040,8 +1099,17 @@ watch(searchText, (val) => {
 
 /* --- Mobile --- */
 
-.mobile-tag-btn {
-  margin-right: 0.25rem;
+.mobile-menu-btn {
+  flex-shrink: 0;
+}
+
+.mobile-drawer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.mobile-drawer-body .tag-tree-container {
+  flex: 1;
 }
 
 .tag-drawer :deep(.p-drawer) {
