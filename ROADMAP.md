@@ -149,6 +149,9 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.5.0) fo
 - Tag tree always visible alongside documents, with facet-driven counts and auto-expand to active branches
 - Document slide-over panel (side peek) to preview documents without leaving the list
 - AND/OR toggle for tag intersection vs union mode
+- Tag exclusion UI: tri-state per tag (neutral / included / excluded) with visual differentiation on chips; backend `!tag:` / `search[nottag]` already supports this
+- Untagged document filter: "Untagged" pseudo-node or toggle to surface documents with zero tags
+- Quick tagging from document list: right-click context menu with tag picker to add/remove tags without opening the edit form
 - Replaces the separate Documents and Browse navigation items with a single "Documents" view
 
 ### Login brute force protection
@@ -181,15 +184,17 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.5.0) fo
 - Enforce mixed-case + digit or zxcvbn-based strength check
 - Reject passwords matching the username
 
+### Bulk operations
+
+- Multi-select in the document list (PrimeVue DataTable `selectionMode="multiple"`) with select-all
+- Bulk add tags, remove tags, delete (to trash), and set language via floating toolbar or context menu
+- `POST /document/bulk` endpoint to batch operations without N individual API calls
+- Natural extension of the quick-tagging context menu in the unified view
+
 ### Folder ingestion
 
 - Watch a filesystem directory for new files and auto-import as documents
 - Configurable polling interval, post-processing (delete or move), error handling
-
-### Improved search syntax
-
-- Expose Lucene's query capabilities in the UI (AND/OR/NOT operators, date ranges, field-specific queries)
-- Search syntax help/documentation in the UI
 
 ---
 
@@ -197,9 +202,14 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.5.0) fo
 
 Lower-priority ideas that may be worth exploring:
 
+- **Tag merging**: consolidate duplicate or similar tags into one, reassigning all document links
+- **Tag aliases**: multiple search names per tag (e.g., "Invoice" also matches "Rechnung") for search and auto-tag matching
+- **Tag icons**: optional emoji or icon per tag for visual scanability beyond color dots
+- **Hidden tags**: flag to hide infrequently-used tags from the tree with a "show hidden" toggle
+- **Keyboard shortcuts for tags**: shortcuts for AND/OR toggle, tag focus, and hotkey tagging (assign 1-9 to favorite tags)
+- **Improved search syntax**: expose Lucene operators in UI (AND/OR/NOT, date ranges, field-specific queries) with syntax help popover
 - **S3-compatible storage backend**: store files in object storage instead of local filesystem
 - **Admin-only tag management** (upstream [sismics/docs#323](https://github.com/sismics/docs/issues/323)): RBAC for tag creation
-- **Bulk operations UI**: select multiple documents for tagging, moving, or deleting
 - **Document templates**: pre-filled metadata for common document types
 - **Webhook / event system enhancements**: document lifecycle events for external automation
 - **Improved email integration** (upstream [sismics/docs#352](https://github.com/sismics/docs/issues/352)): IMAP monitoring, attachment extraction
