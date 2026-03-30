@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { type DocumentDetail } from '../../api/document'
 import { getFileUrl, deleteFile, renameFile } from '../../api/file'
+import PdfViewer from '../../components/PdfViewer.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import { useToast } from 'primevue/usetoast'
@@ -94,7 +95,7 @@ function confirmDelete(file: { id: string; name: string }) {
           <img :src="getFileUrl(file.id, 'web')" :alt="file.name" loading="lazy" />
         </div>
         <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview">
-          <iframe :src="getFileUrl(file.id)" :title="file.name" />
+          <PdfViewer :src="getFileUrl(file.id)" />
         </div>
       </template>
     </div>
@@ -192,11 +193,6 @@ function confirmDelete(file: { id: string; name: string }) {
 .file-preview img {
   width: 100%;
   display: block;
-}
-.file-preview iframe {
-  width: 100%;
-  height: 500px;
-  border: none;
 }
 
 .file-list-section {
