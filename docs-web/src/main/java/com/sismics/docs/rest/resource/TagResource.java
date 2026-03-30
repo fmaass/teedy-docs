@@ -373,14 +373,18 @@ public class TagResource extends BaseResource {
      * Given selected tags, returns other tags that appear on matching documents with counts.
      *
      * @param tagsParam Comma-separated tag IDs (optional, empty = all tags)
+     * @param modeParam Tag combination mode: "and" (default) or "or"
      * @return Response with facet counts and total matching documents
      */
     @GET
     @Path("/facets")
-    public Response facets(@QueryParam("tags") String tagsParam) {
+    public Response facets(@QueryParam("tags") String tagsParam,
+                           @QueryParam("mode") String modeParam) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
+
+        boolean orMode = "or".equalsIgnoreCase(modeParam);
 
         TagDao tagDao = new TagDao();
         java.util.List<String> selectedTagIds = new java.util.ArrayList<>();
@@ -393,8 +397,12 @@ public class TagResource extends BaseResource {
             }
         }
 
-        java.util.Map<String, Long> counts = tagDao.getCoOccurringTagCounts(selectedTagIds);
-        long total = selectedTagIds.isEmpty() ? 0 : tagDao.countDocumentsWithAllTags(selectedTagIds);
+        java.util.Map<String, Long> counts = orMode
+                ? tagDao.getCoOccurringTagCountsOr(selectedTagIds)
+                : tagDao.getCoOccurringTagCounts(selectedTagIds);
+        long total = selectedTagIds.isEmpty() ? 0
+                : orMode ? tagDao.countDocumentsWithAnyTag(selectedTagIds)
+                         : tagDao.countDocumentsWithAllTags(selectedTagIds);
 
         JsonObjectBuilder facets = Json.createObjectBuilder();
         for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {

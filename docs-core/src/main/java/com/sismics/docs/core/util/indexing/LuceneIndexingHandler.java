@@ -312,7 +312,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
             parameterMap.put("title", criteria.getTitleList());
         }
         if (!criteria.getTagIdList().isEmpty()) {
+            boolean orMode = "or".equalsIgnoreCase(criteria.getTagMode());
             int index = 0;
+            List<String> allTagCriteria = orMode ? Lists.newArrayList() : null;
             for (List<String> tagIdList : criteria.getTagIdList()) {
                 List<String> tagCriteriaList = Lists.newArrayList();
                 for (String tagId : tagIdList) {
@@ -321,7 +323,14 @@ public class LuceneIndexingHandler implements IndexingHandler {
                     tagCriteriaList.add(String.format("dt%d.DOT_ID_C is not null", index));
                     index++;
                 }
-                criteriaList.add("(" + Joiner.on(" OR ").join(tagCriteriaList) + ")");
+                if (orMode) {
+                    allTagCriteria.addAll(tagCriteriaList);
+                } else {
+                    criteriaList.add("(" + Joiner.on(" OR ").join(tagCriteriaList) + ")");
+                }
+            }
+            if (orMode && !allTagCriteria.isEmpty()) {
+                criteriaList.add("(" + Joiner.on(" OR ").join(allTagCriteria) + ")");
             }
         }
         if (!criteria.getExcludedTagIdList().isEmpty()) {

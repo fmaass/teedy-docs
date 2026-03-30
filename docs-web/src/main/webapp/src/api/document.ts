@@ -65,6 +65,7 @@ export interface DocumentListParams {
   asc?: boolean
   search?: string
   files?: boolean
+  'search[tagMode]'?: 'and' | 'or'
 }
 
 export function listDocuments(params: DocumentListParams) {

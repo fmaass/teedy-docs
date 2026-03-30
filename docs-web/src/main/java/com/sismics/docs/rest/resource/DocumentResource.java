@@ -449,7 +449,8 @@ public class DocumentResource extends BaseResource {
             @QueryParam("search[title]") String searchTitle,
             @QueryParam("search[uafter]") String searchUpdatedAfter,
             @QueryParam("search[ubefore]") String searchUpdatedBefore,
-            @QueryParam("search[searchworkflow]") String searchWorkflow
+            @QueryParam("search[searchworkflow]") String searchWorkflow,
+            @QueryParam("search[tagMode]") String searchTagMode
     ) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -483,6 +484,10 @@ public class DocumentResource extends BaseResource {
                 searchUpdatedBefore,
                 searchWorkflow,
                 allTagDtoList);
+
+        if ("or".equalsIgnoreCase(searchTagMode)) {
+            documentCriteria.setTagMode("or");
+        }
 
         documentCriteria.setTargetIdList(getTargetIdList(null));
         try {
@@ -586,7 +591,8 @@ public class DocumentResource extends BaseResource {
             @FormParam("search[title]") String searchTitle,
             @FormParam("search[uafter]") String searchUpdatedAfter,
             @FormParam("search[ubefore]") String searchUpdatedBefore,
-            @FormParam("search[searchworkflow]") String searchWorkflow
+            @FormParam("search[searchworkflow]") String searchWorkflow,
+            @FormParam("search[tagMode]") String searchTagMode
     ) {
         return list(
                 limit,
@@ -608,7 +614,8 @@ public class DocumentResource extends BaseResource {
                 searchTitle,
                 searchUpdatedAfter,
                 searchUpdatedBefore,
-                searchWorkflow
+                searchWorkflow,
+                searchTagMode
         );
     }
 

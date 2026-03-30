@@ -112,6 +112,48 @@ public class TestTagFacetResource extends BaseJerseyTest {
         Assertions.assertFalse(facets.containsKey(tagAId));
         Assertions.assertFalse(facets.containsKey(tagBId));
 
+        // GET /tag/facets with tagA selected, OR mode -- docs matching ANY of tagA = doc1, doc2
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagAId)
+                .queryParam("mode", "or")
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        facets = json.getJsonObject("facets");
+        Assertions.assertEquals(2, json.getInt("total"));
+        Assertions.assertEquals(1, facets.getInt(tagBId));
+        Assertions.assertEquals(1, facets.getInt(tagCId));
+
+        // GET /tag/facets with tagA + tagB selected, OR mode -- docs matching ANY = doc1, doc2, doc3 (3 total)
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagAId + "," + tagBId)
+                .queryParam("mode", "or")
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        facets = json.getJsonObject("facets");
+        Assertions.assertEquals(3, json.getInt("total"));
+        Assertions.assertEquals(1, facets.getInt(tagCId));
+        Assertions.assertFalse(facets.containsKey(tagAId));
+        Assertions.assertFalse(facets.containsKey(tagBId));
+
+        // GET /document/list with tagMode=or -- doc1(A,B) + doc2(A,C) + doc3(B) all match A or B
+        json = target().path("/document/list")
+                .queryParam("search", "tag:FacetTagA tag:FacetTagB")
+                .queryParam("search[tagMode]", "or")
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, json.getInt("total"));
+
+        // GET /document/list with tagMode=and (default) -- only doc1 has both A and B
+        json = target().path("/document/list")
+                .queryParam("search", "tag:FacetTagA tag:FacetTagB")
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getInt("total"));
+
         // Cleanup
         target().path("/document/" + doc1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();

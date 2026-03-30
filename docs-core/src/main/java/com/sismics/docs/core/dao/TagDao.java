@@ -306,5 +306,58 @@ public class TagDao {
         q.setParameter("tagCount", (long) tagIds.size());
         return ((Number) q.getSingleResult()).longValue();
     }
+
+    /**
+     * Returns tags that co-occur with any of the given selected tags (OR logic).
+     *
+     * @param selectedTagIds List of currently selected tag IDs
+     * @return Map of tag ID to document count (excludes already-selected tags)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getCoOccurringTagCountsOr(List<String> selectedTagIds) {
+        if (selectedTagIds == null || selectedTagIds.isEmpty()) {
+            return getTagDocumentCounts();
+        }
+
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
+                "from T_DOCUMENT_TAG dt " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "where dt.DOT_DELETEDATE_D is null " +
+                "and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
+                "and dt.DOT_IDDOCUMENT_C in (" +
+                "  select dt2.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt2 " +
+                "  where dt2.DOT_IDTAG_C in (:selectedTagIds) " +
+                "  and dt2.DOT_DELETEDATE_D is null " +
+                ") " +
+                "group by dt.DOT_IDTAG_C");
+        q.setParameter("selectedTagIds", selectedTagIds);
+        List<Object[]> rows = q.getResultList();
+        Map<String, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            result.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
+    }
+
+    /**
+     * Counts documents matching any of the given tags (OR logic).
+     *
+     * @param tagIds Tag IDs
+     * @return Number of matching documents
+     */
+    public long countDocumentsWithAnyTag(List<String> tagIds) {
+        if (tagIds == null || tagIds.isEmpty()) {
+            return 0;
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select count(distinct dt.DOT_IDDOCUMENT_C) from T_DOCUMENT_TAG dt " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null");
+        q.setParameter("tagIds", tagIds);
+        return ((Number) q.getSingleResult()).longValue();
+    }
 }
 
