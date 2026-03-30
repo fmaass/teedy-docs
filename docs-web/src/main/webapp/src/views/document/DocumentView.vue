@@ -19,6 +19,17 @@ const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
+const returnTo = computed(() => (history.state?.returnTo as string) || null)
+const filterLabel = computed(() => (history.state?.filterLabel as string) || null)
+
+function goBack() {
+  if (returnTo.value) {
+    router.push(returnTo.value)
+  } else {
+    router.push({ name: 'documents' })
+  }
+}
+
 const { data: doc, isLoading: loading, error } = useQuery({
   queryKey: computed(() => ['document', props.id]),
   queryFn: () => getDocument(props.id).then((r) => r.data),
@@ -82,6 +93,15 @@ function handleDelete() {
 
 <template>
   <div class="doc-view">
+    <!-- Back bar -->
+    <div class="back-bar">
+      <button class="back-link" @click="goBack">
+        <i class="pi pi-arrow-left" />
+        <span>Documents</span>
+      </button>
+      <span v-if="filterLabel" class="back-filter">· {{ filterLabel }}</span>
+    </div>
+
     <!-- Loading skeleton -->
     <div v-if="loading" class="doc-view-loading">
       <Skeleton width="60%" height="2rem" class="mb-2" />
@@ -151,6 +171,44 @@ function handleDelete() {
 .doc-view {
   padding: 1.5rem;
   max-width: 960px;
+}
+
+.back-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+  font-size: 0.8125rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: none;
+  border: none;
+  color: var(--p-primary-color);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  margin: -0.25rem -0.5rem;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.back-link:hover {
+  background: var(--p-content-hover-background);
+}
+.back-link i {
+  font-size: 0.75rem;
+}
+
+.back-filter {
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .doc-view-loading {

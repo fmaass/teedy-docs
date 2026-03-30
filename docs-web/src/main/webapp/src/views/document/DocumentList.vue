@@ -239,9 +239,28 @@ async function openSlideOver(doc: DocumentListItem) {
   }
 }
 
+function buildFilterLabel(): string {
+  const parts: string[] = []
+  for (const tag of selectedTags.value) parts.push(tag.name)
+  if (debouncedText.value.trim()) parts.push(`"${debouncedText.value.trim()}"`)
+  return parts.join(' · ')
+}
+
 function openFullView() {
   if (slideOverDoc.value) {
-    router.push({ name: 'document-view', params: { id: slideOverDoc.value.id } })
+    const returnQuery: Record<string, string> = {}
+    if (selectedTagIds.value.size) returnQuery.tags = [...selectedTagIds.value].join(',')
+    if (tagMode.value === 'or') returnQuery.mode = 'or'
+    if (debouncedText.value.trim()) returnQuery.search = debouncedText.value.trim()
+
+    router.push({
+      name: 'document-view',
+      params: { id: slideOverDoc.value.id },
+      state: {
+        returnTo: router.resolve({ name: 'documents', query: returnQuery }).fullPath,
+        filterLabel: buildFilterLabel() || undefined,
+      },
+    })
   }
 }
 
