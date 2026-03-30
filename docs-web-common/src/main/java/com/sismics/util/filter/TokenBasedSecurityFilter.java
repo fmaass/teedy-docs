@@ -25,9 +25,11 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
     public static final String COOKIE_NAME = "auth_token";
 
     /**
-     * Lifetime of the authentication token in seconds, since login.
+     * Lifetime of the long-lived authentication token in seconds.
+     * Configurable via DOCS_SESSION_LIFETIME_DAYS env var (default 90 days).
      */
-    public static final int TOKEN_LONG_LIFETIME = 3600 * 24 * 365 * 20;
+    public static final int TOKEN_LONG_LIFETIME = Integer.parseInt(
+            System.getenv().getOrDefault("DOCS_SESSION_LIFETIME_DAYS", "90")) * 3600 * 24;
     
     /**
      * Lifetime of the authentication token in seconds, since last connection.

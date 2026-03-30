@@ -69,7 +69,7 @@ public class TestSecurity extends BaseJerseyTest {
         Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
 
         // User testsecurity logs in with a long lived session
-        testSecurityToken = clientUtil.login("testsecurity", "12345678", true);
+        testSecurityToken = clientUtil.login("testsecurity", "Test1234", true);
 
         // User testsecurity logs out
         clientUtil.logout(testSecurityToken);
