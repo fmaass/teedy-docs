@@ -1,9 +1,12 @@
-<script setup lang="ts">
-import SettingsNav from '../../components/SettingsNav.vue'
-</script>
-
 <template>
-  <SettingsNav>
+  <div class="settings-content">
     <router-view />
-  </SettingsNav>
+  </div>
 </template>
+
+<style scoped>
+.settings-content {
+  padding: 1.5rem;
+  max-width: 800px;
+}
+</style>

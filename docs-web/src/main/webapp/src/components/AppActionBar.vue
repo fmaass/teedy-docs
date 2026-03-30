@@ -3,6 +3,9 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import Button from 'primevue/button'
 
+defineProps<{ isMobile?: boolean }>()
+const emit = defineEmits<{ toggleDrawer: [] }>()
+
 const router = useRouter()
 const auth = useAuthStore()
 
@@ -19,6 +22,16 @@ async function handleLogout() {
 
 <template>
   <header class="action-bar" v-if="!auth.isAnonymous">
+    <Button
+      v-if="isMobile"
+      icon="pi pi-bars"
+      text
+      rounded
+      size="small"
+      @click="emit('toggleDrawer')"
+      aria-label="Menu"
+    />
+
     <div class="action-spacer" />
 
     <div class="action-items">
@@ -63,6 +76,7 @@ async function handleLogout() {
   border-bottom: 1px solid var(--p-content-border-color);
   background: var(--p-content-background);
   min-height: 40px;
+  flex-shrink: 0;
 }
 
 .action-spacer {
