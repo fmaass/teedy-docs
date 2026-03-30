@@ -86,3 +86,33 @@ export function updateDocument(id: string, params: URLSearchParams) {
 export function deleteDocument(id: string) {
   return api.delete(`/document/${id}`)
 }
+
+export interface TrashItem {
+  id: string
+  title: string
+  description: string | null
+  language: string
+  create_date: number
+  delete_date: number
+}
+
+export interface TrashListResponse {
+  total: number
+  documents: TrashItem[]
+}
+
+export function listTrash(params?: { limit?: number; offset?: number }) {
+  return api.get<TrashListResponse>('/document/trash', { params })
+}
+
+export function restoreDocument(id: string) {
+  return api.post(`/document/${id}/restore`)
+}
+
+export function permanentDeleteDocument(id: string) {
+  return api.delete(`/document/${id}/permanent`)
+}
+
+export function emptyTrash() {
+  return api.delete<{ deleted_count: number }>('/document/trash')
+}

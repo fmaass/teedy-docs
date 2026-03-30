@@ -11,6 +11,7 @@ import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
+import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.util.ClasspathScanner;
@@ -72,6 +73,11 @@ public class AppContext {
     private FileSizeService fileSizeService;
 
     /**
+     * Trash purge service.
+     */
+    private TrashPurgeService trashPurgeService;
+
+    /**
      * Asynchronous executors.
      */
     private List<ThreadPoolExecutor> asyncExecutorList;
@@ -112,6 +118,11 @@ public class AppContext {
         fileSizeService = new FileSizeService();
         fileSizeService.startAsync();
         fileSizeService.awaitRunning();
+
+        // Start trash purge service
+        trashPurgeService = new TrashPurgeService();
+        trashPurgeService.startAsync();
+        trashPurgeService.awaitRunning();
 
         // Register fonts
         PdfUtil.registerFonts();
@@ -181,14 +192,16 @@ public class AppContext {
      */
     private EventBus newAsyncEventBus() {
         if (EnvironmentUtil.isUnitTest()) {
-            return new EventBus();
+            return new EventBus((exception, context) ->
+                    log.error("Error in event handler {}", context.getSubscriberMethod(), exception));
         } else {
             int threadCount = Math.max(Runtime.getRuntime().availableProcessors() / 2, 2);
             ThreadPoolExecutor executor = new ThreadPoolExecutor(threadCount, threadCount,
                     1L, TimeUnit.MINUTES,
                     new LinkedBlockingQueue<>());
             asyncExecutorList.add(executor);
-            return new AsyncEventBus(executor);
+            return new AsyncEventBus(executor, (exception, context) ->
+                    log.error("Error in async event handler {}", context.getSubscriberMethod(), exception));
         }
     }
 
@@ -251,6 +264,10 @@ public class AppContext {
 
         if (fileSizeService != null) {
             fileSizeService.stopAsync();
+        }
+
+        if (trashPurgeService != null) {
+            trashPurgeService.stopAsync();
         }
 
         instance = null;

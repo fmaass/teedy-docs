@@ -7,12 +7,17 @@ const auth = useAuthStore()
 
 const emit = defineEmits<{ navigate: [] }>()
 
-function isActive(prefix: string) {
-  return route.path.startsWith('/' + prefix)
+function isActive(item: { prefix: string; exact?: boolean }) {
+  if (item.exact) {
+    return route.path === '/' + item.prefix || (route.path.startsWith('/' + item.prefix + '/') && !route.path.startsWith('/' + item.prefix + '/trash'))
+  }
+  return route.path.startsWith('/' + item.prefix)
 }
 
 const navItems = [
-  { label: 'Documents', icon: 'pi pi-file', to: '/document', prefix: 'document' },
+  { label: 'Documents', icon: 'pi pi-file', to: '/document', prefix: 'document', exact: true },
+  { label: 'Browse', icon: 'pi pi-folder', to: '/browse', prefix: 'browse' },
+  { label: 'Trash', icon: 'pi pi-trash', to: '/document/trash', prefix: 'document/trash' },
   { label: 'Tags', icon: 'pi pi-tags', to: '/tag', prefix: 'tag' },
   { label: 'Users & Groups', icon: 'pi pi-users', to: '/user', prefix: 'user' },
 ]
@@ -36,7 +41,7 @@ const footerItems = [
         :key="item.to"
         :to="item.to"
         class="nav-item"
-        :class="{ active: isActive(item.prefix) }"
+        :class="{ active: isActive(item) }"
         @click="emit('navigate')"
       >
         <i :class="item.icon" />
@@ -52,13 +57,13 @@ const footerItems = [
         :key="item.to"
         :to="item.to"
         class="nav-item"
-        :class="{ active: isActive(item.prefix) }"
+        :class="{ active: isActive(item) }"
         @click="emit('navigate')"
       >
         <i :class="item.icon" />
         <span>{{ item.label }}</span>
       </router-link>
-      <div class="sidebar-version">v2.4.0</div>
+      <div class="sidebar-version">v2.5.0</div>
     </div>
   </nav>
 </template>

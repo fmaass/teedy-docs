@@ -107,6 +107,11 @@ public class DocumentDto {
     private String currentStepName;
 
     /**
+     * Deletion date.
+     */
+    private Long deleteTimestamp;
+
+    /**
      * Search highlight.
      */
     private String highlight;
@@ -271,6 +276,14 @@ public class DocumentDto {
     public DocumentDto setCurrentStepName(String currentStepName) {
         this.currentStepName = currentStepName;
         return this;
+    }
+
+    public Long getDeleteTimestamp() {
+        return deleteTimestamp;
+    }
+
+    public void setDeleteTimestamp(Long deleteTimestamp) {
+        this.deleteTimestamp = deleteTimestamp;
     }
 
     public String getHighlight() {

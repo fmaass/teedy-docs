@@ -7,12 +7,14 @@ const auth = useAuthStore()
 
 const items = [
   { label: 'Account', icon: 'pi pi-user', to: '/settings/account', name: 'settings-account' },
+  { label: 'API Keys', icon: 'pi pi-key', to: '/settings/api-keys', name: 'settings-api-keys' },
 ]
 
 const adminItems = [
   { label: 'Configuration', icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
   { label: 'Users', icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
   { label: 'Tag rules', icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
+  { label: 'Webhooks', icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
 ]
 </script>
 

@@ -31,6 +31,17 @@ const router = createRouter({
           name: 'documents',
           component: () => import('../views/document/DocumentList.vue'),
         },
+        // Browse (faceted tag navigation)
+        {
+          path: 'browse',
+          name: 'browse',
+          component: () => import('../views/tag/TagBrowser.vue'),
+        },
+        {
+          path: 'document/trash',
+          name: 'document-trash',
+          component: () => import('../views/document/DocumentTrash.vue'),
+        },
         {
           path: 'document/add',
           name: 'document-add',
@@ -101,6 +112,11 @@ const router = createRouter({
               component: () => import('../views/settings/SettingsAccount.vue'),
             },
             {
+              path: 'api-keys',
+              name: 'settings-api-keys',
+              component: () => import('../views/settings/SettingsApiKeys.vue'),
+            },
+            {
               path: 'config',
               name: 'settings-config',
               component: () => import('../views/settings/SettingsConfig.vue'),
@@ -114,6 +130,11 @@ const router = createRouter({
               path: 'tag-rules',
               name: 'settings-tag-rules',
               component: () => import('../views/settings/SettingsTagRules.vue'),
+            },
+            {
+              path: 'webhooks',
+              name: 'settings-webhooks',
+              component: () => import('../views/settings/SettingsWebhooks.vue'),
             },
           ],
         },

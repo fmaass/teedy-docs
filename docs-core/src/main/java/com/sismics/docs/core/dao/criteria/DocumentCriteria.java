@@ -88,6 +88,11 @@ public class DocumentCriteria {
      */
     private List<String> titleList = new ArrayList<>();
 
+    /**
+     * If true, search deleted (trashed) documents instead of active ones.
+     */
+    private Boolean deleted;
+
     public List<String> getTargetIdList() {
         return targetIdList;
     }
@@ -194,5 +199,13 @@ public class DocumentCriteria {
 
     public List<String> getTitleList() {
         return titleList;
+    }
+
+    public Boolean getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(Boolean deleted) {
+        this.deleted = deleted;
     }
 }

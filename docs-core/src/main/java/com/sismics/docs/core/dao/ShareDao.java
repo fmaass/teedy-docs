@@ -50,7 +50,7 @@ public class ShareDao {
         shareDb.setDeleteDate(dateNow);
         
         // Delete the linked ACL
-        q = em.createQuery("update Acl a set a.deleteDate = :dateNow where a.targetId = :targetId");
+        q = em.createQuery("update Acl a set a.deleteDate = :dateNow where a.targetId = :targetId and a.deleteDate is null");
         q.setParameter("targetId", id);
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();

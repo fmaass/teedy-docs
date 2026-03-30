@@ -1,0 +1,13 @@
+delete from T_DOCUMENT_TAG where DOT_IDDOCUMENT_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_DOCUMENT_METADATA where DME_IDDOCUMENT_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_CONTRIBUTOR where CTR_IDDOC_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_ACL where ACL_SOURCEID_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_COMMENT where COM_IDDOC_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_RELATION where REL_IDDOCFROM_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null) or REL_IDDOCTO_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_ROUTE_STEP where RTP_IDROUTE_C in (select RTE_ID_C from T_ROUTE where RTE_IDDOCUMENT_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null));
+delete from T_ROUTE where RTE_IDDOCUMENT_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_AUDIT_LOG where LOG_IDENTITY_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+update T_DOCUMENT set DOC_IDFILE_C = null where DOC_DELETEDATE_D is not null;
+delete from T_FILE where FIL_IDDOC_C in (select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null);
+delete from T_DOCUMENT where DOC_DELETEDATE_D is not null;
+update T_CONFIG set CFG_VALUE_C = '36' where CFG_ID_C = 'DB_VERSION';

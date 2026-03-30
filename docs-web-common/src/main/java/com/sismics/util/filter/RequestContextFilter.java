@@ -150,5 +150,8 @@ public class RequestContextFilter implements Filter {
         HttpServletResponse r = (HttpServletResponse) response;
         r.addHeader(HttpHeaders.CACHE_CONTROL, "no-cache");
         r.addHeader(HttpHeaders.EXPIRES, "0");
+        r.addHeader("X-Content-Type-Options", "nosniff");
+        r.addHeader("X-Frame-Options", "DENY");
+        r.addHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     }
 }

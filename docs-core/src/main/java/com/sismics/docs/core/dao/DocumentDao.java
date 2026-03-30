@@ -157,12 +157,12 @@ public class DocumentDao {
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();
         
-        q = em.createQuery("update DocumentTag dt set dt.deleteDate = :dateNow where dt.documentId = :documentId and dt.deleteDate is not null");
+        q = em.createQuery("update DocumentTag dt set dt.deleteDate = :dateNow where dt.documentId = :documentId and dt.deleteDate is null");
         q.setParameter("documentId", id);
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();
         
-        q = em.createQuery("update Relation r set r.deleteDate = :dateNow where (r.fromDocumentId = :documentId or r.toDocumentId = :documentId) and r.deleteDate is not null");
+        q = em.createQuery("update Relation r set r.deleteDate = :dateNow where (r.fromDocumentId = :documentId or r.toDocumentId = :documentId) and r.deleteDate is null");
         q.setParameter("documentId", id);
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();
@@ -237,6 +237,100 @@ public class DocumentDao {
         query.setParameter("fileId", document.getFileId());
         query.setParameter("id", document.getId());
         query.executeUpdate();
+    }
+
+    /**
+     * Gets a soft-deleted document by its ID.
+     *
+     * @param id Document ID
+     * @return Document or null
+     */
+    public Document getDeletedById(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Document> q = em.createQuery("select d from Document d where d.id = :id and d.deleteDate is not null", Document.class);
+        q.setParameter("id", id);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Restores a soft-deleted document and its linked data.
+     *
+     * @param id Document ID
+     * @param userId User ID
+     */
+    public void restore(String id, String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        TypedQuery<Document> dq = em.createQuery("select d from Document d where d.id = :id and d.deleteDate is not null", Document.class);
+        dq.setParameter("id", id);
+        Document documentDb = dq.getSingleResult();
+
+        Date deletedAt = documentDb.getDeleteDate();
+        documentDb.setDeleteDate(null);
+
+        // Restore linked data that was soft-deleted at the same time
+        Query q = em.createQuery("update File f set f.deleteDate = null where f.documentId = :documentId and f.deleteDate = :deletedAt");
+        q.setParameter("documentId", id);
+        q.setParameter("deletedAt", deletedAt);
+        q.executeUpdate();
+
+        q = em.createQuery("update Acl a set a.deleteDate = null where a.sourceId = :documentId and a.deleteDate = :deletedAt");
+        q.setParameter("documentId", id);
+        q.setParameter("deletedAt", deletedAt);
+        q.executeUpdate();
+
+        q = em.createQuery("update DocumentTag dt set dt.deleteDate = null where dt.documentId = :documentId and dt.deleteDate = :deletedAt");
+        q.setParameter("documentId", id);
+        q.setParameter("deletedAt", deletedAt);
+        q.executeUpdate();
+
+        q = em.createQuery("update Relation r set r.deleteDate = null where (r.fromDocumentId = :documentId or r.toDocumentId = :documentId) and r.deleteDate = :deletedAt");
+        q.setParameter("documentId", id);
+        q.setParameter("deletedAt", deletedAt);
+        q.executeUpdate();
+
+        AuditLogUtil.create(documentDb, AuditLogType.CREATE, userId);
+    }
+
+    /**
+     * Permanently deletes a document and all its linked data from the database.
+     *
+     * @param id Document ID
+     */
+    public void permanentDelete(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        em.createNativeQuery("delete from T_DOCUMENT_TAG where DOT_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_DOCUMENT_METADATA where DME_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_CONTRIBUTOR where CTR_IDDOC_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_ACL where ACL_SOURCEID_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_RELATION where REL_IDDOCFROM_C = :id or REL_IDDOCTO_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_COMMENT where COM_IDDOC_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_ROUTE_STEP where RTP_IDROUTE_C in (select RTE_ID_C from T_ROUTE where RTE_IDDOCUMENT_C = :id)").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_ROUTE where RTE_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_AUDIT_LOG where LOG_IDENTITY_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_FILE where FIL_IDDOC_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_DOCUMENT where DOC_ID_C = :id").setParameter("id", id).executeUpdate();
+    }
+
+    /**
+     * Finds documents in trash that have expired past the retention period.
+     *
+     * @param retentionDays Number of days to retain deleted documents
+     * @return List of expired document IDs
+     */
+    public List<String> findExpiredTrash(int retentionDays) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select DOC_ID_C from T_DOCUMENT where DOC_DELETEDATE_D is not null and DOC_DELETEDATE_D < :cutoff");
+        q.setParameter("cutoff", new Date(System.currentTimeMillis() - (long) retentionDays * 24 * 60 * 60 * 1000));
+        @SuppressWarnings("unchecked")
+        List<String> ids = q.getResultList();
+        return ids;
     }
 
     /**

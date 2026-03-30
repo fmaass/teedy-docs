@@ -17,6 +17,9 @@ Teedy is an open source, lightweight document management system for individuals 
 - **Java 21 + Jetty 12 + Jakarta EE 10** (upgraded from Java 11 / Jetty 9)
 - **Multi-arch Docker images** (amd64 + arm64) published to GitHub Container Registry
 - **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed, JWT bearer filter with iss/aud checks
+- **API key authentication** for programmatic access (`Authorization: Bearer tdapi_*`)
+- **Trash / recycle bin** with soft-delete, restore, permanent delete, and auto-purge
+- **Vue 3 frontend** replacing AngularJS (PrimeVue, Vite, TypeScript)
 - **Log4j 1.x removed**, replaced with Log4j 2
 - **Dependency updates**: Hibernate 6.6, Jersey 3.1, Lucene 10, Guava 33, OkHttp 4.12, PostgreSQL driver 42.7
 
@@ -57,7 +60,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.3.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.5.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -90,6 +93,19 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
   - `DOCS_SMTP_PORT`: The port which should be used.
   - `DOCS_SMTP_USERNAME`: The username to be used.
   - `DOCS_SMTP_PASSWORD`: The password to be used.
+
+- Trash
+  - `DOCS_TRASH_RETENTION_DAYS`: Number of days to keep deleted documents in the trash before auto-purging. Default: `30`. Set to `0` to disable auto-purge.
+
+## API Key Authentication
+
+Teedy supports API key authentication for programmatic access. Create API keys in Settings > API Keys. Use the key in the `Authorization` header:
+
+```
+Authorization: Bearer tdapi_<your-key>
+```
+
+API keys act as the creating user and have the same permissions. The raw key is shown only once at creation -- store it securely.
 
 ## OIDC / SSO Authentication
 
@@ -210,7 +226,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.3.0
+    image: ghcr.io/fmaass/teedy-docs:v2.5.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -258,7 +274,7 @@ networks:
 version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.3.0
+    image: ghcr.io/fmaass/teedy-docs:v2.5.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -287,7 +303,7 @@ The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/r
 
 ## How to build Teedy from the sources
 
-Prerequisites: JDK 21, Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Grunt, Tesseract 4+
+Prerequisites: JDK 21, Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Tesseract 4+
 
 Teedy is organized in several Maven modules:
 

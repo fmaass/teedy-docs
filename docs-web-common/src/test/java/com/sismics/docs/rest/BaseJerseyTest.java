@@ -1,6 +1,7 @@
 package com.sismics.docs.rest;
 
 import com.sismics.docs.rest.util.ClientUtil;
+import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.RequestContextFilter;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -103,6 +104,8 @@ public abstract class BaseJerseyTest extends JerseyTest {
         context.addFilter("requestContextFilter", RequestContextFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         context.addFilter("tokenBasedSecurityFilter", TokenBasedSecurityFilter.class)
+                .addMappingForUrlPatterns(null, "/*");
+        context.addFilter("apiKeyBasedSecurityFilter", ApiKeyBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         context.addFilter("headerBasedSecurityFilter", HeaderBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");

@@ -33,7 +33,7 @@ body:
     attributes:
       label: Teedy version
       description: Docker image tag or commit hash
-      placeholder: "v2.3.0"
+      placeholder: "v2.5.0"
     validations:
       required: true
 

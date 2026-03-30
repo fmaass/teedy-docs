@@ -343,4 +343,66 @@ public class TagResource extends BaseResource {
                 .add("status", "ok");
         return Response.ok().entity(response.build()).build();
     }
+
+    /**
+     * Returns document counts per tag.
+     *
+     * @return Response with tag ID to document count mapping
+     */
+    @GET
+    @Path("/stats")
+    public Response stats() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagDao tagDao = new TagDao();
+        java.util.Map<String, Long> counts = tagDao.getTagDocumentCounts();
+
+        JsonObjectBuilder stats = Json.createObjectBuilder();
+        for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {
+            stats.add(entry.getKey(), entry.getValue());
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("stats", stats).build()).build();
+    }
+
+    /**
+     * Returns co-occurring tags for faceted navigation.
+     * Given selected tags, returns other tags that appear on matching documents with counts.
+     *
+     * @param tagsParam Comma-separated tag IDs (optional, empty = all tags)
+     * @return Response with facet counts and total matching documents
+     */
+    @GET
+    @Path("/facets")
+    public Response facets(@QueryParam("tags") String tagsParam) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagDao tagDao = new TagDao();
+        java.util.List<String> selectedTagIds = new java.util.ArrayList<>();
+        if (tagsParam != null && !tagsParam.isBlank()) {
+            for (String id : tagsParam.split(",")) {
+                String trimmed = id.trim();
+                if (!trimmed.isEmpty()) {
+                    selectedTagIds.add(trimmed);
+                }
+            }
+        }
+
+        java.util.Map<String, Long> counts = tagDao.getCoOccurringTagCounts(selectedTagIds);
+        long total = selectedTagIds.isEmpty() ? 0 : tagDao.countDocumentsWithAllTags(selectedTagIds);
+
+        JsonObjectBuilder facets = Json.createObjectBuilder();
+        for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {
+            facets.add(entry.getKey(), entry.getValue());
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("facets", facets)
+                .add("total", total).build()).build();
+    }
 }

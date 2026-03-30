@@ -97,7 +97,7 @@ public class GroupDao {
         groupDb.setDeleteDate(dateNow);
         
         // Delete linked data
-        q = em.createQuery("update UserGroup ug set ug.deleteDate = :dateNow where ug.groupId = :groupId and ug.deleteDate is not null");
+        q = em.createQuery("update UserGroup ug set ug.deleteDate = :dateNow where ug.groupId = :groupId and ug.deleteDate is null");
         q.setParameter("dateNow", dateNow);
         q.setParameter("groupId", groupId);
         q.executeUpdate();

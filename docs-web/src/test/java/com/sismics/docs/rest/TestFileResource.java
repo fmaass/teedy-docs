@@ -462,13 +462,22 @@ public class TestFileResource extends BaseJerseyTest {
         // Check current quota
         Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2 + FILE_PIA_00452_JPG_SIZE, getUserQuota(fileQuotaToken));
 
-        // Deletes the document
+        // Trashes the document (soft-delete, files preserved)
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileQuotaToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
 
-        // Check current quota
+        // Quota still includes trashed files
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2 + FILE_PIA_00452_JPG_SIZE, getUserQuota(fileQuotaToken));
+
+        // Permanently delete the trashed document
+        json = target().path("/document/" + document1Id + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, fileQuotaToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // Quota now reflects the permanent deletion
         Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
     }
 

@@ -217,6 +217,20 @@ public class FileDao {
     }
 
     /**
+     * Get all files by document ID, including soft-deleted files.
+     * Used for permanent deletion to clean up file storage.
+     *
+     * @param documentId Document ID
+     * @return List of files
+     */
+    public List<File> getAllByDocumentId(String documentId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.documentId = :documentId", File.class);
+        q.setParameter("documentId", documentId);
+        return q.getResultList();
+    }
+
+    /**
      * Get files count by documents IDs.
      *
      * @param documentIds Documents IDs

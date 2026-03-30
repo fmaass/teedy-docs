@@ -344,7 +344,10 @@ public class UserResource extends BaseResource {
 
         JsonObjectBuilder response = Json.createObjectBuilder();
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
-        NewCookie cookie = new NewCookie(TokenBasedSecurityFilter.COOKIE_NAME, token, "/", null, null, maxAge, false);
+        NewCookie cookie = new NewCookie(
+                TokenBasedSecurityFilter.COOKIE_NAME, token,
+                "/", null, NewCookie.DEFAULT_VERSION, null,
+                maxAge, (Date) null, true, true);
         return Response.ok().entity(response.build()).cookie(cookie).build();
     }
 

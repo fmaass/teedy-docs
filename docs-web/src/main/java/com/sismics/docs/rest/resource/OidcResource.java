@@ -461,9 +461,8 @@ public class OidcResource extends BaseResource {
             if (StringUtils.isBlank(clientSecret)) return PROP_CLIENT_SECRET + " is required";
             if (StringUtils.isBlank(redirectUri)) return PROP_REDIRECT_URI + " is required";
 
-            log.info("OIDC configuration: issuer={}, client_id={}, redirect_uri={}, secret={}***",
-                    issuer, clientId, redirectUri,
-                    clientSecret.length() > 4 ? clientSecret.substring(0, 4) : "****");
+            log.info("OIDC configuration: issuer={}, client_id={}, redirect_uri={}, secret=[REDACTED]",
+                    issuer, clientId, redirectUri);
 
             configValidated = true;
             return null;

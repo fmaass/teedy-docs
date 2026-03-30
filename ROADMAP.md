@@ -84,29 +84,107 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.3.0) fo
 
 ---
 
-## v2.5.0 (Planned)
+## v2.5.0 (Released)
 
 **Theme:** Automation + Integration
 
+### Multi-tag filtering
+
+- Checkbox-based tag tree with AND logic for progressive narrowing
+- Selected tags shown as removable filter chips above the document list
+- Backend already supported multiple `tag:` tokens; frontend now leverages it
+
 ### Trash / recycle bin
 
-- Soft-delete documents with configurable retention period
+- `DELETE /document/{id}` now soft-deletes (files preserved on disk)
 - Dedicated trash view with restore and permanent delete options
+- Auto-purge via `TrashPurgeService` (configurable via `DOCS_TRASH_RETENTION_DAYS`, default 30)
+- New endpoints: `GET /document/trash`, `POST /document/{id}/restore`, `DELETE /document/{id}/permanent`, `DELETE /document/trash`
+
+### API key authentication
+
+- Bearer token authentication (`Authorization: Bearer tdapi_<hex>`) for external integrations
+- Keys stored as SHA-256 hashes; raw key shown only at creation
+- API key management UI in Settings
+- DB migration 035: `T_API_KEY` table
+
+### Webhook management UI
+
+- Ported webhook management from legacy AngularJS to Vue 3 Settings page
+- Added `DOCUMENT_TRASHED` and `DOCUMENT_RESTORED` webhook event types
+
+### Tag browser (faceted navigation)
+
+- New Browse view with faceted tag navigation
+- Select any combination of tags; remaining co-occurring tags update dynamically with counts
+- `GET /tag/facets?tags=id1,id2` endpoint for co-occurring tag counts
+- `GET /tag/stats` endpoint for document counts per tag
+
+### Security hardening
+
+- Auth cookie: added `Secure` + `HttpOnly` flags
+- Response headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`
+- Lucene: removed `NoLockFactory`, commit-only-on-success, synchronized reader access
+- AsyncEventBus: exceptions now routed to SLF4J
+- Fixed soft-delete bugs in `TagDao.delete()`, `GroupDao.delete()`, `ShareDao.delete()`
+- Ownership checks on trash restore/permanent-delete endpoints
+
+### Infrastructure
+
+- GitHub Actions bumped to Node.js 24 (`checkout@v5`, `setup-java@v5`, `upload-artifact@v6`, `download-artifact@v7`)
+- Removed 180 dead AngularJS files (`src-legacy/`)
+- DB migration 036: cleanup of pre-existing orphan soft-deleted documents
+
+See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.5.0) for details.
+
+---
+
+## v2.6.0 (Planned)
+
+**Theme:** Security Hardening + Unified Navigation
+
+### Unified document view
+
+- Merge Documents and Browse into a single view with three zones: tag tree sidebar (left), address bar with active/related tags and search (top), document list (main)
+- Tag tree always visible alongside documents, with facet-driven counts and auto-expand to active branches
+- Document slide-over panel (side peek) to preview documents without leaving the list
+- AND/OR toggle for tag intersection vs union mode
+- Replaces the separate Documents and Browse navigation items with a single "Documents" view
+
+### Login brute force protection
+
+- Per-IP and per-username rate limiting with exponential backoff after failed attempts
+- Configurable thresholds via env vars
+
+### Password change verification
+
+- Require current password when changing password via self-update endpoint
+- Frontend form update
+
+### File upload size limits
+
+- Configurable maximum upload size (env var, default 500MB)
+- Enforce at stream level before writing to disk
+
+### OIDC linking security
+
+- Prevent auto-linking OIDC accounts to existing local accounts without explicit authorization
+- Require local login or admin approval for first-time binding
+
+### Session token lifetime
+
+- Reduce "remember me" token lifetime from 20 years to 90 days
+- Token rotation on authenticated requests
+
+### Password complexity
+
+- Enforce mixed-case + digit or zxcvbn-based strength check
+- Reject passwords matching the username
 
 ### Folder ingestion
 
 - Watch a filesystem directory for new files and auto-import as documents
 - Configurable polling interval, post-processing (delete or move), error handling
-
-### Webhooks
-
-- Document lifecycle events (created, updated, deleted, tagged) sent to configurable HTTP endpoints
-- Webhook management UI in admin settings
-
-### API key authentication
-
-- Bearer token authentication for external integrations and automation
-- API key management UI with scoped permissions
 
 ### Improved search syntax
 

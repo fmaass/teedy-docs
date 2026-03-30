@@ -408,31 +408,40 @@ public class TestDocumentResource extends BaseJerseyTest {
         relations = json.getJsonArray("relations");
         Assertions.assertEquals(0, relations.size());
         
-        // Deletes a document
+        // Trashes a document (soft-delete)
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
 
-        // Deletes a non-existing document
+        // Trashes a non-existing document
         response = target().path("/document/69b79238-84bb-4263-a32f-9cbdf8c92188").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .delete();
         Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
 
-        // Check that the associated files are deleted from FS
+        // Files should still exist on disk after trash (soft-delete)
         java.io.File storedFile = DirectoryUtil.getStorageDirectory().resolve(file1Id).toFile();
         java.io.File webFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_web").toFile();
         java.io.File thumbnailFile = DirectoryUtil.getStorageDirectory().resolve(file1Id + "_thumb").toFile();
-        Assertions.assertFalse(storedFile.exists());
-        Assertions.assertFalse(webFile.exists());
-        Assertions.assertFalse(thumbnailFile.exists());
-        
-        // Get a document (KO)
+        Assertions.assertTrue(storedFile.exists());
+
+        // Get a trashed document (KO - not visible in normal queries)
         response = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get();
         Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // Permanently delete the trashed document
+        json = target().path("/document/" + document1Id + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // Now files should be deleted from FS
+        Assertions.assertFalse(storedFile.exists());
+        Assertions.assertFalse(webFile.exists());
+        Assertions.assertFalse(thumbnailFile.exists());
     }
     
     /**

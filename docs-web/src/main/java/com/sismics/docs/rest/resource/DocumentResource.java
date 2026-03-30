@@ -23,6 +23,8 @@ import com.sismics.docs.core.dao.dto.RouteStepDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
+import com.sismics.docs.core.event.DocumentRestoredAsyncEvent;
+import com.sismics.docs.core.event.DocumentTrashedAsyncEvent;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
@@ -972,9 +974,9 @@ public class DocumentResource extends BaseResource {
     }
 
     /**
-     * Deletes a document.
+     * Moves a document to trash (soft-delete).
      *
-     * @api {delete} /document/:id Delete a document
+     * @api {delete} /document/:id Move document to trash
      * @apiName DeleteDocument
      * @apiGroup Document
      * @apiParam {String} id ID
@@ -995,37 +997,224 @@ public class DocumentResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Get the document
         DocumentDao documentDao = new DocumentDao();
-        FileDao fileDao = new FileDao();
         AclDao aclDao = new AclDao();
         if (!aclDao.checkPermission(id, PermType.WRITE, getTargetIdList(null))) {
             throw new NotFoundException();
         }
-        List<File> fileList = fileDao.getByDocumentId(principal.getId(), id);
 
-        // Delete the document
         documentDao.delete(id, principal.getId());
 
+        DocumentTrashedAsyncEvent trashedEvent = new DocumentTrashedAsyncEvent();
+        trashedEvent.setUserId(principal.getId());
+        trashedEvent.setDocumentId(id);
+        ThreadLocalContext.get().addAsyncEvent(trashedEvent);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Lists documents in the trash.
+     *
+     * @api {get} /document/trash List trashed documents
+     * @apiName GetDocumentTrash
+     * @apiGroup Document
+     * @apiParam {Number} [limit] Total number of documents to return
+     * @apiParam {Number} [offset] Start offset
+     * @apiParam {Number} [sort_column] Column index to sort on
+     * @apiParam {Boolean} [asc] If true, sort in ascending order
+     * @apiSuccess {Object[]} documents List of trashed documents
+     * @apiSuccess {Number} total Total number of trashed documents
+     * @apiPermission user
+     *
+     * @return Response
+     */
+    @GET
+    @Path("trash")
+    public Response listTrash(
+            @QueryParam("limit") Integer limit,
+            @QueryParam("offset") Integer offset,
+            @QueryParam("sort_column") Integer sortColumn,
+            @QueryParam("asc") Boolean asc) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        documentCriteria.setDeleted(true);
+        documentCriteria.setTargetIdList(getTargetIdList(null));
+
+        SortCriteria sortCriteria = new SortCriteria(sortColumn, asc);
+        PaginatedList<DocumentDto> paginatedList = PaginatedLists.create(limit, offset);
+
+        try {
+            AppContext.getInstance().getIndexingHandler().findByCriteria(paginatedList, Lists.newArrayList(), documentCriteria, sortCriteria);
+        } catch (Exception e) {
+            throw new ServerException("SearchError", "Error searching trashed documents", e);
+        }
+
+        JsonArrayBuilder documents = Json.createArrayBuilder();
+        for (DocumentDto documentDto : paginatedList.getResultList()) {
+            documents.add(Json.createObjectBuilder()
+                    .add("id", documentDto.getId())
+                    .add("title", documentDto.getTitle())
+                    .add("description", JsonUtil.nullable(documentDto.getDescription()))
+                    .add("language", documentDto.getLanguage())
+                    .add("create_date", documentDto.getCreateTimestamp())
+                    .add("delete_date", documentDto.getDeleteTimestamp()));
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("documents", documents)
+                .add("total", paginatedList.getResultCount());
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Restores a document from the trash.
+     *
+     * @api {post} /document/:id/restore Restore a document from trash
+     * @apiName RestoreDocument
+     * @apiGroup Document
+     * @apiParam {String} id ID
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) NotFound Document not found in trash
+     * @apiPermission user
+     *
+     * @param id Document ID
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/restore")
+    public Response restore(
+            @PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        DocumentDao documentDao = new DocumentDao();
+        Document document = documentDao.getDeletedById(id);
+        if (document == null || !document.getUserId().equals(principal.getId())) {
+            throw new NotFoundException();
+        }
+
+        documentDao.restore(id, principal.getId());
+
+        DocumentRestoredAsyncEvent restoredEvent = new DocumentRestoredAsyncEvent();
+        restoredEvent.setUserId(principal.getId());
+        restoredEvent.setDocumentId(id);
+        ThreadLocalContext.get().addAsyncEvent(restoredEvent);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Permanently deletes a document from the trash.
+     *
+     * @api {delete} /document/:id/permanent Permanently delete a document
+     * @apiName PermanentDeleteDocument
+     * @apiGroup Document
+     * @apiParam {String} id ID
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) NotFound Document not found in trash
+     * @apiPermission user
+     *
+     * @param id Document ID
+     * @return Response
+     */
+    @DELETE
+    @Path("{id: [a-z0-9\\-]+}/permanent")
+    public Response permanentDelete(
+            @PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        DocumentDao documentDao = new DocumentDao();
+        FileDao fileDao = new FileDao();
+        Document document = documentDao.getDeletedById(id);
+        if (document == null || !document.getUserId().equals(principal.getId())) {
+            throw new NotFoundException();
+        }
+
+        fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), id);
+        documentDao.permanentDelete(id);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Empties the entire trash (permanently deletes all trashed documents).
+     *
+     * @api {delete} /document/trash Empty trash
+     * @apiName EmptyTrash
+     * @apiGroup Document
+     * @apiSuccess {Number} deleted_count Number of permanently deleted documents
+     * @apiPermission user
+     *
+     * @return Response
+     */
+    @DELETE
+    @Path("trash")
+    public Response emptyTrash() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        DocumentDao documentDao = new DocumentDao();
+        FileDao fileDao = new FileDao();
+
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        documentCriteria.setDeleted(true);
+        documentCriteria.setTargetIdList(getTargetIdList(null));
+        SortCriteria sortCriteria = new SortCriteria(3, false);
+
+        int count = 0;
+        int batchSize = 100;
+        boolean hasMore = true;
+        while (hasMore) {
+            PaginatedList<DocumentDto> paginatedList = PaginatedLists.create(batchSize, 0);
+            try {
+                AppContext.getInstance().getIndexingHandler().findByCriteria(paginatedList, Lists.newArrayList(), documentCriteria, sortCriteria);
+            } catch (Exception e) {
+                throw new ServerException("SearchError", "Error listing trashed documents", e);
+            }
+
+            for (DocumentDto documentDto : paginatedList.getResultList()) {
+                fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), documentDto.getId());
+                documentDao.permanentDelete(documentDto.getId());
+                count++;
+            }
+            hasMore = !paginatedList.getResultList().isEmpty();
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("deleted_count", count);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    private void fireFileAndDocumentDeletedEvents(FileDao fileDao, String userId, String documentId) {
+        List<File> fileList = fileDao.getAllByDocumentId(documentId);
         for (File file : fileList) {
-            // Raise file deleted event
             FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
-            fileDeletedAsyncEvent.setUserId(principal.getId());
+            fileDeletedAsyncEvent.setUserId(userId);
             fileDeletedAsyncEvent.setFileId(file.getId());
             fileDeletedAsyncEvent.setFileSize(file.getSize());
             ThreadLocalContext.get().addAsyncEvent(fileDeletedAsyncEvent);
         }
 
-        // Raise a document deleted event
         DocumentDeletedAsyncEvent documentDeletedAsyncEvent = new DocumentDeletedAsyncEvent();
-        documentDeletedAsyncEvent.setUserId(principal.getId());
-        documentDeletedAsyncEvent.setDocumentId(id);
+        documentDeletedAsyncEvent.setUserId(userId);
+        documentDeletedAsyncEvent.setDocumentId(documentId);
         ThreadLocalContext.get().addAsyncEvent(documentDeletedAsyncEvent);
-
-        // Always return OK
-        JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("status", "ok");
-        return Response.ok().entity(response.build()).build();
     }
 
     /**

@@ -122,7 +122,7 @@ public class TagDao {
         tagDb.setDeleteDate(dateNow);
 
         // Delete linked data
-        q = em.createQuery("update DocumentTag dt set dt.deleteDate = :dateNow where dt.tagId = :tagId and dt.deleteDate is not null");
+        q = em.createQuery("update DocumentTag dt set dt.deleteDate = :dateNow where dt.tagId = :tagId and dt.deleteDate is null");
         q.setParameter("dateNow", dateNow);
         q.setParameter("tagId", tagId);
         q.executeUpdate();
@@ -221,6 +221,90 @@ public class TagDao {
         }
 
         return tagDtoList;
+    }
+
+    /**
+     * Returns document counts per tag (only counting active documents).
+     *
+     * @return Map of tag ID to document count
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getTagDocumentCounts() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
+                "from T_DOCUMENT_TAG dt " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "where dt.DOT_DELETEDATE_D is null " +
+                "group by dt.DOT_IDTAG_C");
+        List<Object[]> rows = q.getResultList();
+        Map<String, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            result.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
+    }
+
+    /**
+     * Returns tags that co-occur with the given selected tags, with document counts.
+     * Used for faceted tag navigation.
+     *
+     * @param selectedTagIds List of currently selected tag IDs
+     * @return Map of tag ID to document count (excludes already-selected tags)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getCoOccurringTagCounts(List<String> selectedTagIds) {
+        if (selectedTagIds == null || selectedTagIds.isEmpty()) {
+            return getTagDocumentCounts();
+        }
+
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
+                "from T_DOCUMENT_TAG dt " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "where dt.DOT_DELETEDATE_D is null " +
+                "and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
+                "and dt.DOT_IDDOCUMENT_C in (" +
+                "  select dt2.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt2 " +
+                "  where dt2.DOT_IDTAG_C in (:selectedTagIds) " +
+                "  and dt2.DOT_DELETEDATE_D is null " +
+                "  group by dt2.DOT_IDDOCUMENT_C " +
+                "  having count(distinct dt2.DOT_IDTAG_C) = :selectedCount" +
+                ") " +
+                "group by dt.DOT_IDTAG_C");
+        q.setParameter("selectedTagIds", selectedTagIds);
+        q.setParameter("selectedCount", (long) selectedTagIds.size());
+        List<Object[]> rows = q.getResultList();
+        Map<String, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            result.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
+    }
+
+    /**
+     * Counts documents matching all the given tags (AND logic).
+     *
+     * @param tagIds Tag IDs
+     * @return Number of matching documents
+     */
+    public long countDocumentsWithAllTags(List<String> tagIds) {
+        if (tagIds == null || tagIds.isEmpty()) {
+            return 0;
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select count(*) from (" +
+                "  select dt.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt " +
+                "  join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "  where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null " +
+                "  group by dt.DOT_IDDOCUMENT_C " +
+                "  having count(distinct dt.DOT_IDTAG_C) = :tagCount" +
+                ")");
+        q.setParameter("tagIds", tagIds);
+        q.setParameter("tagCount", (long) tagIds.size());
+        return ((Number) q.getSingleResult()).longValue();
     }
 }
 

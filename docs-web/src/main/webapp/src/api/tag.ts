@@ -31,3 +31,12 @@ export function updateTag(id: string, name: string, color: string, parent?: stri
 export function deleteTag(id: string) {
   return api.delete(`/tag/${id}`)
 }
+
+export function getTagStats() {
+  return api.get<{ stats: Record<string, number> }>('/tag/stats')
+}
+
+export function getTagFacets(tagIds?: string[]) {
+  const params = tagIds?.length ? { tags: tagIds.join(',') } : {}
+  return api.get<{ facets: Record<string, number>; total: number }>('/tag/facets', { params })
+}

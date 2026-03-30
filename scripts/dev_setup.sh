@@ -1,11 +1,9 @@
 #!/bin/bash
 
 install_macos_dependencies() {
-  brew install openjdk@11
-  export JAVA_HOME=/usr/local/opt/openjdk@11
-  brew install maven
+  brew install openjdk@21
+  export JAVA_HOME="$(brew --prefix)/opt/openjdk@21"
   brew install node
-  npm install -g grunt-cli
   brew install tesseract
   brew install ffmpeg
   brew install mediainfo
@@ -13,16 +11,14 @@ install_macos_dependencies() {
 
 install_ubuntu_debian_dependencies() {
   sudo apt update
-  sudo apt install -y openjdk-11-jdk maven nodejs npm tesseract-ocr ffmpeg mediainfo
-  sudo npm install -g grunt-cli
+  sudo apt install -y openjdk-21-jdk nodejs npm tesseract-ocr ffmpeg mediainfo
 }
 
 install_fedora_dependencies() {
-  sudo dnf install -y java-11-openjdk-devel maven nodejs npm tesseract ffmpeg mediainfo
-  sudo npm install -g grunt-cli
+  sudo dnf install -y java-21-openjdk-devel nodejs npm tesseract ffmpeg mediainfo
 }
 
-echo "📥 Installing dependencies"
+echo "Installing dependencies..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
   install_macos_dependencies
 elif [[ -f /etc/debian_version ]]; then
@@ -30,12 +26,23 @@ elif [[ -f /etc/debian_version ]]; then
 elif [[ -f /etc/fedora-release ]]; then
   install_fedora_dependencies
 else
-  echo "❔ Unsupported OS. Feel free to contribute!"
+  echo "Unsupported OS. Feel free to contribute!"
   exit 1
 fi
 
-echo "✅ Dependencies installed."
+echo "Dependencies installed."
 
-mvn clean -DskipTests install
+cd "$(dirname "$0")/.." || exit 1
 
-echo "You can start the server with 'mvn jetty:run' and then access it at http://localhost:8080/docs-web/src/"
+echo "Installing frontend dependencies..."
+cd docs-web/src/main/webapp && npm install && cd ../../../..
+
+echo "Building backend..."
+./mvnw clean -DskipTests install
+
+echo ""
+echo "Setup complete. To start the dev server:"
+echo "  cd docs-web && ../mvnw jetty:run"
+echo "  cd docs-web/src/main/webapp && npm run dev"
+echo ""
+echo "Access at http://localhost:8080"

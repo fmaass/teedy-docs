@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { listDocuments, type DocumentListItem } from '../../api/document'
-import { listTags } from '../../api/tag'
+import { listTags, type Tag } from '../../api/tag'
 import { getFileUrl } from '../../api/file'
 import { languageLabel } from '../../constants/languages'
 import DataTable from 'primevue/datatable'
@@ -12,13 +12,17 @@ import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
 import Tree from 'primevue/tree'
+import Checkbox from 'primevue/checkbox'
+import Chip from 'primevue/chip'
 import TagBadge from '../../components/TagBadge.vue'
 
 const router = useRouter()
 const route = useRoute()
 
-const searchInput = ref((route.query.search as string) || '')
-const debouncedSearch = ref(searchInput.value)
+const selectedTagIds = ref(new Set<string>())
+const searchText = ref('')
+const debouncedText = ref('')
+const showTagFilter = ref(false)
 
 const { data: tagsData } = useQuery({
   queryKey: ['tags'],
@@ -26,60 +30,119 @@ const { data: tagsData } = useQuery({
   staleTime: 60_000,
 })
 
+// Parse the URL search param into tag selections + free text on initial load
+// and whenever tags data becomes available
+watch(tagsData, (allTags) => {
+  if (!allTags?.length) return
+  const raw = (route.query.search as string) || ''
+  if (!raw) return
+  const { tagIds, text } = parseSearchParam(raw, allTags)
+  if (tagIds.size) {
+    selectedTagIds.value = tagIds
+    showTagFilter.value = true
+  }
+  searchText.value = text
+  debouncedText.value = text
+}, { immediate: true })
+
+function parseSearchParam(search: string, allTags: Tag[]) {
+  const tagIds = new Set<string>()
+  const textParts: string[] = []
+  for (const token of search.split(/\s+/)) {
+    if (token.startsWith('tag:') && token.length > 4) {
+      const name = token.substring(4)
+      const tag = allTags.find((t) => t.name.toLowerCase() === name.toLowerCase())
+      if (tag) tagIds.add(tag.id)
+      else textParts.push(token)
+    } else if (token) {
+      textParts.push(token)
+    }
+  }
+  return { tagIds, text: textParts.join(' ') }
+}
+
+const selectedTags = computed(() => {
+  const allTags = tagsData.value ?? []
+  return [...selectedTagIds.value]
+    .map((id) => allTags.find((t) => t.id === id))
+    .filter((t): t is Tag => !!t)
+})
+
+const combinedSearch = computed(() => {
+  const parts: string[] = selectedTags.value.map((t) => `tag:${t.name}`)
+  const text = debouncedText.value.trim()
+  if (text) parts.push(text)
+  return parts.join(' ')
+})
+
+const hasActiveFilters = computed(() => selectedTagIds.value.size > 0 || debouncedText.value.trim().length > 0)
+
 const { data: documentsData, isLoading } = useQuery({
-  queryKey: computed(() => ['documents', { search: debouncedSearch.value }]),
+  queryKey: computed(() => ['documents', { search: combinedSearch.value }]),
   queryFn: () =>
     listDocuments({
       limit: 100,
       sort_column: 3,
       asc: false,
-      search: debouncedSearch.value || undefined,
+      search: combinedSearch.value || undefined,
     }).then((r) => r.data),
   placeholderData: keepPreviousData,
 })
 
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
-const showTagFilter = ref(false)
 
 const tagTreeNodes = computed(() => {
   const allTags = tagsData.value ?? []
   const rootTags = allTags.filter((t) => !t.parent)
-  function buildNode(tag: typeof allTags[0]): any {
+  function buildNode(tag: (typeof allTags)[0]): any {
     const children = allTags.filter((t) => t.parent === tag.id)
     return { key: tag.id, label: tag.name, data: tag, children: children.map(buildNode) }
   }
   return rootTags.map(buildNode)
 })
 
+const expandedKeys = computed(() => {
+  const keys: Record<string, boolean> = {}
+  for (const tag of tagsData.value ?? []) {
+    const hasChildren = (tagsData.value ?? []).some((t) => t.parent === tag.id)
+    if (hasChildren) keys[tag.id] = true
+  }
+  return keys
+})
+
+// Debounce free-text input
 let searchTimeout: ReturnType<typeof setTimeout>
-watch(searchInput, (val) => {
+watch(searchText, (val) => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
-    debouncedSearch.value = val
-    router.replace({ query: val ? { search: val } : {} })
+    debouncedText.value = val
   }, 300)
 })
 
-watch(() => route.query.search, (val) => {
-  const s = (val as string) || ''
-  if (s !== searchInput.value) {
-    searchInput.value = s
-    debouncedSearch.value = s
+// Sync URL whenever the combined search changes
+watch(combinedSearch, (val) => {
+  const current = (route.query.search as string) || ''
+  if (val !== current) {
+    router.replace({ query: val ? { search: val } : {} })
   }
 })
 
-function filterByTag(node: any) {
-  const tagName = node.data.name
-  searchInput.value = 'tag:' + tagName
-  debouncedSearch.value = searchInput.value
-  router.replace({ query: { search: searchInput.value } })
+function toggleTag(tagId: string) {
+  const next = new Set(selectedTagIds.value)
+  if (next.has(tagId)) next.delete(tagId)
+  else next.add(tagId)
+  selectedTagIds.value = next
 }
 
-function clearTagFilter() {
-  searchInput.value = ''
-  debouncedSearch.value = ''
-  router.replace({ query: {} })
+function removeTag(tagId: string) {
+  toggleTag(tagId)
+}
+
+function clearFilters() {
+  selectedTagIds.value = new Set()
+  searchText.value = ''
+  debouncedText.value = ''
 }
 
 function openDocument(doc: DocumentListItem) {
@@ -110,10 +173,10 @@ function formatDate(ts: number) {
       />
     </div>
 
-    <!-- Search + tag filters -->
+    <!-- Search + tag toggle -->
     <div class="filter-bar">
       <InputText
-        v-model="searchInput"
+        v-model="searchText"
         placeholder="Search documents..."
         class="search-input"
       />
@@ -125,28 +188,50 @@ function formatDate(ts: number) {
         @click="showTagFilter = !showTagFilter"
       />
       <Button
-        v-if="debouncedSearch"
+        v-if="hasActiveFilters"
         icon="pi pi-times"
         label="Clear"
         text
         size="small"
         severity="secondary"
-        @click="clearTagFilter"
+        @click="clearFilters"
       />
     </div>
 
+    <!-- Active tag chips -->
+    <div v-if="selectedTags.length" class="active-tag-chips">
+      <Chip
+        v-for="tag in selectedTags"
+        :key="tag.id"
+        :label="tag.name"
+        removable
+        @remove="removeTag(tag.id)"
+      >
+        <template #default>
+          <span class="chip-tag-dot" :style="{ background: tag.color }" />
+          <span class="chip-tag-label">{{ tag.name }}</span>
+        </template>
+      </Chip>
+    </div>
+
+    <!-- Tag tree with checkboxes -->
     <div v-if="showTagFilter && tagTreeNodes.length" class="tag-filter-panel">
       <Tree
         :value="tagTreeNodes"
-        selectionMode="single"
-        @node-select="filterByTag"
+        :expandedKeys="expandedKeys"
         class="filter-tree"
       >
         <template #default="{ node }">
-          <span class="filter-tag-node">
+          <div class="filter-tag-node" @click.stop="toggleTag(node.key)">
+            <Checkbox
+              :modelValue="selectedTagIds.has(node.key)"
+              :binary="true"
+              :tabindex="-1"
+              @click.stop="toggleTag(node.key)"
+            />
             <span class="filter-tag-dot" :style="{ background: node.data.color }" />
-            {{ node.label }}
-          </span>
+            <span>{{ node.label }}</span>
+          </div>
         </template>
       </Tree>
     </div>
@@ -213,10 +298,10 @@ function formatDate(ts: number) {
     <!-- Empty state -->
     <div v-else class="empty-state">
       <i class="pi pi-inbox" />
-      <p v-if="debouncedSearch">No documents match "{{ debouncedSearch }}"</p>
+      <p v-if="hasActiveFilters">No documents match your filters</p>
       <p v-else>No documents yet</p>
       <Button
-        v-if="!debouncedSearch"
+        v-if="!hasActiveFilters"
         label="Add your first document"
         icon="pi pi-plus"
         outlined
@@ -260,6 +345,23 @@ function formatDate(ts: number) {
 .search-input {
   width: 100%;
   max-width: 400px;
+}
+
+.active-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+.chip-tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 0.375rem;
+}
+.chip-tag-label {
+  font-size: 0.8125rem;
 }
 
 .tag-filter-panel {

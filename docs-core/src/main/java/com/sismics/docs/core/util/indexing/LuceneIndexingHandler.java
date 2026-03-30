@@ -48,7 +48,7 @@ import org.apache.lucene.search.suggest.analyzing.FuzzySuggester;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.NIOFSDirectory;
-import org.apache.lucene.store.NoLockFactory;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -130,7 +130,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
         } else if (luceneStorage.equals("FILE")) {
             Path luceneDirectory = DirectoryUtil.getLuceneDirectory();
             log.info("Using file Lucene storage: {}", luceneDirectory);
-            directory = new NIOFSDirectory(luceneDirectory, NoLockFactory.INSTANCE);
+            directory = new NIOFSDirectory(luceneDirectory);
         }
 
         // Create an index writer
@@ -254,9 +254,11 @@ public class LuceneIndexingHandler implements IndexingHandler {
         List<String> criteriaList = new ArrayList<>();
         Map<String, String> documentSearchMap = Maps.newHashMap();
 
+        boolean trashQuery = Boolean.TRUE.equals(criteria.getDeleted());
+
         StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C c0, d.DOC_TITLE_C c1, d.DOC_DESCRIPTION_C c2, d.DOC_CREATEDATE_D c3, d.DOC_LANGUAGE_C c4, d.DOC_IDFILE_C, ");
         sb.append(" s.count c5, ");
-        sb.append(" rs2.RTP_ID_C c7, rs2.RTP_NAME_C, d.DOC_UPDATEDATE_D c8 ");
+        sb.append(" rs2.RTP_ID_C c7, rs2.RTP_NAME_C, d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
         sb.append(" from T_DOCUMENT d ");
         sb.append(" left join (SELECT count(s.SHA_ID_C) count, ac.ACL_SOURCEID_C " +
                 "   FROM T_SHARE s, T_ACL ac " +
@@ -355,7 +357,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
             criteriaList.add("rs2.RTP_ID_C is not null");
         }
 
-        criteriaList.add("d.DOC_DELETEDATE_D is null");
+        criteriaList.add(trashQuery ? "d.DOC_DELETEDATE_D is not null" : "d.DOC_DELETEDATE_D is null");
 
         sb.append(" where ");
         sb.append(Joiner.on(" and ").join(criteriaList));
@@ -379,7 +381,11 @@ public class LuceneIndexingHandler implements IndexingHandler {
             documentDto.setShared(shareCount != null && shareCount.intValue() > 0);
             documentDto.setActiveRoute(o[i++] != null);
             documentDto.setCurrentStepName((String) o[i++]);
-            documentDto.setUpdateTimestamp(((Timestamp) o[i]).getTime());
+            documentDto.setUpdateTimestamp(((Timestamp) o[i++]).getTime());
+            Timestamp deleteTs = (Timestamp) o[i];
+            if (deleteTs != null) {
+                documentDto.setDeleteTimestamp(deleteTs.getTime());
+            }
             documentDto.setHighlight(documentSearchMap.get(documentDto.getId()));
             documentDtoList.add(documentDto);
         }
@@ -570,7 +576,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
      *
      * @return the directoryReader
      */
-    private DirectoryReader getDirectoryReader() {
+    private synchronized DirectoryReader getDirectoryReader() {
         if (directoryReader == null) {
             try {
                 if (!DirectoryReader.indexExists(directory)) {
@@ -602,14 +608,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
     private void handle(LuceneRunnable runnable) {
         try {
             runnable.run(indexWriter);
-        } catch (Exception e) {
-            log.error("Error in running index writing", e);
-        }
-
-        try {
             indexWriter.commit();
-        } catch (IOException e) {
-            log.error("Cannot commit index writer", e);
+        } catch (Exception e) {
+            log.error("Error in index writing, skipping commit", e);
         }
     }
 

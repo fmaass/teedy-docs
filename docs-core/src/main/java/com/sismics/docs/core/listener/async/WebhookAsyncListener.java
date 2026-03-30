@@ -53,6 +53,18 @@ public class WebhookAsyncListener {
 
     @Subscribe
     @AllowConcurrentEvents
+    public void on(final DocumentTrashedAsyncEvent event) {
+        triggerWebhook(WebhookEvent.DOCUMENT_TRASHED, event.getDocumentId());
+    }
+
+    @Subscribe
+    @AllowConcurrentEvents
+    public void on(final DocumentRestoredAsyncEvent event) {
+        triggerWebhook(WebhookEvent.DOCUMENT_RESTORED, event.getDocumentId());
+    }
+
+    @Subscribe
+    @AllowConcurrentEvents
     public void on(final FileCreatedAsyncEvent event) {
         triggerWebhook(WebhookEvent.FILE_CREATED, event.getFileId());
     }
