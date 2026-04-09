@@ -105,6 +105,17 @@ public class LuceneIndexingHandler implements IndexingHandler {
         } catch (Exception e) {
             // An error occurred initializing Lucene, the index is out of date or broken, delete everything
             log.info("Unable to initialize Lucene, cleaning up the index: " + e.getMessage());
+
+            // Release the lock before deleting — initLucene may have partially succeeded
+            if (indexWriter != null) {
+                try { indexWriter.close(); } catch (Exception ignored) {}
+                indexWriter = null;
+            }
+            if (directory != null) {
+                try { directory.close(); } catch (Exception ignored) {}
+                directory = null;
+            }
+
             Path luceneDirectory = DirectoryUtil.getLuceneDirectory();
             Files.walk(luceneDirectory)
                     .sorted(Comparator.reverseOrder())
