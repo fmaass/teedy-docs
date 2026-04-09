@@ -25,3 +25,4 @@ docs/*
 #macos
 .DS_Store
 .cursor/
+CLAUDE.md
