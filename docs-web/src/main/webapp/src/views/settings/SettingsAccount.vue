@@ -5,7 +5,6 @@ import { setLocale } from '../../i18n'
 import { useThemeSwitch, themeNames, getStoredTheme } from '../../composables/useThemeSwitch'
 import Password from 'primevue/password'
 import Select from 'primevue/select'
-import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
@@ -38,7 +37,10 @@ const themeOptions = themeNames.map((n) => ({ label: n, value: n }))
 
 const selectedLocale = ref(localStorage.getItem('teedy-locale') || 'en')
 const selectedTheme = ref(getStoredTheme())
-const darkMode = ref(document.documentElement.classList.contains('dark-mode'))
+
+interface SelectChangeEvent {
+  value: string
+}
 
 onMounted(() => {
   selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
@@ -77,14 +79,12 @@ function handleThemeChange(name: string) {
   toast.add({ severity: 'success', summary: `Theme switched to ${name}`, life: 2000 })
 }
 
-function handleDarkModeToggle(val: boolean) {
-  darkMode.value = val
-  if (val) {
-    document.documentElement.classList.add('dark-mode')
-  } else {
-    document.documentElement.classList.remove('dark-mode')
-  }
-  localStorage.setItem('teedy-dark-mode', String(val))
+function onThemeSelect(event: SelectChangeEvent) {
+  handleThemeChange(event.value)
+}
+
+function onLocaleSelect(event: SelectChangeEvent) {
+  handleLocaleChange(event.value)
 }
 </script>
 
@@ -107,28 +107,20 @@ function handleDarkModeToggle(val: boolean) {
           optionLabel="label"
           optionValue="value"
           class="w-full"
-          @change="(e: any) => handleThemeChange(e.value)"
+          @change="onThemeSelect"
         />
       </div>
       <div class="form-field">
-        <label class="toggle-label">
-          <ToggleSwitch :modelValue="darkMode" @update:modelValue="handleDarkModeToggle" />
-          Dark mode
-        </label>
+        <label>Language</label>
+        <Select
+          v-model="selectedLocale"
+          :options="languages"
+          optionLabel="label"
+          optionValue="value"
+          class="w-full"
+          @change="onLocaleSelect"
+        />
       </div>
-    </template></Card>
-
-    <!-- Language -->
-    <Card class="mb-3" style="max-width: 400px"><template #content>
-      <h3 class="section-title">Language</h3>
-      <Select
-        v-model="selectedLocale"
-        :options="languages"
-        optionLabel="label"
-        optionValue="value"
-        class="w-full"
-        @change="(e: any) => handleLocaleChange(e.value)"
-      />
     </template></Card>
 
     <!-- Password -->
@@ -162,10 +154,5 @@ function handleDarkModeToggle(val: boolean) {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--p-text-color);
-}
-.toggle-label {
-  display: flex !important;
-  align-items: center;
-  gap: 0.75rem;
 }
 </style>

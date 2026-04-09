@@ -4,9 +4,10 @@ import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
-import { useTagStore } from '../../stores/tags'
+import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import api from '../../api/client'
+import { formatFileSize } from '../../composables/useFormatters'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
@@ -21,7 +22,7 @@ const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const toast = useToast()
 const confirm = useConfirm()
-const tagStore = useTagStore()
+const tagFilter = useTagFilterStore()
 const queryClient = useQueryClient()
 const isEdit = computed(() => !!props.id)
 
@@ -52,15 +53,15 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+const isDragging = ref(false)
 
 const languages = SUPPORTED_LANGUAGES
 
 const tagOptions = computed(() =>
-  tagStore.tags.map((t) => ({ label: t.name, value: t.id }))
+  tagFilter.allTags.map((t) => ({ label: t.name, value: t.id })),
 )
 
 onMounted(async () => {
-  tagStore.fetchTags()
   if (isEdit.value && props.id) {
     const { data } = await getDocument(props.id, true)
     form.value.title = data.title || ''
@@ -84,20 +85,24 @@ onMounted(async () => {
         form.value.language = appConfig.default_language
       }
     } catch { /* fall back to 'eng' */ }
+
+    // Pre-populate tags from current tag filter selection (included only)
+    form.value.tags = [...tagFilter.selectedTagIds]
   }
 })
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1048576).toFixed(1) + ' MB'
-}
 
 function onFilesSelected(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files) {
     pendingFiles.value.push(...Array.from(input.files))
     input.value = ''
+  }
+}
+
+function onDrop(e: DragEvent) {
+  isDragging.value = false
+  if (e.dataTransfer?.files) {
+    pendingFiles.value.push(...Array.from(e.dataTransfer.files))
   }
 }
 
@@ -287,48 +292,64 @@ async function handleSubmit() {
     <Card class="mt-3"><template #content><div class="doc-edit-files">
       <h3 class="files-heading">Files</h3>
 
-      <!-- Existing files (edit mode) -->
-      <div v-if="existingFiles.length" class="existing-files">
-        <div v-for="file in existingFiles" :key="file.id" class="file-row">
-          <i :class="file.mimetype.startsWith('image/') ? 'pi pi-image' : file.mimetype === 'application/pdf' ? 'pi pi-file-pdf' : 'pi pi-file'" class="file-icon" />
-          <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ file.name }}</a>
-          <span class="file-size">{{ formatSize(file.size) }}</span>
-          <Button
-            icon="pi pi-times"
-            text
-            rounded
-            severity="danger"
-            size="small"
-            @click="confirmDeleteExisting(file)"
-            aria-label="Remove file"
-          />
+      <!-- Drop zone -->
+      <div
+        class="file-drop-zone"
+        :class="{ 'file-drop-zone--active': isDragging }"
+        @dragover.prevent="isDragging = true"
+        @dragenter.prevent="isDragging = true"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="onDrop"
+      >
+        <div class="file-drop-zone__content">
+          <i class="pi pi-cloud-upload file-drop-zone__icon" />
+          <span v-if="isDragging">Drop files here</span>
+          <span v-else>Drag files here or use the button below</span>
         </div>
-      </div>
 
-      <!-- Pending files to upload -->
-      <div v-if="pendingFiles.length" class="pending-files">
-        <div v-for="(file, index) in pendingFiles" :key="index" class="file-row pending">
-          <i class="pi pi-upload file-icon" />
-          <span class="file-name">{{ file.name }}</span>
-          <span class="file-size">{{ formatSize(file.size) }}</span>
-          <Button
-            icon="pi pi-times"
-            text
-            rounded
-            severity="secondary"
-            size="small"
-            @click="removePending(index)"
-            aria-label="Remove"
-          />
+        <!-- Existing files (edit mode) -->
+        <div v-if="existingFiles.length" class="existing-files">
+          <div v-for="file in existingFiles" :key="file.id" class="file-row">
+            <i :class="file.mimetype.startsWith('image/') ? 'pi pi-image' : file.mimetype === 'application/pdf' ? 'pi pi-file-pdf' : 'pi pi-file'" class="file-icon" />
+            <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ file.name }}</a>
+            <span class="file-size">{{ formatFileSize(file.size) }}</span>
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              severity="danger"
+              size="small"
+              @click="confirmDeleteExisting(file)"
+              aria-label="Remove file"
+            />
+          </div>
         </div>
-      </div>
 
-      <!-- File picker -->
-      <label class="file-add-btn">
-        <i class="pi pi-plus" />
-        Add files
-        <input type="file" multiple @change="onFilesSelected" style="display: none" />
-      </label>
+        <!-- Pending files to upload -->
+        <div v-if="pendingFiles.length" class="pending-files">
+          <div v-for="(file, index) in pendingFiles" :key="index" class="file-row pending">
+            <i class="pi pi-upload file-icon" />
+            <span class="file-name">{{ file.name }}</span>
+            <span class="file-size">{{ formatFileSize(file.size) }}</span>
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              severity="secondary"
+              size="small"
+              @click="removePending(index)"
+              aria-label="Remove"
+            />
+          </div>
+        </div>
+
+        <!-- File picker -->
+        <label class="file-add-btn">
+          <i class="pi pi-plus" />
+          Add files
+          <input type="file" multiple @change="onFilesSelected" style="display: none" />
+        </label>
+      </div>
 
       <p v-if="pendingFiles.length" class="upload-hint">
         {{ pendingFiles.length }} file{{ pendingFiles.length > 1 ? 's' : '' }} will be uploaded on save.
@@ -478,6 +499,32 @@ a.file-name:hover {
 .file-add-btn:hover {
   border-color: var(--teedy-brand);
   color: var(--teedy-brand);
+}
+
+.file-drop-zone {
+  border: 2px dashed var(--p-content-border-color);
+  border-radius: var(--teedy-radius);
+  padding: 1rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.file-drop-zone--active {
+  border-color: var(--p-primary-color);
+  background: color-mix(in srgb, var(--p-primary-color) 5%, transparent);
+}
+.file-drop-zone__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.75rem 0;
+  font-size: 0.8125rem;
+  color: var(--p-text-muted-color);
+}
+.file-drop-zone--active .file-drop-zone__content {
+  color: var(--p-primary-color);
+}
+.file-drop-zone__icon {
+  font-size: 1.5rem;
 }
 
 .upload-hint {

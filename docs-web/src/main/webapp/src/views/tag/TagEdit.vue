@@ -171,6 +171,6 @@ function handleDelete() {
   border-radius: 4px;
   font-size: 0.8125rem;
   font-weight: 500;
-  color: #fff;
+  color: var(--teedy-tag-text);
 }
 </style>

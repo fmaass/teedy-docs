@@ -62,7 +62,7 @@ public class ClientUtil {
                 .put(Entity.form(new Form()
                         .param("username", username)
                         .param("email", username + "@docs.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("storage_quota", String.valueOf(quota))), JsonObject.class);
         
         // Add to groups
@@ -133,7 +133,7 @@ public class ClientUtil {
      * @return Authentication token
      */
     public String login(String username) {
-        return login(username, "12345678", false);
+        return login(username, "Test1234", false);
     }
     
     /**

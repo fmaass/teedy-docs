@@ -328,7 +328,7 @@ public class TestAppResource extends BaseJerseyTest {
                         .param("hostname", "localhost")
                         .param("port", "9755")
                         .param("username", "test@sismics.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("folder", "INBOX")
                         .param("tag", tagInboxId)
                 ), JsonObject.class);
@@ -342,14 +342,14 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals("localhost", json.getString("hostname"));
         Assertions.assertEquals(9755, json.getInt("port"));
         Assertions.assertEquals("test@sismics.com", json.getString("username"));
-        Assertions.assertEquals("12345678", json.getString("password"));
+        Assertions.assertEquals("Test1234", json.getString("password"));
         Assertions.assertEquals("INBOX", json.getString("folder"));
         Assertions.assertEquals(tagInboxId, json.getString("tag"));
 
         ServerSetup serverSetupSmtp = new ServerSetup(9754, null, ServerSetup.PROTOCOL_SMTP);
         ServerSetup serverSetupImap = new ServerSetup(9755, null, ServerSetup.PROTOCOL_IMAP);
         GreenMail greenMail = new GreenMail(new ServerSetup[] { serverSetupSmtp, serverSetupImap });
-        greenMail.setUser("test@sismics.com", "12345678");
+        greenMail.setUser("test@sismics.com", "Test1234");
         greenMail.start();
 
         // Test the inbox

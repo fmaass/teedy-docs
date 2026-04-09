@@ -64,7 +64,7 @@ public class TestUserResource extends BaseJerseyTest {
                 .put(Entity.form(new Form()
                         .param("username", "   bb  ")
                         .param("email", "bob@docs.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("storage_quota", "10")));
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
@@ -77,7 +77,7 @@ public class TestUserResource extends BaseJerseyTest {
                 .put(Entity.form(new Form()
                         .param("username", "bob/")
                         .param("email", "bob@docs.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("storage_quota", "10")));
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
@@ -90,7 +90,7 @@ public class TestUserResource extends BaseJerseyTest {
                 .put(Entity.form(new Form()
                         .param("username", "bob")
                         .param("email", "bob@docs.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("storage_quota", "nope")));
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
@@ -103,7 +103,7 @@ public class TestUserResource extends BaseJerseyTest {
                 .put(Entity.form(new Form()
                         .param("username", "bob")
                         .param("email", "bobdocs.com")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("storage_quota", "10")));
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
@@ -114,7 +114,7 @@ public class TestUserResource extends BaseJerseyTest {
         Form form = new Form()
                 .param("username", " bob ")
                 .param("email", " bob@docs.com ")
-                .param("password", " 12345678 ")
+                .param("password", " Test1234 ")
                 .param("storage_quota", "10");
         target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
@@ -132,7 +132,7 @@ public class TestUserResource extends BaseJerseyTest {
         response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", " alice ")
-                        .param("password", " 12345678 ")));
+                        .param("password", " Test1234 ")));
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         String aliceAuthToken = clientUtil.getAuthenticationCookie(response);
 
@@ -196,7 +196,7 @@ public class TestUserResource extends BaseJerseyTest {
         response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "intruder")
-                        .param("password", "12345678")));
+                        .param("password", "Test1234")));
         Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
 
         // Test login KO (wrong password)
@@ -228,7 +228,7 @@ public class TestUserResource extends BaseJerseyTest {
         response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "alice")
-                        .param("password", "12345678")));
+                        .param("password", "Test1234")));
         Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
 
         // Delete user bob
@@ -295,7 +295,7 @@ public class TestUserResource extends BaseJerseyTest {
         response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "admin_user1")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("remember", "false")));
         Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
 
@@ -310,7 +310,7 @@ public class TestUserResource extends BaseJerseyTest {
         response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "admin_user1")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("remember", "false")));
         Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
 
@@ -355,7 +355,7 @@ public class TestUserResource extends BaseJerseyTest {
         Response response = target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "totp1")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("remember", "false")));
         Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
         json = response.readEntity(JsonObject.class);
@@ -369,7 +369,7 @@ public class TestUserResource extends BaseJerseyTest {
         target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "totp1")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("code", Integer.toString(validationCode))
                         .param("remember", "false")), JsonObject.class);
         
@@ -392,7 +392,7 @@ public class TestUserResource extends BaseJerseyTest {
         target().path("/user/disable_totp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
                 .post(Entity.form(new Form()
-                        .param("password", "12345678")), JsonObject.class);
+                        .param("password", "Test1234")), JsonObject.class);
 
         // Enable TOTP for totp1
         target().path("/user/enable_totp").request()
@@ -408,7 +408,7 @@ public class TestUserResource extends BaseJerseyTest {
         target().path("/user/login").request()
                 .post(Entity.form(new Form()
                         .param("username", "totp1")
-                        .param("password", "12345678")
+                        .param("password", "Test1234")
                         .param("remember", "false")), JsonObject.class);
         
         // Check TOTP enablement
@@ -483,14 +483,14 @@ public class TestUserResource extends BaseJerseyTest {
         json = target().path("/user/password_reset").request()
                 .post(Entity.form(new Form()
                         .param("key", key)
-                        .param("password", "87654321")), JsonObject.class);
+                        .param("password", "Reset1Pass")), JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
 
         // User absent_minded resets its password: expired key
         response = target().path("/user/password_reset").request()
                 .post(Entity.form(new Form()
                         .param("key", key)
-                        .param("password", "87654321")));
+                        .param("password", "Reset1Pass")));
         Assertions.assertEquals(Response.Status.BAD_REQUEST, Response.Status.fromStatusCode(response.getStatus()));
         json = response.readEntity(JsonObject.class);
         Assertions.assertEquals("KeyNotFound", json.getString("type"));

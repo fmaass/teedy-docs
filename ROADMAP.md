@@ -139,50 +139,79 @@ See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.5.0) fo
 
 ---
 
-## v2.6.0 (Planned)
+## v2.6.0 (Released)
 
 **Theme:** Security Hardening + Unified Navigation
 
 ### Unified document view
 
-- Merge Documents and Browse into a single view with three zones: tag tree sidebar (left), address bar with active/related tags and search (top), document list (main)
-- Tag tree always visible alongside documents, with facet-driven counts and auto-expand to active branches
-- Document slide-over panel (side peek) to preview documents without leaving the list
+- Merged Documents and Browse into a single three-zone layout: tag tree sidebar (left), search bar with filter chips (top), document list (main)
+- Tag tree always visible with facet-driven counts and auto-expand to active branches
+- Document slide-over panel to preview documents without leaving the list
 - AND/OR toggle for tag intersection vs union mode
-- Tag exclusion UI: tri-state per tag (neutral / included / excluded) with visual differentiation on chips; backend `!tag:` / `search[nottag]` already supports this
-- Untagged document filter: "Untagged" pseudo-node or toggle to surface documents with zero tags
-- Quick tagging from document list: right-click context menu with tag picker to add/remove tags without opening the edit form
-- Replaces the separate Documents and Browse navigation items with a single "Documents" view
+- Tag exclusion UI: tri-state per tag (neutral / included / excluded) with visual chips
+- Quick tagging from document list context menu
 
-### Login brute force protection
+### File drop zones
 
-- Per-IP and per-username rate limiting with exponential backoff after failed attempts
-- Configurable thresholds via env vars
+- Drag-and-drop file upload on document edit form and Files tab
+- Visual feedback on drag hover, pending file list with sizes
+- Direct upload on Files tab without entering edit mode
+
+### Auto-tag from filter
+
+- New documents pre-populate tags from currently selected tags in the tag tree
+- Convenience default — users can remove tags before saving
+
+### Security hardening
+
+- Login brute force protection: per-IP and per-username rate limiting with exponential backoff, HTTP 429 + Retry-After header, 15-minute max lockout
+- Session token lifetime reduced from 20 years to 90 days with sliding expiry (token rotation on authenticated requests)
+- Password complexity enforcement: minimum 8 characters, mixed case + digit, reject username as password
+- Auth cookie Secure + HttpOnly flags, security response headers
+- Lucene: removed NoLockFactory, commit-only-on-success, synchronized reader access
+
+### Upload size limits
+
+- Configurable maximum upload size via `DOCS_MAX_UPLOAD_SIZE` env var (default 500 MB)
+- Exposed in Settings UI as read-only system info
+
+### Unified color palette
+
+- Self-contained primary color ramp derived from Teedy blue (#2aabd2), no external palette references
+- Status colors (success/warning/danger/info) use PrimeVue semantic tokens for automatic dark mode and theme switching
+- Design token system via teedy-tokens.css with PrimeVue variable delegation
+
+### Frontend modernization
+
+- Component decomposition: AppHeader, TagTreePanel, TagFilterChips, DocumentSearchBar, DocumentTable, DocumentSlideOver, PdfViewer
+- PDF.js canvas renderer replacing iframe embeds
+- Accessibility: ARIA labels on icon-only buttons, ARIA tab roles, PrimeVue Select components
+- Design tokens and PrimeVue migration across settings, document, and tag views
+
+### Infrastructure
+
+- Docker CMD JSON form for proper signal forwarding
+- GitHub Actions upgraded to Node.js 24 compatible versions
+- Legacy AngularJS removed (180 dead files from src-legacy/)
+
+See [release notes](https://github.com/fmaass/teedy-docs/releases/tag/v2.6.0) for details.
+
+---
+
+## v2.7.0 (Planned)
+
+**Theme:** TBD
 
 ### Password change verification
 
 - Require current password when changing password via self-update endpoint
 - Frontend form update
 
-### File upload size limits
-
-- Configurable maximum upload size (env var, default 500MB)
-- Enforce at stream level before writing to disk
-
 ### OIDC linking security
 
 - Prevent auto-linking OIDC accounts to existing local accounts without explicit authorization
 - Require local login or admin approval for first-time binding
-
-### Session token lifetime
-
-- Reduce "remember me" token lifetime from 20 years to 90 days
-- Token rotation on authenticated requests
-
-### Password complexity
-
-- Enforce mixed-case + digit or zxcvbn-based strength check
-- Reject passwords matching the username
 
 ### Bulk operations
 

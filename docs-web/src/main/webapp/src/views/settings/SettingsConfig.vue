@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../../api/client'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
+import { formatFileSize } from '../../composables/useFormatters'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
@@ -17,6 +18,7 @@ const queryClient = useQueryClient()
 const defaultLanguage = ref('eng')
 const tagSearchMode = ref('PREFIX')
 const ocrEnabled = ref(true)
+const maxUploadSize = ref(0)
 
 const { data: appConfig } = useQuery({
   queryKey: ['app-config'],
@@ -28,6 +30,7 @@ watch(appConfig, (config) => {
     defaultLanguage.value = config.default_language || 'eng'
     tagSearchMode.value = config.tag_search_mode || 'PREFIX'
     ocrEnabled.value = config.ocr_enabled !== false
+    maxUploadSize.value = config.max_upload_size || 524288000
   }
 }, { immediate: true })
 
@@ -110,6 +113,11 @@ function handleReindex() {
         <label>Tag search mode</label>
         <Select v-model="tagSearchMode" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
+      <div class="form-field">
+        <label>Maximum upload size</label>
+        <div class="read-only-value">{{ formatFileSize(maxUploadSize) }}</div>
+        <small class="field-hint">Set via <code>DOCS_MAX_UPLOAD_SIZE</code> environment variable</small>
+      </div>
       <Button label="Save" icon="pi pi-check" :loading="saving" @click="saveConfig()" />
     </template></Card>
 
@@ -162,6 +170,23 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
   line-height: 1.5;
+}
+.read-only-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--p-text-color);
+}
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.field-hint code {
+  font-size: 0.7rem;
+  background: var(--p-content-hover-background);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
 }
 .ocr-toggle {
   display: flex;

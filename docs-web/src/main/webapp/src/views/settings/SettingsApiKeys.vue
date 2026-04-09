@@ -49,6 +49,9 @@ const deleteMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['apikeys'] })
     toast.add({ severity: 'success', summary: 'API key deleted', life: 3000 })
   },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to delete API key', life: 3000 })
+  },
 })
 
 function doCreate() {
@@ -117,7 +120,7 @@ function formatDate(ts?: number) {
       </Column>
       <Column header="" style="width: 60px">
         <template #body="{ data }">
-          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" />
+          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete API key" />
         </template>
       </Column>
     </DataTable>
@@ -145,7 +148,7 @@ function formatDate(ts?: number) {
         <p class="key-warning">Copy this key now. It will not be shown again.</p>
         <div class="key-value-row">
           <code class="key-value">{{ createdKey }}</code>
-          <Button icon="pi pi-copy" text size="small" @click="copyKey" />
+          <Button icon="pi pi-copy" text size="small" @click="copyKey" aria-label="Copy to clipboard" />
         </div>
       </div>
       <template #footer>
@@ -240,7 +243,7 @@ function formatDate(ts?: number) {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--p-warn-color, #b45309);
+  color: var(--teedy-warning-text);
 }
 .key-value-row {
   display: flex;

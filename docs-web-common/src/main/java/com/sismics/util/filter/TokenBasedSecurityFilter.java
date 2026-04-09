@@ -25,9 +25,11 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
     public static final String COOKIE_NAME = "auth_token";
 
     /**
-     * Lifetime of the authentication token in seconds, since login.
+     * Lifetime of the long-lived authentication token in seconds.
+     * Configurable via DOCS_SESSION_LIFETIME_DAYS env var (default 90 days).
      */
-    public static final int TOKEN_LONG_LIFETIME = 3600 * 24 * 365 * 20;
+    public static final int TOKEN_LONG_LIFETIME = Integer.parseInt(
+            System.getenv().getOrDefault("DOCS_SESSION_LIFETIME_DAYS", "90")) * 3600 * 24;
     
     /**
      * Lifetime of the authentication token in seconds, since last connection.
@@ -102,6 +104,18 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
         if (isTokenExpired(authToken)) {
             handleExpiredToken(authTokenDao, authTokenId);
             return null;
+        }
+
+        // Token rotation: if < 30 days remaining on a long-lived token, extend by 90 days
+        if (authToken.isLongLasted()) {
+            long now = System.currentTimeMillis();
+            long creationDate = authToken.getCreationDate().getTime();
+            long expiryMs = creationDate + ((long) TOKEN_LONG_LIFETIME) * 1000L;
+            long thirtyDaysMs = 30L * 24 * 3600 * 1000;
+            if (expiryMs - now < thirtyDaysMs) {
+                authToken.setCreationDate(new Date(now));
+                authTokenDao.updateCreationDate(authToken);
+            }
         }
 
         return new UserDao().getById(authToken.getUserId());

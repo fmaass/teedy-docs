@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -32,6 +33,9 @@ const restoreMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['documents'] })
     toast.add({ severity: 'success', summary: 'Document restored', life: 3000 })
   },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to restore document', life: 3000 })
+  },
 })
 
 const permanentDeleteMutation = useMutation({
@@ -40,6 +44,9 @@ const permanentDeleteMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['trash'] })
     toast.add({ severity: 'success', summary: 'Document permanently deleted', life: 3000 })
   },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to delete document', life: 3000 })
+  },
 })
 
 const emptyTrashMutation = useMutation({
@@ -47,6 +54,9 @@ const emptyTrashMutation = useMutation({
   onSuccess: (res) => {
     queryClient.invalidateQueries({ queryKey: ['trash'] })
     toast.add({ severity: 'success', summary: `${res.data.deleted_count} document(s) permanently deleted`, life: 3000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to empty trash', life: 3000 })
   },
 })
 
@@ -75,7 +85,7 @@ function executeConfirmed() {
   }
 }
 
-function formatDate(ts: number) {
+function formatDeletedAt(ts: number) {
   return new Date(ts).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -84,6 +94,7 @@ function formatDate(ts: number) {
     minute: '2-digit',
   })
 }
+
 </script>
 
 <template>
@@ -124,7 +135,7 @@ function formatDate(ts: number) {
       </Column>
       <Column header="Deleted" style="width: 180px" sortable sortField="delete_date">
         <template #body="{ data }">
-          <span class="doc-meta">{{ formatDate(data.delete_date) }}</span>
+          <span class="doc-meta">{{ formatDeletedAt(data.delete_date) }}</span>
         </template>
       </Column>
       <Column header="Actions" style="width: 200px">
@@ -151,10 +162,7 @@ function formatDate(ts: number) {
       </Column>
     </DataTable>
 
-    <div v-else class="empty-state">
-      <i class="pi pi-trash" />
-      <p>Trash is empty</p>
-    </div>
+    <EmptyState v-else icon="pi pi-trash" message="Trash is empty" />
 
     <Dialog
       v-model:visible="confirmDialog"
@@ -216,23 +224,6 @@ function formatDate(ts: number) {
 .action-buttons {
   display: flex;
   gap: 0.25rem;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 4rem 1rem;
-  text-align: center;
-  color: var(--p-text-muted-color);
-}
-.empty-state i {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}
-.empty-state p {
-  margin: 0 0 1rem;
-  font-size: 1rem;
 }
 
 @media (max-width: 768px) {

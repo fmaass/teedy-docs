@@ -5,6 +5,7 @@ import { type DocumentDetail } from '../../api/document'
 import api from '../../api/client'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import EmptyState from '../../components/EmptyState.vue'
 
 const doc = inject<Ref<DocumentDetail | null>>('document')!
 
@@ -39,10 +40,7 @@ function formatDate(ts: number) {
       <Column field="username" header="User" style="width: 120px" />
       <Column field="message" header="Action" />
       <template #empty>
-        <div class="teedy-empty">
-          <i class="pi pi-history" />
-          <p>No activity recorded</p>
-        </div>
+        <EmptyState icon="pi pi-history" message="No activity recorded" />
       </template>
     </DataTable>
   </div>

@@ -221,4 +221,29 @@ public class ValidationUtil {
             throw new ClientException("ValidationError", MessageFormat.format("{0} must be a date", name));
         }
     }
+
+    /**
+     * Validates password strength: 8+ chars, at least one uppercase, one lowercase, one digit.
+     * Rejects passwords matching the username (case-insensitive).
+     *
+     * @param password Password to validate
+     * @param username Username to compare against
+     */
+    public static void validatePasswordStrength(String password, String username) {
+        if (password == null || password.length() < 8) {
+            throw new ClientException("ValidationError", "Password must be at least 8 characters");
+        }
+        boolean hasUpper = false, hasLower = false, hasDigit = false;
+        for (char c : password.toCharArray()) {
+            if (Character.isUpperCase(c)) hasUpper = true;
+            else if (Character.isLowerCase(c)) hasLower = true;
+            else if (Character.isDigit(c)) hasDigit = true;
+        }
+        if (!hasUpper || !hasLower || !hasDigit) {
+            throw new ClientException("ValidationError", "Password must contain at least one uppercase letter, one lowercase letter, and one digit");
+        }
+        if (username != null && password.equalsIgnoreCase(username)) {
+            throw new ClientException("ValidationError", "Password must not match the username");
+        }
+    }
 }

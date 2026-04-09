@@ -19,6 +19,17 @@ const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
+const returnTo = computed(() => (history.state?.returnTo as string) || null)
+const filterLabel = computed(() => (history.state?.filterLabel as string) || null)
+
+function goBack() {
+  if (returnTo.value) {
+    router.push(returnTo.value)
+  } else {
+    router.push({ name: 'documents' })
+  }
+}
+
 const { data: doc, isLoading: loading, error } = useQuery({
   queryKey: computed(() => ['document', props.id]),
   queryFn: () => getDocument(props.id).then((r) => r.data),
@@ -40,14 +51,19 @@ const tabs = [
   { label: 'Activity', icon: 'pi pi-history', route: 'document-view-activity' },
 ]
 
-const activeTab = ref(tabs.findIndex((t) => t.route === route.name) || 0)
+interface TabChangeEvent {
+  index: number
+}
+
+const initialTabIndex = tabs.findIndex((t) => t.route === route.name)
+const activeTab = ref(initialTabIndex >= 0 ? initialTabIndex : 0)
 
 watch(() => route.name, (name) => {
   const idx = tabs.findIndex((t) => t.route === name)
   if (idx >= 0) activeTab.value = idx
 })
 
-function onTabChange(e: any) {
+function onTabChange(e: TabChangeEvent) {
   const tab = tabs[e.index]
   if (tab) router.push({ name: tab.route, params: { id: props.id } })
 }
@@ -82,6 +98,15 @@ function handleDelete() {
 
 <template>
   <div class="doc-view">
+    <!-- Back bar -->
+    <div class="back-bar">
+      <button class="back-link" @click="goBack">
+        <i class="pi pi-arrow-left" />
+        <span>Documents</span>
+      </button>
+      <span v-if="filterLabel" class="back-filter">· {{ filterLabel }}</span>
+    </div>
+
     <!-- Loading skeleton -->
     <div v-if="loading" class="doc-view-loading">
       <Skeleton width="60%" height="2rem" class="mb-2" />
@@ -153,6 +178,44 @@ function handleDelete() {
   max-width: 960px;
 }
 
+.back-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+  font-size: 0.8125rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: none;
+  border: none;
+  color: var(--p-primary-color);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  margin: -0.25rem -0.5rem;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.back-link:hover {
+  background: var(--p-content-hover-background);
+}
+.back-link i {
+  font-size: 0.75rem;
+}
+
+.back-filter {
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .doc-view-loading {
   padding: 1rem 0;
 }
@@ -192,8 +255,8 @@ function handleDelete() {
   font-size: 0.6875rem;
   font-weight: 600;
   border-radius: 999px;
-  background: #e0e7ff;
-  color: #3730a3;
+  background: var(--teedy-neutral-bg);
+  color: var(--teedy-neutral-text);
   vertical-align: baseline;
 }
 

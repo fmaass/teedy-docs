@@ -36,7 +36,9 @@ export function getTagStats() {
   return api.get<{ stats: Record<string, number> }>('/tag/stats')
 }
 
-export function getTagFacets(tagIds?: string[]) {
-  const params = tagIds?.length ? { tags: tagIds.join(',') } : {}
+export function getTagFacets(tagIds?: string[], mode?: 'and' | 'or') {
+  const params: Record<string, string> = {}
+  if (tagIds?.length) params.tags = tagIds.join(',')
+  if (mode === 'or') params.mode = 'or'
   return api.get<{ facets: Record<string, number>; total: number }>('/tag/facets', { params })
 }

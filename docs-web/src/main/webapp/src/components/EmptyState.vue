@@ -19,3 +19,25 @@ const emit = defineEmits<{ action: [] }>()
     </slot>
   </div>
 </template>
+
+<style scoped>
+.teedy-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: var(--teedy-text-muted);
+}
+
+.teedy-empty i {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.teedy-empty p {
+  margin: 0 0 1rem;
+  font-size: 0.9375rem;
+}
+</style>

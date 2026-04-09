@@ -50,6 +50,9 @@ const deleteMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['webhooks'] })
     toast.add({ severity: 'success', summary: 'Webhook deleted', life: 3000 })
   },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to delete webhook', life: 3000 })
+  },
 })
 
 function doAdd() {
@@ -113,7 +116,7 @@ function formatDate(ts: number) {
       </Column>
       <Column header="" style="width: 60px">
         <template #body="{ data }">
-          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" />
+          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete webhook" />
         </template>
       </Column>
     </DataTable>

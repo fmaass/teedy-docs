@@ -193,33 +193,14 @@ public class OidcResource extends BaseResource {
                 user = userDao.getByOidcSubject(issuer, subject);
             }
 
-            // Second: initial linking by username or email (only if no subject binding exists)
-            boolean needsBinding = false;
-            if (user == null) {
-                if (preferredUsername != null) {
-                    user = userDao.getActiveByUsername(preferredUsername);
-                }
-                if (user == null && email != null) {
-                    user = userDao.getByEmail(email);
-                }
-                if (user != null) {
-                    needsBinding = true;
-                }
-            }
-
-            // Third: provision a new user
+            // Security: do NOT auto-link to existing local accounts by username/email.
+            // First OIDC login always provisions a new user to prevent account takeover.
             if (user == null) {
                 user = provisionUser(userDao, preferredUsername, email, subject, issuer);
                 if (user == null) {
                     log.error("Failed to provision OIDC user: sub={}", subject);
                     return Response.temporaryRedirect(URI.create("/#/login")).build();
                 }
-            }
-
-            // Store OIDC binding on first login for existing users
-            if (needsBinding && subject != null) {
-                userDao.updateOidcBinding(user.getId(), issuer, subject);
-                log.info("Stored OIDC binding for user {}: issuer={}, sub={}", user.getUsername(), issuer, subject);
             }
 
             String ip = request.getHeader("x-forwarded-for");

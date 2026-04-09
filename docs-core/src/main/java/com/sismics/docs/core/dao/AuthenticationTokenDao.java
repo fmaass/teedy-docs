@@ -98,6 +98,23 @@ public class AuthenticationTokenDao {
     }
     
     /**
+     * Updates the creation date of a token (used for token rotation / sliding expiry).
+     *
+     * @param authenticationToken Authentication token with updated creation date
+     */
+    public void updateCreationDate(AuthenticationToken authenticationToken) {
+        StringBuilder sb = new StringBuilder("update T_AUTHENTICATION_TOKEN ato ");
+        sb.append(" set AUT_CREATEDATE_D = :creationDate ");
+        sb.append(" where ato.AUT_ID_C = :id");
+
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(sb.toString());
+        q.setParameter("creationDate", authenticationToken.getCreationDate());
+        q.setParameter("id", authenticationToken.getId());
+        q.executeUpdate();
+    }
+
+    /**
      * Returns all authentication tokens of an user.
      * 
      * @param userId

@@ -29,7 +29,7 @@ public abstract class BaseTransactionalTest {
         UserDao userDao = new UserDao();
         User user = new User();
         user.setUsername(userName);
-        user.setPassword("12345678");
+        user.setPassword("Test1234");
         user.setEmail("toto@docs.com");
         user.setRoleId("admin");
         user.setStorageQuota(100_000L);

@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { type DocumentDetail, type Acl, type InheritedAcl } from '../../api/document'
 import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../../api/acl'
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
+import AutoComplete from 'primevue/autocomplete'
 import Select from 'primevue/select'
 import TagBadge from '../../components/TagBadge.vue'
 import { useToast } from 'primevue/usetoast'
@@ -31,36 +31,31 @@ const inheritedBySource = computed(() => {
 })
 
 // Add ACL form
-const searchQuery = ref('')
 const searchResults = ref<AclTarget[]>([])
 const selectedTarget = ref<AclTarget | null>(null)
 const selectedPerm = ref<'READ' | 'WRITE'>('READ')
 const addingAcl = ref(false)
-let searchTimeout: ReturnType<typeof setTimeout>
 
 const permOptions = [
   { label: 'Can view', value: 'READ' },
   { label: 'Can edit', value: 'WRITE' },
 ]
 
-watch(searchQuery, (val) => {
-  clearTimeout(searchTimeout)
-  if (!val.trim()) {
+async function completeAclTargetSearch(event: { query: string }) {
+  const query = event.query.trim()
+  if (!query) {
     searchResults.value = []
-    selectedTarget.value = null
     return
   }
-  searchTimeout = setTimeout(async () => {
-    try {
-      const { data } = await searchAclTargets(val)
-      const users = (data.users ?? []).map((u) => ({ ...u, type: 'USER' as const }))
-      const groups = (data.groups ?? []).map((g) => ({ ...g, type: 'GROUP' as const }))
-      searchResults.value = [...users, ...groups]
-    } catch {
-      searchResults.value = []
-    }
-  }, 300)
-})
+  try {
+    const { data } = await searchAclTargets(query)
+    const users = (data.users ?? []).map((u) => ({ ...u, type: 'USER' as const }))
+    const groups = (data.groups ?? []).map((g) => ({ ...g, type: 'GROUP' as const }))
+    searchResults.value = [...users, ...groups]
+  } catch {
+    searchResults.value = []
+  }
+}
 
 async function handleAdd() {
   if (!selectedTarget.value || !doc.value) return
@@ -69,7 +64,6 @@ async function handleAdd() {
     await addAcl(doc.value.id, selectedPerm.value, selectedTarget.value.name, selectedTarget.value.type)
     queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
     toast.add({ severity: 'success', summary: 'Permission added', life: 2000 })
-    searchQuery.value = ''
     selectedTarget.value = null
     searchResults.value = []
     selectedPerm.value = 'READ'
@@ -140,27 +134,25 @@ function typeIcon(type: string) {
       <div v-if="doc.writable" class="add-acl-form">
         <h4>Add permission</h4>
         <div class="add-acl-row">
-          <div class="add-acl-search">
-            <InputText
-              v-model="searchQuery"
-              placeholder="Search user or group…"
-              size="small"
-              class="w-full"
-            />
-            <div v-if="searchResults.length" class="search-dropdown">
-              <button
-                v-for="result in searchResults"
-                :key="result.id"
-                class="search-result"
-                :class="{ selected: selectedTarget?.id === result.id }"
-                @click="selectedTarget = result; searchQuery = result.name; searchResults = []"
-              >
-                <i :class="typeIcon(result.type)" />
-                {{ result.name }}
-                <span class="result-type">{{ result.type }}</span>
-              </button>
-            </div>
-          </div>
+          <AutoComplete
+            v-model="selectedTarget"
+            :suggestions="searchResults"
+            optionLabel="name"
+            forceSelection
+            dropdown
+            size="small"
+            class="add-acl-autocomplete"
+            placeholder="Search user or group…"
+            @complete="completeAclTargetSearch"
+          >
+            <template #option="{ option }">
+              <div class="search-result">
+                <i :class="typeIcon(option.type)" />
+                <span>{{ option.name }}</span>
+                <span class="result-type">{{ option.type }}</span>
+              </div>
+            </template>
+          </AutoComplete>
           <Select
             v-model="selectedPerm"
             :options="permOptions"
@@ -264,12 +256,12 @@ function typeIcon(type: string) {
   flex-shrink: 0;
 }
 .badge-read {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--teedy-info-bg);
+  color: var(--teedy-info-text);
 }
 .badge-write {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--teedy-warning-bg);
+  color: var(--teedy-warning-text);
 }
 
 .no-acl {
@@ -290,22 +282,8 @@ function typeIcon(type: string) {
   align-items: flex-start;
 }
 
-.add-acl-search {
-  position: relative;
+.add-acl-autocomplete {
   flex: 1;
-}
-
-.search-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  background: white;
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  margin-top: 2px;
 }
 
 .search-result {
@@ -313,16 +291,7 @@ function typeIcon(type: string) {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  background: none;
-  border: none;
-  cursor: pointer;
   font-size: 0.875rem;
-  text-align: left;
-}
-.search-result:hover,
-.search-result.selected {
-  background: var(--p-content-hover-background);
 }
 
 .result-type {

@@ -4,6 +4,7 @@ import { type DocumentDetail } from '../../api/document'
 import { getFileContent, reprocessFile } from '../../api/file'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
+import EmptyState from '../../components/EmptyState.vue'
 import { useToast } from 'primevue/usetoast'
 
 const doc = inject<Ref<DocumentDetail | null>>('document')!
@@ -76,10 +77,7 @@ function fileIcon(mime: string) {
       Text extracted from each file via OCR or direct text parsing. This is what powers full-text search.
     </p>
 
-    <div v-if="!doc.files?.length" class="teedy-empty mt-4">
-      <i class="pi pi-file" />
-      <p>No files attached to this document</p>
-    </div>
+    <EmptyState v-if="!doc.files?.length" icon="pi pi-file" message="No files attached to this document" />
 
     <div v-for="ft in fileTexts" :key="ft.fileId" class="file-text-block">
       <div class="file-text-header">
@@ -179,12 +177,12 @@ function fileIcon(mime: string) {
   white-space: nowrap;
 }
 .status-ok {
-  background: #d1fae5;
-  color: #065f46;
+  background: var(--teedy-success-bg);
+  color: var(--teedy-success-text);
 }
 .status-empty {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--teedy-warning-bg);
+  color: var(--teedy-warning-text);
 }
 
 .file-text-loading {
@@ -214,8 +212,8 @@ function fileIcon(mime: string) {
   gap: 0.5rem;
   padding: 1rem 0.875rem;
   font-size: 0.8125rem;
-  color: #92400e;
-  background: #fffbeb;
+  color: var(--teedy-warning-text);
+  background: var(--teedy-warning-bg);
 }
 .file-text-empty i {
   flex-shrink: 0;

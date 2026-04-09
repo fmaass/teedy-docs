@@ -93,6 +93,12 @@ public class DocumentCriteria {
      */
     private Boolean deleted;
 
+    /**
+     * Tag combination mode: "and" (default) requires all tag groups to match,
+     * "or" requires any tag group to match.
+     */
+    private String tagMode = "and";
+
     public List<String> getTargetIdList() {
         return targetIdList;
     }
@@ -207,5 +213,13 @@ public class DocumentCriteria {
 
     public void setDeleted(Boolean deleted) {
         this.deleted = deleted;
+    }
+
+    public String getTagMode() {
+        return tagMode;
+    }
+
+    public void setTagMode(String tagMode) {
+        this.tagMode = tagMode;
     }
 }

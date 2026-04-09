@@ -92,6 +92,7 @@ public class UserResource extends BaseResource {
         username = ValidationUtil.validateLength(username, "username", 3, 50);
         ValidationUtil.validateUsername(username, "username");
         password = ValidationUtil.validateLength(password, "password", 8, 50);
+        ValidationUtil.validatePasswordStrength(password, username);
         email = ValidationUtil.validateLength(email, "email", 1, 100);
         Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
         ValidationUtil.validateEmail(email, "email");
@@ -144,6 +145,7 @@ public class UserResource extends BaseResource {
     @POST
     public Response update(
         @FormParam("password") String password,
+        @FormParam("current_password") String currentPassword,
         @FormParam("email") String email) {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
@@ -152,6 +154,17 @@ public class UserResource extends BaseResource {
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
         email = ValidationUtil.validateLength(email, "email", 1, 100, true);
+
+        // If changing password, verify the current password first
+        if (StringUtils.isNotBlank(password)) {
+            if (StringUtils.isBlank(currentPassword)) {
+                throw new ClientException("CurrentPasswordRequired", "Current password is required to change password");
+            }
+            if (AuthenticationUtil.authenticate(principal.getName(), currentPassword) == null) {
+                throw new ForbiddenClientException();
+            }
+            ValidationUtil.validatePasswordStrength(password, principal.getName());
+        }
         
         // Update the user
         UserDao userDao = new UserDao();
@@ -213,6 +226,11 @@ public class UserResource extends BaseResource {
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
         email = ValidationUtil.validateLength(email, "email", 1, 100, true);
         
+        // Validate password strength if changing
+        if (StringUtils.isNotBlank(password)) {
+            ValidationUtil.validatePasswordStrength(password, username);
+        }
+
         // Check if the user exists
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(username);
@@ -293,6 +311,23 @@ public class UserResource extends BaseResource {
         username = StringUtils.strip(username);
         password = StringUtils.strip(password);
 
+        // Rate limiting: check if IP or username is blocked
+        String clientIp = request.getHeader("x-forwarded-for");
+        if (Strings.isNullOrEmpty(clientIp)) {
+            clientIp = request.getRemoteAddr();
+        }
+        com.sismics.docs.rest.util.LoginRateLimiter rateLimiter = com.sismics.docs.rest.util.LoginRateLimiter.getInstance();
+        long retryAfterIp = rateLimiter.getRetryAfterSeconds(clientIp);
+        long retryAfterUser = username != null ? rateLimiter.getRetryAfterSeconds("user:" + username) : 0;
+        long retryAfter = Math.max(retryAfterIp, retryAfterUser);
+        if (retryAfter > 0) {
+            return Response.status(429)
+                    .header("Retry-After", retryAfter)
+                    .entity(Json.createObjectBuilder().add("type", "RateLimited")
+                            .add("message", "Too many login attempts. Try again later.").build())
+                    .build();
+        }
+
         // Get the user
         UserDao userDao = new UserDao();
         User user = null;
@@ -306,8 +341,14 @@ public class UserResource extends BaseResource {
             user = AuthenticationUtil.authenticate(username, password);
         }
         if (user == null) {
+            rateLimiter.recordFailure(clientIp);
+            if (username != null) rateLimiter.recordFailure("user:" + username);
             throw new ForbiddenClientException();
         }
+
+        // Clear rate limiter on successful auth
+        rateLimiter.recordSuccess(clientIp);
+        if (username != null) rateLimiter.recordSuccess("user:" + username);
 
         // Two factor authentication
         if (user.getTotpKey() != null) {
@@ -1103,6 +1144,9 @@ public class UserResource extends BaseResource {
         // Load the password recovery key
         PasswordRecoveryDao passwordRecoveryDao = new PasswordRecoveryDao();
         PasswordRecovery passwordRecovery = passwordRecoveryDao.getActiveById(passwordResetKey);
+        if (passwordRecovery != null && StringUtils.isNotBlank(password)) {
+            ValidationUtil.validatePasswordStrength(password, passwordRecovery.getUsername());
+        }
         if (passwordRecovery == null) {
             throw new ClientException("KeyNotFound", "Password recovery key not found");
         }

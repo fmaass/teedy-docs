@@ -8,6 +8,8 @@ import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import 'primeicons/primeicons.css'
 import './assets/teedy-theme.css'
+import './assets/teedy-tokens.css'
+import { teedyPrimary } from './theme/primary'
 
 import App from './App.vue'
 import router from './router'
@@ -24,19 +26,7 @@ if (localStorage.getItem('teedy-dark-mode') === 'true') {
 
 const TeedyPreset = definePreset(Lara, {
   semantic: {
-    primary: {
-      50: '{sky.50}',
-      100: '{sky.100}',
-      200: '{sky.200}',
-      300: '{sky.300}',
-      400: '{sky.400}',
-      500: '#2aabd2',
-      600: '#2493b5',
-      700: '#1e7a97',
-      800: '#18627a',
-      900: '#124a5c',
-      950: '#0c323e',
-    },
+    primary: teedyPrimary,
   },
 })
 

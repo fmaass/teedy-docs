@@ -128,12 +128,29 @@ public class FileResource extends BaseResource {
         // Keep unencrypted data temporary on disk
         String name = fileBodyPart.getContentDisposition() != null ?
                 URLDecoder.decode(fileBodyPart.getContentDisposition().getFileName(), StandardCharsets.UTF_8) : null;
+        long maxUploadSize = Long.parseLong(System.getenv().getOrDefault("DOCS_MAX_UPLOAD_SIZE", String.valueOf(500L * 1024 * 1024)));
         java.nio.file.Path unencryptedFile;
         long fileSize;
         try {
             unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile(name);
-            Files.copy(fileBodyPart.getValueAs(InputStream.class), unencryptedFile, StandardCopyOption.REPLACE_EXISTING);
+            try (InputStream in = fileBodyPart.getValueAs(InputStream.class);
+                 java.io.OutputStream out = Files.newOutputStream(unencryptedFile)) {
+                long totalRead = 0;
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    totalRead += n;
+                    if (totalRead > maxUploadSize) {
+                        Files.deleteIfExists(unencryptedFile);
+                        throw new ClientException("PayloadTooLarge",
+                                "File exceeds maximum upload size of " + (maxUploadSize / (1024 * 1024)) + " MB");
+                    }
+                    out.write(buf, 0, n);
+                }
+            }
             fileSize = Files.size(unencryptedFile);
+        } catch (ClientException e) {
+            throw e;
         } catch (IOException e) {
             throw new ServerException("StreamError", "Error reading the input file", e);
         }

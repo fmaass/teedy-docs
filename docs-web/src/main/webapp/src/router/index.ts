@@ -14,7 +14,7 @@ const router = createRouter({
       path: '/password-reset/:key',
       name: 'password-reset',
       component: () => import('../views/PasswordReset.vue'),
-      props: true,
+      props: (route) => ({ resetKey: route.params.key }),
       meta: { public: true },
     },
     {
@@ -31,11 +31,10 @@ const router = createRouter({
           name: 'documents',
           component: () => import('../views/document/DocumentList.vue'),
         },
-        // Browse (faceted tag navigation)
+        // Legacy browse route redirects to documents (merged in v2.6)
         {
           path: 'browse',
-          name: 'browse',
-          component: () => import('../views/tag/TagBrowser.vue'),
+          redirect: { name: 'documents' },
         },
         {
           path: 'document/trash',
@@ -94,11 +93,10 @@ const router = createRouter({
           component: () => import('../views/tag/TagEdit.vue'),
           props: true,
         },
-        // Users & Groups
+        // Legacy user route redirects to settings (merged in v2.6)
         {
           path: 'user',
-          name: 'user-groups',
-          component: () => import('../views/user/UserGroupDefault.vue'),
+          redirect: { name: 'settings-users' },
         },
         // Settings
         {

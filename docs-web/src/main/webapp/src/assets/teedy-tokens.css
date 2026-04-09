@@ -1,0 +1,41 @@
+:root {
+  /* Brand */
+  --teedy-brand: var(--p-primary-color);
+  --teedy-brand-hover: var(--p-primary-600);
+  --teedy-brand-subtle: var(--p-primary-100);
+
+  /* Surfaces */
+  --teedy-surface: var(--p-content-background);
+  --teedy-surface-ground: var(--p-surface-ground);
+  --teedy-surface-hover: var(--p-content-hover-background);
+  --teedy-surface-border: var(--p-content-border-color);
+
+  /* Text */
+  --teedy-text: var(--p-text-color);
+  --teedy-text-muted: var(--p-text-muted-color);
+
+  /* Semantic status colors (delegated to PrimeVue palette — dark mode automatic) */
+  --teedy-success-bg: var(--p-green-50);
+  --teedy-success-text: var(--p-green-700);
+  --teedy-warning-bg: var(--p-yellow-50);
+  --teedy-warning-text: var(--p-yellow-700);
+  --teedy-danger-bg: var(--p-red-50);
+  --teedy-danger-text: var(--p-red-700);
+  --teedy-info-bg: var(--p-blue-50);
+  --teedy-info-text: var(--p-blue-700);
+  --teedy-neutral-bg: var(--p-surface-100);
+  --teedy-neutral-text: var(--p-surface-700);
+
+  /* Component-specific */
+  --teedy-tag-text: #ffffff;
+  --teedy-pdf-chrome: #525659;
+  --teedy-enabled-color: var(--p-green-500);
+  --teedy-disabled-color: var(--p-red-500);
+
+  /* Radius */
+  --teedy-radius: var(--p-content-border-radius, 6px);
+}
+
+.dark-mode {
+  --teedy-pdf-chrome: #1e1e1e;
+}

@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { listTags, createTag } from '../../api/tag'
+import { listTags, createTag, type Tag } from '../../api/tag'
 import Tree from 'primevue/tree'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -27,10 +27,25 @@ const { data: tags, isLoading } = useQuery({
 
 const tagList = computed(() => tags.value ?? [])
 
+interface TagTreeNode {
+  key: string
+  label: string
+  data: Tag
+  children: TagTreeNode[]
+}
+
+interface ApiError {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
 const tagTreeNodes = computed(() => {
   const allTags = tagList.value
   const rootTags = allTags.filter((t) => !t.parent)
-  function buildNode(tag: typeof allTags[0]): any {
+  function buildNode(tag: Tag): TagTreeNode {
     const children = allTags.filter((t) => t.parent === tag.id)
     return {
       key: tag.id,
@@ -55,8 +70,9 @@ const { mutate: addTag } = useMutation({
     queryClient.invalidateQueries({ queryKey: ['tags'] })
     toast.add({ severity: 'success', summary: 'Tag created', life: 2000 })
   },
-  onError: (e: any) => {
-    toast.add({ severity: 'error', summary: e.response?.data?.message || 'Failed to create tag', life: 3000 })
+  onError: (error: unknown) => {
+    const message = (error as ApiError).response?.data?.message || 'Failed to create tag'
+    toast.add({ severity: 'error', summary: message, life: 3000 })
   },
 })
 
@@ -65,7 +81,7 @@ function handleAddTag() {
   addTag()
 }
 
-function selectTag(node: any) {
+function selectTag(node: { key: string }) {
   router.push({ name: 'tag-edit', params: { id: node.key } })
 }
 </script>

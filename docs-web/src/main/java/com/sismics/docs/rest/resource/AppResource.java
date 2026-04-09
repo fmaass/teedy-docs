@@ -119,6 +119,12 @@ public class AppResource extends BaseResource {
                 .add("active_user_count", userDao.getActiveUserCount())
                 .add("global_storage_current", userDao.getGlobalStorageCurrent())
                 .add("tag_search_mode", tagSearchMode);
+
+        // Max upload size (from env or default 500MB)
+        String maxUploadStr = System.getenv("DOCS_MAX_UPLOAD_SIZE");
+        long maxUploadSize = maxUploadStr != null ? Long.parseLong(maxUploadStr) : 524288000L;
+        response.add("max_upload_size", maxUploadSize);
+
         if (globalQuota > 0) {
             response.add("global_storage_quota", globalQuota);
         }

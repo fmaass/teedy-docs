@@ -7,7 +7,7 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 
-const props = defineProps<{ key: string }>()
+const props = defineProps<{ resetKey: string }>()
 const router = useRouter()
 const toast = useToast()
 
@@ -15,6 +15,14 @@ const password = ref('')
 const passwordConfirm = ref('')
 const loading = ref(false)
 const error = ref('')
+
+interface PasswordResetError {
+  response?: {
+    data?: {
+      type?: string
+    }
+  }
+}
 
 async function handleReset() {
   error.value = ''
@@ -32,11 +40,11 @@ async function handleReset() {
   }
   loading.value = true
   try {
-    await resetPassword(props.key, password.value)
+    await resetPassword(props.resetKey, password.value)
     toast.add({ severity: 'success', summary: 'Password changed. You can now sign in.', life: 5000 })
     router.push({ name: 'login' })
-  } catch (e: any) {
-    const type = e.response?.data?.type
+  } catch (errorResponse: unknown) {
+    const type = (errorResponse as PasswordResetError).response?.data?.type
     if (type === 'KeyNotFound') {
       error.value = 'This reset link has expired or is invalid. Please request a new one.'
     } else {

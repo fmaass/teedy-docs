@@ -13,6 +13,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
+import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -25,6 +26,14 @@ interface Rule {
   pattern: string
   order: number
   enabled: boolean
+}
+
+interface ApiError {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
 }
 
 const showDialog = ref(false)
@@ -67,8 +76,9 @@ const { mutate: saveRule } = useMutation({
     showDialog.value = false
     toast.add({ severity: 'success', summary: 'Rule saved', life: 2000 })
   },
-  onError: (e: any) => {
-    toast.add({ severity: 'error', summary: e.response?.data?.message || 'Failed to save rule', life: 3000 })
+  onError: (error: unknown) => {
+    const message = (error as ApiError).response?.data?.message || 'Failed to save rule'
+    toast.add({ severity: 'error', summary: message, life: 3000 })
   },
 })
 
@@ -77,6 +87,9 @@ const { mutate: deleteRule } = useMutation({
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tagmatchrules'] })
     toast.add({ severity: 'success', summary: 'Rule deleted', life: 2000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: 'Failed to delete rule', life: 3000 })
   },
 })
 
@@ -138,20 +151,17 @@ function getTagName(tagId: string) {
       <Column field="order" header="Order" style="width: 70px" />
       <Column header="Enabled" style="width: 80px">
         <template #body="{ data }">
-          <i :class="data.enabled ? 'pi pi-check-circle' : 'pi pi-times-circle'" :style="{ color: data.enabled ? '#22c55e' : '#ef4444' }" />
+          <i :class="data.enabled ? 'pi pi-check-circle' : 'pi pi-times-circle'" :style="{ color: data.enabled ? 'var(--teedy-enabled-color)' : 'var(--teedy-disabled-color)' }" />
         </template>
       </Column>
       <Column header="" style="width: 100px">
         <template #body="{ data }">
-          <Button icon="pi pi-pencil" text rounded size="small" @click="openEdit(data)" />
-          <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="handleDelete(data)" />
+          <Button icon="pi pi-pencil" text rounded size="small" @click="openEdit(data)" aria-label="Edit rule" />
+          <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="handleDelete(data)" aria-label="Delete rule" />
         </template>
       </Column>
       <template #empty>
-        <div class="teedy-empty">
-          <i class="pi pi-bolt" />
-          <p>No auto-tagging rules defined yet</p>
-        </div>
+        <EmptyState icon="pi pi-bolt" message="No auto-tagging rules defined yet" />
       </template>
     </DataTable>
 

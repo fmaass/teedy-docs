@@ -52,7 +52,7 @@ export interface DocumentDetail extends DocumentListItem {
   file_count: number
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
-  metadata: Array<{ id: string; name: string; type: string; value?: any }>
+  metadata: Array<{ id: string; name: string; type: string; value?: unknown }>
   files?: Array<{ id: string; name: string; mimetype: string; size: number }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
@@ -65,6 +65,7 @@ export interface DocumentListParams {
   asc?: boolean
   search?: string
   files?: boolean
+  'search[tagMode]'?: 'and' | 'or'
 }
 
 export function listDocuments(params: DocumentListParams) {

@@ -5,9 +5,12 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Dialog from 'primevue/dialog'
-import Card from 'primevue/card'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
+import { formatDate, formatStorage } from '../../composables/useFormatters'
+import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const confirm = useConfirm()
@@ -50,8 +53,8 @@ async function handleAdd() {
     await loadUsers()
     showAddDialog.value = false
     toast.add({ severity: 'success', summary: 'User created', life: 2000 })
-  } catch (e: any) {
-    const msg = e.response?.data?.type === 'AlreadyExistingUsername' ? 'Username already in use' : 'Failed to create user'
+  } catch (error: unknown) {
+    const msg = getCreateUserErrorMessage(error)
     toast.add({ severity: 'error', summary: msg, life: 3000 })
   } finally {
     addLoading.value = false
@@ -105,15 +108,15 @@ function confirmDelete(user: UserListItem) {
   })
 }
 
-function formatStorage(bytes: number) {
-  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB'
-  if (bytes >= 1048576) return (bytes / 1048576).toFixed(0) + ' MB'
-  return (bytes / 1024).toFixed(0) + ' KB'
+function getCreateUserErrorMessage(error: unknown): string {
+  const maybeType = (error as { response?: { data?: { type?: string } } })?.response?.data?.type
+  return maybeType === 'AlreadyExistingUsername' ? 'Username already in use' : 'Failed to create user'
 }
 
-function formatDate(ts: number) {
-  return new Date(ts).toLocaleDateString()
+function userRowClass(data: UserListItem): string {
+  return data.disabled ? 'row-disabled' : ''
 }
+
 </script>
 
 <template>
@@ -123,41 +126,53 @@ function formatDate(ts: number) {
       <Button label="Add user" icon="pi pi-plus" size="small" @click="openAddDialog" />
     </div>
 
-    <div v-if="loading" class="p-4 text-center text-muted">Loading users…</div>
-
-    <Card v-else-if="users.length" class="users-table"><template #content>
-      <div class="user-row user-row-head">
-        <span>Username</span>
-        <span>Email</span>
-        <span>Storage</span>
-        <span>Created</span>
-        <span></span>
-      </div>
-      <div
-        v-for="user in users"
-        :key="user.username"
-        class="user-row"
-        :class="{ disabled: user.disabled }"
-      >
-        <span class="user-name">
-          <i class="pi pi-user" />
-          {{ user.username }}
-          <span v-if="user.disabled" class="badge-disabled">disabled</span>
-          <span v-if="user.totp_enabled" class="badge-totp" v-tooltip="'2FA enabled'">2FA</span>
-        </span>
-        <span class="user-email">{{ user.email }}</span>
-        <span class="user-storage">
-          {{ formatStorage(user.storage_current) }} / {{ formatStorage(user.storage_quota) }}
-        </span>
-        <span class="user-date">{{ formatDate(user.create_date) }}</span>
-        <span class="user-actions">
-          <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(user)" v-tooltip="'Edit'" />
-          <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(user)" v-tooltip="'Delete'" />
-        </span>
-      </div>
-    </template></Card>
-
-    <p v-else class="text-sm text-muted mt-4">No users found.</p>
+    <DataTable
+      :value="users"
+      :loading="loading"
+      :rowClass="userRowClass"
+      stripedRows
+      class="users-table"
+      size="small"
+    >
+      <Column header="Username">
+        <template #body="{ data }">
+          <span class="user-name">
+            <i class="pi pi-user" />
+            {{ data.username }}
+            <span v-if="data.disabled" class="badge-disabled">disabled</span>
+            <span v-if="data.totp_enabled" class="badge-totp" v-tooltip="'2FA enabled'">2FA</span>
+          </span>
+        </template>
+      </Column>
+      <Column field="email" header="Email">
+        <template #body="{ data }">
+          <span class="user-email">{{ data.email }}</span>
+        </template>
+      </Column>
+      <Column header="Storage">
+        <template #body="{ data }">
+          <span class="user-storage">
+            {{ formatStorage(data.storage_current) }} / {{ formatStorage(data.storage_quota) }}
+          </span>
+        </template>
+      </Column>
+      <Column header="Created">
+        <template #body="{ data }">
+          <span class="user-date">{{ formatDate(data.create_date) }}</span>
+        </template>
+      </Column>
+      <Column header="" style="width: 90px">
+        <template #body="{ data }">
+          <span class="user-actions">
+            <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="'Edit'" />
+            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="'Delete'" />
+          </span>
+        </template>
+      </Column>
+      <template #empty>
+        <EmptyState icon="pi pi-users" message="No users found." />
+      </template>
+    </DataTable>
 
     <!-- Add user dialog -->
     <Dialog v-model:visible="showAddDialog" header="Add user" :style="{ width: '400px' }" modal>
@@ -213,30 +228,10 @@ function formatDate(ts: number) {
 }
 
 .users-table {
-  overflow: hidden;
+  max-width: 100%;
 }
 
-.user-row {
-  display: grid;
-  grid-template-columns: 1.5fr 2fr 1.2fr 1fr 80px;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 1rem;
-  border: 1px solid var(--p-content-border-color);
-  font-size: 0.875rem;
-}
-.user-row:last-child {
-  border-bottom: none;
-}
-.user-row-head {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--p-text-muted-color);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  background: var(--p-content-hover-background);
-}
-.user-row.disabled {
+:deep(.row-disabled) {
   opacity: 0.6;
 }
 
@@ -249,8 +244,8 @@ function formatDate(ts: number) {
 
 .badge-disabled {
   font-size: 0.625rem;
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--teedy-danger-bg);
+  color: var(--teedy-danger-text);
   padding: 0.1rem 0.375rem;
   border-radius: 999px;
   font-weight: 600;
@@ -258,8 +253,8 @@ function formatDate(ts: number) {
 }
 .badge-totp {
   font-size: 0.625rem;
-  background: #d1fae5;
-  color: #065f46;
+  background: var(--teedy-success-bg);
+  color: var(--teedy-success-text);
   padding: 0.1rem 0.375rem;
   border-radius: 999px;
   font-weight: 600;
@@ -297,13 +292,4 @@ function formatDate(ts: number) {
   color: var(--p-text-color);
 }
 
-@media (max-width: 700px) {
-  .user-row {
-    grid-template-columns: 1fr 1fr 80px;
-  }
-  .user-storage,
-  .user-date {
-    display: none;
-  }
-}
 </style>

@@ -25,6 +25,18 @@ const error = ref('')
 const oidcEnabled = ref(false)
 const guestLogin = ref(false)
 
+interface ApiError {
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
+function extractLoginErrorMessage(error: unknown, fallback: string): string {
+  return (error as ApiError).response?.data?.message || fallback
+}
+
 onMounted(async () => {
   try {
     const { data } = await api.get('/app')
@@ -39,8 +51,8 @@ async function handleLogin() {
   try {
     await auth.login(username.value, password.value, remember.value)
     router.push({ name: 'documents' })
-  } catch (e: any) {
-    error.value = e.response?.data?.message || 'Invalid username or password'
+  } catch (loginError: unknown) {
+    error.value = extractLoginErrorMessage(loginError, 'Invalid username or password')
   } finally {
     loading.value = false
   }
@@ -57,8 +69,8 @@ async function handleGuestLogin() {
   try {
     await auth.login('guest', '', false)
     router.push({ name: 'documents' })
-  } catch (e: any) {
-    error.value = e.response?.data?.message || 'Guest login failed'
+  } catch (loginError: unknown) {
+    error.value = extractLoginErrorMessage(loginError, 'Guest login failed')
   } finally {
     loading.value = false
   }

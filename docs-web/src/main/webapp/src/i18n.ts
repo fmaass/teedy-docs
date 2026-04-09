@@ -9,7 +9,10 @@ export const i18n = createI18n({
   messages: { en },
 })
 
-const localeImports: Record<string, () => Promise<any>> = {
+type LocaleMessages = Record<string, unknown>
+type LocaleModule = { default: LocaleMessages } | LocaleMessages
+
+const localeImports: Record<string, () => Promise<LocaleModule>> = {
   de: () => import('./locale/de.json'),
   es: () => import('./locale/es.json'),
   fr: () => import('./locale/fr.json'),
@@ -26,7 +29,8 @@ const localeImports: Record<string, () => Promise<any>> = {
 export async function setLocale(locale: string) {
   if (locale !== 'en' && localeImports[locale]) {
     const messages = await localeImports[locale]()
-    i18n.global.setLocaleMessage(locale, messages.default || messages)
+    const resolvedMessages = 'default' in messages ? messages.default : messages
+    i18n.global.setLocaleMessage(locale, resolvedMessages as typeof en)
   }
-  ;(i18n.global.locale as any).value = locale
+  ;(i18n.global.locale as { value: string }).value = locale
 }
