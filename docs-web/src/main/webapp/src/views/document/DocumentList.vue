@@ -138,6 +138,24 @@ async function addTagToSlideOver(tagId: string) {
   }
 }
 
+async function removeTagFromSlideOver(tagId: string) {
+  if (!slideOverDoc.value || !tagId) return
+  const doc = slideOverDoc.value
+  const currentTagIds = doc.tags?.map((t) => t.id).filter((id) => id !== tagId) ?? []
+  const params = new URLSearchParams()
+  params.set('title', doc.title)
+  params.set('language', doc.language)
+  for (const id of currentTagIds) params.append('tags', id)
+  try {
+    await updateDocument(doc.id, params)
+    const { data } = await getDocument(doc.id)
+    slideOverDoc.value = data
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  } catch {
+    showTagUpdateError()
+  }
+}
+
 function buildFilterLabel(): string {
   const parts: string[] = []
   for (const tag of tf.selectedTags) parts.push(tag.name)
@@ -244,6 +262,7 @@ const contextMenuItems = computed(() => {
       :document="slideOverDoc"
       :available-tags="availableTagsForSlideOver"
       @add-tag="addTagToSlideOver"
+      @remove-tag="removeTagFromSlideOver"
       @open-full-view="openFullView"
       @edit-document="(id: string) => router.push({ name: 'document-edit', params: { id } })"
     />

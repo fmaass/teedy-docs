@@ -22,6 +22,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   addTag: [tagId: string]
+  removeTag: [tagId: string]
   openFullView: []
   editDocument: [id: string]
 }>()
@@ -81,7 +82,7 @@ const tagOptions = computed(() =>
 
       <div class="slide-section">
         <div class="slide-tags-row">
-          <TagBadge v-for="tag in document.tags" :key="tag.id" :name="tag.name" :color="tag.color" />
+          <TagBadge v-for="tag in document.tags" :key="tag.id" :name="tag.name" :color="tag.color" removable @remove="emit('removeTag', tag.id)" />
           <Button v-if="!slideOverTagAdding" icon="pi pi-plus" text rounded size="small" class="tag-add-btn" @click="slideOverTagAdding = true" aria-label="Add tag" />
         </div>
         <div v-if="slideOverTagAdding" class="tag-add-row">
