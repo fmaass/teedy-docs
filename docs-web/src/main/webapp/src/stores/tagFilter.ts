@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { listTags, getTagStats, getTagFacets, type Tag } from '../api/tag'
+import { listTags, getTagStats, getTagFacets, getTagCoOccurrence, type Tag, type CoOccurrencePair } from '../api/tag'
+import { useCoOccurrenceTree } from '../composables/useCoOccurrenceTree'
 
 export const useTagFilterStore = defineStore('tagFilter', () => {
   const router = useRouter()
@@ -14,6 +15,12 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   const searchText = ref('')
   const debouncedText = ref('')
   const tagMode = ref<'and' | 'or'>('and')
+
+  const viewMode = ref<'tree' | 'facets'>(
+    (localStorage.getItem('teedy_tag_view_mode') as 'tree' | 'facets') || 'tree'
+  )
+
+  watch(viewMode, (v) => localStorage.setItem('teedy_tag_view_mode', v))
 
   // --- Tag data ---
 
@@ -47,6 +54,18 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     staleTime: 15_000,
     enabled: computed(() => selectedTagIds.value.size > 0),
   })
+
+  const { data: coOccurrenceData } = useQuery({
+    queryKey: ['tagCoOccurrence'],
+    queryFn: () => getTagCoOccurrence().then((r) => r.data.pairs),
+    staleTime: 60_000,
+    enabled: computed(() => viewMode.value === 'facets'),
+  })
+
+  const coOccurrencePairs = computed<CoOccurrencePair[]>(() => coOccurrenceData.value ?? [])
+  const {
+    treeNodes: facetTreeNodes,
+  } = useCoOccurrenceTree(allTags, computed(() => statsData.value ?? {}), coOccurrencePairs)
 
   const tagCounts = computed<Record<string, number>>(() => {
     if (selectedTagIds.value.size > 0 && facetData.value) {
@@ -123,28 +142,60 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     return keys
   })
 
+  const activeTreeNodes = computed<TreeNode[]>(() =>
+    viewMode.value === 'facets' ? (facetTreeNodes.value as TreeNode[]) : tagTreeNodes.value,
+  )
+
+  const facetExpandedKeys = computed(() => {
+    const keys: Record<string, boolean> = {}
+    if (selectedTagIds.value.size === 0) return keys
+    for (const node of facetTreeNodes.value) {
+      const hasSelectedChild = node.children?.some((c: any) => {
+        const childTagId = resolveCompoundKey(c.key as string)
+        return selectedTagIds.value.has(childTagId)
+      })
+      if (hasSelectedChild || selectedTagIds.value.has(node.key as string)) {
+        keys[node.key as string] = true
+      }
+    }
+    return keys
+  })
+
+  const activeExpandedKeys = computed(() =>
+    viewMode.value === 'facets' ? facetExpandedKeys.value : expandedKeys.value,
+  )
+
+  function resolveCompoundKey(key: string): string {
+    const idx = key.indexOf('__')
+    return idx >= 0 ? key.slice(idx + 2) : key
+  }
+
   // --- Actions ---
 
   function toggleTag(tagId: string) {
-    if (selectedTagIds.value.has(tagId)) {
+    const resolvedId = resolveCompoundKey(tagId)
+
+    if (selectedTagIds.value.has(resolvedId)) {
       const next = new Set(selectedTagIds.value)
-      next.delete(tagId)
+      next.delete(resolvedId)
       selectedTagIds.value = next
       const excl = new Set(excludedTagIds.value)
-      excl.add(tagId)
+      excl.add(resolvedId)
       excludedTagIds.value = excl
-    } else if (excludedTagIds.value.has(tagId)) {
+    } else if (excludedTagIds.value.has(resolvedId)) {
       const excl = new Set(excludedTagIds.value)
-      excl.delete(tagId)
+      excl.delete(resolvedId)
       excludedTagIds.value = excl
     } else {
-      // Include this tag + all ancestors
       const next = new Set(selectedTagIds.value)
-      next.add(tagId)
-      let tag = tagMap.value.get(tagId)
-      while (tag?.parent) {
-        next.add(tag.parent)
-        tag = tagMap.value.get(tag.parent)
+      next.add(resolvedId)
+      // In Tree mode, also include ancestors (existing behavior)
+      if (viewMode.value === 'tree') {
+        let tag = tagMap.value.get(resolvedId)
+        while (tag?.parent) {
+          next.add(tag.parent)
+          tag = tagMap.value.get(tag.parent)
+        }
       }
       selectedTagIds.value = next
     }
@@ -246,8 +297,12 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     combinedSearch,
     hasActiveFilters,
     relatedTags,
+    viewMode,
     tagTreeNodes,
     expandedKeys,
+    activeTreeNodes,
+    activeExpandedKeys,
+    resolveCompoundKey,
     toggleTag,
     removeTag,
     clearFilters,

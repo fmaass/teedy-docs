@@ -23,16 +23,45 @@ const props = defineProps<{
   selectedTagIds: Set<string>
   excludedTagIds: Set<string>
   tagCounts: Record<string, number>
+  viewMode?: 'tree' | 'facets'
 }>()
 
 const emit = defineEmits<{
   'update:tagMode': [value: 'and' | 'or']
+  'update:viewMode': [value: 'tree' | 'facets']
   selectTag: [tagId: string]
 }>()
+
+const viewModeOptions = [
+  { label: 'Tree', value: 'tree' },
+  { label: 'Facets', value: 'facets' },
+]
+
+function nodeTagId(key: string): string {
+  const idx = key.indexOf('__')
+  return idx >= 0 ? key.slice(idx + 2) : key
+}
+
+function getNodeCount(node: any): number | undefined {
+  if (node.key?.includes('__')) {
+    return node.data?.coCount
+  }
+  return props.tagCounts[node.key]
+}
 </script>
 
 <template>
   <div class="panel-controls">
+    <SelectButton
+      v-if="viewMode !== undefined"
+      :model-value="viewMode"
+      :options="viewModeOptions"
+      optionLabel="label"
+      optionValue="value"
+      :allowEmpty="false"
+      class="mode-toggle-sm"
+      @update:model-value="(v: string) => emit('update:viewMode', v as 'tree' | 'facets')"
+    />
     <SelectButton
       :model-value="tagMode"
       :options="modeOptions"
@@ -53,18 +82,18 @@ const emit = defineEmits<{
         <div
           class="tag-tree-node"
           :class="{
-            'tag-active': selectedTagIds.has(node.key),
-            'tag-excluded': excludedTagIds.has(node.key),
-            'tag-dimmed': !selectedTagIds.has(node.key) && !excludedTagIds.has(node.key) && selectedTagIds.size > 0 && !(tagCounts[node.key] > 0),
+            'tag-active': selectedTagIds.has(nodeTagId(node.key)),
+            'tag-excluded': excludedTagIds.has(nodeTagId(node.key)),
+            'tag-dimmed': !selectedTagIds.has(nodeTagId(node.key)) && !excludedTagIds.has(nodeTagId(node.key)) && selectedTagIds.size > 0 && !((getNodeCount(node) ?? 0) > 0),
           }"
           @click.stop="emit('selectTag', node.key)"
         >
-          <i v-if="selectedTagIds.has(node.key)" class="pi pi-check-circle state-icon include" />
-          <i v-else-if="excludedTagIds.has(node.key)" class="pi pi-minus-circle state-icon exclude" />
+          <i v-if="selectedTagIds.has(nodeTagId(node.key))" class="pi pi-check-circle state-icon include" />
+          <i v-else-if="excludedTagIds.has(nodeTagId(node.key))" class="pi pi-minus-circle state-icon exclude" />
           <span class="tag-dot" :style="{ background: node.data.color }" />
           <span class="tag-name">{{ node.label }}</span>
-          <span class="tag-count" v-if="tagCounts[node.key] !== undefined">
-            {{ tagCounts[node.key] }}
+          <span class="tag-count" v-if="getNodeCount(node) != null">
+            {{ getNodeCount(node) }}
           </span>
         </div>
       </template>

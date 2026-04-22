@@ -96,12 +96,14 @@ function handleMobileTagSelect(tagId: string) {
             <TagTreePanel
               :tag-mode="tf.tagMode"
               :mode-options="modeOptions"
-              :tag-tree-nodes="tf.tagTreeNodes"
-              :expanded-keys="tf.expandedKeys"
+              :tag-tree-nodes="tf.activeTreeNodes"
+              :expanded-keys="tf.activeExpandedKeys"
               :selected-tag-ids="tf.selectedTagIds"
               :excluded-tag-ids="tf.excludedTagIds"
               :tag-counts="tf.tagCounts"
+              :view-mode="tf.viewMode"
               @update:tag-mode="tf.tagMode = $event"
+              @update:view-mode="tf.viewMode = $event"
               @select-tag="handleDesktopTagSelect"
             />
           </template>
@@ -157,12 +159,14 @@ function handleMobileTagSelect(tagId: string) {
             v-if="!isAdminContext"
             :tag-mode="tf.tagMode"
             :mode-options="modeOptions"
-            :tag-tree-nodes="tf.tagTreeNodes"
-            :expanded-keys="tf.expandedKeys"
+            :tag-tree-nodes="tf.activeTreeNodes"
+            :expanded-keys="tf.activeExpandedKeys"
             :selected-tag-ids="tf.selectedTagIds"
             :excluded-tag-ids="tf.excludedTagIds"
             :tag-counts="tf.tagCounts"
+            :view-mode="tf.viewMode"
             @update:tag-mode="tf.tagMode = $event"
+            @update:view-mode="tf.viewMode = $event"
             @select-tag="handleMobileTagSelect"
           />
           <AdminNavPanel
