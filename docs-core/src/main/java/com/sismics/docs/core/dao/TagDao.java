@@ -342,6 +342,27 @@ public class TagDao {
     }
 
     /**
+     * Returns the full co-occurrence matrix: for every pair of tags
+     * that appear together on at least one non-deleted document, the count.
+     *
+     * @return List of [tagIdA, tagIdB, count] triples (A < B lexicographically to avoid dupes)
+     */
+    @SuppressWarnings("unchecked")
+    public List<Object[]> getFullCoOccurrenceMatrix() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select dt1.DOT_IDTAG_C, dt2.DOT_IDTAG_C, count(distinct dt1.DOT_IDDOCUMENT_C) " +
+                "from T_DOCUMENT_TAG dt1 " +
+                "join T_DOCUMENT_TAG dt2 on dt1.DOT_IDDOCUMENT_C = dt2.DOT_IDDOCUMENT_C " +
+                "  and dt1.DOT_IDTAG_C < dt2.DOT_IDTAG_C " +
+                "  and dt2.DOT_DELETEDATE_D is null " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt1.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
+                "where dt1.DOT_DELETEDATE_D is null " +
+                "group by dt1.DOT_IDTAG_C, dt2.DOT_IDTAG_C");
+        return q.getResultList();
+    }
+
+    /**
      * Counts documents matching any of the given tags (OR logic).
      *
      * @param tagIds Tag IDs

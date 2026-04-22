@@ -36,6 +36,16 @@ export function getTagStats() {
   return api.get<{ stats: Record<string, number> }>('/tag/stats')
 }
 
+export interface CoOccurrencePair {
+  tagA: string
+  tagB: string
+  count: number
+}
+
+export function getTagCoOccurrence() {
+  return api.get<{ pairs: CoOccurrencePair[] }>('/tag/co-occurrence')
+}
+
 export function getTagFacets(tagIds?: string[], mode?: 'and' | 'or') {
   const params: Record<string, string> = {}
   if (tagIds?.length) params.tags = tagIds.join(',')
