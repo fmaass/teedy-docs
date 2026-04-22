@@ -23,6 +23,7 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
 import java.text.MessageFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -412,5 +413,41 @@ public class TagResource extends BaseResource {
         return Response.ok().entity(Json.createObjectBuilder()
                 .add("facets", facets)
                 .add("total", total).build()).build();
+    }
+
+    /**
+     * Returns the full tag co-occurrence matrix.
+     * Each entry is a pair of tag IDs and how many documents share both tags.
+     *
+     * @api {get} /tag/co-occurrence Get tag co-occurrence matrix
+     * @apiName GetTagCoOccurrence
+     * @apiGroup Tag
+     * @apiSuccess {Object[]} pairs List of co-occurring tag pairs
+     * @apiSuccess {String} pairs.tagA First tag ID
+     * @apiSuccess {String} pairs.tagB Second tag ID
+     * @apiSuccess {Number} pairs.count Document count sharing both tags
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission user
+     */
+    @GET
+    @Path("/co-occurrence")
+    public Response coOccurrence() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagDao tagDao = new TagDao();
+        List<Object[]> matrix = tagDao.getFullCoOccurrenceMatrix();
+
+        JsonArrayBuilder pairs = Json.createArrayBuilder();
+        for (Object[] row : matrix) {
+            pairs.add(Json.createObjectBuilder()
+                    .add("tagA", (String) row[0])
+                    .add("tagB", (String) row[1])
+                    .add("count", ((Number) row[2]).longValue()));
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("pairs", pairs).build()).build();
     }
 }
