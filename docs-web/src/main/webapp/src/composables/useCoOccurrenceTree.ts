@@ -42,7 +42,7 @@ export function useCoOccurrenceTree(
                 } as TreeNode
               })
               .filter((n): n is TreeNode => n !== null)
-              .sort((a, b) => ((b.data as any).coCount ?? 0) - ((a.data as any).coCount ?? 0))
+              .sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''))
           : []
         return {
           key: tag.id,
@@ -52,7 +52,7 @@ export function useCoOccurrenceTree(
         } as TreeNode
       })
       .filter((n) => (n.data as any).docCount > 0)
-      .sort((a, b) => ((b.data as any).docCount ?? 0) - ((a.data as any).docCount ?? 0))
+      .sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''))
   })
 
   return { treeNodes, adjacency, tagMap }
