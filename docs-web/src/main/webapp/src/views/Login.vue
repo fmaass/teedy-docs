@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
 import api from '../api/client'
@@ -13,6 +13,7 @@ import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -24,6 +25,7 @@ const error = ref('')
 
 const oidcEnabled = ref(false)
 const guestLogin = ref(false)
+const oidcError = ref(false)
 
 interface ApiError {
   response?: {
@@ -43,6 +45,15 @@ onMounted(async () => {
     oidcEnabled.value = !!data.oidc_enabled
     guestLogin.value = !!data.guest_login
   } catch { /* non-critical — buttons just stay hidden */ }
+
+  if (route.query.error) {
+    oidcError.value = true
+    return
+  }
+
+  if (oidcEnabled.value && !route.query.local) {
+    handleOidcLogin()
+  }
 })
 
 async function handleLogin() {
@@ -105,6 +116,7 @@ async function handleForgot() {
         <p>Document Management</p>
       </div>
 
+      <Message v-if="oidcError" severity="warn" :closable="false" class="mb-4">Single sign-on failed. You can try again or sign in with a local account.</Message>
       <Message v-if="error" severity="error" :closable="false" class="mb-4">{{ error }}</Message>
 
       <form @submit.prevent="handleLogin">

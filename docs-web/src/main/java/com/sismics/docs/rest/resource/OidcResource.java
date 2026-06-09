@@ -141,7 +141,7 @@ public class OidcResource extends BaseResource {
 
         if (error != null) {
             log.error("OIDC provider returned error: {}", error);
-            return Response.temporaryRedirect(URI.create("/#/login")).build();
+            return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
         }
 
         if (StringUtils.isBlank(code) || StringUtils.isBlank(state)) {
@@ -166,7 +166,7 @@ public class OidcResource extends BaseResource {
             String idTokenStr = tokenResponse.getString("id_token", null);
             if (idTokenStr == null) {
                 log.error("OIDC token response missing id_token");
-                return Response.temporaryRedirect(URI.create("/#/login")).build();
+                return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
             DecodedJWT idToken = verifyIdToken(idTokenStr);
@@ -175,7 +175,7 @@ public class OidcResource extends BaseResource {
             String tokenNonce = getClaimAsString(idToken, "nonce");
             if (expectedNonce == null || !expectedNonce.equals(tokenNonce)) {
                 log.error("OIDC nonce mismatch: expected={}, got={}", expectedNonce, tokenNonce);
-                return Response.temporaryRedirect(URI.create("/#/login")).build();
+                return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
             String preferredUsername = getClaimAsString(idToken, "preferred_username");
@@ -199,7 +199,7 @@ public class OidcResource extends BaseResource {
                 user = provisionUser(userDao, preferredUsername, email, subject, issuer);
                 if (user == null) {
                     log.error("Failed to provision OIDC user: sub={}", subject);
-                    return Response.temporaryRedirect(URI.create("/#/login")).build();
+                    return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
                 }
             }
 
@@ -234,7 +234,7 @@ public class OidcResource extends BaseResource {
                     .build();
         } catch (Exception e) {
             log.error("Error processing OIDC callback", e);
-            return Response.temporaryRedirect(URI.create("/#/login")).build();
+            return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
         }
     }
 
