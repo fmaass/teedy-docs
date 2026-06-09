@@ -104,7 +104,7 @@ public class AuthenticationTokenDao {
      */
     public void updateCreationDate(AuthenticationToken authenticationToken) {
         StringBuilder sb = new StringBuilder("update T_AUTHENTICATION_TOKEN ato ");
-        sb.append(" set AUT_CREATEDATE_D = :creationDate ");
+        sb.append(" set AUT_CREATIONDATE_D = :creationDate ");
         sb.append(" where ato.AUT_ID_C = :id");
 
         EntityManager em = ThreadLocalContext.get().getEntityManager();
