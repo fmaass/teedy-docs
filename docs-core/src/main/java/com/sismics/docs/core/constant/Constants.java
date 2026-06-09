@@ -62,6 +62,7 @@ public class Constants {
     public static final String SMTP_PORT_ENV = "DOCS_SMTP_PORT";
     public static final String SMTP_USERNAME_ENV = "DOCS_SMTP_USERNAME";
     public static final String SMTP_PASSWORD_ENV = "DOCS_SMTP_PASSWORD";
+    public static final String SMTP_FROM_ENV = "DOCS_SMTP_FROM";
 
     /**
      * Global quota environment variable.

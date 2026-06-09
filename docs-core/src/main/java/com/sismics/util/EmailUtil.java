@@ -8,7 +8,6 @@ import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
-import com.sismics.docs.core.util.ConfigUtil;
 import freemarker.template.Configuration;
 import freemarker.template.DefaultObjectWrapperBuilder;
 import freemarker.template.Template;
@@ -91,19 +90,27 @@ public class EmailUtil {
             email.setCharset(StandardCharsets.UTF_8.name());
             ConfigDao configDao = new ConfigDao();
 
-            // Hostname
+            // Hostname: env first, then DB
             String envHostname = System.getenv(Constants.SMTP_HOSTNAME_ENV);
-            if (Strings.isNullOrEmpty(envHostname)) {
-                email.setHostName(ConfigUtil.getConfigStringValue(ConfigType.SMTP_HOSTNAME));
-            } else {
+            if (!Strings.isNullOrEmpty(envHostname)) {
                 email.setHostName(envHostname);
+            } else {
+                Config hostnameConfig = configDao.getById(ConfigType.SMTP_HOSTNAME);
+                if (hostnameConfig != null) {
+                    email.setHostName(hostnameConfig.getValue());
+                }
             }
 
-            // Port
-            int port = ConfigUtil.getConfigIntegerValue(ConfigType.SMTP_PORT);
+            // Port: env first, then DB, default 587
+            int port = 587;
             String envPort = System.getenv(Constants.SMTP_PORT_ENV);
             if (!Strings.isNullOrEmpty(envPort)) {
-                port = Integer.valueOf(envPort);
+                port = Integer.parseInt(envPort);
+            } else {
+                Config portConfig = configDao.getById(ConfigType.SMTP_PORT);
+                if (portConfig != null) {
+                    port = Integer.parseInt(portConfig.getValue());
+                }
             }
             email.setSmtpPort(port);
             if (port == 465) {
@@ -138,8 +145,16 @@ public class EmailUtil {
                 }
             }
 
-            // From email address (defined only by configuration value in the database)
-            email.setFrom(ConfigUtil.getConfigStringValue(ConfigType.SMTP_FROM), appName);
+            // From email address: env first, then DB
+            String envFrom = System.getenv(Constants.SMTP_FROM_ENV);
+            if (!Strings.isNullOrEmpty(envFrom)) {
+                email.setFrom(envFrom, appName);
+            } else {
+                Config fromConfig = configDao.getById(ConfigType.SMTP_FROM);
+                if (fromConfig != null) {
+                    email.setFrom(fromConfig.getValue(), appName);
+                }
+            }
 
             // Locale (defined only by environment variable)
             java.util.Locale userLocale = LocaleUtil.getLocale(System.getenv(Constants.DEFAULT_LANGUAGE_ENV));

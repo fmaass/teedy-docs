@@ -85,7 +85,7 @@ public class InboxService extends AbstractScheduledService {
      */
     public void syncInbox() {
         TransactionUtil.handle(() -> {
-            Boolean enabled = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_ENABLED);
+            boolean enabled = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_ENABLED, false);
             if (!enabled) {
                 return;
             }
@@ -114,8 +114,7 @@ public class InboxService extends AbstractScheduledService {
             } finally {
                 try {
                     if (inbox != null) {
-                        // The parameter controls if the messages flagged to be deleted, should actually get deleted.
-                        inbox.close(ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED));
+                        inbox.close(ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED, false));
                         inbox.getStore().close();
                     }
                 } catch (Exception e) {
@@ -131,7 +130,7 @@ public class InboxService extends AbstractScheduledService {
      * @return Number of messages currently in the remote inbox
      */
     public int testInbox() {
-        Boolean enabled = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_ENABLED);
+        boolean enabled = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_ENABLED, false);
         if (!enabled) {
             return -1;
         }
@@ -293,7 +292,7 @@ public class InboxService extends AbstractScheduledService {
                     document.getLanguage(), "admin", document.getId());
         }
 
-        if (ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED)) {
+        if (ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED, false)) {
             message.setFlag(Flags.Flag.DELETED, true);
         }
     }
@@ -304,7 +303,7 @@ public class InboxService extends AbstractScheduledService {
      * @return Map with all tags or null if not enabled
      */
     private Map<String, String> getAllTags() {
-        if (!ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_AUTOMATIC_TAGS)) {
+        if (!ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_AUTOMATIC_TAGS, false)) {
             return null;
         }
         TagDao tagDao = new TagDao();

@@ -63,6 +63,36 @@ public class ConfigUtil {
     }
 
     /**
+     * Returns the textual value of a configuration parameter with a default value.
+     *
+     * @param configType Type of the configuration parameter
+     * @param defaultValue Default value to return if the configuration parameter is undefined
+     * @return Textual value of the configuration parameter
+     */
+    public static String getConfigStringValue(ConfigType configType, String defaultValue) {
+        try {
+            return getConfigStringValue(configType);
+        } catch (IllegalStateException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Returns the integer value of a configuration parameter with a default value.
+     *
+     * @param configType Type of the configuration parameter
+     * @param defaultValue Default value to return if the configuration parameter is undefined
+     * @return Integer value of the configuration parameter
+     */
+    public static int getConfigIntegerValue(ConfigType configType, int defaultValue) {
+        try {
+            return getConfigIntegerValue(configType);
+        } catch (IllegalStateException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
      * Returns the boolean value of a configuration parameter.
      *
      * @param configType Type of the configuration parameter
