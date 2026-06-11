@@ -4,12 +4,9 @@ import { type DocumentListItem } from '../api/document'
 import { languageLabel } from '../constants/languages'
 import { formatDate } from '../composables/useFormatters'
 import DataTable from 'primevue/datatable'
+import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
-
-interface RowClickEvent {
-  data: DocumentListItem
-}
 
 interface RowContextMenuEvent {
   data: DocumentListItem
@@ -18,23 +15,41 @@ interface RowContextMenuEvent {
 
 defineProps<{
   documents: DocumentListItem[]
+  totalRecords: number
+  rows: number
+  first: number
+  loading?: boolean
+  sortField?: string
+  sortOrder?: number
 }>()
 
 const emit = defineEmits<{
   rowClick: [doc: DocumentListItem]
   rowContextMenu: [event: Event, doc: DocumentListItem]
+  page: [event: DataTablePageEvent]
+  sort: [event: DataTableSortEvent]
 }>()
 </script>
 
 <template>
   <DataTable
     :value="documents"
+    :totalRecords="totalRecords"
+    :rows="rows"
+    :first="first"
+    :loading="loading"
+    :sortField="sortField"
+    :sortOrder="sortOrder"
+    lazy
+    paginator
     stripedRows
     :rowHover="true"
+    dataKey="id"
     class="doc-table"
-    @row-click="(e: RowClickEvent) => emit('rowClick', e.data)"
+    @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
-    selectionMode="single"
+    @page="(e: DataTablePageEvent) => emit('page', e)"
+    @sort="(e: DataTableSortEvent) => emit('sort', e)"
   >
     <Column header="" style="width: 44px">
       <template #body="{ data }">

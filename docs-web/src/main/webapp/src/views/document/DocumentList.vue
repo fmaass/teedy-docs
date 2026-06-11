@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
 import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
-import Skeleton from 'primevue/skeleton'
 import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
+import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import EmptyState from '../../components/EmptyState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
@@ -21,15 +21,33 @@ const queryClient = useQueryClient()
 const toast = useToast()
 const { addTag, removeTag } = useDocumentTags()
 
-// --- Document search ---
+// --- Pagination & sort state ---
+
+const PAGE_SIZE = 20
+const pageOffset = ref(0)
+const sortField = ref<string>('create_date')
+const sortOrder = ref<number>(-1)
+
+const SORT_FIELD_MAP: Record<string, number> = { title: 1, create_date: 3 }
+
+watch([() => tf.combinedSearch, () => tf.tagMode], () => {
+  pageOffset.value = 0
+})
 
 const { data: documentsData, isLoading } = useQuery({
-  queryKey: computed(() => ['documents', { search: tf.combinedSearch, tagMode: tf.tagMode }]),
+  queryKey: computed(() => ['documents', {
+    search: tf.combinedSearch,
+    tagMode: tf.tagMode,
+    offset: pageOffset.value,
+    sortField: sortField.value,
+    sortOrder: sortOrder.value,
+  }]),
   queryFn: () =>
     listDocuments({
-      limit: 100,
-      sort_column: 3,
-      asc: false,
+      limit: PAGE_SIZE,
+      offset: pageOffset.value,
+      sort_column: SORT_FIELD_MAP[sortField.value] ?? 3,
+      asc: sortOrder.value === 1,
       search: tf.combinedSearch || undefined,
       'search[tagMode]': tf.selectedTagIds.size > 1 ? tf.tagMode : undefined,
     }).then((r) => r.data),
@@ -38,6 +56,16 @@ const { data: documentsData, isLoading } = useQuery({
 
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
+
+function onPage(event: DataTablePageEvent) {
+  pageOffset.value = event.first
+}
+
+function onSort(event: DataTableSortEvent) {
+  sortField.value = (event.sortField as string) ?? 'create_date'
+  sortOrder.value = event.sortOrder ?? -1
+  pageOffset.value = 0
+}
 
 // --- Quick tagging context menu ---
 
@@ -182,15 +210,19 @@ const contextMenuItems = computed(() => {
 
     <!-- Document list -->
     <div class="doc-area">
-      <div v-if="isLoading" class="loading-area">
-        <Skeleton v-for="i in 8" :key="i" height="3rem" class="mb-2" />
-      </div>
-
       <DocumentTable
-        v-else-if="documents.length"
+        v-if="documents.length || isLoading"
         :documents="documents"
+        :totalRecords="totalCount"
+        :rows="PAGE_SIZE"
+        :first="pageOffset"
+        :loading="isLoading"
+        :sortField="sortField"
+        :sortOrder="sortOrder"
         @row-click="openDocument"
         @row-context-menu="onDocContextMenu"
+        @page="onPage"
+        @sort="onSort"
       />
 
       <EmptyState
@@ -241,7 +273,6 @@ const contextMenuItems = computed(() => {
   overflow-y: auto;
   padding: 0.75rem 1.5rem 1.5rem;
 }
-.loading-area { padding: 1rem 0; }
 
 @media (max-width: 1024px) {
   .address-bar { padding: 0.75rem 1rem 0; }
