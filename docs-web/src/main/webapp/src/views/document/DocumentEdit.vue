@@ -53,6 +53,9 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+const loadedRelations = ref<Array<{ id: string }>>([])
+const loadedMetadata = ref<Array<{ id: string; value?: unknown }>>([])
+
 const isDragging = ref(false)
 
 const languages = SUPPORTED_LANGUAGES
@@ -77,6 +80,8 @@ onMounted(async () => {
     form.value.language = data.language || 'eng'
     form.value.create_date = new Date(data.create_date)
     form.value.tags = data.tags?.map((t) => t.id) || []
+    loadedRelations.value = data.relations ?? []
+    loadedMetadata.value = data.metadata ?? []
     existingFiles.value = data.files || []
   } else {
     try {
@@ -146,6 +151,11 @@ function buildDocParams() {
   if (form.value.rights) fields.rights = form.value.rights
   Object.entries(fields).forEach(([k, v]) => params.append(k, v))
   form.value.tags.forEach((tagId) => params.append('tags', tagId))
+  for (const r of loadedRelations.value) params.append('relations', r.id)
+  for (const m of loadedMetadata.value) {
+    params.append('metadata_id', m.id)
+    params.append('metadata_value', m.value != null ? String(m.value) : '')
+  }
   return params
 }
 

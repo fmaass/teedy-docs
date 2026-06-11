@@ -386,7 +386,7 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(1, contributors.size());
         Assertions.assertEquals("document1", contributors.getJsonObject(0).getString("username"));
         relations = json.getJsonArray("relations");
-        Assertions.assertEquals(0, relations.size());
+        Assertions.assertEquals(1, relations.size());
         Assertions.assertFalse(json.containsKey("files"));
 
         // Get document 1 with its files
@@ -401,12 +401,12 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
 
-        // Get document 2
+        // Get document 1 again (relations preserved by partial update)
         json = target().path("/document/" + document1Id).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
                 .get(JsonObject.class);
         relations = json.getJsonArray("relations");
-        Assertions.assertEquals(0, relations.size());
+        Assertions.assertEquals(1, relations.size());
         
         // Trashes a document (soft-delete)
         json = target().path("/document/" + document1Id).request()
@@ -1010,5 +1010,162 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals("4bool", meta.getString("name"));
         Assertions.assertEquals("BOOLEAN", meta.getString("type"));
         Assertions.assertTrue(meta.getBoolean("value"));
+    }
+
+    @Test
+    public void testUpdateDocumentPartialPreservesUntouchedFields() throws Exception {
+        clientUtil.createUser("partial1");
+        String token = clientUtil.login("partial1");
+
+        // Create a tag
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "PartialTag")
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        // Create a fully populated document
+        long createTs = 1700000000000L;
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Original Title")
+                        .param("description", "Original Description")
+                        .param("subject", "Original Subject")
+                        .param("identifier", "ID-001")
+                        .param("publisher", "Original Publisher")
+                        .param("format", "PDF")
+                        .param("source", "Scanner")
+                        .param("type", "Invoice")
+                        .param("coverage", "Germany")
+                        .param("rights", "Private")
+                        .param("language", "eng")
+                        .param("create_date", String.valueOf(createTs))
+                        .param("tags", tagId)), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Create a second document for relation
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Related Doc")
+                        .param("language", "eng")
+                        .param("relations", docId)), JsonObject.class);
+        String relatedDocId = json.getString("id");
+
+        // Verify the relation exists on the original doc
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("relations").size());
+
+        // Update with ONLY title and language (mimics quick-tag pattern)
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Updated Title")
+                        .param("language", "eng")), JsonObject.class);
+        Assertions.assertEquals(docId, json.getString("id"));
+
+        // Verify all untouched fields are preserved
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Updated Title", json.getString("title"));
+        Assertions.assertEquals("Original Description", json.getString("description"));
+        Assertions.assertEquals("Original Subject", json.getString("subject"));
+        Assertions.assertEquals("ID-001", json.getString("identifier"));
+        Assertions.assertEquals("Original Publisher", json.getString("publisher"));
+        Assertions.assertEquals("PDF", json.getString("format"));
+        Assertions.assertEquals("Scanner", json.getString("source"));
+        Assertions.assertEquals("Invoice", json.getString("type"));
+        Assertions.assertEquals("Germany", json.getString("coverage"));
+        Assertions.assertEquals("Private", json.getString("rights"));
+        Assertions.assertEquals(createTs, json.getJsonNumber("create_date").longValue());
+        Assertions.assertEquals(1, json.getJsonArray("tags").size());
+        Assertions.assertEquals(tagId, json.getJsonArray("tags").getJsonObject(0).getString("id"));
+        Assertions.assertEquals(1, json.getJsonArray("relations").size());
+    }
+
+    @Test
+    public void testUpdateDocumentExplicitClearStillClears() throws Exception {
+        clientUtil.createUser("partial2");
+        String token = clientUtil.login("partial2");
+
+        // Create document with description
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Clear Test")
+                        .param("description", "Has a description")
+                        .param("language", "eng")), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Update sending an empty description (explicit clear)
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Clear Test")
+                        .param("description", "")
+                        .param("language", "eng")), JsonObject.class);
+        Assertions.assertEquals(docId, json.getString("id"));
+
+        // Verify description was cleared
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertTrue(json.isNull("description") || json.getString("description").isEmpty());
+    }
+
+    @Test
+    public void testUpdateDocumentTagsOnlyKeepsMetadata() throws Exception {
+        clientUtil.createUser("partial3");
+        String token = clientUtil.login("partial3");
+
+        // Create tags
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "TagA")
+                        .param("color", "#aaaaaa")), JsonObject.class);
+        String tagAId = json.getString("id");
+
+        json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "TagB")
+                        .param("color", "#bbbbbb")), JsonObject.class);
+        String tagBId = json.getString("id");
+
+        // Create doc with description, subject, and tagA
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Tag Swap Test")
+                        .param("description", "Keep this")
+                        .param("subject", "Keep this too")
+                        .param("language", "eng")
+                        .param("tags", tagAId)), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Quick-tag: send only title, language, tags (replacing tagA with tagB)
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Tag Swap Test")
+                        .param("language", "eng")
+                        .param("tags", tagBId)), JsonObject.class);
+        Assertions.assertEquals(docId, json.getString("id"));
+
+        // Verify tags changed but description/subject survived
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Keep this", json.getString("description"));
+        Assertions.assertEquals("Keep this too", json.getString("subject"));
+        JsonArray tags = json.getJsonArray("tags");
+        Assertions.assertEquals(1, tags.size());
+        Assertions.assertEquals(tagBId, tags.getJsonObject(0).getString("id"));
     }
 }

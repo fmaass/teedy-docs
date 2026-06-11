@@ -2,8 +2,9 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
-import { listDocuments, getDocument, updateDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
+import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
+import { useDocumentTags } from '../../composables/useDocumentTags'
 import Skeleton from 'primevue/skeleton'
 import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
@@ -18,6 +19,7 @@ const router = useRouter()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
+const { addTag, removeTag } = useDocumentTags()
 
 // --- Document search ---
 
@@ -49,47 +51,17 @@ function onDocContextMenu(event: Event, doc: DocumentListItem) {
   contextMenu.value?.show(event)
 }
 
-function showTagUpdateError() {
-  toast.add({
-    severity: 'error',
-    summary: 'Error',
-    detail: 'Failed to update tags',
-    life: 3000,
-  })
-}
-
 async function quickAddTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
-  const currentTagIds = doc.tags?.map((t) => t.id) ?? []
-  if (currentTagIds.includes(tagId)) return
-  const params = new URLSearchParams()
-  params.set('title', doc.title)
-  params.set('language', doc.language)
-  for (const id of [...currentTagIds, tagId]) params.append('tags', id)
-  try {
-    await updateDocument(doc.id, params)
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-  } catch {
-    showTagUpdateError()
-  }
+  await addTag(doc.id, tagId)
   contextMenu.value?.hide()
 }
 
 async function quickRemoveTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
-  const currentTagIds = doc.tags?.map((t) => t.id).filter((id) => id !== tagId) ?? []
-  const params = new URLSearchParams()
-  params.set('title', doc.title)
-  params.set('language', doc.language)
-  for (const id of currentTagIds) params.append('tags', id)
-  try {
-    await updateDocument(doc.id, params)
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-  } catch {
-    showTagUpdateError()
-  }
+  await removeTag(doc.id, tagId)
   contextMenu.value?.hide()
 }
 
@@ -122,38 +94,14 @@ const availableTagsForSlideOver = computed(() => {
 
 async function addTagToSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const doc = slideOverDoc.value
-  const currentTagIds = doc.tags?.map((t) => t.id) ?? []
-  const params = new URLSearchParams()
-  params.set('title', doc.title)
-  params.set('language', doc.language)
-  for (const id of [...currentTagIds, tagId]) params.append('tags', id)
-  try {
-    await updateDocument(doc.id, params)
-    const { data } = await getDocument(doc.id)
-    slideOverDoc.value = data
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-  } catch {
-    showTagUpdateError()
-  }
+  const refreshed = await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
+  if (refreshed) slideOverDoc.value = refreshed
 }
 
 async function removeTagFromSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const doc = slideOverDoc.value
-  const currentTagIds = doc.tags?.map((t) => t.id).filter((id) => id !== tagId) ?? []
-  const params = new URLSearchParams()
-  params.set('title', doc.title)
-  params.set('language', doc.language)
-  for (const id of currentTagIds) params.append('tags', id)
-  try {
-    await updateDocument(doc.id, params)
-    const { data } = await getDocument(doc.id)
-    slideOverDoc.value = data
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-  } catch {
-    showTagUpdateError()
-  }
+  const refreshed = await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
+  if (refreshed) slideOverDoc.value = refreshed
 }
 
 function buildFilterLabel(): string {

@@ -64,6 +64,8 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
 import org.apache.commons.collections4.CollectionUtils;
@@ -752,28 +754,29 @@ public class DocumentResource extends BaseResource {
     }
 
     /**
-     * Updates the document.
+     * Partial-updates the document. Only fields present in the submitted form are modified;
+     * omitted fields are left unchanged. Title and language are always required.
      *
      * @api {post} /document/:id Update a document
      * @apiName PostDocument
      * @apiGroup Document
      * @apiParam {String} id ID
      * @apiParam {String} title Title
-     * @apiParam {String} [description] Description
-     * @apiParam {String} [subject] Subject
-     * @apiParam {String} [identifier] Identifier
-     * @apiParam {String} [publisher] Publisher
-     * @apiParam {String} [format] Format
-     * @apiParam {String} [source] Source
-     * @apiParam {String} [type] Type
-     * @apiParam {String} [coverage] Coverage
-     * @apiParam {String} [rights] Rights
-     * @apiParam {String[]} [tags] List of tags ID
-     * @apiParam {String[]} [relations] List of related documents ID
-     * @apiParam {String[]} [metadata_id] List of metadata ID
+     * @apiParam {String} [description] Description (omit to preserve)
+     * @apiParam {String} [subject] Subject (omit to preserve)
+     * @apiParam {String} [identifier] Identifier (omit to preserve)
+     * @apiParam {String} [publisher] Publisher (omit to preserve)
+     * @apiParam {String} [format] Format (omit to preserve)
+     * @apiParam {String} [source] Source (omit to preserve)
+     * @apiParam {String} [type] Type (omit to preserve)
+     * @apiParam {String} [coverage] Coverage (omit to preserve)
+     * @apiParam {String} [rights] Rights (omit to preserve)
+     * @apiParam {String[]} [tags] List of tags ID (omit to preserve)
+     * @apiParam {String[]} [relations] List of related documents ID (omit to preserve)
+     * @apiParam {String[]} [metadata_id] List of metadata ID (omit to preserve)
      * @apiParam {String[]} [metadata_value] List of metadata values
      * @apiParam {String} [language] Language
-     * @apiParam {Number} [create_date] Create date (timestamp)
+     * @apiParam {Number} [create_date] Create date (timestamp, omit to preserve)
      * @apiSuccess {String} id Document ID
      * @apiError (client) ForbiddenError Access denied or document not writable
      * @apiError (client) ValidationError Validation error
@@ -781,30 +784,32 @@ public class DocumentResource extends BaseResource {
      * @apiPermission user
      * @apiVersion 1.5.0
      *
-     * @param title Title
-     * @param description Description
+     * @param id Document ID
+     * @param form Form parameters
      * @return Response
      */
     @POST
     @Path("{id: [a-z0-9\\-]+}")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     public Response update(
             @PathParam("id") String id,
-            @FormParam("title") String title,
-            @FormParam("description") String description,
-            @FormParam("subject") String subject,
-            @FormParam("identifier") String identifier,
-            @FormParam("publisher") String publisher,
-            @FormParam("format") String format,
-            @FormParam("source") String source,
-            @FormParam("type") String type,
-            @FormParam("coverage") String coverage,
-            @FormParam("rights") String rights,
-            @FormParam("tags") List<String> tagList,
-            @FormParam("relations") List<String> relationList,
-            @FormParam("metadata_id") List<String> metadataIdList,
-            @FormParam("metadata_value") List<String> metadataValueList,
-            @FormParam("language") String language,
-            @FormParam("create_date") String createDateStr) {
+            MultivaluedMap<String, String> form) {
+        String title = form.getFirst("title");
+        String description = form.getFirst("description");
+        String subject = form.getFirst("subject");
+        String identifier = form.getFirst("identifier");
+        String publisher = form.getFirst("publisher");
+        String format = form.getFirst("format");
+        String source = form.getFirst("source");
+        String type = form.getFirst("type");
+        String coverage = form.getFirst("coverage");
+        String rights = form.getFirst("rights");
+        List<String> tagList = form.get("tags");
+        List<String> relationList = form.get("relations");
+        List<String> metadataIdList = form.get("metadata_id");
+        List<String> metadataValueList = form.get("metadata_value");
+        String language = form.getFirst("language");
+        String createDateStr = form.getFirst("create_date");
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -839,37 +844,56 @@ public class DocumentResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        // Update the document
+        // Partial update: only modify fields whose form params were submitted.
+        // title and language are always required; all others are optional.
         document.setTitle(title);
-        document.setDescription(description);
-        document.setSubject(subject);
-        document.setIdentifier(identifier);
-        document.setPublisher(publisher);
-        document.setFormat(format);
-        document.setSource(source);
-        document.setType(type);
-        document.setCoverage(coverage);
-        document.setRights(rights);
         document.setLanguage(language);
-        if (createDate == null) {
-            document.setCreateDate(new Date());
-        } else {
-            document.setCreateDate(createDate);
+        if (description != null) {
+            document.setDescription(description);
+        }
+        if (subject != null) {
+            document.setSubject(subject);
+        }
+        if (identifier != null) {
+            document.setIdentifier(identifier);
+        }
+        if (publisher != null) {
+            document.setPublisher(publisher);
+        }
+        if (format != null) {
+            document.setFormat(format);
+        }
+        if (source != null) {
+            document.setSource(source);
+        }
+        if (type != null) {
+            document.setType(type);
+        }
+        if (coverage != null) {
+            document.setCoverage(coverage);
+        }
+        if (rights != null) {
+            document.setRights(rights);
+        }
+        if (createDateStr != null) {
+            document.setCreateDate(createDate != null ? createDate : new Date());
         }
 
         documentDao.update(document, principal.getId());
 
-        // Update tags
-        updateTagList(id, tagList);
-
-        // Update relations
-        updateRelationList(id, relationList);
-
-        // Update custom metadata
-        try {
-            MetadataUtil.updateMetadata(document.getId(), metadataIdList, metadataValueList);
-        } catch (Exception e) {
-            throw new ClientException("ValidationError", e.getMessage());
+        // Update tags, relations, metadata only when their params are present in the form
+        if (form.containsKey("tags")) {
+            updateTagList(id, tagList);
+        }
+        if (form.containsKey("relations")) {
+            updateRelationList(id, relationList);
+        }
+        if (form.containsKey("metadata_id")) {
+            try {
+                MetadataUtil.updateMetadata(document.getId(), metadataIdList, metadataValueList);
+            } catch (Exception e) {
+                throw new ClientException("ValidationError", e.getMessage());
+            }
         }
 
         // Raise a document updated event
