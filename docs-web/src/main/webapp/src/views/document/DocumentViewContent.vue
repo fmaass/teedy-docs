@@ -322,7 +322,8 @@ function confirmDelete(file: { id: string; name: string }) {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.file-row:hover .file-actions {
+.file-row:hover .file-actions,
+.file-row:focus-within .file-actions {
   opacity: 1;
 }
 

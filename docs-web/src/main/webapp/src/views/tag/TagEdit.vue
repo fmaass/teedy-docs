@@ -105,20 +105,21 @@ function handleDelete() {
     <Card style="max-width: 480px">
       <template #content>
         <div class="form-field">
-          <label>Name</label>
-          <InputText v-model="name" class="w-full" />
+          <label for="tag-name">Name</label>
+          <InputText id="tag-name" v-model="name" class="w-full" />
         </div>
         <div class="form-field">
-          <label>Color</label>
+          <label id="tag-color-label">Color</label>
           <div class="color-row">
-            <ColorPicker v-model="color" />
+            <ColorPicker v-model="color" aria-labelledby="tag-color-label" />
             <span class="color-preview" :style="{ background: '#' + color }">{{ name || 'Preview' }}</span>
           </div>
         </div>
         <div class="form-field">
-          <label>Parent tag</label>
+          <label for="tag-parent">Parent tag</label>
           <Select
             v-model="parent"
+            inputId="tag-parent"
             :options="parentOptions"
             optionLabel="label"
             optionValue="value"

@@ -23,11 +23,12 @@ const textColor = computed(() => {
 </script>
 
 <template>
-  <span class="teedy-tag" :style="{ backgroundColor: color, color: textColor }">{{ name }}<i v-if="removable" class="pi pi-times tag-remove-icon" role="button" aria-label="Remove tag" @click.stop="emit('remove')" /></span>
+  <span class="teedy-tag" :style="{ backgroundColor: color, color: textColor }">{{ name }}<button v-if="removable" type="button" class="tag-remove-btn" :aria-label="`Remove tag ${name}`" @click.stop="emit('remove')"><i class="pi pi-times" /></button></span>
 </template>
 
 <style scoped>
-.tag-remove-icon {
+.tag-remove-btn {
+  all: unset;
   font-size: 0.625rem;
   margin-left: 0.25rem;
   opacity: 0.7;
@@ -35,8 +36,11 @@ const textColor = computed(() => {
   border-radius: 50%;
   transition: opacity 0.15s;
   color: inherit;
+  display: inline-flex;
+  align-items: center;
 }
-.tag-remove-icon:hover {
+.tag-remove-btn:hover,
+.tag-remove-btn:focus-visible {
   opacity: 1;
 }
 </style>

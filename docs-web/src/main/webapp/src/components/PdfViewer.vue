@@ -128,7 +128,7 @@ onUnmounted(() => {
     <div v-else-if="error" class="pdf-error">
       <i class="pi pi-exclamation-triangle" />
       <span>Could not load PDF</span>
-      <a :href="src" target="_blank" class="pdf-fallback-link">Open in new tab</a>
+      <a :href="src" target="_blank" rel="noopener" class="pdf-fallback-link">Open in new tab</a>
     </div>
     <template v-else>
       <div ref="containerRef" class="pdf-canvas-container" />
@@ -136,12 +136,12 @@ onUnmounted(() => {
         <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" aria-label="Previous page" />
         <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
         <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" aria-label="Next page" />
-        <a :href="src" target="_blank" class="pdf-open-btn" title="Open in new tab">
+        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" title="Open in new tab">
           <i class="pi pi-external-link" />
         </a>
       </div>
       <div v-else class="pdf-nav">
-        <a :href="src" target="_blank" class="pdf-open-btn" title="Open in new tab">
+        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" title="Open in new tab">
           <i class="pi pi-external-link" />
           <span>Open in new tab</span>
         </a>
