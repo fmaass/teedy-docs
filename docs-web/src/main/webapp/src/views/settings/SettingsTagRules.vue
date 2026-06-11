@@ -151,7 +151,7 @@ function getTagName(tagId: string) {
       <Column field="order" header="Order" style="width: 70px" />
       <Column header="Enabled" style="width: 80px">
         <template #body="{ data }">
-          <i :class="data.enabled ? 'pi pi-check-circle' : 'pi pi-times-circle'" :style="{ color: data.enabled ? 'var(--teedy-enabled-color)' : 'var(--teedy-disabled-color)' }" />
+          <i :class="data.enabled ? 'pi pi-check-circle' : 'pi pi-times-circle'" :style="{ color: data.enabled ? 'var(--teedy-enabled-color)' : 'var(--teedy-danger)' }" />
         </template>
       </Column>
       <Column header="" style="width: 100px">

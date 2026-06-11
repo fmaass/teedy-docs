@@ -9,6 +9,7 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -98,7 +99,7 @@ function formatDate(ts: number) {
       <Button label="Add webhook" icon="pi pi-plus" size="small" @click="showAddDialog = true" />
     </div>
 
-    <DataTable v-if="webhooks.length" :value="webhooks" stripedRows :loading="isLoading" class="webhooks-table">
+    <DataTable :value="webhooks" stripedRows :loading="isLoading" class="webhooks-table">
       <Column header="Event" style="width: 220px">
         <template #body="{ data }">
           <code class="event-badge">{{ formatEvent(data.event) }}</code>
@@ -119,12 +120,10 @@ function formatDate(ts: number) {
           <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete webhook" />
         </template>
       </Column>
+      <template #empty>
+        <EmptyState icon="pi pi-link" message="No webhooks configured" />
+      </template>
     </DataTable>
-
-    <div v-else-if="!isLoading" class="empty-state">
-      <i class="pi pi-link" />
-      <p>No webhooks configured</p>
-    </div>
 
     <!-- Add dialog -->
     <Dialog v-model:visible="showAddDialog" header="Add webhook" :modal="true" :style="{ width: '480px' }">
@@ -202,21 +201,6 @@ function formatDate(ts: number) {
 .meta {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 3rem 1rem;
-  color: var(--p-text-muted-color);
-}
-.empty-state i {
-  font-size: 2.5rem;
-  margin-bottom: 0.75rem;
-}
-.empty-state p {
-  margin: 0;
 }
 
 .form-fields {

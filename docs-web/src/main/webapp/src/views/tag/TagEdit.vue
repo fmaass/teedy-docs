@@ -27,12 +27,32 @@ const { data: tags } = useQuery({
   staleTime: 60_000,
 })
 
-const parentOptions = computed(() => [
-  { label: '(none — root level)', value: null },
-  ...(tags.value ?? [])
-    .filter((t) => t.id !== props.id)
-    .map((t) => ({ label: t.name, value: t.id })),
-])
+function getDescendantIds(tagId: string, allTags: Array<{ id: string; parent: string | null }>): Set<string> {
+  const ids = new Set<string>()
+  const queue = [tagId]
+  while (queue.length) {
+    const current = queue.pop()!
+    for (const t of allTags) {
+      if (t.parent === current && !ids.has(t.id)) {
+        ids.add(t.id)
+        queue.push(t.id)
+      }
+    }
+  }
+  return ids
+}
+
+const parentOptions = computed(() => {
+  const allTags = tags.value ?? []
+  const excluded = getDescendantIds(props.id, allTags)
+  excluded.add(props.id)
+  return [
+    { label: '(none — root level)', value: null },
+    ...allTags
+      .filter((t) => !excluded.has(t.id))
+      .map((t) => ({ label: t.name, value: t.id })),
+  ]
+})
 
 function loadFromCache() {
   const tag = tags.value?.find((t) => t.id === props.id)

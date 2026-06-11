@@ -186,8 +186,8 @@ function userRowClass(data: UserListItem): string {
           <InputText v-model="addForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
-          <label>Password *</label>
-          <Password v-model="addForm.password" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
+          <label for="add-user-pass">Password *</label>
+          <Password v-model="addForm.password" inputId="add-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
       </div>
       <template #footer>
@@ -204,8 +204,8 @@ function userRowClass(data: UserListItem): string {
           <InputText v-model="editForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
-          <label>New password <span class="text-muted">(leave blank to keep current)</span></label>
-          <Password v-model="editForm.password" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
+          <label for="edit-user-pass">New password <span class="text-muted">(leave blank to keep current)</span></label>
+          <Password v-model="editForm.password" inputId="edit-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
       </div>
       <template #footer>

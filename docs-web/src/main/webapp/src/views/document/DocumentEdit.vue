@@ -447,7 +447,7 @@ async function handleSubmit() {
   align-items: center;
   gap: 0.5rem;
   padding: 0.375rem 0;
-  border: 1px solid var(--p-content-border-color);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .file-row:last-of-type {
   border-bottom: none;

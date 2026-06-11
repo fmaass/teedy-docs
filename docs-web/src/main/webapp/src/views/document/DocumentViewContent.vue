@@ -257,7 +257,7 @@ function confirmDelete(file: { id: string; name: string }) {
   align-items: center;
   gap: 0.625rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--p-content-border-color);
+  border-bottom: 1px solid var(--p-content-border-color);
   transition: background 0.1s;
 }
 .file-row:last-child {

@@ -159,7 +159,7 @@ function getNodeCount(node: any): number | undefined {
 }
 
 .tag-tree-node.tag-excluded {
-  background: color-mix(in srgb, var(--teedy-disabled-color) 10%, transparent);
+  background: color-mix(in srgb, var(--teedy-danger) 10%, transparent);
   text-decoration: line-through;
   opacity: 0.7;
 }
@@ -168,7 +168,7 @@ function getNodeCount(node: any): number | undefined {
 
 .state-icon { font-size: 0.75rem; flex-shrink: 0; }
 .state-icon.include { color: var(--p-primary-color); }
-.state-icon.exclude { color: var(--teedy-disabled-color); }
+.state-icon.exclude { color: var(--teedy-danger); }
 
 .tag-dot {
   width: 10px;

@@ -99,7 +99,7 @@ const emit = defineEmits<{
 
 .excl-icon {
   font-size: 0.625rem;
-  color: var(--teedy-disabled-color);
+  color: var(--teedy-danger);
   margin-right: 0.25rem;
 }
 

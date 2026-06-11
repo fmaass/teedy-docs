@@ -179,7 +179,7 @@ onUnmounted(() => {
   font-size: 0.875rem;
 }
 .pdf-loading i { font-size: 1.5rem; }
-.pdf-error i { color: var(--teedy-disabled-color); }
+.pdf-error i { color: var(--teedy-danger); }
 
 .pdf-fallback-link {
   color: var(--p-primary-color);

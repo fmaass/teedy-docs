@@ -8,6 +8,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -97,7 +98,7 @@ function formatDate(ts?: number) {
       <Button label="Create key" icon="pi pi-plus" size="small" @click="showCreateDialog = true" />
     </div>
 
-    <DataTable v-if="keys.length" :value="keys" stripedRows :loading="isLoading" class="keys-table">
+    <DataTable :value="keys" stripedRows :loading="isLoading" class="keys-table">
       <Column field="name" header="Name">
         <template #body="{ data }">
           <span class="key-name">{{ data.name }}</span>
@@ -123,12 +124,10 @@ function formatDate(ts?: number) {
           <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete API key" />
         </template>
       </Column>
+      <template #empty>
+        <EmptyState icon="pi pi-key" message="No API keys yet" />
+      </template>
     </DataTable>
-
-    <div v-else-if="!isLoading" class="empty-state">
-      <i class="pi pi-key" />
-      <p>No API keys yet</p>
-    </div>
 
     <!-- Create dialog -->
     <Dialog v-model:visible="showCreateDialog" header="Create API key" :modal="true" :style="{ width: '400px' }">
@@ -204,21 +203,6 @@ function formatDate(ts?: number) {
 .meta {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 3rem 1rem;
-  color: var(--p-text-muted-color);
-}
-.empty-state i {
-  font-size: 2.5rem;
-  margin-bottom: 0.75rem;
-}
-.empty-state p {
-  margin: 0;
 }
 
 .form-field {

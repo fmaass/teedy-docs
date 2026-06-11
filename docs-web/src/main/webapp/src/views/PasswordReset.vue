@@ -70,10 +70,11 @@ async function handleReset() {
         <div class="teedy-login-field">
           <label for="reset-pass">New password</label>
           <Password
-            id="reset-pass"
+            inputId="reset-pass"
             v-model="password"
             :feedback="true"
             toggleMask
+            :inputProps="{ autocomplete: 'new-password', name: 'new-password' }"
             inputClass="w-full"
             class="w-full"
             autofocus
@@ -83,10 +84,11 @@ async function handleReset() {
         <div class="teedy-login-field">
           <label for="reset-confirm">Confirm new password</label>
           <Password
-            id="reset-confirm"
+            inputId="reset-confirm"
             v-model="passwordConfirm"
             :feedback="false"
             toggleMask
+            :inputProps="{ autocomplete: 'new-password', name: 'confirm-password' }"
             inputClass="w-full"
             class="w-full"
           />

@@ -127,12 +127,12 @@ function onLocaleSelect(event: SelectChangeEvent) {
     <Card style="max-width: 400px"><template #content>
       <h3 class="section-title">Change password</h3>
       <div class="form-field">
-        <label>New password</label>
-        <Password v-model="password" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
+        <label for="account-new-pass">New password</label>
+        <Password v-model="password" inputId="account-new-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
       </div>
       <div class="form-field">
-        <label>Confirm password</label>
-        <Password v-model="passwordConfirm" :feedback="false" toggleMask inputClass="w-full" class="w-full" />
+        <label for="account-confirm-pass">Confirm password</label>
+        <Password v-model="passwordConfirm" inputId="account-confirm-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'confirm-password' }" inputClass="w-full" class="w-full" />
       </div>
       <Button label="Save" icon="pi pi-check" :loading="saving" @click="handleSave" />
     </template></Card>

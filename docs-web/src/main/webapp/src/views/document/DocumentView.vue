@@ -227,7 +227,7 @@ function handleDelete() {
   gap: 1rem;
   margin-bottom: 1.25rem;
   padding-bottom: 1.25rem;
-  border: 1px solid var(--p-content-border-color);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 
 .doc-header-main {

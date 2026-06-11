@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, computed, ref, watch, type Ref } from 'vue'
+import { inject, computed, ref, type Ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { type DocumentDetail, type Acl, type InheritedAcl } from '../../api/document'
 import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../../api/acl'
@@ -231,7 +231,7 @@ function typeIcon(type: string) {
   align-items: center;
   gap: 0.625rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--p-content-border-color);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .acl-row:last-child {
   border-bottom: none;
