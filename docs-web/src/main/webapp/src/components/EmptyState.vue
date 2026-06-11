@@ -28,7 +28,7 @@ const emit = defineEmits<{ action: [] }>()
   justify-content: center;
   padding: 3rem 1.5rem;
   text-align: center;
-  color: var(--teedy-text-muted);
+  color: var(--p-text-muted-color);
 }
 
 .teedy-empty i {

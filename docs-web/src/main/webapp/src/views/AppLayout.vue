@@ -304,7 +304,7 @@ function handleMobileTagSelect(tagId: string) {
 /* --- Mobile --- */
 
 .mobile-panel-drawer :deep(.p-drawer) {
-  width: 280px !important;
+  width: 280px;
 }
 
 .mobile-panel-body {

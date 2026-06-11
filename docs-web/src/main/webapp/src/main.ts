@@ -11,8 +11,8 @@ import { definePreset } from '@primeuix/themes'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import 'primeicons/primeicons.css'
-import './assets/teedy-theme.css'
 import './assets/teedy-tokens.css'
+import './assets/teedy-theme.css'
 import { teedyPrimary } from './theme/primary'
 
 import App from './App.vue'
@@ -58,6 +58,10 @@ app.use(PrimeVue, {
     preset: TeedyPreset,
     options: {
       darkModeSelector: '.dark-mode',
+      cssLayer: {
+        name: 'primevue',
+        order: 'primevue',
+      },
     },
   },
 })

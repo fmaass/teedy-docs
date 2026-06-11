@@ -144,7 +144,7 @@ const tagOptions = computed(() =>
 </template>
 
 <style scoped>
-.doc-slide-over :deep(.p-drawer) { width: min(500px, 90vw) !important; }
+.doc-slide-over :deep(.p-drawer) { width: min(500px, 90vw); }
 .slide-over-header { min-width: 0; }
 .slide-over-title { font-size: 1.125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slide-over-loading { padding: 1rem 0; }
