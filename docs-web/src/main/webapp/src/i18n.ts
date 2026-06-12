@@ -7,6 +7,8 @@ export const i18n = createI18n({
   locale: 'en',
   fallbackLocale: 'en',
   messages: { en },
+  missingWarn: import.meta.env.DEV,
+  fallbackWarn: false,
 })
 
 type LocaleMessages = Record<string, unknown>
@@ -33,4 +35,5 @@ export async function setLocale(locale: string) {
     i18n.global.setLocaleMessage(locale, resolvedMessages as typeof en)
   }
   ;(i18n.global.locale as { value: string }).value = locale
+  document.documentElement.lang = locale.replace('_', '-')
 }

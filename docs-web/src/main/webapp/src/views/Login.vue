@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
 import api from '../api/client'
@@ -14,6 +15,7 @@ import { useToast } from 'primevue/usetoast'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -122,7 +124,7 @@ async function handleForgot() {
 
       <form @submit.prevent="handleLogin">
         <div class="teedy-login-field">
-          <label for="login-user">Username</label>
+          <label for="login-user">{{ t('login.username') }}</label>
           <InputText
             id="login-user"
             v-model="username"
@@ -133,7 +135,7 @@ async function handleForgot() {
         </div>
 
         <div class="teedy-login-field">
-          <label for="login-pass">Password</label>
+          <label for="login-pass">{{ t('login.password') }}</label>
           <Password
             inputId="login-pass"
             v-model="password"
@@ -148,16 +150,16 @@ async function handleForgot() {
         <div class="teedy-login-row">
           <label class="flex items-center gap-2 text-sm">
             <Checkbox v-model="remember" :binary="true" />
-            Remember me
+            {{ t('login.remember_me') }}
           </label>
           <button type="button" class="forgot-link" @click="showForgot = true">
-            Forgot password?
+            {{ t('login.password_lost_btn') }}
           </button>
         </div>
 
         <Button
           type="submit"
-          label="Sign in"
+          :label="t('login.submit')"
           icon="pi pi-sign-in"
           :loading="loading"
           class="w-full"
@@ -167,7 +169,7 @@ async function handleForgot() {
       <div v-if="guestLogin || oidcEnabled" class="login-alt-actions">
         <Button
           v-if="guestLogin"
-          label="Login as guest"
+          :label="t('login.login_as_guest')"
           icon="pi pi-user"
           severity="secondary"
           outlined
@@ -177,7 +179,7 @@ async function handleForgot() {
         />
         <Button
           v-if="oidcEnabled"
-          label="Login with SSO"
+          :label="t('login.login_with_sso')"
           icon="pi pi-sign-in"
           severity="secondary"
           outlined
