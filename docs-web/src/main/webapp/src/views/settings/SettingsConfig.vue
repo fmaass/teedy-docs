@@ -107,12 +107,12 @@ function handleReindex() {
     <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>General</h3>
       <div class="form-field">
-        <label>Default language for new documents</label>
-        <Select v-model="defaultLanguage" :options="SUPPORTED_LANGUAGES" optionLabel="label" optionValue="value" class="w-full" filter />
+        <label for="cfg-language">Default language for new documents</label>
+        <Select v-model="defaultLanguage" inputId="cfg-language" :options="SUPPORTED_LANGUAGES" optionLabel="label" optionValue="value" class="w-full" filter />
       </div>
       <div class="form-field">
-        <label>Tag search mode</label>
-        <Select v-model="tagSearchMode" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
+        <label for="cfg-tag-search">Tag search mode</label>
+        <Select v-model="tagSearchMode" inputId="cfg-tag-search" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
       <div class="form-field">
         <label>Maximum upload size</label>

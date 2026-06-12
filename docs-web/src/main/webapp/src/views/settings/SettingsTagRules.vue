@@ -168,9 +168,10 @@ function getTagName(tagId: string) {
 
     <Dialog v-model:visible="showDialog" :header="editId ? 'Edit rule' : 'New rule'" modal style="width: 480px">
       <div class="form-field">
-        <label>Tag</label>
+        <label for="rule-tag">Tag</label>
         <Select
           v-model="form.tag_id"
+          inputId="rule-tag"
           :options="tags ?? []"
           optionLabel="name"
           optionValue="id"
@@ -179,16 +180,16 @@ function getTagName(tagId: string) {
         />
       </div>
       <div class="form-field">
-        <label>Rule type</label>
-        <Select v-model="form.rule_type" :options="ruleTypes" optionLabel="label" optionValue="value" class="w-full" />
+        <label for="rule-type">Rule type</label>
+        <Select v-model="form.rule_type" inputId="rule-type" :options="ruleTypes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
       <div class="form-field">
-        <label>Regex pattern</label>
-        <InputText v-model="form.pattern" class="w-full" placeholder="e.g. invoice.*\d{4}" />
+        <label for="rule-pattern">Regex pattern</label>
+        <InputText id="rule-pattern" v-model="form.pattern" class="w-full" placeholder="e.g. invoice.*\d{4}" />
       </div>
       <div class="form-field">
-        <label>Execution order</label>
-        <InputNumber v-model="form.order" :min="0" class="w-full" />
+        <label for="rule-order">Execution order</label>
+        <InputNumber v-model="form.order" inputId="rule-order" :min="0" class="w-full" />
       </div>
       <div class="form-field">
         <label class="flex items-center gap-2">

@@ -192,7 +192,7 @@ function confirmDelete(file: { id: string; name: string }) {
     >
       <template #empty>
         <div class="file-upload-empty">
-          <i class="pi pi-cloud-upload" />
+          <i class="pi pi-cloud-upload" aria-hidden="true" />
           <span v-if="uploading">Uploading...</span>
           <span v-else>Drag files here or click Choose to upload</span>
         </div>

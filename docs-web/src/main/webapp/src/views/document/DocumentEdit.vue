@@ -341,7 +341,7 @@ async function handleSubmit() {
       >
         <template #empty>
           <div class="file-upload-empty">
-            <i class="pi pi-cloud-upload" />
+            <i class="pi pi-cloud-upload" aria-hidden="true" />
             <span>Drag files here or click Choose to add</span>
           </div>
         </template>

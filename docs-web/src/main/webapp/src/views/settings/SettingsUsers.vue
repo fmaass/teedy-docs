@@ -130,7 +130,7 @@ function userRowClass(data: UserListItem): string {
       <Column header="Username">
         <template #body="{ data }">
           <span class="user-name">
-            <i class="pi pi-user" />
+            <i class="pi pi-user" aria-hidden="true" />
             {{ data.username }}
             <span v-if="data.disabled" class="badge-disabled">disabled</span>
             <span v-if="data.totp_enabled" class="badge-totp" v-tooltip="'2FA enabled'">2FA</span>
@@ -171,12 +171,12 @@ function userRowClass(data: UserListItem): string {
     <Dialog v-model:visible="showAddDialog" header="Add user" :style="{ width: '400px' }" modal>
       <div class="dialog-form">
         <div class="form-field">
-          <label>Username *</label>
-          <InputText v-model="addForm.username" class="w-full" autofocus />
+          <label for="add-user-name">Username *</label>
+          <InputText id="add-user-name" v-model="addForm.username" class="w-full" autofocus />
         </div>
         <div class="form-field">
-          <label>Email *</label>
-          <InputText v-model="addForm.email" type="email" class="w-full" />
+          <label for="add-user-email">Email *</label>
+          <InputText id="add-user-email" v-model="addForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
           <label for="add-user-pass">Password *</label>
@@ -193,8 +193,8 @@ function userRowClass(data: UserListItem): string {
     <Dialog v-model:visible="showEditDialog" :header="`Edit ${editTarget?.username}`" :style="{ width: '400px' }" modal>
       <div class="dialog-form">
         <div class="form-field">
-          <label>Email</label>
-          <InputText v-model="editForm.email" type="email" class="w-full" />
+          <label for="edit-user-email">Email</label>
+          <InputText id="edit-user-email" v-model="editForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
           <label for="edit-user-pass">New password <span class="text-muted">(leave blank to keep current)</span></label>
