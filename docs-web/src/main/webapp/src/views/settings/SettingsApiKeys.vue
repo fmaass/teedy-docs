@@ -8,9 +8,11 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
+const confirm = useConfirm()
 const queryClient = useQueryClient()
 
 const { data: keysData, isLoading } = useQuery({
@@ -25,9 +27,6 @@ const newKeyName = ref('')
 const createdKey = ref('')
 const showKeyDialog = ref(false)
 
-const deleteConfirmId = ref('')
-const deleteConfirmName = ref('')
-const showDeleteDialog = ref(false)
 
 const createMutation = useMutation({
   mutationFn: (name: string) => createApiKey(name),
@@ -46,7 +45,6 @@ const createMutation = useMutation({
 const deleteMutation = useMutation({
   mutationFn: (id: string) => deleteApiKey(id),
   onSuccess: () => {
-    showDeleteDialog.value = false
     queryClient.invalidateQueries({ queryKey: ['apikeys'] })
     toast.add({ severity: 'success', summary: 'API key deleted', life: 3000 })
   },
@@ -62,13 +60,14 @@ function doCreate() {
 }
 
 function confirmDelete(key: ApiKeyItem) {
-  deleteConfirmId.value = key.id
-  deleteConfirmName.value = key.name
-  showDeleteDialog.value = true
-}
-
-function doDelete() {
-  deleteMutation.mutate(deleteConfirmId.value)
+  confirm.require({
+    message: `Delete "${key.name}"? Any integrations using this key will stop working.`,
+    header: 'Delete API key',
+    icon: 'pi pi-trash',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => deleteMutation.mutate(key.id),
+  })
 }
 
 function copyKey() {
@@ -155,14 +154,6 @@ function formatDate(ts?: number) {
       </template>
     </Dialog>
 
-    <!-- Delete confirmation -->
-    <Dialog v-model:visible="showDeleteDialog" header="Delete API key" :modal="true" :style="{ width: '400px' }">
-      <p>Delete "{{ deleteConfirmName }}"? Any integrations using this key will stop working.</p>
-      <template #footer>
-        <Button label="Cancel" text @click="showDeleteDialog = false" />
-        <Button label="Delete" severity="danger" :loading="deleteMutation.isPending.value" @click="doDelete" />
-      </template>
-    </Dialog>
   </div>
 </template>
 

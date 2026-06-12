@@ -79,7 +79,8 @@ function confirmRemove(acl: Acl) {
     message: `Remove ${acl.perm.toLowerCase()} permission for "${acl.name}"?`,
     header: 'Remove permission',
     icon: 'pi pi-lock',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       if (!doc.value) return
       try {

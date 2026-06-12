@@ -120,7 +120,8 @@ function handleDelete(rule: Rule) {
     message: `Delete this auto-tagging rule?`,
     header: 'Delete rule',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => deleteRule(rule.id),
   })
 }

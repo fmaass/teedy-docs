@@ -96,22 +96,24 @@ async function quickRemoveTag(tagId: string) {
 // --- Slide-over panel ---
 
 const slideOverOpen = ref(false)
-const slideOverDoc = ref<DocumentDetail | null>(null)
-const slideOverLoading = ref(false)
+const slideOverDocId = ref<string | null>(null)
 
-async function openSlideOver(doc: DocumentListItem) {
-  slideOverOpen.value = true
-  slideOverLoading.value = true
-  try {
-    const { data } = await getDocument(doc.id)
-    slideOverDoc.value = data
-    queryClient.setQueryData(['document', doc.id], data)
-  } catch {
+const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError } = useQuery({
+  queryKey: computed(() => ['document', slideOverDocId.value]),
+  queryFn: () => getDocument(slideOverDocId.value!).then((r) => r.data),
+  enabled: computed(() => !!slideOverDocId.value && slideOverOpen.value),
+})
+
+watch(slideOverError, (err) => {
+  if (err) {
     slideOverOpen.value = false
     toast.add({ severity: 'error', summary: 'Failed to load document', life: 3000 })
-  } finally {
-    slideOverLoading.value = false
   }
+})
+
+function openSlideOver(doc: DocumentListItem) {
+  slideOverDocId.value = doc.id
+  slideOverOpen.value = true
 }
 
 const availableTagsForSlideOver = computed(() => {
@@ -123,13 +125,13 @@ const availableTagsForSlideOver = computed(() => {
 async function addTagToSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
   const refreshed = await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) slideOverDoc.value = refreshed
+  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
 }
 
 async function removeTagFromSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
   const refreshed = await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) slideOverDoc.value = refreshed
+  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
 }
 
 function buildFilterLabel(): string {
@@ -239,7 +241,7 @@ const contextMenuItems = computed(() => {
     <DocumentSlideOver
       v-model:visible="slideOverOpen"
       :loading="slideOverLoading"
-      :document="slideOverDoc"
+      :document="slideOverDoc ?? null"
       :available-tags="availableTagsForSlideOver"
       @add-tag="addTagToSlideOver"
       @remove-tag="removeTagFromSlideOver"

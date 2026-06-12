@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { listUsers, createUser, updateUser, deleteUser, type UserListItem } from '../../api/user'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -14,23 +15,14 @@ import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
 const confirm = useConfirm()
+const queryClient = useQueryClient()
 
-const users = ref<UserListItem[]>([])
-const loading = ref(false)
+const { data: usersData, isLoading: loading } = useQuery({
+  queryKey: ['users'],
+  queryFn: () => listUsers().then((r) => r.data.users),
+})
 
-async function loadUsers() {
-  loading.value = true
-  try {
-    const { data } = await listUsers()
-    users.value = data.users
-  } catch {
-    toast.add({ severity: 'error', summary: 'Failed to load users', life: 3000 })
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadUsers)
+const users = computed(() => usersData.value ?? [])
 
 // Add user dialog
 const showAddDialog = ref(false)
@@ -50,7 +42,7 @@ async function handleAdd() {
   addLoading.value = true
   try {
     await createUser(addForm.value.username, addForm.value.password, addForm.value.email, addForm.value.storage_quota)
-    await loadUsers()
+    queryClient.invalidateQueries({ queryKey: ['users'] })
     showAddDialog.value = false
     toast.add({ severity: 'success', summary: 'User created', life: 2000 })
   } catch (error: unknown) {
@@ -80,7 +72,7 @@ async function handleEdit() {
     const data: { email?: string; password?: string } = { email: editForm.value.email }
     if (editForm.value.password) data.password = editForm.value.password
     await updateUser(editTarget.value.username, data)
-    await loadUsers()
+    queryClient.invalidateQueries({ queryKey: ['users'] })
     showEditDialog.value = false
     toast.add({ severity: 'success', summary: 'User updated', life: 2000 })
   } catch {
@@ -95,11 +87,12 @@ function confirmDelete(user: UserListItem) {
     message: `Delete user "${user.username}"? This cannot be undone.`,
     header: 'Delete user',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteUser(user.username)
-        await loadUsers()
+        queryClient.invalidateQueries({ queryKey: ['users'] })
         toast.add({ severity: 'success', summary: 'User deleted', life: 2000 })
       } catch {
         toast.add({ severity: 'error', summary: 'Failed to delete user', life: 3000 })

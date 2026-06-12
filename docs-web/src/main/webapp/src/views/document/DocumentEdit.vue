@@ -255,10 +255,15 @@ async function handleSubmit() {
       </div>
 
       <!-- Advanced metadata (collapsible) -->
-      <button type="button" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
-        <i :class="showAdvanced ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" />
-        Additional metadata
-      </button>
+      <Button
+        type="button"
+        :icon="showAdvanced ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"
+        label="Additional metadata"
+        text
+        size="small"
+        class="advanced-toggle"
+        @click="showAdvanced = !showAdvanced"
+      />
 
       <div v-if="showAdvanced" class="advanced-fields">
         <div class="form-row">
@@ -424,20 +429,8 @@ async function handleSubmit() {
 }
 
 .advanced-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 500;
   color: var(--teedy-brand);
-  padding: 0.5rem 0;
   margin-bottom: 0.75rem;
-}
-.advanced-toggle:hover {
-  text-decoration: underline;
 }
 
 .advanced-fields {

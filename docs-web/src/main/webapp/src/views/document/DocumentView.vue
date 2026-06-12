@@ -82,6 +82,7 @@ function handleDelete() {
       try {
         await deleteDocument(props.id)
         queryClient.invalidateQueries({ queryKey: ['documents'] })
+        queryClient.invalidateQueries({ queryKey: ['trash'] })
         toast.add({ severity: 'success', summary: 'Document deleted', life: 2000 })
         router.push({ name: 'documents' })
       } catch {

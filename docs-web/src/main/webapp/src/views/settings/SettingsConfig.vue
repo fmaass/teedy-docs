@@ -83,7 +83,8 @@ function handleReindex() {
     message: 'This will destroy and rebuild the entire search index. Documents will be temporarily unsearchable. Continue?',
     header: 'Rebuild search index',
     icon: 'pi pi-exclamation-triangle',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       reindexing.value = true
       try {
