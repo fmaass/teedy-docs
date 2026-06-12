@@ -19,7 +19,10 @@ Teedy is an open source, lightweight document management system for individuals 
 - **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed, JWT bearer filter with iss/aud checks
 - **API key authentication** for programmatic access (`Authorization: Bearer tdapi_*`)
 - **Trash / recycle bin** with soft-delete, restore, permanent delete, and auto-purge
-- **Vue 3 frontend** replacing AngularJS (PrimeVue, Vite, TypeScript)
+- **Vue 3 frontend** replacing AngularJS (PrimeVue 4, Vite 7, Pinia 3, TypeScript 5.9, vue-i18n)
+- **Full internationalization** with 12 languages and live language switching
+- **Accessibility**: keyboard navigation, label associations, ARIA attributes, PrimeVue FileUpload
+- **Document update safety**: partial-update semantics prevent data loss on concurrent edits
 - **Log4j 1.x removed**, replaced with Log4j 2
 - **Dependency updates**: Hibernate 6.6, Jersey 3.1, Lucene 10, Guava 33, OkHttp 4.12, PostgreSQL driver 42.7
 
@@ -60,7 +63,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.5.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.8.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
