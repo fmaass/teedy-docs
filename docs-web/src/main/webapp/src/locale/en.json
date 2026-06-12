@@ -220,6 +220,7 @@
   "tag": {
     "new_tag": "New tag",
     "search": "Search",
+    "remove_tag": "Remove tag {name}",
     "default": {
       "title": "Tags",
       "message_1": "<strong>Tags</strong> are labels associated to documents.",

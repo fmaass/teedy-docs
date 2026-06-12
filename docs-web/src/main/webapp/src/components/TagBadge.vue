@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   name: string
@@ -23,7 +26,7 @@ const textColor = computed(() => {
 </script>
 
 <template>
-  <span class="teedy-tag" :style="{ backgroundColor: color, color: textColor }">{{ name }}<button v-if="removable" type="button" class="tag-remove-btn" :aria-label="`Remove tag ${name}`" @click.stop="emit('remove')"><i class="pi pi-times" /></button></span>
+  <span class="teedy-tag" :style="{ backgroundColor: color, color: textColor }">{{ name }}<button v-if="removable" type="button" class="tag-remove-btn" :aria-label="t('tag.remove_tag', { name })" @click.stop="emit('remove')"><i class="pi pi-times" /></button></span>
 </template>
 
 <style scoped>
