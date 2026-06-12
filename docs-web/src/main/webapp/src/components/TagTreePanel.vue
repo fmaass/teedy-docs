@@ -86,7 +86,12 @@ function getNodeCount(node: any): number | undefined {
             'tag-excluded': excludedTagIds.has(nodeTagId(node.key)),
             'tag-dimmed': !selectedTagIds.has(nodeTagId(node.key)) && !excludedTagIds.has(nodeTagId(node.key)) && selectedTagIds.size > 0 && !((getNodeCount(node) ?? 0) > 0),
           }"
+          role="button"
+          tabindex="0"
+          :aria-pressed="selectedTagIds.has(nodeTagId(node.key))"
           @click.stop="emit('selectTag', node.key)"
+          @keydown.enter.stop="emit('selectTag', node.key)"
+          @keydown.space.prevent="emit('selectTag', node.key)"
         >
           <i v-if="selectedTagIds.has(nodeTagId(node.key))" class="pi pi-check-circle state-icon include" />
           <i v-else-if="excludedTagIds.has(nodeTagId(node.key))" class="pi pi-minus-circle state-icon exclude" />

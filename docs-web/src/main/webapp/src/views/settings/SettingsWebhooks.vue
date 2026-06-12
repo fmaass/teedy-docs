@@ -9,9 +9,11 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
+const confirm = useConfirm()
 const queryClient = useQueryClient()
 
 const { data: webhooksData, isLoading } = useQuery({
@@ -27,8 +29,7 @@ const newUrl = ref('')
 
 const eventOptions = WEBHOOK_EVENTS.map((e) => ({ label: e.replace(/_/g, ' '), value: e }))
 
-const showDeleteDialog = ref(false)
-const deleteTarget = ref<WebhookItem | null>(null)
+const urlError = ref('')
 
 const addMutation = useMutation({
   mutationFn: () => createWebhook(newEvent.value, newUrl.value),
@@ -46,8 +47,6 @@ const addMutation = useMutation({
 const deleteMutation = useMutation({
   mutationFn: (id: string) => deleteWebhook(id),
   onSuccess: () => {
-    showDeleteDialog.value = false
-    deleteTarget.value = null
     queryClient.invalidateQueries({ queryKey: ['webhooks'] })
     toast.add({ severity: 'success', summary: 'Webhook deleted', life: 3000 })
   },
@@ -56,21 +55,35 @@ const deleteMutation = useMutation({
   },
 })
 
-function doAdd() {
-  if (newUrl.value.trim()) {
-    addMutation.mutate()
+function isValidUrl(str: string): boolean {
+  try {
+    const url = new URL(str)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
   }
+}
+
+function doAdd() {
+  urlError.value = ''
+  const url = newUrl.value.trim()
+  if (!url) return
+  if (!isValidUrl(url)) {
+    urlError.value = 'Enter a valid HTTP(S) URL'
+    return
+  }
+  addMutation.mutate()
 }
 
 function confirmDelete(webhook: WebhookItem) {
-  deleteTarget.value = webhook
-  showDeleteDialog.value = true
-}
-
-function doDelete() {
-  if (deleteTarget.value) {
-    deleteMutation.mutate(deleteTarget.value.id)
-  }
+  confirm.require({
+    message: `Delete webhook for "${formatEvent(webhook.event)}" to ${webhook.url}?`,
+    header: 'Delete webhook',
+    icon: 'pi pi-trash',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => deleteMutation.mutate(webhook.id),
+  })
 }
 
 function formatEvent(event: string) {
@@ -129,30 +142,21 @@ function formatDate(ts: number) {
     <Dialog v-model:visible="showAddDialog" header="Add webhook" :modal="true" :style="{ width: '480px' }">
       <div class="form-fields">
         <div class="form-field">
-          <label>Event</label>
-          <Select v-model="newEvent" :options="eventOptions" optionLabel="label" optionValue="value" class="w-full" />
+          <label for="webhook-event">Event</label>
+          <Select v-model="newEvent" inputId="webhook-event" :options="eventOptions" optionLabel="label" optionValue="value" class="w-full" />
         </div>
         <div class="form-field">
-          <label>URL</label>
-          <InputText v-model="newUrl" placeholder="https://example.com/webhook" class="w-full" @keyup.enter="doAdd" />
+          <label for="webhook-url">URL</label>
+          <InputText id="webhook-url" v-model="newUrl" placeholder="https://example.com/webhook" class="w-full" :invalid="!!urlError" @keyup.enter="doAdd" />
+          <small v-if="urlError" class="url-error">{{ urlError }}</small>
         </div>
       </div>
       <template #footer>
-        <Button label="Cancel" text @click="showAddDialog = false" />
+        <Button label="Cancel" severity="secondary" text @click="showAddDialog = false" />
         <Button label="Add" :disabled="!newUrl.trim()" :loading="addMutation.isPending.value" @click="doAdd" />
       </template>
     </Dialog>
 
-    <!-- Delete confirmation -->
-    <Dialog v-model:visible="showDeleteDialog" header="Delete webhook" :modal="true" :style="{ width: '400px' }">
-      <p v-if="deleteTarget">
-        Delete webhook for <strong>{{ formatEvent(deleteTarget.event) }}</strong> to <code>{{ deleteTarget.url }}</code>?
-      </p>
-      <template #footer>
-        <Button label="Cancel" text @click="showDeleteDialog = false" />
-        <Button label="Delete" severity="danger" :loading="deleteMutation.isPending.value" @click="doDelete" />
-      </template>
-    </Dialog>
   </div>
 </template>
 
@@ -219,5 +223,9 @@ function formatDate(ts: number) {
 }
 .w-full {
   width: 100%;
+}
+.url-error {
+  color: var(--p-red-500);
+  font-size: 0.75rem;
 }
 </style>

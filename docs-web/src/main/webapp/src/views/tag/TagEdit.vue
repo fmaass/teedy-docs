@@ -81,12 +81,15 @@ function handleDelete() {
     message: `Delete tag "${name.value}"? Documents will not be deleted.`,
     header: 'Delete tag',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => {
       deleteTag(props.id).then(() => {
         queryClient.invalidateQueries({ queryKey: ['tags'] })
         toast.add({ severity: 'success', summary: 'Tag deleted', life: 2000 })
         router.push({ name: 'tags' })
+      }).catch(() => {
+        toast.add({ severity: 'error', summary: 'Failed to delete tag', life: 3000 })
       })
     },
   })

@@ -14,6 +14,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const { switchTheme } = useThemeSwitch()
 
+const currentPassword = ref('')
 const password = ref('')
 const passwordConfirm = ref('')
 const saving = ref(false)
@@ -47,17 +48,26 @@ onMounted(() => {
 })
 
 async function handleSave() {
+  if (!currentPassword.value) {
+    toast.add({ severity: 'warn', summary: 'Current password is required', life: 2000 })
+    return
+  }
+  if (password.value.length < 8) {
+    toast.add({ severity: 'warn', summary: 'New password must be at least 8 characters', life: 2000 })
+    return
+  }
   if (password.value !== passwordConfirm.value) {
     toast.add({ severity: 'warn', summary: 'Passwords do not match', life: 2000 })
     return
   }
-  if (!password.value) return
 
   saving.value = true
   try {
     const params = new URLSearchParams()
+    params.set('current_password', currentPassword.value)
     params.set('password', password.value)
     await api.post('/user', params)
+    currentPassword.value = ''
     password.value = ''
     passwordConfirm.value = ''
     toast.add({ severity: 'success', summary: 'Password updated', life: 2000 })
@@ -100,9 +110,10 @@ function onLocaleSelect(event: SelectChangeEvent) {
     <Card class="mb-3" style="max-width: 400px"><template #content>
       <h3 class="section-title">Appearance</h3>
       <div class="form-field">
-        <label>Theme</label>
+        <label for="account-theme">Theme</label>
         <Select
           v-model="selectedTheme"
+          inputId="account-theme"
           :options="themeOptions"
           optionLabel="label"
           optionValue="value"
@@ -111,9 +122,10 @@ function onLocaleSelect(event: SelectChangeEvent) {
         />
       </div>
       <div class="form-field">
-        <label>Language</label>
+        <label for="account-locale">Language</label>
         <Select
           v-model="selectedLocale"
+          inputId="account-locale"
           :options="languages"
           optionLabel="label"
           optionValue="value"
@@ -126,15 +138,21 @@ function onLocaleSelect(event: SelectChangeEvent) {
     <!-- Password -->
     <Card style="max-width: 400px"><template #content>
       <h3 class="section-title">Change password</h3>
-      <div class="form-field">
-        <label for="account-new-pass">New password</label>
-        <Password v-model="password" inputId="account-new-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
-      </div>
-      <div class="form-field">
-        <label for="account-confirm-pass">Confirm password</label>
-        <Password v-model="passwordConfirm" inputId="account-confirm-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'confirm-password' }" inputClass="w-full" class="w-full" />
-      </div>
-      <Button label="Save" icon="pi pi-check" :loading="saving" @click="handleSave" />
+      <form @submit.prevent="handleSave">
+        <div class="form-field">
+          <label for="account-current-pass">Current password</label>
+          <Password v-model="currentPassword" inputId="account-current-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'current-password', name: 'current-password' }" inputClass="w-full" class="w-full" />
+        </div>
+        <div class="form-field">
+          <label for="account-new-pass">New password</label>
+          <Password v-model="password" inputId="account-new-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
+        </div>
+        <div class="form-field">
+          <label for="account-confirm-pass">Confirm password</label>
+          <Password v-model="passwordConfirm" inputId="account-confirm-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'confirm-password' }" inputClass="w-full" class="w-full" />
+        </div>
+        <Button type="submit" label="Save" icon="pi pi-check" :loading="saving" />
+      </form>
     </template></Card>
   </div>
 </template>

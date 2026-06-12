@@ -21,6 +21,7 @@ const username = ref('')
 const password = ref('')
 const remember = ref(false)
 const loading = ref(false)
+const guestLoading = ref(false)
 const error = ref('')
 
 const oidcEnabled = ref(false)
@@ -76,14 +77,14 @@ function handleOidcLogin() {
 
 async function handleGuestLogin() {
   error.value = ''
-  loading.value = true
+  guestLoading.value = true
   try {
     await auth.login('guest', '', false)
     router.push({ name: 'documents' })
   } catch (loginError: unknown) {
     error.value = extractLoginErrorMessage(loginError, 'Guest login failed')
   } finally {
-    loading.value = false
+    guestLoading.value = false
   }
 }
 
@@ -171,7 +172,7 @@ async function handleForgot() {
           severity="secondary"
           outlined
           class="w-full"
-          :loading="loading"
+          :loading="guestLoading"
           @click="handleGuestLogin"
         />
         <Button

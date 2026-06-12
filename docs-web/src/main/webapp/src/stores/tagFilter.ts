@@ -129,9 +129,10 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     return roots.map(buildNode)
   })
 
+  const manualExpandedKeys = ref<Record<string, boolean>>({})
+
   const expandedKeys = computed(() => {
-    const keys: Record<string, boolean> = {}
-    if (selectedTagIds.value.size === 0) return keys
+    const keys: Record<string, boolean> = { ...manualExpandedKeys.value }
     for (const id of selectedTagIds.value) {
       let tag = tagMap.value.get(id)
       while (tag?.parent) {
@@ -141,6 +142,10 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     }
     return keys
   })
+
+  function setExpandedKeys(keys: Record<string, boolean>) {
+    manualExpandedKeys.value = keys
+  }
 
   const activeTreeNodes = computed<TreeNode[]>(() =>
     viewMode.value === 'facets' ? (facetTreeNodes.value as TreeNode[]) : tagTreeNodes.value,
@@ -300,6 +305,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     viewMode,
     tagTreeNodes,
     expandedKeys,
+    setExpandedKeys,
     activeTreeNodes,
     activeExpandedKeys,
     resolveCompoundKey,

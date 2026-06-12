@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/vue-query'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
-import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
 const toast = useToast()
+const confirm = useConfirm()
 const queryClient = useQueryClient()
 
 const { data: trashData, isLoading } = useQuery({
@@ -20,11 +21,6 @@ const { data: trashData, isLoading } = useQuery({
 
 const documents = computed(() => trashData.value?.documents ?? [])
 const totalCount = computed(() => trashData.value?.total ?? 0)
-
-const confirmDialog = ref(false)
-const confirmAction = ref<'permanent' | 'empty'>('permanent')
-const confirmDocId = ref('')
-const confirmDocTitle = ref('')
 
 const restoreMutation = useMutation({
   mutationFn: (id: string) => restoreDocument(id),
@@ -65,24 +61,25 @@ function doRestore(doc: TrashItem) {
 }
 
 function confirmPermanentDelete(doc: TrashItem) {
-  confirmAction.value = 'permanent'
-  confirmDocId.value = doc.id
-  confirmDocTitle.value = doc.title
-  confirmDialog.value = true
+  confirm.require({
+    message: `Permanently delete "${doc.title}"? This action cannot be undone.`,
+    header: 'Permanently delete',
+    icon: 'pi pi-trash',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => permanentDeleteMutation.mutate(doc.id),
+  })
 }
 
 function confirmEmptyTrash() {
-  confirmAction.value = 'empty'
-  confirmDialog.value = true
-}
-
-function executeConfirmed() {
-  confirmDialog.value = false
-  if (confirmAction.value === 'permanent') {
-    permanentDeleteMutation.mutate(confirmDocId.value)
-  } else {
-    emptyTrashMutation.mutate()
-  }
+  confirm.require({
+    message: 'This will permanently delete all documents in the trash. This action cannot be undone.',
+    header: 'Empty trash',
+    icon: 'pi pi-trash',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => emptyTrashMutation.mutate(),
+  })
 }
 
 function formatDeletedAt(ts: number) {
@@ -147,7 +144,7 @@ function formatDeletedAt(ts: number) {
               text
               size="small"
               @click="doRestore(data)"
-              :loading="restoreMutation.isPending.value"
+              :loading="restoreMutation.isPending.value && restoreMutation.variables.value === data.id"
             />
             <Button
               icon="pi pi-times"
@@ -156,6 +153,7 @@ function formatDeletedAt(ts: number) {
               size="small"
               severity="danger"
               @click="confirmPermanentDelete(data)"
+              :loading="permanentDeleteMutation.isPending.value && permanentDeleteMutation.variables.value === data.id"
             />
           </div>
         </template>
@@ -163,24 +161,6 @@ function formatDeletedAt(ts: number) {
     </DataTable>
 
     <EmptyState v-else icon="pi pi-trash" message="Trash is empty" />
-
-    <Dialog
-      v-model:visible="confirmDialog"
-      :header="confirmAction === 'empty' ? 'Empty trash' : 'Permanently delete'"
-      :modal="true"
-      :style="{ width: '400px' }"
-    >
-      <p v-if="confirmAction === 'empty'">
-        This will permanently delete all documents in the trash. This action cannot be undone.
-      </p>
-      <p v-else>
-        Permanently delete "{{ confirmDocTitle }}"? This action cannot be undone.
-      </p>
-      <template #footer>
-        <Button label="Cancel" text @click="confirmDialog = false" />
-        <Button label="Delete permanently" severity="danger" @click="executeConfirmed" />
-      </template>
-    </Dialog>
   </div>
 </template>
 

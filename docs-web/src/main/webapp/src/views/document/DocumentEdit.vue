@@ -66,23 +66,28 @@ const tagOptions = computed(() =>
 
 onMounted(async () => {
   if (isEdit.value && props.id) {
-    const { data } = await getDocument(props.id, true)
-    form.value.title = data.title || ''
-    form.value.description = data.description || ''
-    form.value.subject = data.subject || ''
-    form.value.identifier = data.identifier || ''
-    form.value.publisher = data.publisher || ''
-    form.value.format = data.format || ''
-    form.value.source = data.source || ''
-    form.value.type = data.type || ''
-    form.value.coverage = data.coverage || ''
-    form.value.rights = data.rights || ''
-    form.value.language = data.language || 'eng'
-    form.value.create_date = new Date(data.create_date)
-    form.value.tags = data.tags?.map((t) => t.id) || []
-    loadedRelations.value = data.relations ?? []
-    loadedMetadata.value = data.metadata ?? []
-    existingFiles.value = data.files || []
+    try {
+      const { data } = await getDocument(props.id, true)
+      form.value.title = data.title || ''
+      form.value.description = data.description || ''
+      form.value.subject = data.subject || ''
+      form.value.identifier = data.identifier || ''
+      form.value.publisher = data.publisher || ''
+      form.value.format = data.format || ''
+      form.value.source = data.source || ''
+      form.value.type = data.type || ''
+      form.value.coverage = data.coverage || ''
+      form.value.rights = data.rights || ''
+      form.value.language = data.language || 'eng'
+      form.value.create_date = data.create_date ? new Date(data.create_date) : new Date()
+      form.value.tags = data.tags?.map((t) => t.id) || []
+      loadedRelations.value = data.relations ?? []
+      loadedMetadata.value = data.metadata ?? []
+      existingFiles.value = data.files || []
+    } catch {
+      toast.add({ severity: 'error', summary: 'Failed to load document', life: 3000 })
+      router.back()
+    }
   } else {
     try {
       const { data: appConfig } = await api.get('/app')
@@ -91,7 +96,6 @@ onMounted(async () => {
       }
     } catch { /* fall back to 'eng' */ }
 
-    // Pre-populate tags from current tag filter selection (included only)
     form.value.tags = [...tagFilter.selectedTagIds]
   }
 })
@@ -120,7 +124,8 @@ function confirmDeleteExisting(file: AttachedFile) {
     message: `Remove "${file.name}" from this document?`,
     header: 'Remove file',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)
@@ -135,11 +140,12 @@ function confirmDeleteExisting(file: AttachedFile) {
 
 function buildDocParams() {
   const params = new URLSearchParams()
+  const date = form.value.create_date ?? new Date()
   const fields: Record<string, string> = {
     title: form.value.title,
     description: form.value.description,
     language: form.value.language,
-    create_date: String(form.value.create_date.getTime()),
+    create_date: String(date.getTime()),
   }
   if (form.value.subject) fields.subject = form.value.subject
   if (form.value.identifier) fields.identifier = form.value.identifier
@@ -257,42 +263,42 @@ async function handleSubmit() {
       <div v-if="showAdvanced" class="advanced-fields">
         <div class="form-row">
           <div class="form-field">
-            <label>Subject</label>
-            <InputText v-model="form.subject" class="w-full" />
+            <label for="edit-subject">Subject</label>
+            <InputText id="edit-subject" v-model="form.subject" class="w-full" />
           </div>
           <div class="form-field">
-            <label>Identifier</label>
-            <InputText v-model="form.identifier" class="w-full" />
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-field">
-            <label>Publisher</label>
-            <InputText v-model="form.publisher" class="w-full" />
-          </div>
-          <div class="form-field">
-            <label>Format</label>
-            <InputText v-model="form.format" class="w-full" />
+            <label for="edit-identifier">Identifier</label>
+            <InputText id="edit-identifier" v-model="form.identifier" class="w-full" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
-            <label>Source</label>
-            <InputText v-model="form.source" class="w-full" />
+            <label for="edit-publisher">Publisher</label>
+            <InputText id="edit-publisher" v-model="form.publisher" class="w-full" />
           </div>
           <div class="form-field">
-            <label>Type</label>
-            <InputText v-model="form.type" class="w-full" />
+            <label for="edit-format">Format</label>
+            <InputText id="edit-format" v-model="form.format" class="w-full" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
-            <label>Coverage</label>
-            <InputText v-model="form.coverage" class="w-full" />
+            <label for="edit-source">Source</label>
+            <InputText id="edit-source" v-model="form.source" class="w-full" />
           </div>
           <div class="form-field">
-            <label>Rights</label>
-            <InputText v-model="form.rights" class="w-full" />
+            <label for="edit-type">Type</label>
+            <InputText id="edit-type" v-model="form.type" class="w-full" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="edit-coverage">Coverage</label>
+            <InputText id="edit-coverage" v-model="form.coverage" class="w-full" />
+          </div>
+          <div class="form-field">
+            <label for="edit-rights">Rights</label>
+            <InputText id="edit-rights" v-model="form.rights" class="w-full" />
           </div>
         </div>
       </div>
