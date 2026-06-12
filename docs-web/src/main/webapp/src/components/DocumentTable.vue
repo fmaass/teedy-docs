@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { getFileUrl } from '../api/file'
 import { type DocumentListItem } from '../api/document'
 import { languageLabel } from '../constants/languages'
 import { formatDate } from '../composables/useFormatters'
 import DataTable from 'primevue/datatable'
-import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent } from 'primevue/datatable'
+import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, DataTableRowSelectEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
 
@@ -29,6 +30,12 @@ const emit = defineEmits<{
   page: [event: DataTablePageEvent]
   sort: [event: DataTableSortEvent]
 }>()
+
+const selectedRow = ref<DocumentListItem | null>(null)
+
+function onRowSelect(event: DataTableRowSelectEvent) {
+  emit('rowClick', event.data as DocumentListItem)
+}
 </script>
 
 <template>
@@ -40,6 +47,9 @@ const emit = defineEmits<{
     :loading="loading"
     :sortField="sortField"
     :sortOrder="sortOrder"
+    v-model:selection="selectedRow"
+    selectionMode="single"
+    :metaKeySelection="false"
     lazy
     paginator
     stripedRows
@@ -47,6 +57,7 @@ const emit = defineEmits<{
     dataKey="id"
     class="doc-table"
     @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
+    @row-select="onRowSelect"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
     @page="(e: DataTablePageEvent) => emit('page', e)"
     @sort="(e: DataTableSortEvent) => emit('sort', e)"
