@@ -8,6 +8,7 @@ import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { formatFileSize } from '../../composables/useFormatters'
@@ -24,15 +25,15 @@ const sanitizedDescription = computed(() => {
 
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
-const isDragging = ref(false)
 const uploading = ref(false)
+const fileUploadRef = ref()
 
-async function onDropUpload(e: DragEvent) {
-  isDragging.value = false
-  if (!e.dataTransfer?.files?.length || !doc.value) return
+async function handleUpload(event: FileUploadUploaderEvent) {
+  if (!doc.value) return
   uploading.value = true
   try {
-    for (const file of Array.from(e.dataTransfer.files)) {
+    const files = Array.isArray(event.files) ? event.files : [event.files]
+    for (const file of files) {
       await uploadFile(doc.value.id, file)
     }
     queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
@@ -41,6 +42,7 @@ async function onDropUpload(e: DragEvent) {
     toast.add({ severity: 'error', summary: 'Upload failed', life: 3000 })
   } finally {
     uploading.value = false
+    fileUploadRef.value?.clear()
   }
 }
 
@@ -175,20 +177,27 @@ function confirmDelete(file: { id: string; name: string }) {
       </div>
     </div>
 
-    <!-- Drop zone for immediate upload -->
-    <div
-      class="view-drop-zone"
-      :class="{ 'view-drop-zone--active': isDragging, 'view-drop-zone--uploading': uploading }"
-      @dragover.prevent="isDragging = true"
-      @dragenter.prevent="isDragging = true"
-      @dragleave.prevent="isDragging = false"
-      @drop.prevent="onDropUpload"
+    <!-- Upload zone -->
+    <FileUpload
+      ref="fileUploadRef"
+      mode="advanced"
+      multiple
+      customUpload
+      auto
+      :showUploadButton="false"
+      :showCancelButton="false"
+      :disabled="uploading"
+      @uploader="handleUpload"
+      class="view-file-upload"
     >
-      <i class="pi pi-cloud-upload" />
-      <span v-if="uploading">Uploading...</span>
-      <span v-else-if="isDragging">Drop files to upload</span>
-      <span v-else>Drag files here to upload</span>
-    </div>
+      <template #empty>
+        <div class="file-upload-empty">
+          <i class="pi pi-cloud-upload" />
+          <span v-if="uploading">Uploading...</span>
+          <span v-else>Drag files here or click Choose to upload</span>
+        </div>
+      </template>
+    </FileUpload>
 
     <EmptyState
       v-if="!doc.files?.length"
@@ -328,27 +337,21 @@ function confirmDelete(file: { id: string; name: string }) {
   opacity: 1;
 }
 
-.view-drop-zone {
+.view-file-upload {
+  margin-top: 1rem;
+}
+
+.file-upload-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 1rem;
   padding: 0.75rem;
-  border: 2px dashed var(--p-content-border-color);
-  border-radius: var(--p-content-border-radius, 6px);
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
-  transition: border-color 0.15s, background 0.15s;
 }
-.view-drop-zone--active {
-  border-color: var(--p-primary-color);
-  color: var(--p-primary-color);
-  background: color-mix(in srgb, var(--p-primary-color) 5%, transparent);
-}
-.view-drop-zone--uploading {
-  opacity: 0.6;
-  pointer-events: none;
+.file-upload-empty i {
+  font-size: 1.25rem;
 }
 
 @media (max-width: 600px) {
