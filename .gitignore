@@ -26,3 +26,4 @@ docs/*
 .DS_Store
 .cursor/
 CLAUDE.md
+docs/session-reviews/

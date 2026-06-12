@@ -1,41 +1,29 @@
 package com.sismics.util;
 
-import com.google.common.collect.Lists;
-import com.google.common.reflect.ClassPath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Modifier;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.ServiceLoader;
 
 /**
  * Classes scanner.
  */
 public class ClasspathScanner<T> {
-    /**
-     * Logger.
-     */
     private static final Logger log = LoggerFactory.getLogger(ClasspathScanner.class);
 
-    /**
-     * Find classes assignable from another.
-     *
-     * @param topClass Top class or interface
-     * @param pkg In this package
-     * @return List of classes
-     */
     @SuppressWarnings("unchecked")
     public List<Class<T>> findClasses(Class<T> topClass, String pkg) {
-        List<Class<T>> classes = Lists.newArrayList();
+        List<Class<T>> classes = new ArrayList<>();
         try {
-        for (ClassPath.ClassInfo classInfo : ClassPath.from(topClass.getClassLoader()).getTopLevelClasses(pkg)) {
-            Class<?> clazz = classInfo.load();
-            if (topClass.isAssignableFrom(clazz) && !Modifier.isAbstract(clazz.getModifiers()) && !clazz.isInterface()) {
-                classes.add((Class<T>) clazz);
+            for (ServiceLoader.Provider<T> provider : ServiceLoader.load(topClass).stream().toList()) {
+                classes.add((Class<T>) provider.type());
             }
-        }
         } catch (Exception e) {
-            log.error("Error loading format handlers", e);
+            log.error("Error discovering service providers for {}", topClass.getSimpleName(), e);
         }
 
         classes.sort((o1, o2) -> {
@@ -45,13 +33,14 @@ public class ClasspathScanner<T> {
                     priority2 == null ? Integer.MAX_VALUE : priority2.value());
         });
 
-        log.info("Found " + classes.size() + " classes for " + topClass.getSimpleName());
+        log.info("Found {} classes for {}", classes.size(), topClass.getSimpleName());
         return classes;
     }
 
     /**
      * Classpath scanning priority.
      */
+    @Retention(RetentionPolicy.RUNTIME)
     public @interface Priority {
         int value() default Integer.MAX_VALUE;
     }

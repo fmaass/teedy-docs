@@ -1,0 +1,7 @@
+com.sismics.docs.core.util.format.DocxFormatHandler
+com.sismics.docs.core.util.format.ImageFormatHandler
+com.sismics.docs.core.util.format.OdtFormatHandler
+com.sismics.docs.core.util.format.PdfFormatHandler
+com.sismics.docs.core.util.format.PptxFormatHandler
+com.sismics.docs.core.util.format.TextPlainFormatHandler
+com.sismics.docs.core.util.format.VideoFormatHandler
