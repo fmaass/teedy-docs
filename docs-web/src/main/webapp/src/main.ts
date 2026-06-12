@@ -14,6 +14,7 @@ import 'primeicons/primeicons.css'
 import './assets/teedy-tokens.css'
 import './assets/teedy-theme.css'
 import { teedyPrimary } from './theme/primary'
+import { DARK_MODE_SELECTOR } from './constants/theme'
 
 import App from './App.vue'
 import router from './router'
@@ -57,7 +58,7 @@ app.use(PrimeVue, {
   theme: {
     preset: TeedyPreset,
     options: {
-      darkModeSelector: '.dark-mode',
+      darkModeSelector: DARK_MODE_SELECTOR,
       cssLayer: {
         name: 'primevue',
         order: 'primevue',

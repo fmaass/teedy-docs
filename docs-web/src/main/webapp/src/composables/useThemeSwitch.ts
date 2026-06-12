@@ -5,6 +5,7 @@ import Lara from '@primeuix/themes/lara'
 import Material from '@primeuix/themes/material'
 import Nora from '@primeuix/themes/nora'
 import { teedyPrimary } from '../theme/primary'
+import { DARK_MODE_SELECTOR } from '../constants/theme'
 
 const presets: Record<string, typeof Lara> = { Aura, Lara, Material, Nora }
 
@@ -18,7 +19,7 @@ export function useThemeSwitch() {
     const preset = definePreset(base, { semantic: { primary: teedyPrimary } })
     PrimeVue.config.theme = {
       preset,
-      options: { darkModeSelector: '.dark-mode' },
+      options: { darkModeSelector: DARK_MODE_SELECTOR },
     }
     localStorage.setItem('teedy-theme', name)
   }

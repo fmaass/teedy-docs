@@ -134,11 +134,11 @@ async function handleForgot() {
         <div class="teedy-login-field">
           <label for="login-pass">Password</label>
           <Password
-            id="login-pass"
+            inputId="login-pass"
             v-model="password"
             :feedback="false"
             toggleMask
-            autocomplete="current-password"
+            :inputProps="{ autocomplete: 'current-password', name: 'password' }"
             inputClass="w-full"
             class="w-full"
           />
