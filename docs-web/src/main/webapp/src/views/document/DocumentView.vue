@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, provide, watch } from 'vue'
+import { computed, provide, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
 import { getFileUrl } from '../../api/file'
 import { languageLabel } from '../../constants/languages'
 import Button from 'primevue/button'
-import TabMenu from 'primevue/tabmenu'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
 import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
@@ -51,20 +53,13 @@ const tabs = [
   { label: 'Activity', icon: 'pi pi-history', route: 'document-view-activity' },
 ]
 
-interface TabChangeEvent {
-  index: number
-}
-
-const initialTabIndex = tabs.findIndex((t) => t.route === route.name)
-const activeTab = ref(initialTabIndex >= 0 ? initialTabIndex : 0)
-
-watch(() => route.name, (name) => {
-  const idx = tabs.findIndex((t) => t.route === name)
-  if (idx >= 0) activeTab.value = idx
+const activeTab = computed(() => {
+  const name = route.name as string
+  return tabs.find((t) => t.route === name)?.route ?? tabs[0].route
 })
 
-function onTabChange(e: TabChangeEvent) {
-  const tab = tabs[e.index]
+function onTabChange(value: string | number) {
+  const tab = tabs.find((t) => t.route === value)
   if (tab) router.push({ name: tab.route, params: { id: props.id } })
 }
 
@@ -81,7 +76,8 @@ function handleDelete() {
     message: 'Are you sure you want to delete this document?',
     header: 'Delete document',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteDocument(props.id)
@@ -100,10 +96,10 @@ function handleDelete() {
   <div class="doc-view">
     <!-- Back bar -->
     <div class="back-bar">
-      <button class="back-link" @click="goBack">
-        <i class="pi pi-arrow-left" />
+      <Button text size="small" class="back-link" @click="goBack">
+        <i class="pi pi-arrow-left" aria-hidden="true" />
         <span>Documents</span>
-      </button>
+      </Button>
       <span v-if="filterLabel" class="back-filter">· {{ filterLabel }}</span>
     </div>
 
@@ -162,7 +158,13 @@ function handleDelete() {
       </header>
 
       <!-- Tabs -->
-      <TabMenu :model="tabs" :activeIndex="activeTab" @tab-change="onTabChange" class="doc-tabs" />
+      <Tabs :value="activeTab" @update:value="onTabChange" class="doc-tabs">
+        <TabList>
+          <Tab v-for="tab in tabs" :key="tab.route" :value="tab.route">
+            <i :class="tab.icon" style="margin-right: 0.375rem" aria-hidden="true" />{{ tab.label }}
+          </Tab>
+        </TabList>
+      </Tabs>
 
       <!-- Tab content -->
       <div class="doc-tab-content">

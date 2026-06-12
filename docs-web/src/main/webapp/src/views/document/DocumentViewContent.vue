@@ -83,7 +83,8 @@ function confirmDelete(file: { id: string; name: string }) {
     message: `Remove "${file.name}" from this document?`,
     header: 'Remove file',
     icon: 'pi pi-trash',
-    acceptClass: 'p-button-danger',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)

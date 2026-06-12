@@ -10,6 +10,11 @@ import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
 import TagBadge from './TagBadge.vue'
 
 const props = defineProps<{
@@ -99,41 +104,47 @@ const tagOptions = computed(() =>
         </div>
       </div>
 
-      <div class="slide-tabs" role="tablist">
-        <button class="slide-tab" :class="{ active: slideOverTab === 'overview' }" role="tab" :aria-selected="slideOverTab === 'overview'" @click="slideOverTab = 'overview'">Overview</button>
-        <button class="slide-tab" :class="{ active: slideOverTab === 'files' }" role="tab" :aria-selected="slideOverTab === 'files'" @click="slideOverTab = 'files'">Files{{ document.files?.length ? ` (${document.files.length})` : '' }}</button>
-      </div>
-
-      <div v-if="slideOverTab === 'overview'" class="slide-tab-content">
-        <div v-if="document.description" class="slide-section">
-          <h4 class="slide-label">Description</h4>
-          <div class="slide-description" v-html="sanitizedDescription" />
-        </div>
-        <div class="slide-section">
-          <h4 class="slide-label">Details</h4>
-          <div class="slide-meta-grid">
-            <div class="meta-item"><span class="meta-key">Language</span><span class="meta-val">{{ languageLabel(document.language) }}</span></div>
-            <div class="meta-item"><span class="meta-key">Created</span><span class="meta-val">{{ formatDate(document.create_date) }}</span></div>
-            <div class="meta-item" v-if="document.creator"><span class="meta-key">Creator</span><span class="meta-val">{{ document.creator }}</span></div>
-            <div class="meta-item" v-if="document.subject"><span class="meta-key">Subject</span><span class="meta-val">{{ document.subject }}</span></div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="slideOverTab === 'files'" class="slide-tab-content">
-        <div v-if="document.files?.length" class="slide-file-list">
-          <div v-for="file in document.files" :key="file.id" class="slide-file-card">
-            <div v-if="file.mimetype?.startsWith('image/')" class="file-inline-preview">
-              <img :src="getFileUrl(file.id, 'web')" alt="" loading="lazy" />
+      <Tabs v-model:value="slideOverTab">
+        <TabList>
+          <Tab value="overview">Overview</Tab>
+          <Tab value="files">Files{{ document.files?.length ? ` (${document.files.length})` : '' }}</Tab>
+        </TabList>
+        <TabPanels>
+          <TabPanel value="overview">
+            <div class="slide-tab-content">
+              <div v-if="document.description" class="slide-section">
+                <h4 class="slide-label">Description</h4>
+                <div class="slide-description" v-html="sanitizedDescription" />
+              </div>
+              <div class="slide-section">
+                <h4 class="slide-label">Details</h4>
+                <div class="slide-meta-grid">
+                  <div class="meta-item"><span class="meta-key">Language</span><span class="meta-val">{{ languageLabel(document.language) }}</span></div>
+                  <div class="meta-item"><span class="meta-key">Created</span><span class="meta-val">{{ formatDate(document.create_date) }}</span></div>
+                  <div class="meta-item" v-if="document.creator"><span class="meta-key">Creator</span><span class="meta-val">{{ document.creator }}</span></div>
+                  <div class="meta-item" v-if="document.subject"><span class="meta-key">Subject</span><span class="meta-val">{{ document.subject }}</span></div>
+                </div>
+              </div>
             </div>
-            <div class="file-card-row">
-              <i class="pi pi-file" /><span class="file-name">{{ file.name }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>
-              <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" title="Download" aria-label="Download file"><i class="pi pi-download" /></a>
+          </TabPanel>
+          <TabPanel value="files">
+            <div class="slide-tab-content">
+              <div v-if="document.files?.length" class="slide-file-list">
+                <div v-for="file in document.files" :key="file.id" class="slide-file-card">
+                  <div v-if="file.mimetype?.startsWith('image/')" class="file-inline-preview">
+                    <img :src="getFileUrl(file.id, 'web')" alt="" loading="lazy" />
+                  </div>
+                  <div class="file-card-row">
+                    <i class="pi pi-file" /><span class="file-name">{{ file.name }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>
+                    <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" title="Download" aria-label="Download file"><i class="pi pi-download" /></a>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="slide-empty-files"><span class="meta">No files attached</span></div>
             </div>
-          </div>
-        </div>
-        <div v-else class="slide-empty-files"><span class="meta">No files attached</span></div>
-      </div>
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
 
       <div class="slide-actions">
         <Button label="Open full view" icon="pi pi-external-link" outlined size="small" @click="emit('openFullView')" />
@@ -155,14 +166,6 @@ const tagOptions = computed(() =>
 .slide-tags-row { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
 .tag-add-row { display: flex; gap: 0.375rem; align-items: center; }
 .tag-add-select { flex: 1; font-size: 0.8125rem; }
-.slide-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--p-content-border-color); }
-.slide-tab {
-  padding: 0.5rem 1rem; font-size: 0.8125rem; font-weight: 500; font-family: inherit;
-  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
-  color: var(--p-text-muted-color); transition: color 0.12s, border-color 0.12s;
-}
-.slide-tab:hover { color: var(--p-text-color); }
-.slide-tab.active { color: var(--p-primary-color); border-bottom-color: var(--p-primary-color); }
 .slide-tab-content { display: flex; flex-direction: column; gap: 1rem; }
 .slide-label { margin: 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--p-text-muted-color); }
 .slide-description { font-size: 0.875rem; line-height: 1.5; color: var(--p-text-color); }
