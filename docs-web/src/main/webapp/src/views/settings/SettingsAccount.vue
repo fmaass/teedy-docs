@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { setLocale } from '../../i18n'
 import { useThemeSwitch, themeNames, getStoredTheme } from '../../composables/useThemeSwitch'
@@ -10,6 +11,7 @@ import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const { switchTheme } = useThemeSwitch()
@@ -49,15 +51,15 @@ onMounted(() => {
 
 async function handleSave() {
   if (!currentPassword.value) {
-    toast.add({ severity: 'warn', summary: 'Current password is required', life: 2000 })
+    toast.add({ severity: 'warn', summary: t('ui.account.current_password_required'), life: 2000 })
     return
   }
   if (password.value.length < 8) {
-    toast.add({ severity: 'warn', summary: 'New password must be at least 8 characters', life: 2000 })
+    toast.add({ severity: 'warn', summary: t('ui.account.password_min_length'), life: 2000 })
     return
   }
   if (password.value !== passwordConfirm.value) {
-    toast.add({ severity: 'warn', summary: 'Passwords do not match', life: 2000 })
+    toast.add({ severity: 'warn', summary: t('ui.account.passwords_mismatch'), life: 2000 })
     return
   }
 
@@ -70,9 +72,9 @@ async function handleSave() {
     currentPassword.value = ''
     password.value = ''
     passwordConfirm.value = ''
-    toast.add({ severity: 'success', summary: 'Password updated', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.account.password_updated'), life: 2000 })
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to update password', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.account.failed_update_password'), life: 3000 })
   } finally {
     saving.value = false
   }
@@ -81,12 +83,12 @@ async function handleSave() {
 async function handleLocaleChange(locale: string) {
   await setLocale(locale)
   localStorage.setItem('teedy-locale', locale)
-  toast.add({ severity: 'success', summary: 'Language updated', life: 2000 })
+  toast.add({ severity: 'success', summary: t('ui.account.language_updated'), life: 2000 })
 }
 
 function handleThemeChange(name: string) {
   switchTheme(name)
-  toast.add({ severity: 'success', summary: `Theme switched to ${name}`, life: 2000 })
+  toast.add({ severity: 'success', summary: t('ui.account.theme_switched', { name }), life: 2000 })
 }
 
 function onThemeSelect(event: SelectChangeEvent) {
@@ -100,17 +102,17 @@ function onLocaleSelect(event: SelectChangeEvent) {
 
 <template>
   <div>
-    <h2>User account</h2>
+    <h2>{{ t('ui.account.title') }}</h2>
     <p class="text-sm text-muted mb-4">
-      Logged in as <strong>{{ auth.username }}</strong>
+      {{ t('ui.account.logged_in_as', { username: auth.username }) }}
       <span v-if="auth.user?.email"> ({{ auth.user.email }})</span>
     </p>
 
     <!-- Appearance -->
     <Card class="mb-3" style="max-width: 400px"><template #content>
-      <h3 class="section-title">Appearance</h3>
+      <h3 class="section-title">{{ t('ui.account.appearance') }}</h3>
       <div class="form-field">
-        <label for="account-theme">Theme</label>
+        <label for="account-theme">{{ t('ui.account.theme') }}</label>
         <Select
           v-model="selectedTheme"
           inputId="account-theme"
@@ -122,7 +124,7 @@ function onLocaleSelect(event: SelectChangeEvent) {
         />
       </div>
       <div class="form-field">
-        <label for="account-locale">Language</label>
+        <label for="account-locale">{{ t('ui.account.language') }}</label>
         <Select
           v-model="selectedLocale"
           inputId="account-locale"
@@ -137,21 +139,21 @@ function onLocaleSelect(event: SelectChangeEvent) {
 
     <!-- Password -->
     <Card style="max-width: 400px"><template #content>
-      <h3 class="section-title">Change password</h3>
+      <h3 class="section-title">{{ t('ui.account.change_password') }}</h3>
       <form @submit.prevent="handleSave">
         <div class="form-field">
-          <label for="account-current-pass">Current password</label>
+          <label for="account-current-pass">{{ t('ui.account.current_password') }}</label>
           <Password v-model="currentPassword" inputId="account-current-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'current-password', name: 'current-password' }" inputClass="w-full" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="account-new-pass">New password</label>
+          <label for="account-new-pass">{{ t('ui.account.new_password') }}</label>
           <Password v-model="password" inputId="account-new-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="account-confirm-pass">Confirm password</label>
+          <label for="account-confirm-pass">{{ t('ui.account.confirm_password') }}</label>
           <Password v-model="passwordConfirm" inputId="account-confirm-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'confirm-password' }" inputClass="w-full" class="w-full" />
         </div>
-        <Button type="submit" label="Save" icon="pi pi-check" :loading="saving" />
+        <Button type="submit" :label="t('save')" icon="pi pi-check" :loading="saving" />
       </form>
     </template></Card>
   </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import Button from 'primevue/button'
 
@@ -7,6 +8,7 @@ defineProps<{ isMobile?: boolean }>()
 const emit = defineEmits<{ toggleDrawer: [] }>()
 
 const router = useRouter()
+const { t } = useI18n()
 const auth = useAuthStore()
 
 function toggleDarkMode() {
@@ -41,8 +43,8 @@ async function handleLogout() {
         rounded
         size="small"
         @click="router.push({ name: 'document-trash' })"
-        aria-label="Trash"
-        v-tooltip.bottom="'Trash'"
+        :aria-label="t('ui.trash')"
+        v-tooltip.bottom="t('ui.trash')"
       />
       <Button
         icon="pi pi-moon"
@@ -60,8 +62,8 @@ async function handleLogout() {
         rounded
         size="small"
         @click="handleLogout"
-        aria-label="Logout"
-        v-tooltip.bottom="'Logout'"
+        :aria-label="t('index.logout')"
+        v-tooltip.bottom="t('index.logout')"
       />
     </div>
   </header>

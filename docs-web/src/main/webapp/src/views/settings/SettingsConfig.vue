@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../../api/client'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
@@ -11,6 +12,7 @@ import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -34,10 +36,10 @@ watch(appConfig, (config) => {
   }
 }, { immediate: true })
 
-const searchModes = [
-  { label: 'Prefix match (default)', value: 'PREFIX' },
-  { label: 'Exact match', value: 'EXACT' },
-]
+const searchModes = computed(() => [
+  { label: t('ui.config.prefix_match'), value: 'PREFIX' },
+  { label: t('ui.config.exact_match'), value: 'EXACT' },
+])
 
 const { mutate: saveConfig, isPending: saving } = useMutation({
   mutationFn: () => {
@@ -48,10 +50,10 @@ const { mutate: saveConfig, isPending: saving } = useMutation({
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['app-config'] })
-    toast.add({ severity: 'success', summary: 'Configuration saved', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.config.config_saved'), life: 2000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to save configuration', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.config.failed_save'), life: 3000 })
   },
 })
 
@@ -63,11 +65,11 @@ const { mutate: toggleOcr, isPending: togglingOcr } = useMutation({
   },
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['app-config'] })
-    toast.add({ severity: 'success', summary: `OCR ${ocrEnabled.value ? 'enabled' : 'disabled'}`, life: 2000 })
+    toast.add({ severity: 'success', summary: ocrEnabled.value ? t('ui.config.ocr_enabled') : t('ui.config.ocr_disabled'), life: 2000 })
   },
   onError: () => {
     ocrEnabled.value = !ocrEnabled.value
-    toast.add({ severity: 'error', summary: 'Failed to update OCR setting', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.config.ocr_toggle_failed'), life: 3000 })
   },
 })
 
@@ -80,8 +82,8 @@ const reindexing = ref(false)
 
 function handleReindex() {
   confirm.require({
-    message: 'This will destroy and rebuild the entire search index. Documents will be temporarily unsearchable. Continue?',
-    header: 'Rebuild search index',
+    message: t('ui.config.rebuild_confirm'),
+    header: t('ui.config.rebuild_header'),
     icon: 'pi pi-exclamation-triangle',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -89,9 +91,9 @@ function handleReindex() {
       reindexing.value = true
       try {
         await api.post('/app/batch/reindex')
-        toast.add({ severity: 'success', summary: 'Search index rebuild started', life: 3000 })
+        toast.add({ severity: 'success', summary: t('ui.config.rebuild_started'), life: 3000 })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to start reindex', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.config.rebuild_failed'), life: 3000 })
       } finally {
         reindexing.value = false
       }
@@ -102,30 +104,30 @@ function handleReindex() {
 
 <template>
   <div>
-    <h2>Configuration</h2>
+    <h2>{{ t('ui.config.title') }}</h2>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>
-      <h3>General</h3>
+      <h3>{{ t('ui.config.general') }}</h3>
       <div class="form-field">
-        <label for="cfg-language">Default language for new documents</label>
+        <label for="cfg-language">{{ t('ui.config.default_language') }}</label>
         <Select v-model="defaultLanguage" inputId="cfg-language" :options="SUPPORTED_LANGUAGES" optionLabel="label" optionValue="value" class="w-full" filter />
       </div>
       <div class="form-field">
-        <label for="cfg-tag-search">Tag search mode</label>
+        <label for="cfg-tag-search">{{ t('ui.config.tag_search_mode') }}</label>
         <Select v-model="tagSearchMode" inputId="cfg-tag-search" :options="searchModes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
       <div class="form-field">
-        <label>Maximum upload size</label>
+        <label>{{ t('ui.config.max_upload_size') }}</label>
         <div class="read-only-value">{{ formatFileSize(maxUploadSize) }}</div>
-        <small class="field-hint">Set via <code>DOCS_MAX_UPLOAD_SIZE</code> environment variable</small>
+        <small class="field-hint">{{ t('ui.config.max_upload_env_hint', { env: 'DOCS_MAX_UPLOAD_SIZE' }) }}</small>
       </div>
-      <Button label="Save" icon="pi pi-check" :loading="saving" @click="saveConfig()" />
+      <Button :label="t('save')" icon="pi pi-check" :loading="saving" @click="saveConfig()" />
     </template></Card>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>
-      <h3>OCR (Optical Character Recognition)</h3>
+      <h3>{{ t('ui.config.ocr_title') }}</h3>
       <p class="section-hint">
-        When enabled, Teedy uses Tesseract to extract text from images and scanned PDFs. The document's language setting determines which OCR model is used.
+        {{ t('ui.config.ocr_hint') }}
       </p>
       <div class="ocr-toggle">
         <ToggleSwitch
@@ -133,17 +135,17 @@ function handleReindex() {
           @update:modelValue="handleOcrToggle"
           :disabled="togglingOcr"
         />
-        <span>{{ ocrEnabled ? 'OCR is enabled' : 'OCR is disabled' }}</span>
+        <span>{{ ocrEnabled ? t('ui.config.ocr_enabled') : t('ui.config.ocr_disabled') }}</span>
       </div>
     </template></Card>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>
-      <h3>Maintenance</h3>
+      <h3>{{ t('ui.config.maintenance') }}</h3>
       <p class="section-hint">
-        Rebuild the search index from the database. Use this if documents are missing from search results after a migration or configuration change.
+        {{ t('ui.config.maintenance_hint') }}
       </p>
       <Button
-        label="Rebuild search index"
+        :label="t('ui.config.rebuild_index')"
         icon="pi pi-sync"
         severity="danger"
         outlined

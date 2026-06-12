@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
 import { getFileUrl } from '../api/file'
 import { type DocumentDetail } from '../api/document'
@@ -16,6 +17,8 @@ import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
 import TagBadge from './TagBadge.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   visible: boolean
@@ -58,7 +61,7 @@ function onTagSelect(tagId: string) {
 }
 
 const tagOptions = computed(() =>
-  props.availableTags.map((t) => ({ label: t.name, value: t.id })),
+  props.availableTags.map((tag) => ({ label: tag.name, value: tag.id })),
 )
 </script>
 
@@ -72,7 +75,7 @@ const tagOptions = computed(() =>
   >
     <template #header>
       <div class="slide-over-header">
-        <span class="slide-over-title">{{ document?.title ?? 'Document' }}</span>
+        <span class="slide-over-title">{{ document?.title ?? t('directive.auditlog.Document') }}</span>
       </div>
     </template>
     <div v-if="loading" class="slide-over-loading">
@@ -88,7 +91,7 @@ const tagOptions = computed(() =>
       <div class="slide-section">
         <div class="slide-tags-row">
           <TagBadge v-for="tag in document.tags" :key="tag.id" :name="tag.name" :color="tag.color" removable @remove="emit('removeTag', tag.id)" />
-          <Button v-if="!slideOverTagAdding" icon="pi pi-plus" text rounded size="small" class="tag-add-btn" @click="slideOverTagAdding = true" aria-label="Add tag" />
+          <Button v-if="!slideOverTagAdding" icon="pi pi-plus" text rounded size="small" class="tag-add-btn" @click="slideOverTagAdding = true" :aria-label="t('document.tags')" />
         </div>
         <div v-if="slideOverTagAdding" class="tag-add-row">
           <Select
@@ -96,33 +99,33 @@ const tagOptions = computed(() =>
             :options="tagOptions"
             optionLabel="label"
             optionValue="value"
-            placeholder="Add a tag..."
+            :placeholder="t('document.tags')"
             class="tag-add-select"
             @update:modelValue="onTagSelect"
           />
-          <Button icon="pi pi-times" text rounded size="small" @click="slideOverTagAdding = false" aria-label="Cancel" />
+          <Button icon="pi pi-times" text rounded size="small" @click="slideOverTagAdding = false" :aria-label="t('cancel')" />
         </div>
       </div>
 
       <Tabs v-model:value="slideOverTab">
         <TabList>
           <Tab value="overview">Overview</Tab>
-          <Tab value="files">Files{{ document.files?.length ? ` (${document.files.length})` : '' }}</Tab>
+          <Tab value="files">{{ document.files?.length ? t('ui.files_count', { count: document.files.length }) : t('ui.files') }}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel value="overview">
             <div class="slide-tab-content">
               <div v-if="document.description" class="slide-section">
-                <h4 class="slide-label">Description</h4>
+                <h4 class="slide-label">{{ t('document.description') }}</h4>
                 <div class="slide-description" v-html="sanitizedDescription" />
               </div>
               <div class="slide-section">
                 <h4 class="slide-label">Details</h4>
                 <div class="slide-meta-grid">
-                  <div class="meta-item"><span class="meta-key">Language</span><span class="meta-val">{{ languageLabel(document.language) }}</span></div>
-                  <div class="meta-item"><span class="meta-key">Created</span><span class="meta-val">{{ formatDate(document.create_date) }}</span></div>
-                  <div class="meta-item" v-if="document.creator"><span class="meta-key">Creator</span><span class="meta-val">{{ document.creator }}</span></div>
-                  <div class="meta-item" v-if="document.subject"><span class="meta-key">Subject</span><span class="meta-val">{{ document.subject }}</span></div>
+                  <div class="meta-item"><span class="meta-key">{{ t('document.language') }}</span><span class="meta-val">{{ languageLabel(document.language) }}</span></div>
+                  <div class="meta-item"><span class="meta-key">{{ t('document.creation_date') }}</span><span class="meta-val">{{ formatDate(document.create_date) }}</span></div>
+                  <div class="meta-item" v-if="document.creator"><span class="meta-key">{{ t('document.search_creator') }}</span><span class="meta-val">{{ document.creator }}</span></div>
+                  <div class="meta-item" v-if="document.subject"><span class="meta-key">{{ t('document.subject') }}</span><span class="meta-val">{{ document.subject }}</span></div>
                 </div>
               </div>
             </div>
@@ -136,19 +139,19 @@ const tagOptions = computed(() =>
                   </div>
                   <div class="file-card-row">
                     <i class="pi pi-file" /><span class="file-name">{{ file.name }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>
-                    <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" title="Download" aria-label="Download file"><i class="pi pi-download" /></a>
+                    <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" :title="t('download')" :aria-label="t('download')"><i class="pi pi-download" /></a>
                   </div>
                 </div>
               </div>
-              <div v-else class="slide-empty-files"><span class="meta">No files attached</span></div>
+              <div v-else class="slide-empty-files"><span class="meta">{{ t('ui.no_files') }}</span></div>
             </div>
           </TabPanel>
         </TabPanels>
       </Tabs>
 
       <div class="slide-actions">
-        <Button label="Open full view" icon="pi pi-external-link" outlined size="small" @click="emit('openFullView')" />
-        <Button label="Edit" icon="pi pi-pencil" text size="small" @click="emit('editDocument', document.id)" />
+        <Button :label="t('open')" icon="pi pi-external-link" outlined size="small" @click="emit('openFullView')" />
+        <Button :label="t('edit')" icon="pi pi-pencil" text size="small" @click="emit('editDocument', document.id)" />
       </div>
     </div>
   </Drawer>

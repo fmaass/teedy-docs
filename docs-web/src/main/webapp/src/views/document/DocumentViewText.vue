@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { inject, ref, watch, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { type DocumentDetail } from '../../api/document'
 import { getFileContent, reprocessFile } from '../../api/file'
 import Button from 'primevue/button'
@@ -7,6 +8,7 @@ import Skeleton from 'primevue/skeleton'
 import EmptyState from '../../components/EmptyState.vue'
 import { useToast } from 'primevue/usetoast'
 
+const { t } = useI18n()
 const doc = inject<Ref<DocumentDetail | null>>('document')!
 const toast = useToast()
 
@@ -51,10 +53,10 @@ async function handleReprocess(ft: FileText) {
   reprocessingId.value = ft.fileId
   try {
     await reprocessFile(ft.fileId)
-    toast.add({ severity: 'info', summary: `"${ft.fileName}" queued for reprocessing. Refresh in a few seconds.`, life: 4000 })
+    toast.add({ severity: 'info', summary: t('ui.reprocess_queued', { name: ft.fileName }), life: 4000 })
     setTimeout(() => loadContent(ft), 3000)
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to reprocess file', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.reprocess_failed'), life: 3000 })
   } finally {
     reprocessingId.value = null
   }
@@ -74,10 +76,10 @@ function fileIcon(mime: string) {
 <template>
   <div v-if="doc" class="text-view">
     <p class="text-view-hint">
-      Text extracted from each file via OCR or direct text parsing. This is what powers full-text search.
+      {{ t('ui.text_hint') }}
     </p>
 
-    <EmptyState v-if="!doc.files?.length" icon="pi pi-file" message="No files attached to this document" />
+    <EmptyState v-if="!doc.files?.length" icon="pi pi-file" :message="t('ui.no_files')" />
 
     <div v-for="ft in fileTexts" :key="ft.fileId" class="file-text-block">
       <div class="file-text-header">
@@ -89,18 +91,18 @@ function fileIcon(mime: string) {
             class="status-badge"
             :class="hasContent(ft) ? 'status-ok' : 'status-empty'"
           >
-            {{ hasContent(ft) ? 'Text extracted' : 'No text' }}
+            {{ hasContent(ft) ? t('ui.text_extracted') : t('ui.no_text') }}
           </span>
         </div>
         <Button
           icon="pi pi-sync"
-          label="Reprocess"
+          :label="t('ui.reprocess')"
           text
           size="small"
           severity="secondary"
           :loading="reprocessingId === ft.fileId"
           @click="handleReprocess(ft)"
-          v-tooltip="'Re-run OCR / text extraction'"
+          v-tooltip="t('ui.reprocess_tooltip')"
         />
       </div>
 
@@ -112,7 +114,7 @@ function fileIcon(mime: string) {
       <pre v-else-if="hasContent(ft)" class="file-text-content">{{ ft.content }}</pre>
       <div v-else class="file-text-empty">
         <i class="pi pi-info-circle" />
-        <span>No text was extracted from this file. Check that the document language matches the file content and try reprocessing.</span>
+        <span>{{ t('ui.no_text_hint') }}</span>
       </div>
     </div>
   </div>

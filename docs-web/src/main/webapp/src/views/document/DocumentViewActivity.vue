@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery } from '@tanstack/vue-query'
 import { type DocumentDetail } from '../../api/document'
 import api from '../../api/client'
@@ -7,6 +8,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const doc = inject<Ref<DocumentDetail | null>>('document')!
 
 interface AuditEntry {
@@ -32,15 +34,15 @@ function formatDate(ts: number) {
 <template>
   <div>
     <DataTable :value="logs ?? []" :loading="loading" size="small" stripedRows>
-      <Column header="Date" style="width: 180px">
+      <Column :header="t('ui.date')" style="width: 180px">
         <template #body="{ data }">
           <span class="text-xs">{{ formatDate(data.create_date) }}</span>
         </template>
       </Column>
-      <Column field="username" header="User" style="width: 120px" />
-      <Column field="message" header="Action" />
+      <Column field="username" :header="t('ui.user')" style="width: 120px" />
+      <Column field="message" :header="t('ui.action')" />
       <template #empty>
-        <EmptyState icon="pi pi-history" message="No activity recorded" />
+        <EmptyState icon="pi pi-history" :message="t('ui.no_activity')" />
       </template>
     </DataTable>
   </div>

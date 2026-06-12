@@ -12,7 +12,7 @@
     "login_failed_message": "Неверное имя пользователя или пароль",
     "password_lost_btn": "Пароль потерян?",
     "password_lost_sent_title": "Сброс пароля",
-    "password_lost_sent_message": "Электронная почта была отправлена ​​на адрес <strong>{{ username }}</strong>, чтобы сбросить пароль.",
+    "password_lost_sent_message": "Электронная почта была отправлена ​​на адрес <strong>{username}</strong>, чтобы сбросить пароль.",
     "password_lost_error_title": "Ошибка сброса пароля",
     "password_lost_error_message": "Не удалось отправить письмо сброса пароля, обратитесь к администратору за ручным сбросом"
   },
@@ -32,11 +32,11 @@
     "nav_documents": "Документы",
     "nav_tags": "Теги",
     "nav_users_groups": "Пользователи и группы",
-    "error_info": "{{ count }} новая ошибка",
-    "logged_as": "Вы вошли как {{ username }}",
+    "error_info": "{count} новая ошибка",
+    "logged_as": "Вы вошли как {username}",
     "nav_settings": "Настройки",
     "logout": "Выйти",
-    "global_quota_warning": "<strong>Предупреждение!</strong> Глобальная квота почти достигнута в {{ current | number: 0 }}МB ({{ percent | number: 1 }}%), использованы из {{ total | number: 0 }}МB"
+    "global_quota_warning": "<strong>Предупреждение!</strong> Глобальная квота почти достигнута в {current}МB ({percent}%), использованы из {total}МB"
   },
   "document": {
     "search_simple": "Простой поиск",
@@ -54,7 +54,7 @@
     "no_tags": "Нет тегов",
     "no_documents": "В базе данных нет документа",
     "search": "Поиск",
-    "search_empty": "Нет совпадений для <strong>\"{{search}}\"</strong>",
+    "search_empty": "Нет совпадений для <strong>\"{search}\"</strong>",
     "shared": "Общий",
     "title": "Название",
     "description": "Описание",
@@ -75,15 +75,15 @@
     "page_size_20": "20 на странице",
     "page_size_30": "30 на странице",
     "upgrade_quota": "Чтобы обновить свою квоту, спросите своего администратора",
-    "quota": "{{ current | number: 0 }}МB ({{ percent | number: 1 }}%), использовано из {{ total | number: 0 }}МB",
-    "count": "Найдено {{ count }} документа",
+    "quota": "{current}МB ({percent}%), использовано из {total}МB",
+    "count": "Найдено {count} документа",
     "view": {
       "delete_comment_title": "Удалить комментарий",
       "delete_comment_message": "Вы действительно хотите удалить этот комментарий?",
       "delete_document_title": "Удалить документ",
       "delete_document_message": "Вы действительно хотите удалить этот документ?",
       "shared_document_title": "Общий документ",
-      "shared_document_message": "Вы можете поделиться этим документом, указав эту ссылку. Обратите внимание: все, у кого есть эта ссылка, могут видеть документ.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{{ link }}\" onclick=\"this.select(); document.execCommand('copy');\" />",
+      "shared_document_message": "Вы можете поделиться этим документом, указав эту ссылку. Обратите внимание: все, у кого есть эта ссылка, могут видеть документ.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
       "not_found": "Документ не найден",
       "forbidden": "Доступ запрещен",
       "download_files": "Скачать файлы",
@@ -114,7 +114,7 @@
         "workflow_start_label": "Какой рабочий процесс нужно запустить?",
         "add_more_workflow": "Добавить больше рабочих процессов",
         "start_workflow_submit": "Начать рабочий процесс",
-        "full_name": "<strong>{{name}}</strong> запущен на {{create_date | date }}",
+        "full_name": "<strong>{name}</strong> запущен на {create_date}",
         "cancel_workflow": "Отмена текущего рабочего процесса",
         "cancel_workflow_title": "Отменить рабочий процесс",
         "cancel_workflow_message": "Вы действительно хотите отменить текущий рабочий процесс?"
@@ -136,13 +136,13 @@
     "edit": {
       "document_edited_with_errors": "Документ успешно отредактирован, но некоторые файлы не могут быть загружены",
       "document_added_with_errors": "Документ успешно добавлен, но некоторые файлы не могут быть загружены",
-      "document_added": "Документ успешно добавлен (с {{ count }} файлом)",
+      "document_added": "Документ успешно добавлен (с {count} файлом)",
       "quota_reached": "Достигнута квота",
       "primary_metadata": "Первичные метаданные",
       "title_placeholder": "Имя, присвоенное ресурсу",
       "description_placeholder": "Учет ресурсов",
       "new_files": "Новые файлы",
-      "orphan_files": "+ {{ count }} файл",
+      "orphan_files": "+ {count} файл",
       "additional_metadata": "Дополнительные метаданные",
       "subject_placeholder": "Тема ресурса",
       "identifier_placeholder": "Недвусмысленная ссылка на ресурс в данном контексте",
@@ -204,7 +204,7 @@
       "name": "Имя",
       "color": "Цвет",
       "parent": "Источник",
-      "info": "Разрешения на этот тег также будут применены к документам, помеченным тегом <span class=\"label label-info\" ng-style=\"{'background': color}\">{{ name }}</span>"
+      "info": "Разрешения на этот тег также будут применены к документам, помеченным тегом <span class=\"label label-info\" ng-style=\"{'background': color}\">{name}</span>"
     }
   },
   "group": {
@@ -212,17 +212,17 @@
       "members": "Участники",
       "no_members": "Нет участников",
       "related_links": "Ссылки по теме",
-      "edit_group": "Изменить группу {{ name }}"
+      "edit_group": "Изменить группу {name}"
     }
   },
   "user": {
     "profile": {
       "groups": "Группы",
       "quota_used": "Используемая квота",
-      "percent_used": "{{ percent | number: 0 }}% Используется",
+      "percent_used": "{percent}% Используется",
       "related_links": "Ссылки по теме",
-      "document_created": "Документы, созданные {{ username }}",
-      "edit_user": "Изменить  пользователя {{ username }}"
+      "document_created": "Документы, созданные {username}",
+      "edit_user": "Изменить  пользователя {username}"
     }
   },
   "usergroup": {
@@ -258,7 +258,7 @@
         "delete_user_message": "Вы действительно хотите удалить этого пользователя? Все связанные документы, файлы и теги будут удалены.",
         "edit_user_failed_title": "Пользователь уже существует",
         "edit_user_failed_message": "Это имя пользователя уже используется другим пользователем",
-        "edit_user_title": "<small>Изменить</small> \"{{ username }}\"",
+        "edit_user_title": "<small>Изменить</small> \"{username}\"",
         "add_user_title": "Добавить <small>пользователя</small>",
         "username": "Имя пользователя",
         "email": "Электронная почта",
@@ -270,7 +270,7 @@
         "disabled": "Отключенный пользователь",
         "password_reset_btn": "Отправить сообщение для сброса пароля для этого пользователя",
         "password_lost_sent_title": "Сброс пароля",
-        "password_lost_sent_message": "Сообщение сброса пароля было отправлено на адрес <strong>{{username}}</strong> для сброса пароля"
+        "password_lost_sent_message": "Сообщение сброса пароля было отправлено на адрес <strong>{username}</strong> для сброса пароля"
       }
     },
     "workflow": {
@@ -281,7 +281,7 @@
       "edit": {
         "delete_workflow_title": "Удалить рабочий процесс",
         "delete_workflow_message": "Вы действительно хотите удалить этот рабочий процесс? Текущие запущенные рабочие процессы не будут удалены.",
-        "edit_workflow_title": "<small> Изменить </small> \"{{name}}\"",
+        "edit_workflow_title": "<small> Изменить </small> \"{name}\"",
         "add_workflow_title": "<small> Добавьте рабочий процесс </small>",
         "name": "имя",
         "name_placeholder": "Имя шага или описание",
@@ -298,14 +298,14 @@
       "enable_totp": "Включить двухфакторную аутентификацию",
       "enable_totp_message": "Убедитесь, что на вашем телефоне есть приложение, совместимое с TOTP, чтобы добавить новую учетную запись",
       "title": "Двухфакторная <small>аутентификация</small>",
-      "message_1": "Двухфакторная аутентификация позволяет вам добавить уровень безопасности в свою учетную запись <strong>{{ appName }}</strong>.<br/>Прежде чем активировать эту функцию, убедитесь, что на вашем телефоне есть приложение, совместимое с TOTP:",
+      "message_1": "Двухфакторная аутентификация позволяет вам добавить уровень безопасности в свою учетную запись <strong>{appName}</strong>.<br/>Прежде чем активировать эту функцию, убедитесь, что на вашем телефоне есть приложение, совместимое с TOTP:",
       "message_google_authenticator": "Для Android, iOS и Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
       "message_duo_mobile": "Для Android и iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
       "message_authenticator": "Для Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Эти приложения автоматически генерируют код проверки, который изменяется через определенный промежуток времени.<br/>Вам будет необходимо ввести этот код проверки каждый раз при входе в систему <strong>{{ appName }}</strong>.",
-      "secret_key": "Ваш секретный ключ: <strong>{{ secret }}</strong>",
+      "message_2": "Эти приложения автоматически генерируют код проверки, который изменяется через определенный промежуток времени.<br/>Вам будет необходимо ввести этот код проверки каждый раз при входе в систему <strong>{appName}</strong>.",
+      "secret_key": "Ваш секретный ключ: <strong>{secret}</strong>",
       "secret_key_warning": "Настройте свое приложение TOTP на своем телефоне с помощью этого секретного ключа сейчас, вы не сможете получить к нему доступ позже.",
-      "totp_enabled_message": "В вашем аккаунте включена двухфакторная аутентификация.<br/>При каждом входе в систему <strong>{{ appName }}</strong> вам будет выслан код подтверждения из вашего настроенного приложения на телефоне.<br/>Если вы потеряете свой телефон, вы не сможете войти в свою учетную запись, но активные сеансы позволят вам восстановить секретный ключ.",
+      "totp_enabled_message": "В вашем аккаунте включена двухфакторная аутентификация.<br/>При каждом входе в систему <strong>{appName}</strong> вам будет выслан код подтверждения из вашего настроенного приложения на телефоне.<br/>Если вы потеряете свой телефон, вы не сможете войти в свою учетную запись, но активные сеансы позволят вам восстановить секретный ключ.",
       "disable_totp": {
         "disable_totp": "Отключить двухфакторную аутентификацию",
         "message": "Ваша учетная запись больше не будет защищена двухфакторной аутентификацией.",
@@ -322,7 +322,7 @@
         "delete_group_message": "Вы действительно хотите удалить эту группу?",
         "edit_group_failed_title": "Группа уже существует",
         "edit_group_failed_message": "Это название группы уже используется для другой группы",
-        "edit_group_title": "Изменить <small>\"{{ name }}\"</small>",
+        "edit_group_title": "Изменить <small>\"{name}\"</small>",
         "add_group_title": "<small>Добавить</small> группу",
         "name": "Имя",
         "parent_group": "Группа источник",
@@ -340,7 +340,7 @@
     },
     "config": {
       "title_guest_access": "Гость <small>доступ</small>",
-      "message_guest_access": "Гостевой доступ - это режим, в котором каждый может получить доступ к {{ appName }} без пароля.<br/>Как обычный пользователь, гость может получить доступ только к своим документам и доступным через разрешения.<br/>",
+      "message_guest_access": "Гостевой доступ - это режим, в котором каждый может получить доступ к {appName} без пароля.<br/>Как обычный пользователь, гость может получить доступ только к своим документам и доступным через разрешения.<br/>",
       "enable_guest_access": "Включить гостевой доступ",
       "disable_guest_access": "Отключить гостевой доступ",
       "title_theme": "<small>Настройка</small> темы",
@@ -372,8 +372,8 @@
       "folder": "Папке IMAP",
       "tag": "Тег добавлен в импортированные документы",
       "test": "Проверить параметры",
-      "last_sync": "Последняя синхронизация: {{data.date | date}}, {{data.count}} импортировано",
-      "test_success": "Соединение с почтовым ящиком успешное ({{count}} сообщение)",
+      "last_sync": "Последняя синхронизация: {data.date}, {data.count} импортировано",
+      "test_success": "Соединение с почтовым ящиком успешное ({count} сообщение)",
       "test_fail": "При подключении к папке «Входящие» произошла ошибка, проверьте параметры"
     },
     "log": {

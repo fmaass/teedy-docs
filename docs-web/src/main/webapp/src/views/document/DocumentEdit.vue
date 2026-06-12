@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
@@ -25,6 +26,7 @@ const toast = useToast()
 const confirm = useConfirm()
 const tagFilter = useTagFilterStore()
 const queryClient = useQueryClient()
+const { t } = useI18n()
 const isEdit = computed(() => !!props.id)
 
 const form = ref({
@@ -86,7 +88,7 @@ onMounted(async () => {
       loadedMetadata.value = data.metadata ?? []
       existingFiles.value = data.files || []
     } catch {
-      toast.add({ severity: 'error', summary: 'Failed to load document', life: 3000 })
+      toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
       router.back()
     }
   } else {
@@ -115,8 +117,8 @@ function onFileClear() {
 
 function confirmDeleteExisting(file: AttachedFile) {
   confirm.require({
-    message: `Remove "${file.name}" from this document?`,
-    header: 'Remove file',
+    message: t('ui.remove_file_confirm', { name: file.name }),
+    header: t('ui.remove_file'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -124,9 +126,9 @@ function confirmDeleteExisting(file: AttachedFile) {
       try {
         await deleteFile(file.id)
         existingFiles.value = existingFiles.value.filter((f) => f.id !== file.id)
-        toast.add({ severity: 'success', summary: 'File removed', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.file_removed'), life: 2000 })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to remove file', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.failed_remove_file'), life: 3000 })
       }
     },
   })
@@ -161,7 +163,7 @@ function buildDocParams() {
 
 async function handleSubmit() {
   if (!form.value.title.trim()) {
-    toast.add({ severity: 'warn', summary: 'Title is required', life: 2000 })
+    toast.add({ severity: 'warn', summary: t('ui.title_required'), life: 2000 })
     return
   }
 
@@ -186,10 +188,10 @@ async function handleSubmit() {
 
     await queryClient.invalidateQueries({ queryKey: ['documents'] })
     await queryClient.invalidateQueries({ queryKey: ['document', resultId] })
-    toast.add({ severity: 'success', summary: isEdit.value ? 'Document updated' : 'Document created', life: 2000 })
+    toast.add({ severity: 'success', summary: isEdit.value ? t('ui.document_updated') : t('ui.document_created'), life: 2000 })
     router.push({ name: 'document-view', params: { id: resultId } })
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to save document', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
   } finally {
     loading.value = false
   }
@@ -199,32 +201,32 @@ async function handleSubmit() {
 <template>
   <div class="doc-edit">
     <header class="doc-edit-header">
-      <h1>{{ isEdit ? 'Edit document' : 'New document' }}</h1>
+      <h1>{{ isEdit ? t('ui.edit_document') : t('ui.new_document') }}</h1>
       <div class="doc-edit-actions">
-        <Button label="Cancel" severity="secondary" text @click="router.back()" />
-        <Button label="Save" icon="pi pi-check" :loading="loading" @click="handleSubmit" />
+        <Button :label="t('cancel')" severity="secondary" text @click="router.back()" />
+        <Button :label="t('save')" icon="pi pi-check" :loading="loading" @click="handleSubmit" />
       </div>
     </header>
 
     <Card><template #content><form @submit.prevent="handleSubmit" class="doc-edit-form">
       <!-- Primary fields -->
       <div class="form-field">
-        <label for="edit-title">Title *</label>
+        <label for="edit-title">{{ t('ui.title') }} *</label>
         <InputText id="edit-title" v-model="form.title" class="w-full" autofocus />
       </div>
 
       <div class="form-field">
-        <label for="edit-desc">Description <span class="label-hint">(HTML supported)</span></label>
+        <label for="edit-desc">{{ t('ui.description') }} <span class="label-hint">({{ t('ui.description_hint') }})</span></label>
         <Textarea id="edit-desc" v-model="form.description" rows="4" class="w-full" autoResize />
       </div>
 
       <div class="form-row">
         <div class="form-field">
-          <label for="edit-date">Creation date</label>
+          <label for="edit-date">{{ t('ui.creation_date') }}</label>
           <DatePicker id="edit-date" v-model="form.create_date" dateFormat="yy-mm-dd" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="edit-lang">Language</label>
+          <label for="edit-lang">{{ t('document.language') }}</label>
           <Select
             id="edit-lang"
             v-model="form.language"
@@ -237,14 +239,14 @@ async function handleSubmit() {
       </div>
 
       <div class="form-field">
-        <label for="edit-tags">Tags</label>
+        <label for="edit-tags">{{ t('document.tags') }}</label>
         <MultiSelect
           id="edit-tags"
           v-model="form.tags"
           :options="tagOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="Select tags"
+          :placeholder="t('document.tags')"
           class="w-full"
           display="chip"
         />
@@ -254,7 +256,7 @@ async function handleSubmit() {
       <Button
         type="button"
         :icon="showAdvanced ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"
-        label="Additional metadata"
+        :label="t('ui.additional_metadata')"
         text
         size="small"
         class="advanced-toggle"
@@ -264,41 +266,41 @@ async function handleSubmit() {
       <div v-if="showAdvanced" class="advanced-fields">
         <div class="form-row">
           <div class="form-field">
-            <label for="edit-subject">Subject</label>
+            <label for="edit-subject">{{ t('document.subject') }}</label>
             <InputText id="edit-subject" v-model="form.subject" class="w-full" />
           </div>
           <div class="form-field">
-            <label for="edit-identifier">Identifier</label>
+            <label for="edit-identifier">{{ t('document.identifier') }}</label>
             <InputText id="edit-identifier" v-model="form.identifier" class="w-full" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
-            <label for="edit-publisher">Publisher</label>
+            <label for="edit-publisher">{{ t('document.publisher') }}</label>
             <InputText id="edit-publisher" v-model="form.publisher" class="w-full" />
           </div>
           <div class="form-field">
-            <label for="edit-format">Format</label>
+            <label for="edit-format">{{ t('document.format') }}</label>
             <InputText id="edit-format" v-model="form.format" class="w-full" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
-            <label for="edit-source">Source</label>
+            <label for="edit-source">{{ t('document.source') }}</label>
             <InputText id="edit-source" v-model="form.source" class="w-full" />
           </div>
           <div class="form-field">
-            <label for="edit-type">Type</label>
+            <label for="edit-type">{{ t('document.type') }}</label>
             <InputText id="edit-type" v-model="form.type" class="w-full" />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
-            <label for="edit-coverage">Coverage</label>
+            <label for="edit-coverage">{{ t('document.coverage') }}</label>
             <InputText id="edit-coverage" v-model="form.coverage" class="w-full" />
           </div>
           <div class="form-field">
-            <label for="edit-rights">Rights</label>
+            <label for="edit-rights">{{ t('document.rights') }}</label>
             <InputText id="edit-rights" v-model="form.rights" class="w-full" />
           </div>
         </div>
@@ -307,7 +309,7 @@ async function handleSubmit() {
 
     <!-- Files section -->
     <Card class="mt-3"><template #content><div class="doc-edit-files">
-      <h3 class="files-heading">Files</h3>
+      <h3 class="files-heading">{{ t('ui.files') }}</h3>
 
       <!-- Existing files (edit mode) -->
       <div v-if="existingFiles.length" class="existing-files">
@@ -342,13 +344,13 @@ async function handleSubmit() {
         <template #empty>
           <div class="file-upload-empty">
             <i class="pi pi-cloud-upload" aria-hidden="true" />
-            <span>Drag files here or click Choose to add</span>
+            <span>{{ t('ui.drag_or_choose') }}</span>
           </div>
         </template>
       </FileUpload>
 
       <p v-if="pendingFiles.length" class="upload-hint">
-        {{ pendingFiles.length }} file{{ pendingFiles.length > 1 ? 's' : '' }} will be uploaded on save.
+        {{ t('ui.files_upload_hint', { count: pendingFiles.length }) }}
       </p>
     </div></template></Card>
   </div>

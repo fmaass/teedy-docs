@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, provide, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
@@ -20,6 +21,7 @@ const route = useRoute()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
+const { t } = useI18n()
 
 const returnTo = computed(() => (history.state?.returnTo as string) || null)
 const filterLabel = computed(() => (history.state?.filterLabel as string) || null)
@@ -41,25 +43,25 @@ provide('document', doc)
 
 watch(error, (err) => {
   if (err) {
-    toast.add({ severity: 'error', summary: 'Document not found', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.document_not_found'), life: 3000 })
     router.push({ name: 'documents' })
   }
 })
 
-const tabs = [
-  { label: 'Files', icon: 'pi pi-file', route: 'document-view-content' },
-  { label: 'Extracted Text', icon: 'pi pi-align-left', route: 'document-view-text' },
-  { label: 'Permissions', icon: 'pi pi-lock', route: 'document-view-permissions' },
-  { label: 'Activity', icon: 'pi pi-history', route: 'document-view-activity' },
-]
+const tabs = computed(() => [
+  { label: t('ui.files'), icon: 'pi pi-file', route: 'document-view-content' },
+  { label: t('document.view.content.content'), icon: 'pi pi-align-left', route: 'document-view-text' },
+  { label: t('document.view.permissions.permissions'), icon: 'pi pi-lock', route: 'document-view-permissions' },
+  { label: t('document.view.activity.activity'), icon: 'pi pi-history', route: 'document-view-activity' },
+])
 
 const activeTab = computed(() => {
   const name = route.name as string
-  return tabs.find((t) => t.route === name)?.route ?? tabs[0].route
+  return tabs.value.find((tb) => tb.route === name)?.route ?? tabs.value[0].route
 })
 
 function onTabChange(value: string | number) {
-  const tab = tabs.find((t) => t.route === value)
+  const tab = tabs.value.find((tb) => tb.route === value)
   if (tab) router.push({ name: tab.route, params: { id: props.id } })
 }
 
@@ -73,8 +75,8 @@ function formatDate(ts: number) {
 
 function handleDelete() {
   confirm.require({
-    message: 'Are you sure you want to delete this document?',
-    header: 'Delete document',
+    message: t('ui.delete_document_confirm'),
+    header: t('ui.delete_document'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -83,10 +85,10 @@ function handleDelete() {
         await deleteDocument(props.id)
         queryClient.invalidateQueries({ queryKey: ['documents'] })
         queryClient.invalidateQueries({ queryKey: ['trash'] })
-        toast.add({ severity: 'success', summary: 'Document deleted', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.document_deleted'), life: 2000 })
         router.push({ name: 'documents' })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to delete document', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.failed_delete_document'), life: 3000 })
       }
     },
   })
@@ -99,7 +101,7 @@ function handleDelete() {
     <div class="back-bar">
       <Button text size="small" class="back-link" @click="goBack">
         <i class="pi pi-arrow-left" aria-hidden="true" />
-        <span>Documents</span>
+        <span>{{ t('ui.documents') }}</span>
       </Button>
       <span v-if="filterLabel" class="back-filter">· {{ filterLabel }}</span>
     </div>
@@ -134,14 +136,14 @@ function handleDelete() {
             :href="getFileUrl(doc.file_id)"
             target="_blank"
             icon="pi pi-download"
-            label="Download"
+            :label="t('download')"
             severity="secondary"
             outlined
             size="small"
           />
           <Button
             icon="pi pi-pencil"
-            label="Edit"
+            :label="t('edit')"
             severity="secondary"
             outlined
             size="small"
@@ -149,7 +151,7 @@ function handleDelete() {
           />
           <Button
             icon="pi pi-trash"
-            label="Delete"
+            :label="t('delete')"
             severity="danger"
             outlined
             size="small"

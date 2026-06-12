@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useTagFilterStore } from '../stores/tagFilter'
 import AppHeader from '../components/AppHeader.vue'
@@ -11,6 +12,7 @@ import Drawer from 'primevue/drawer'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const auth = useAuthStore()
 const tf = useTagFilterStore()
 
@@ -42,21 +44,21 @@ const isAdminContext = computed(() =>
   route.path.startsWith('/settings') || route.path.startsWith('/tag'),
 )
 
-const settingsNavItems = [
-  { label: 'Account', icon: 'pi pi-user', to: '/settings/account', name: 'settings-account' },
-  { label: 'API Keys', icon: 'pi pi-key', to: '/settings/api-keys', name: 'settings-api-keys' },
-]
+const settingsNavItems = computed(() => [
+  { label: t('ui.account.title'), icon: 'pi pi-user', to: '/settings/account', name: 'settings-account' },
+  { label: t('ui.apikeys.title'), icon: 'pi pi-key', to: '/settings/api-keys', name: 'settings-api-keys' },
+])
 
-const settingsAdminItems = [
-  { label: 'Configuration', icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
-  { label: 'Users', icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
-  { label: 'Tag rules', icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
-  { label: 'Webhooks', icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
-]
+const settingsAdminItems = computed(() => [
+  { label: t('ui.config.title'), icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
+  { label: t('ui.users.title'), icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
+  { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
+  { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
+])
 
-const tagManageItems = [
-  { label: 'All tags', icon: 'pi pi-tags', to: '/tag', name: 'tags' },
-]
+const tagManageItems = computed(() => [
+  { label: t('ui.tags_page.title'), icon: 'pi pi-tags', to: '/tag', name: 'tags' },
+])
 
 function handleDesktopTagSelect(tagId: string) {
   tf.toggleTag(tagId)
@@ -84,8 +86,8 @@ function handleMobileTagSelect(tagId: string) {
             size="small"
             rounded
             @click="router.push({ name: 'document-add' })"
-            aria-label="Add document"
-            v-tooltip.right="'Add document'"
+            :aria-label="t('ui.add_document')"
+            v-tooltip.right="t('ui.add_document')"
           />
         </div>
 
@@ -130,7 +132,7 @@ function handleMobileTagSelect(tagId: string) {
             :class="{ active: route.path.startsWith('/tag') }"
           >
             <i class="pi pi-tags" />
-            <span>Manage tags</span>
+            <span>{{ t('ui.manage_tags') }}</span>
           </router-link>
           <router-link
             to="/settings"
@@ -138,7 +140,7 @@ function handleMobileTagSelect(tagId: string) {
             :class="{ active: route.path.startsWith('/settings') }"
           >
             <i class="pi pi-cog" />
-            <span>Settings</span>
+            <span>{{ t('ui.nav.settings') }}</span>
           </router-link>
         </div>
       </aside>
@@ -182,10 +184,10 @@ function handleMobileTagSelect(tagId: string) {
           />
           <div class="panel-footer">
             <router-link to="/tag" class="footer-link" @click="drawerOpen = false">
-              <i class="pi pi-tags" /><span>Manage tags</span>
+              <i class="pi pi-tags" /><span>{{ t('ui.manage_tags') }}</span>
             </router-link>
             <router-link to="/settings" class="footer-link" @click="drawerOpen = false">
-              <i class="pi pi-cog" /><span>Settings</span>
+              <i class="pi pi-cog" /><span>{{ t('ui.nav.settings') }}</span>
             </router-link>
           </div>
         </div>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   modelValue: string
@@ -18,20 +21,20 @@ const emit = defineEmits<{
   <div class="search-row">
     <InputText
       :model-value="props.modelValue"
-      placeholder="Search documents..."
+      :placeholder="t('document.search')"
       class="search-input"
       @update:model-value="(value) => emit('update:modelValue', value as string)"
     />
     <Button
       v-if="hasActiveFilters"
       icon="pi pi-times"
-      label="Clear"
+      :label="t('document.search_clear')"
       text
       size="small"
       severity="secondary"
       @click="emit('clear')"
     />
-    <span v-if="totalCount" class="doc-count">{{ totalCount }} doc{{ totalCount !== 1 ? 's' : '' }}</span>
+    <span v-if="totalCount" class="doc-count">{{ t('document.count', { count: totalCount }) }}</span>
   </div>
 </template>
 

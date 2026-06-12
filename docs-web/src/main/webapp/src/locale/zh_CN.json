@@ -12,7 +12,7 @@
     "login_failed_message": "用户名或密码不正确",
     "password_lost_btn": "密码丢失？",
     "password_lost_sent_title": "密码重置邮件已发送",
-    "password_lost_sent_message": "重置密码的邮件已经发送至<strong>{{ username }}</strong>",
+    "password_lost_sent_message": "重置密码的邮件已经发送至<strong>{username}</strong>",
     "password_lost_error_title": "密码重置出错",
     "password_lost_error_message": "无法发送密码重置邮件，请联系您的管理员进行手动重置"
   },
@@ -32,11 +32,11 @@
     "nav_documents": "文档",
     "nav_tags": "标签",
     "nav_users_groups": "用户 & 群组",
-    "error_info": "{{ count }} 新错误",
-    "logged_as": "以 {{ username }}登录",
+    "error_info": "{count} 新错误",
+    "logged_as": "以 {username}登录",
     "nav_settings": "设置",
     "logout": "退出",
-    "global_quota_warning": "<strong>提醒!</strong> 全球配额存储空间已经使用 {{ current | number: 0 }}MB 占总存储配额 {{ total | number: 0 }}MB 的 ({{ percent | number: 1 }}%)"
+    "global_quota_warning": "<strong>提醒!</strong> 全球配额存储空间已经使用 {current}MB 占总存储配额 {total}MB 的 ({percent}%)"
   },
   "document": {
     "search_simple": "简单搜索",
@@ -54,7 +54,7 @@
     "no_tags": "无标签",
     "no_documents": "数据库中无该文档",
     "search": "搜索",
-    "search_empty": "无匹配 <strong>\"{{ search }}\"</strong>",
+    "search_empty": "无匹配 <strong>\"{search}\"</strong>",
     "shared": "已共享",
     "title": "标题",
     "description": "介绍",
@@ -75,15 +75,15 @@
     "page_size_20": "20 每页",
     "page_size_30": "30 每页",
     "upgrade_quota": "如需要升级您的限额, 请联系管理员",
-    "quota": "{{ current | number: 0 }}MB ({{ current | number: 1 }}%) 已使用 {{ total | number: 0 }}MB",
-    "count": "找到{{ count }}个文件",
+    "quota": "{current}MB ({current}%) 已使用 {total}MB",
+    "count": "找到{count}个文件",
     "view": {
       "delete_comment_title": "删除评论",
       "delete_comment_message": "您是否确认删除此评论?",
       "delete_document_title": "删除文档",
       "delete_document_message": "您是否确认删除此文档?",
       "shared_document_title": "已共享文档",
-      "shared_document_message": "您可以直接通过发送该链接来分享该文档. 注意：任何有该链接的人员均可查看该文档.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{{ link }}\" onclick=\"this.select(); document.execCommand('copy');\" />",
+      "shared_document_message": "您可以直接通过发送该链接来分享该文档. 注意：任何有该链接的人员均可查看该文档.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
       "not_found": "文档未找到",
       "forbidden": "无权限",
       "download_files": "下载文档",
@@ -114,7 +114,7 @@
         "workflow_start_label": "哪个工作流程启动？",
         "add_more_workflow": "添加更多工作流程",
         "start_workflow_submit": "开始工作流程",
-        "full_name": "<strong>{{ name }}</strong>开始于{{ create_date | date }}",
+        "full_name": "<strong>{name}</strong>开始于{create_date}",
         "cancel_workflow": "取消当前的工作流程",
         "cancel_workflow_title": "取消工作流程",
         "cancel_workflow_message": "你真的想取消当前的工作流程吗？"
@@ -136,13 +136,13 @@
     "edit": {
       "document_edited_with_errors": "文档编辑成功但部分文件没能上传",
       "document_added_with_errors": "文档成功添加但部分文件没能上传",
-      "document_added": "文档成功上传 (与{{ count }}个文件)",
+      "document_added": "文档成功上传 (与{count}个文件)",
       "quota_reached": "达到限额",
       "primary_metadata": "主要元数据",
       "title_placeholder": "资源的性质或类型",
       "description_placeholder": "资源账户",
       "new_files": "新文件",
-      "orphan_files": "+ {{ count }}个文件",
+      "orphan_files": "+ {count}个文件",
       "additional_metadata": "附件",
       "subject_placeholder": "资源话题",
       "identifier_placeholder": "在给定的上下文中对资源的明确引用",
@@ -204,7 +204,7 @@
       "name": "名称",
       "color": "颜色",
       "parent": "母",
-      "info": "此标记的权限也将应用于已标记的文档 <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{{ name }}</span>"
+      "info": "此标记的权限也将应用于已标记的文档 <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span>"
     }
   },
   "group": {
@@ -212,17 +212,17 @@
       "members": "组成员",
       "no_members": "无组成员",
       "related_links": "相关链接",
-      "edit_group": "编辑 {{ name }} 组"
+      "edit_group": "编辑 {name} 组"
     }
   },
   "user": {
     "profile": {
       "groups": "群组",
       "quota_used": "已使用配额",
-      "percent_used": "{{ percent | number: 0 }}% 已使用",
+      "percent_used": "{percent}% 已使用",
       "related_links": "相关链接",
-      "document_created": "文档由 {{ username }} 创建",
-      "edit_user": "编辑 {{ username }} 用户"
+      "document_created": "文档由 {username} 创建",
+      "edit_user": "编辑 {username} 用户"
     }
   },
   "usergroup": {
@@ -258,7 +258,7 @@
         "delete_user_message": "您是否确认删除该用户? 所有相关文档，文件和标签将被删除",
         "edit_user_failed_title": "用户已存在",
         "edit_user_failed_message": "该用户名已被占用",
-        "edit_user_title": "<small>编辑</small> \"{{ username }}\"",
+        "edit_user_title": "<small>编辑</small> \"{username}\"",
         "add_user_title": "<small>添加一个</small> 用户",
         "username": "用户名",
         "email": "邮箱",
@@ -270,7 +270,7 @@
         "disabled": "禁用用户",
         "password_reset_btn": "给该用户发送密码重置电子邮件",
         "password_lost_sent_title": "密码重置邮件已发送",
-        "password_lost_sent_message": "密码重置电子邮件已发送至 <strong>{{ username }}</strong>"
+        "password_lost_sent_message": "密码重置电子邮件已发送至 <strong>{username}</strong>"
       }
     },
     "workflow": {
@@ -281,7 +281,7 @@
       "edit": {
         "delete_workflow_title": "删除工作流程",
         "delete_workflow_message": "你真的想删除这个工作流程吗？当前正在运行的工作流程不会被删除",
-        "edit_workflow_title": "<small>编辑</small>\"{{ name }}\"",
+        "edit_workflow_title": "<small>编辑</small>\"{name}\"",
         "add_workflow_title": "<small>添加一个</small>工作流程",
         "name": "名称",
         "name_placeholder": "步骤名称或说明",
@@ -298,14 +298,14 @@
       "enable_totp": "激活双重身份验证",
       "enable_totp_message": "请确保您的手机上已经拥有一个TOTP兼容的应用程序方可添加新账户",
       "title": "双重身份 <small>验证</small>",
-      "message_1": "双重身份验证将让您的<strong>{{ appName }}</strong> 帐号获得多一层的安全保障.<br/>在启用该功能前, 请确保在您的手机上拥有一个与TOTP兼容的应用程序:",
+      "message_1": "双重身份验证将让您的<strong>{appName}</strong> 帐号获得多一层的安全保障.<br/>在启用该功能前, 请确保在您的手机上拥有一个与TOTP兼容的应用程序:",
       "message_google_authenticator": "给安卓, 苹果, and 黑莓系统: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">谷歌认证</a>",
       "message_duo_mobile": "给 安卓 和 苹果系统: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
       "message_authenticator": "给 Windows 系统手机: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">认证</a>",
-      "message_2": "这些应用程序会自动生成一个验证码，且该验证码在一段时间内会变化.<br/>每次登录 <strong>{{ appName }}</strong>时您都需要输入该验证码.",
-      "secret_key": "您的秘钥是: <strong>{{ secret }}</strong>",
+      "message_2": "这些应用程序会自动生成一个验证码，且该验证码在一段时间内会变化.<br/>每次登录 <strong>{appName}</strong>时您都需要输入该验证码.",
+      "secret_key": "您的秘钥是: <strong>{secret}</strong>",
       "secret_key_warning": "现在用该秘钥配置您的手机应用程序上的TOTP, 您之后将无获取权限.",
-      "totp_enabled_message": "双重身份验证将确保您的帐号.<br/>每次您登录 <strong>{{ appName }}</strong>时, 您都需要从您配置的手机应用程序的验证码.<br/>如果您丢失您的手机, 您将无法登录您的帐号但有效会话将允许您重新生成密钥.",
+      "totp_enabled_message": "双重身份验证将确保您的帐号.<br/>每次您登录 <strong>{appName}</strong>时, 您都需要从您配置的手机应用程序的验证码.<br/>如果您丢失您的手机, 您将无法登录您的帐号但有效会话将允许您重新生成密钥.",
       "disable_totp": {
         "disable_totp": "不激活双重身份验证",
         "message": "您的帐户将不再受双重身份验证保护.",
@@ -322,7 +322,7 @@
         "delete_group_message": "您是否确认删除该组?",
         "edit_group_failed_title": "组已存在",
         "edit_group_failed_message": "该组名已经被占用",
-        "edit_group_title": "编辑 <small>\"{{ name }}\"</small>",
+        "edit_group_title": "编辑 <small>\"{name}\"</small>",
         "add_group_title": "<small>添加一个</small>组",
         "name": "名称",
         "parent_group": "母群组",
@@ -340,7 +340,7 @@
     },
     "config": {
       "title_guest_access": "游客 <small>权限</small>",
-      "message_guest_access": "游客权限是所有人都能无需密码即获取 {{ appName }} 的权限模式.<br/>和其他正常用户一样, 游客权限用户也只能通过其获取的权限来访问其文档.<br/>",
+      "message_guest_access": "游客权限是所有人都能无需密码即获取 {appName} 的权限模式.<br/>和其他正常用户一样, 游客权限用户也只能通过其获取的权限来访问其文档.<br/>",
       "enable_guest_access": "激活游客权限",
       "disable_guest_access": "不激活游客权限",
       "title_theme": "主题 <small>定制</small>",
@@ -372,8 +372,8 @@
       "folder": "IMAP 件夹中",
       "tag": "标签添加到导入的文档",
       "test": "测试参数",
-      "last_sync": "上次同步：{{ data.date | date }}，{{ data.count }}消息导入",
-      "test_success": "与收件箱的连接成功（{{count}}消息）",
+      "last_sync": "上次同步：{data.date}，{data.count}消息导入",
+      "test_success": "与收件箱的连接成功（{count}消息）",
       "test_fail": "连接到收件箱时发生错误，请检查参数"
     },
     "log": {

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as pdfjsLib from 'pdfjs-dist'
 import Button from 'primevue/button'
+
+const { t } = useI18n()
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -127,23 +130,23 @@ onUnmounted(() => {
     </div>
     <div v-else-if="error" class="pdf-error">
       <i class="pi pi-exclamation-triangle" />
-      <span>Could not load PDF</span>
-      <a :href="src" target="_blank" rel="noopener" class="pdf-fallback-link">Open in new tab</a>
+      <span>{{ t('ui.could_not_load_pdf') }}</span>
+      <a :href="src" target="_blank" rel="noopener" class="pdf-fallback-link">{{ t('ui.open_new_tab') }}</a>
     </div>
     <template v-else>
       <div ref="containerRef" class="pdf-canvas-container" />
       <div v-if="totalPages > 1" class="pdf-nav">
-        <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" aria-label="Previous page" />
+        <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
         <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
-        <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" aria-label="Next page" />
-        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" title="Open in new tab">
+        <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
+        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
           <i class="pi pi-external-link" />
         </a>
       </div>
       <div v-else class="pdf-nav">
-        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" title="Open in new tab">
+        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
           <i class="pi pi-external-link" />
-          <span>Open in new tab</span>
+          <span>{{ t('ui.open_new_tab') }}</span>
         </a>
       </div>
     </template>

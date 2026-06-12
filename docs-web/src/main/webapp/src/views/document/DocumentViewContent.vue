@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { inject, computed, ref, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { type DocumentDetail } from '../../api/document'
@@ -14,6 +15,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { formatFileSize } from '../../composables/useFormatters'
 
 const doc = inject<Ref<DocumentDetail | null>>('document')!
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -37,9 +39,9 @@ async function handleUpload(event: FileUploadUploaderEvent) {
       await uploadFile(doc.value.id, file)
     }
     queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
-    toast.add({ severity: 'success', summary: 'Files uploaded', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
   } catch {
-    toast.add({ severity: 'error', summary: 'Upload failed', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
   } finally {
     uploading.value = false
     fileUploadRef.value?.clear()
@@ -72,9 +74,9 @@ async function commitRename(fileId: string) {
   try {
     await renameFile(fileId, name)
     queryClient.invalidateQueries({ queryKey: ['document', doc.value?.id] })
-    toast.add({ severity: 'success', summary: 'File renamed', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.file_renamed'), life: 2000 })
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to rename file', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_rename_file'), life: 3000 })
   } finally {
     cancelRename()
   }
@@ -82,8 +84,8 @@ async function commitRename(fileId: string) {
 
 function confirmDelete(file: { id: string; name: string }) {
   confirm.require({
-    message: `Remove "${file.name}" from this document?`,
-    header: 'Remove file',
+    message: t('ui.remove_file_confirm', { name: file.name }),
+    header: t('ui.remove_file'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -91,9 +93,9 @@ function confirmDelete(file: { id: string; name: string }) {
       try {
         await deleteFile(file.id)
         queryClient.invalidateQueries({ queryKey: ['document', doc.value?.id] })
-        toast.add({ severity: 'success', summary: 'File removed', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.file_removed'), life: 2000 })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to remove file', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.failed_remove_file'), life: 3000 })
       }
     },
   })
@@ -122,7 +124,7 @@ function confirmDelete(file: { id: string; name: string }) {
 
     <!-- File list -->
     <div v-if="doc.files?.length" class="file-list-section">
-      <h3>Files ({{ doc.files.length }})</h3>
+      <h3>{{ t('ui.files_count', { count: doc.files.length }) }}</h3>
       <div class="file-table">
         <div v-for="file in doc.files" :key="file.id" class="file-row">
           <i :class="fileIcon(file.mimetype)" class="file-type-icon" />
@@ -160,7 +162,7 @@ function confirmDelete(file: { id: string; name: string }) {
                 size="small"
                 severity="secondary"
                 @click="startRename(file)"
-                v-tooltip="'Rename'"
+                v-tooltip="t('rename')"
               />
               <Button
                 icon="pi pi-trash"
@@ -169,7 +171,7 @@ function confirmDelete(file: { id: string; name: string }) {
                 size="small"
                 severity="danger"
                 @click="confirmDelete(file)"
-                v-tooltip="'Remove'"
+                v-tooltip="t('ui.remove_file')"
               />
             </template>
           </div>
@@ -193,8 +195,8 @@ function confirmDelete(file: { id: string; name: string }) {
       <template #empty>
         <div class="file-upload-empty">
           <i class="pi pi-cloud-upload" aria-hidden="true" />
-          <span v-if="uploading">Uploading...</span>
-          <span v-else>Drag files here or click Choose to upload</span>
+          <span v-if="uploading">{{ t('ui.uploading') }}</span>
+          <span v-else>{{ t('ui.drag_or_choose_upload') }}</span>
         </div>
       </template>
     </FileUpload>
@@ -202,8 +204,8 @@ function confirmDelete(file: { id: string; name: string }) {
     <EmptyState
       v-if="!doc.files?.length"
       icon="pi pi-file"
-      message="No files attached to this document"
-      action-label="Edit document to add files"
+      :message="t('ui.no_files')"
+      :action-label="t('ui.edit_to_add_files')"
       @action="$router.push({ name: 'document-edit', params: { id: doc.id } })"
     />
   </div>

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 interface NavItem {
   label: string
   icon: string
@@ -33,7 +37,7 @@ function isNavActive(name: string) {
     </button>
 
     <template v-if="mode === 'tag'">
-      <div class="admin-nav-section">Tags</div>
+      <div class="admin-nav-section">{{ t('ui.tags_page.title') }}</div>
       <router-link
         v-for="item in tagManageItems"
         :key="item.name"
@@ -48,7 +52,7 @@ function isNavActive(name: string) {
     </template>
 
     <template v-else>
-      <div class="admin-nav-section">Settings</div>
+      <div class="admin-nav-section">{{ t('ui.nav.settings') }}</div>
       <router-link
         v-for="item in settingsNavItems"
         :key="item.name"

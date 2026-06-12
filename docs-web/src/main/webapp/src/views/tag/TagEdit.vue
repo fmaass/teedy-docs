@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { listTags, updateTag, deleteTag } from '../../api/tag'
@@ -12,6 +13,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
 const props = defineProps<{ id: string }>()
+const { t } = useI18n()
 const router = useRouter()
 const toast = useToast()
 const confirm = useConfirm()
@@ -32,10 +34,10 @@ function getDescendantIds(tagId: string, allTags: Array<{ id: string; parent: st
   const queue = [tagId]
   while (queue.length) {
     const current = queue.pop()!
-    for (const t of allTags) {
-      if (t.parent === current && !ids.has(t.id)) {
-        ids.add(t.id)
-        queue.push(t.id)
+    for (const tag of allTags) {
+      if (tag.parent === current && !ids.has(tag.id)) {
+        ids.add(tag.id)
+        queue.push(tag.id)
       }
     }
   }
@@ -47,15 +49,15 @@ const parentOptions = computed(() => {
   const excluded = getDescendantIds(props.id, allTags)
   excluded.add(props.id)
   return [
-    { label: '(none — root level)', value: null },
+    { label: t('ui.tags_page.none_root'), value: null },
     ...allTags
-      .filter((t) => !excluded.has(t.id))
-      .map((t) => ({ label: t.name, value: t.id })),
+      .filter((tag) => !excluded.has(tag.id))
+      .map((tag) => ({ label: tag.name, value: tag.id })),
   ]
 })
 
 function loadFromCache() {
-  const tag = tags.value?.find((t) => t.id === props.id)
+  const tag = tags.value?.find((item) => item.id === props.id)
   if (tag) {
     name.value = tag.name
     color.value = tag.color.replace('#', '')
@@ -69,27 +71,27 @@ const { mutate: save, isPending: loading } = useMutation({
   mutationFn: () => updateTag(props.id, name.value, '#' + color.value, parent.value ?? undefined),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tags'] })
-    toast.add({ severity: 'success', summary: 'Tag updated', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.tag_edit.tag_updated'), life: 2000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to update tag', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.tag_edit.failed_update'), life: 3000 })
   },
 })
 
 function handleDelete() {
   confirm.require({
-    message: `Delete tag "${name.value}"? Documents will not be deleted.`,
-    header: 'Delete tag',
+    message: t('ui.tag_edit.delete_confirm', { name: name.value }),
+    header: t('ui.tag_edit.delete_tag'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
     accept: () => {
       deleteTag(props.id).then(() => {
         queryClient.invalidateQueries({ queryKey: ['tags'] })
-        toast.add({ severity: 'success', summary: 'Tag deleted', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.tag_edit.tag_deleted'), life: 2000 })
         router.push({ name: 'tags' })
       }).catch(() => {
-        toast.add({ severity: 'error', summary: 'Failed to delete tag', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.tag_edit.failed_delete'), life: 3000 })
       })
     },
   })
@@ -99,27 +101,27 @@ function handleDelete() {
 <template>
   <div class="tag-edit-page">
     <div class="page-header">
-      <h1>Edit tag</h1>
+      <h1>{{ t('ui.tag_edit.title') }}</h1>
       <router-link :to="{ name: 'tags' }" class="back-link">
-        <i class="pi pi-arrow-left" /> Back to tags
+        <i class="pi pi-arrow-left" /> {{ t('ui.back_to_tags') }}
       </router-link>
     </div>
 
     <Card style="max-width: 480px">
       <template #content>
         <div class="form-field">
-          <label for="tag-name">Name</label>
+          <label for="tag-name">{{ t('ui.tag_edit.name') }}</label>
           <InputText id="tag-name" v-model="name" class="w-full" />
         </div>
         <div class="form-field">
-          <label id="tag-color-label">Color</label>
+          <label id="tag-color-label">{{ t('ui.tag_edit.color') }}</label>
           <div class="color-row">
             <ColorPicker v-model="color" aria-labelledby="tag-color-label" />
-            <span class="color-preview" :style="{ background: '#' + color }">{{ name || 'Preview' }}</span>
+            <span class="color-preview" :style="{ background: '#' + color }">{{ name || t('ui.tag_edit.preview') }}</span>
           </div>
         </div>
         <div class="form-field">
-          <label for="tag-parent">Parent tag</label>
+          <label for="tag-parent">{{ t('ui.tag_edit.parent') }}</label>
           <Select
             v-model="parent"
             inputId="tag-parent"
@@ -128,12 +130,12 @@ function handleDelete() {
             optionValue="value"
             class="w-full"
             showClear
-            placeholder="No parent (root level)"
+            :placeholder="t('ui.tag_edit.no_parent')"
           />
         </div>
         <div class="flex gap-2 mt-4">
-          <Button label="Save" icon="pi pi-check" :loading="loading" @click="save()" />
-          <Button label="Delete" icon="pi pi-trash" severity="danger" outlined @click="handleDelete" />
+          <Button :label="t('save')" icon="pi pi-check" :loading="loading" @click="save()" />
+          <Button :label="t('delete')" icon="pi pi-trash" severity="danger" outlined @click="handleDelete" />
         </div>
       </template>
     </Card>

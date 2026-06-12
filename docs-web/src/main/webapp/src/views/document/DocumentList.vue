@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
 import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
@@ -15,6 +16,7 @@ import TagFilterChips from '../../components/TagFilterChips.vue'
 import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 
+const { t } = useI18n()
 const router = useRouter()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
@@ -107,7 +109,7 @@ const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError }
 watch(slideOverError, (err) => {
   if (err) {
     slideOverOpen.value = false
-    toast.add({ severity: 'error', summary: 'Failed to load document', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: 'document' }), life: 3000 })
   }
 })
 
@@ -230,8 +232,8 @@ const contextMenuItems = computed(() => {
       <EmptyState
         v-else
         icon="pi pi-inbox"
-        :message="tf.hasActiveFilters ? 'No documents match your filters' : 'No documents yet'"
-        :action-label="tf.hasActiveFilters ? undefined : 'Add your first document'"
+        :message="tf.hasActiveFilters ? t('ui.no_documents_match') : t('ui.no_documents_yet')"
+        :action-label="tf.hasActiveFilters ? undefined : t('ui.add_first_document')"
         @action="router.push({ name: 'document-add' })"
       />
     </div>

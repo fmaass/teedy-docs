@@ -12,7 +12,7 @@
     "login_failed_message": "Nome de utilizador ou palavra-passe inválidos",
     "password_lost_btn": "Perdeu a palavra-passe?",
     "password_lost_sent_title": "Email de recuperação de palavra-passe enviado",
-    "password_lost_sent_message": "Foi enviado um email para <strong>{{ username }}</strong> para redefinir a sua palavra-passe",
+    "password_lost_sent_message": "Foi enviado um email para <strong>{username}</strong> para redefinir a sua palavra-passe",
     "password_lost_error_title": "Erro na recuperação de palavra-passe",
     "password_lost_error_message": "Não foi possível enviar um email de recuperação de palavra-passe. Por favor contacte o seu administrador para uma redefinição manual"
   },
@@ -32,11 +32,11 @@
     "nav_documents": "Documentos",
     "nav_tags": "Tags",
     "nav_users_groups": "Utilizadores e Grupos",
-    "error_info": "{{ count }} novo erro{{ count > 1 ? 's' : '' }}",
-    "logged_as": "Sessão iniciada como {{ username }}",
+    "error_info": "{count} novo erro{count}",
+    "logged_as": "Sessão iniciada como {username}",
     "nav_settings": "Definições",
     "logout": "Terminar sessão",
-    "global_quota_warning": "<strong>Aviso!</strong> Quota global quase atingida em {{ current | number: 0 }}MB ({{ percent | number: 1 }}%) usados em {{ total | number: 0 }}MB"
+    "global_quota_warning": "<strong>Aviso!</strong> Quota global quase atingida em {current}MB ({percent}%) usados em {total}MB"
   },
   "document": {
     "navigation_up": "Ir para cima",
@@ -62,7 +62,7 @@
     "no_tags": "Sem etiquetas",
     "no_documents": "Não há documentos na base de dados",
     "search": "Pesquisar",
-    "search_empty": "Sem correspondências para <strong>\"{{ search }}\"</strong>",
+    "search_empty": "Sem correspondências para <strong>\"{search}\"</strong>",
     "shared": "Partilhado",
     "current_step_name": "Passo atual",
     "title": "Título",
@@ -84,16 +84,16 @@
     "page_size_20": "20 por página",
     "page_size_30": "30 por página",
     "upgrade_quota": "Para atualizar a sua quota, peça ao seu administrador",
-    "quota": "{{ current | number: 0 }}MB ({{ percent | number: 1 }}%) utilizados em {{ total | number: 0 }}MB",
-    "count": "{{ count }} documento{{ count > 1 ? 's' : '' }} encontrado{{ count > 1 ? 's' : '' }}",
-    "last_updated": "Última atualização {{ date | timeAgo: dateFormat }}",
+    "quota": "{current}MB ({percent}%) utilizados em {total}MB",
+    "count": "{count} documento{count} encontrado{count}",
+    "last_updated": "Última atualização {date}",
     "view": {
       "delete_comment_title": "Apagar comentário",
       "delete_comment_message": "Tem a certeza que pretende apagar este comentário?",
       "delete_document_title": "Apagar documento",
       "delete_document_message": "Tem a certeza que pretende apagar este documento?",
       "shared_document_title": "Documento partilhado",
-      "shared_document_message": "Pode partilhar este documento dando este link. Note que todas as pessoas que tiverem este link podem ver o documento.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{{ link }}\" onclick=\"this.select(); document.execCommand('copy');\" />",
+      "shared_document_message": "Pode partilhar este documento dando este link. Note que todas as pessoas que tiverem este link podem ver o documento.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
       "not_found": "Documento não encontrado",
       "forbidden": "Acesso proibido",
       "download_files": "Transferir ficheiros",
@@ -130,7 +130,7 @@
         "workflow_start_label": "Qual fluxo de trabalho deseja iniciar?",
         "add_more_workflow": "Adicionar mais fluxos de trabalho",
         "start_workflow_submit": "Iniciar fluxo de trabalho",
-        "full_name": "<strong>{{ name }}</strong> iniciado em {{ create_date | date }}",
+        "full_name": "<strong>{name}</strong> iniciado em {create_date}",
         "cancel_workflow": "Cancelar o fluxo de trabalho atual",
         "cancel_workflow_title": "Cancelar o fluxo de trabalho",
         "cancel_workflow_message": "Tem a certeza que pretende cancelar o fluxo de trabalho atual?",
@@ -158,7 +158,7 @@
       "title_placeholder": "Um nome dado ao recurso",
       "description_placeholder": "Uma descrição do recurso",
       "new_files": "Novos ficheiros",
-      "orphan_files": "+ {{ count }} ficheiro{{ count > 1 ? 's' : '' }}",
+      "orphan_files": "+ {count} ficheiro{count}",
       "additional_metadata": "Metadados adicionais",
       "subject_placeholder": "O tema do recurso",
       "identifier_placeholder": "Uma referência inequívoca ao recurso num determinado contexto",
@@ -197,65 +197,65 @@
       "message": "Dê um nome à partilha se quiser partilhar o mesmo documento várias vezes.",
       "submit": "Partilha"
     }
- },
- "file": {
-  "view": { 
-    "previous": "Anterior",
-    "next": "Seguinte",
-    "not_found": "Ficheiro não encontrado"
   },
-  "edit": {
-    "title": "Editar ficheiro",
-    "name": "Nome do ficheiro"
+  "file": {
+    "view": {
+      "previous": "Anterior",
+      "next": "Seguinte",
+      "not_found": "Ficheiro não encontrado"
+    },
+    "edit": {
+      "title": "Editar ficheiro",
+      "name": "Nome do ficheiro"
+    },
+    "versions": {
+      "title": "Histórico de versões",
+      "filename": "Nome do ficheiro",
+      "mimetype": "Tipo",
+      "create_date": "Data de criação",
+      "version": "Versão"
+    }
   },
-  "versions": {
-    "title": "Histórico de versões",
-    "filename": "Nome do ficheiro",
-    "mimetype": "Tipo",
-    "create_date": "Data de criação",
-    "version": "Versão"
-  }
-},
-"tag": {
-  "new_tag": "Nova etiqueta",
-  "search": "Pesquisar",
-  "default": {
-    "title": "Etiquetas",
-    "message_1": "<strong>Etiquetas</strong> são rótulos associados a documentos.",
-    "message_2": "Um documento pode ser etiquetado com várias etiquetas e uma etiqueta pode ser aplicada a vários documentos.",
-    "message_3": "Usando o botão <span class=\"fas fa-pencil-alt\"></span>, pode editar as permissões de uma etiqueta.",
-    "message_4": "Se uma etiqueta puder ser lida por outro utilizador ou grupo, os documentos associados também poderão ser lidos por essas pessoas.",
-    "message_5": "Por exemplo, etiquete os documentos da sua empresa com a etiqueta <span class=\"label label-info\">MinhaEmpresa</span> e adicione a permissão <strong>Pode ler</strong> a um grupo <span class=\"btn btn-default\">funcionários</span>."
+  "tag": {
+    "new_tag": "Nova etiqueta",
+    "search": "Pesquisar",
+    "default": {
+      "title": "Etiquetas",
+      "message_1": "<strong>Etiquetas</strong> são rótulos associados a documentos.",
+      "message_2": "Um documento pode ser etiquetado com várias etiquetas e uma etiqueta pode ser aplicada a vários documentos.",
+      "message_3": "Usando o botão <span class=\"fas fa-pencil-alt\"></span>, pode editar as permissões de uma etiqueta.",
+      "message_4": "Se uma etiqueta puder ser lida por outro utilizador ou grupo, os documentos associados também poderão ser lidos por essas pessoas.",
+      "message_5": "Por exemplo, etiquete os documentos da sua empresa com a etiqueta <span class=\"label label-info\">MinhaEmpresa</span> e adicione a permissão <strong>Pode ler</strong> a um grupo <span class=\"btn btn-default\">funcionários</span>."
+    },
+    "edit": {
+      "delete_tag_title": "Eliminar etiqueta",
+      "delete_tag_message": "Tem a certeza de que deseja eliminar esta etiqueta?",
+      "name": "Nome",
+      "color": "Cor",
+      "parent": "Pai",
+      "info": "As permissões nesta etiqueta serão também aplicadas aos documentos etiquetados com <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span>",
+      "circular_reference_title": "Referência circular",
+      "circular_reference_message": "A hierarquia das etiquetas pai faz um loop, por favor escolha outra etiqueta pai."
+    }
   },
-  "edit": {
-    "delete_tag_title": "Eliminar etiqueta",
-    "delete_tag_message": "Tem a certeza de que deseja eliminar esta etiqueta?",
-    "name": "Nome",
-    "color": "Cor",
-    "parent": "Pai",
-    "info": "As permissões nesta etiqueta serão também aplicadas aos documentos etiquetados com <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{{ name }}</span>",
-    "circular_reference_title": "Referência circular",
-    "circular_reference_message": "A hierarquia das etiquetas pai faz um loop, por favor escolha outra etiqueta pai."
-  }
-},
-"group": {
-  "profile": {
-    "members": "Membros",
-    "no_members": "Sem membros",
-    "related_links": "Links relacionados",
-    "edit_group": "Editar grupo {{ name }}"
-  }
-},
-"user": {
-  "profile": {
-    "groups": "Grupos",
-    "quota_used": "Quota utilizada",
-    "percent_used": "{{ percent | number: 0 }}% utilizada",
-    "related_links": "Links relacionados",
-    "document_created": "Documentos criados por {{ username }}",
-    "edit_user": "Editar utilizador {{ username }}"
-  }
-},
+  "group": {
+    "profile": {
+      "members": "Membros",
+      "no_members": "Sem membros",
+      "related_links": "Links relacionados",
+      "edit_group": "Editar grupo {name}"
+    }
+  },
+  "user": {
+    "profile": {
+      "groups": "Grupos",
+      "quota_used": "Quota utilizada",
+      "percent_used": "{percent}% utilizada",
+      "related_links": "Links relacionados",
+      "document_created": "Documentos criados por {username}",
+      "edit_user": "Editar utilizador {username}"
+    }
+  },
   "usergroup": {
     "search_groups": "Pesquisar em grupos",
     "search_users": "Pesquisar em utilizadores",
@@ -304,10 +304,10 @@
         "delete_user_title": "Apagar utilizador",
         "delete_user_message": "Tem a certeza de que deseja apagar este utilizador? Todos os documentos, ficheiros e etiquetas associados serão apagados",
         "user_used_title": "Utilizador em uso",
-        "user_used_message": "Este utilizador é utilizado no fluxo de trabalho \"{{ name }}\"",
+        "user_used_message": "Este utilizador é utilizado no fluxo de trabalho \"{name}\"",
         "edit_user_failed_title": "Utilizador já existe",
         "edit_user_failed_message": "Este nome de utilizador já está em uso por outro utilizador",
-        "edit_user_title": "Editar \"{{ username }}\"",
+        "edit_user_title": "Editar \"{username}\"",
         "add_user_title": "Adicionar utilizador",
         "username": "Nome de utilizador",
         "email": "E-mail",
@@ -319,13 +319,12 @@
         "disabled": "Utilizador desativado",
         "password_reset_btn": "Enviar um email para reset de password para este utilizador",
         "password_lost_sent_title": "Email de reset de password enviado",
-        "password_lost_sent_message": "Foi enviado um email de reset de password para <strong>{{ username }}</strong>",
+        "password_lost_sent_message": "Foi enviado um email de reset de password para <strong>{username}</strong>",
         "disable_totp_btn": "Desativar autenticação de dois fatores para este utilizador",
         "disable_totp_title": "Desativar autenticação de dois fatores",
         "disable_totp_message": "Tem a certeza de que deseja desativar a autenticação de dois fatores para este utilizador?"
-},
-"workflow": {
-      }
+      },
+      "workflow": {}
     },
     "workflow": {
       "title": "Configuração de fluxo de trabalho",
@@ -334,7 +333,7 @@
       "edit": {
         "delete_workflow_title": "Eliminar fluxo de trabalho",
         "delete_workflow_message": "Tem a certeza de que deseja eliminar este fluxo de trabalho? Os fluxos de trabalho em execução não serão eliminados",
-        "edit_workflow_title": "Editar \"{{ name }}\"",
+        "edit_workflow_title": "Editar \"{name}\"",
         "add_workflow_title": "Adicionar um fluxo de trabalho",
         "name": "Nome",
         "name_placeholder": "Nome ou descrição da etapa",
@@ -354,14 +353,14 @@
       "enable_totp": "Ativar autenticação de dois fatores",
       "enable_totp_message": "Certifique-se de que tem uma aplicação compatível com TOTP no seu telemóvel pronta para adicionar uma nova conta",
       "title": "Autenticação de dois fatores",
-      "message_1": "A autenticação de dois fatores permite adicionar uma camada de segurança à sua conta <strong>{{ appName }}</strong>.<br/>Antes de ativar esta funcionalidade, certifique-se de que tem uma aplicação compatível com TOTP no seu telemóvel:",
+      "message_1": "A autenticação de dois fatores permite adicionar uma camada de segurança à sua conta <strong>{appName}</strong>.<br/>Antes de ativar esta funcionalidade, certifique-se de que tem uma aplicação compatível com TOTP no seu telemóvel:",
       "message_google_authenticator": "Para Android, iOS e Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
       "message_duo_mobile": "Para Android e iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
       "message_authenticator": "Para Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Essas aplicações geram automaticamente um código de validação que muda após um certo período de tempo.<br/>Você terá que inserir este código de validação cada vez que fizer login em <strong>{{ appName }}</strong>.",
-      "secret_key": "Sua chave secreta é: <strong>{{ secret }}</strong>",
+      "message_2": "Essas aplicações geram automaticamente um código de validação que muda após um certo período de tempo.<br/>Você terá que inserir este código de validação cada vez que fizer login em <strong>{appName}</strong>.",
+      "secret_key": "Sua chave secreta é: <strong>{secret}</strong>",
       "secret_key_warning": "Configure seu aplicativo TOTP no seu telefone com esta chave secreta agora, pois você não poderá acessá-la posteriormente.",
-      "totp_enabled_message": "A autenticação de dois fatores está habilitada em sua conta.<br/>Cada vez que fizer login em <strong>{{ appName }}</strong>, você será solicitado a inserir um código de validação do seu aplicativo de telefone configurado.<br/>Se você perder seu telefone, não poderá fazer login em sua conta, mas as sessões ativas permitirão que você regenere uma chave secreta.",
+      "totp_enabled_message": "A autenticação de dois fatores está habilitada em sua conta.<br/>Cada vez que fizer login em <strong>{appName}</strong>, você será solicitado a inserir um código de validação do seu aplicativo de telefone configurado.<br/>Se você perder seu telefone, não poderá fazer login em sua conta, mas as sessões ativas permitirão que você regenere uma chave secreta.",
       "disable_totp": {
         "disable_totp": "Desativar autenticação de dois fatores",
         "message": "Sua conta não será mais protegida pela autenticação de dois fatores.",
@@ -382,8 +381,8 @@
         "edit_group_failed_title": "Grupo já existe",
         "edit_group_failed_message": "Este nome de grupo já está em uso por outro grupo",
         "group_used_title": "Grupo em uso",
-        "group_used_message": "Este grupo é utilizado no fluxo de trabalho \"{{ name }}\"",
-        "edit_group_title": "Editar \"{{ name }}\"",
+        "group_used_message": "Este grupo é utilizado no fluxo de trabalho \"{name}\"",
+        "edit_group_title": "Editar \"{name}\"",
         "add_group_title": "Adicionar um grupo",
         "name": "Nome",
         "parent_group": "Grupo principal",
@@ -401,7 +400,7 @@
     },
     "config": {
       "title_guest_access": "Acesso de convidado",
-      "message_guest_access": "O acesso de convidado é um modo em que qualquer pessoa pode aceder ao {{ appName }} sem palavra-passe.<br/> Como um utilizador normal, o utilizador convidado só pode aceder aos seus documentos e aos que têm permissão de acesso. <br/>",
+      "message_guest_access": "O acesso de convidado é um modo em que qualquer pessoa pode aceder ao {appName} sem palavra-passe.<br/> Como um utilizador normal, o utilizador convidado só pode aceder aos seus documentos e aos que têm permissão de acesso. <br/>",
       "enable_guest_access": "Ativar acesso de convidado",
       "disable_guest_access": "Desativar acesso de convidado",
       "title_theme": "Personalização do tema",
@@ -445,8 +444,8 @@
       "folder": "Pasta IMAP",
       "tag": "Tag adicionada aos documentos importados",
       "test": "Testar os parâmetros",
-      "last_sync": "Última sincronização: {{ data.date | date: 'medium' }}, {{ data.count }} mensagem{{ data.count > 1 ? 's' : '' }} importada{{ data.count > 1 ? 's' : '' }}",
-      "test_success": "A ligação à caixa de entrada foi estabelecida com sucesso ({{ count }} mensagem{{ count > 1 ? 's' : '' }} <strong>não lida{{ count > 1 ? 's' : '' }}</strong>)",
+      "last_sync": "Última sincronização: {data.date}, {data.count} mensagem{data} importada{data}",
+      "test_success": "A ligação à caixa de entrada foi estabelecida com sucesso ({count} mensagem{count} <strong>não lida{count}</strong>)",
       "test_fail": "Ocorreu um erro ao ligar à caixa de entrada, por favor verifique os parâmetros",
       "saved": "Configuração IMAP guardada com sucesso",
       "autoTagsEnabled": "Adicionar automaticamente tags da linha de assunto marcadas com #",
@@ -454,7 +453,7 @@
     },
     "monitoring": {
       "background_tasks": "Tarefas em segundo plano",
-      "queued_tasks": "Existem atualmente {{ count }} tarefas em fila.",
+      "queued_tasks": "Existem atualmente {count} tarefas em fila.",
       "queued_tasks_explain": "O processamento de ficheiros, a criação de miniaturas, a atualização de índices e o reconhecimento ótico de caracteres são tarefas em segundo plano. Uma grande quantidade de tarefas por processar resultará em resultados de pesquisa incompletos.",
       "server_logs": "Registos do servidor",
       "log_date": "Data",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { inject, computed, ref, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import { type DocumentDetail, type Acl, type InheritedAcl } from '../../api/document'
 import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../../api/acl'
@@ -10,6 +11,7 @@ import TagBadge from '../../components/TagBadge.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
+const { t } = useI18n()
 const doc = inject<Ref<DocumentDetail | null>>('document')!
 const toast = useToast()
 const confirm = useConfirm()
@@ -36,10 +38,10 @@ const selectedTarget = ref<AclTarget | null>(null)
 const selectedPerm = ref<'READ' | 'WRITE'>('READ')
 const addingAcl = ref(false)
 
-const permOptions = [
-  { label: 'Can view', value: 'READ' },
-  { label: 'Can edit', value: 'WRITE' },
-]
+const permOptions = computed(() => [
+  { label: t('ui.permissions.can_view'), value: 'READ' },
+  { label: t('ui.permissions.can_edit'), value: 'WRITE' },
+])
 
 async function completeAclTargetSearch(event: { query: string }) {
   const query = event.query.trim()
@@ -63,12 +65,12 @@ async function handleAdd() {
   try {
     await addAcl(doc.value.id, selectedPerm.value, selectedTarget.value.name, selectedTarget.value.type)
     queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
-    toast.add({ severity: 'success', summary: 'Permission added', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.permissions.added'), life: 2000 })
     selectedTarget.value = null
     searchResults.value = []
     selectedPerm.value = 'READ'
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to add permission', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.permissions.failed_add'), life: 3000 })
   } finally {
     addingAcl.value = false
   }
@@ -76,8 +78,8 @@ async function handleAdd() {
 
 function confirmRemove(acl: Acl) {
   confirm.require({
-    message: `Remove ${acl.perm.toLowerCase()} permission for "${acl.name}"?`,
-    header: 'Remove permission',
+    message: t('ui.permissions.remove_confirm', { perm: acl.perm.toLowerCase(), name: acl.name }),
+    header: t('ui.permissions.remove'),
     icon: 'pi pi-lock',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -86,16 +88,16 @@ function confirmRemove(acl: Acl) {
       try {
         await deleteAcl(doc.value.id, acl.perm, acl.id)
         queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
-        toast.add({ severity: 'success', summary: 'Permission removed', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.permissions.removed'), life: 2000 })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to remove permission', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.permissions.failed_remove'), life: 3000 })
       }
     },
   })
 }
 
 function permLabel(perm: string) {
-  return perm === 'WRITE' ? 'Can edit' : 'Can view'
+  return perm === 'WRITE' ? t('ui.permissions.can_edit') : t('ui.permissions.can_view')
 }
 function typeIcon(type: string) {
   return type === 'GROUP' ? 'pi pi-users' : 'pi pi-user'
@@ -107,8 +109,8 @@ function typeIcon(type: string) {
 
     <!-- Direct permissions -->
     <section class="perm-section">
-      <h3>Direct permissions</h3>
-      <p class="section-hint">Users and groups with explicit access to this document.</p>
+      <h3>{{ t('ui.permissions.direct') }}</h3>
+      <p class="section-hint">{{ t('ui.permissions.direct_hint') }}</p>
 
       <div v-if="acls.length" class="acl-list">
         <div v-for="acl in acls" :key="acl.id + acl.perm" class="acl-row">
@@ -125,15 +127,15 @@ function typeIcon(type: string) {
             size="small"
             severity="danger"
             @click="confirmRemove(acl)"
-            v-tooltip="'Remove'"
+            v-tooltip="t('ui.permissions.remove')"
           />
         </div>
       </div>
-      <p v-else class="no-acl">No direct permissions set. Only the owner has access.</p>
+      <p v-else class="no-acl">{{ t('ui.permissions.no_direct') }}</p>
 
       <!-- Add permission form -->
       <div v-if="doc.writable" class="add-acl-form">
-        <h4>Add permission</h4>
+        <h4>{{ t('ui.permissions.add') }}</h4>
         <div class="add-acl-row">
           <AutoComplete
             v-model="selectedTarget"
@@ -143,7 +145,7 @@ function typeIcon(type: string) {
             dropdown
             size="small"
             class="add-acl-autocomplete"
-            placeholder="Search user or group…"
+            :placeholder="t('ui.permissions.search_placeholder')"
             @complete="completeAclTargetSearch"
           >
             <template #option="{ option }">
@@ -163,7 +165,7 @@ function typeIcon(type: string) {
             style="width: 130px"
           />
           <Button
-            label="Add"
+            :label="t('add')"
             icon="pi pi-plus"
             size="small"
             :disabled="!selectedTarget"
@@ -176,8 +178,8 @@ function typeIcon(type: string) {
 
     <!-- Inherited permissions from tags -->
     <section v-if="inheritedBySource.length" class="perm-section">
-      <h3>Inherited from tags</h3>
-      <p class="section-hint">These permissions are inherited from the tags applied to this document and cannot be changed here.</p>
+      <h3>{{ t('ui.permissions.inherited') }}</h3>
+      <p class="section-hint">{{ t('ui.permissions.inherited_hint') }}</p>
 
       <div v-for="source in inheritedBySource" :key="source.id" class="inherited-group">
         <div class="inherited-source">

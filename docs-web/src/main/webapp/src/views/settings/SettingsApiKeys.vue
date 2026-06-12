@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/vue-query'
 import { listApiKeys, createApiKey, deleteApiKey, type ApiKeyItem } from '../../api/apikey'
 import DataTable from 'primevue/datatable'
@@ -11,6 +12,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -38,7 +40,7 @@ const createMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ['apikeys'] })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to create API key', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.apikeys.failed_create'), life: 3000 })
   },
 })
 
@@ -46,10 +48,10 @@ const deleteMutation = useMutation({
   mutationFn: (id: string) => deleteApiKey(id),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['apikeys'] })
-    toast.add({ severity: 'success', summary: 'API key deleted', life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.apikeys.key_deleted'), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to delete API key', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.apikeys.failed_delete'), life: 3000 })
   },
 })
 
@@ -61,8 +63,8 @@ function doCreate() {
 
 function confirmDelete(key: ApiKeyItem) {
   confirm.require({
-    message: `Delete "${key.name}"? Any integrations using this key will stop working.`,
-    header: 'Delete API key',
+    message: t('ui.apikeys.delete_confirm', { name: key.name }),
+    header: t('ui.apikeys.delete_title'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -72,11 +74,11 @@ function confirmDelete(key: ApiKeyItem) {
 
 function copyKey() {
   navigator.clipboard.writeText(createdKey.value)
-  toast.add({ severity: 'success', summary: 'Copied to clipboard', life: 2000 })
+  toast.add({ severity: 'success', summary: t('ui.apikeys.copied'), life: 2000 })
 }
 
 function formatDate(ts?: number) {
-  if (!ts) return 'Never'
+  if (!ts) return t('ui.apikeys.never')
   return new Date(ts).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -91,29 +93,29 @@ function formatDate(ts?: number) {
   <div class="apikeys-settings">
     <div class="section-header">
       <div>
-        <h2>API Keys</h2>
-        <p class="section-desc">Create keys to access the Teedy API programmatically.</p>
+        <h2>{{ t('ui.apikeys.title') }}</h2>
+        <p class="section-desc">{{ t('ui.apikeys.description') }}</p>
       </div>
-      <Button label="Create key" icon="pi pi-plus" size="small" @click="showCreateDialog = true" />
+      <Button :label="t('ui.apikeys.create_key')" icon="pi pi-plus" size="small" @click="showCreateDialog = true" />
     </div>
 
     <DataTable :value="keys" stripedRows :loading="isLoading" class="keys-table">
-      <Column field="name" header="Name">
+      <Column field="name" :header="t('ui.apikeys.name')">
         <template #body="{ data }">
           <span class="key-name">{{ data.name }}</span>
         </template>
       </Column>
-      <Column header="Key" style="width: 160px">
+      <Column :header="t('ui.apikeys.key')" style="width: 160px">
         <template #body="{ data }">
           <code class="key-prefix">{{ data.prefix }}...</code>
         </template>
       </Column>
-      <Column header="Last used" style="width: 180px">
+      <Column :header="t('ui.apikeys.last_used')" style="width: 180px">
         <template #body="{ data }">
           <span class="meta">{{ formatDate(data.last_used_date) }}</span>
         </template>
       </Column>
-      <Column header="Created" style="width: 180px">
+      <Column :header="t('ui.apikeys.created')" style="width: 180px">
         <template #body="{ data }">
           <span class="meta">{{ formatDate(data.create_date) }}</span>
         </template>
@@ -124,33 +126,33 @@ function formatDate(ts?: number) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-key" message="No API keys yet" />
+        <EmptyState icon="pi pi-key" :message="t('ui.apikeys.no_keys')" />
       </template>
     </DataTable>
 
     <!-- Create dialog -->
-    <Dialog v-model:visible="showCreateDialog" header="Create API key" :modal="true" :style="{ width: '400px' }">
+    <Dialog v-model:visible="showCreateDialog" :header="t('ui.apikeys.create_title')" :modal="true" :style="{ width: '400px' }">
       <div class="form-field">
-        <label for="key-name">Name</label>
-        <InputText id="key-name" v-model="newKeyName" placeholder="e.g. CI/CD pipeline" class="w-full" @keyup.enter="doCreate" />
+        <label for="key-name">{{ t('ui.apikeys.name') }}</label>
+        <InputText id="key-name" v-model="newKeyName" :placeholder="t('ui.apikeys.name_placeholder')" class="w-full" @keyup.enter="doCreate" />
       </div>
       <template #footer>
-        <Button label="Cancel" text @click="showCreateDialog = false" />
-        <Button label="Create" :disabled="!newKeyName.trim()" :loading="createMutation.isPending.value" @click="doCreate" />
+        <Button :label="t('cancel')" text @click="showCreateDialog = false" />
+        <Button :label="t('create')" :disabled="!newKeyName.trim()" :loading="createMutation.isPending.value" @click="doCreate" />
       </template>
     </Dialog>
 
     <!-- Key display dialog (shown once) -->
-    <Dialog v-model:visible="showKeyDialog" header="API key created" :modal="true" :closable="false" :style="{ width: '520px' }">
+    <Dialog v-model:visible="showKeyDialog" :header="t('ui.apikeys.key_created_title')" :modal="true" :closable="false" :style="{ width: '520px' }">
       <div class="key-display">
-        <p class="key-warning">Copy this key now. It will not be shown again.</p>
+        <p class="key-warning">{{ t('ui.apikeys.copy_warning') }}</p>
         <div class="key-value-row">
           <code class="key-value">{{ createdKey }}</code>
           <Button icon="pi pi-copy" text size="small" @click="copyKey" aria-label="Copy to clipboard" />
         </div>
       </div>
       <template #footer>
-        <Button label="Done" @click="showKeyDialog = false" />
+        <Button :label="t('ui.apikeys.done')" @click="showKeyDialog = false" />
       </template>
     </Dialog>
 

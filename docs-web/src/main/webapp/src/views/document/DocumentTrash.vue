@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/vue-query'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
 import DataTable from 'primevue/datatable'
@@ -10,6 +11,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -27,10 +29,10 @@ const restoreMutation = useMutation({
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['trash'] })
     queryClient.invalidateQueries({ queryKey: ['documents'] })
-    toast.add({ severity: 'success', summary: 'Document restored', life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.document_restored'), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to restore document', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_restore'), life: 3000 })
   },
 })
 
@@ -38,10 +40,10 @@ const permanentDeleteMutation = useMutation({
   mutationFn: (id: string) => permanentDeleteDocument(id),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['trash'] })
-    toast.add({ severity: 'success', summary: 'Document permanently deleted', life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.document_deleted'), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to delete document', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_delete_permanently'), life: 3000 })
   },
 })
 
@@ -49,10 +51,10 @@ const emptyTrashMutation = useMutation({
   mutationFn: () => emptyTrash(),
   onSuccess: (res) => {
     queryClient.invalidateQueries({ queryKey: ['trash'] })
-    toast.add({ severity: 'success', summary: `${res.data.deleted_count} document(s) permanently deleted`, life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.documents_deleted', { count: res.data.deleted_count }), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to empty trash', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_empty_trash'), life: 3000 })
   },
 })
 
@@ -62,8 +64,8 @@ function doRestore(doc: TrashItem) {
 
 function confirmPermanentDelete(doc: TrashItem) {
   confirm.require({
-    message: `Permanently delete "${doc.title}"? This action cannot be undone.`,
-    header: 'Permanently delete',
+    message: t('ui.permanently_delete_confirm', { title: doc.title }),
+    header: t('ui.permanently_delete'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -73,8 +75,8 @@ function confirmPermanentDelete(doc: TrashItem) {
 
 function confirmEmptyTrash() {
   confirm.require({
-    message: 'This will permanently delete all documents in the trash. This action cannot be undone.',
-    header: 'Empty trash',
+    message: t('ui.empty_trash_confirm'),
+    header: t('ui.empty_trash'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -98,14 +100,14 @@ function formatDeletedAt(ts: number) {
   <div class="trash-page">
     <div class="page-header">
       <div>
-        <h1>Trash</h1>
+        <h1>{{ t('ui.trash') }}</h1>
         <p class="page-subtitle" v-if="totalCount">
-          {{ totalCount }} document{{ totalCount !== 1 ? 's' : '' }} in trash
+          {{ t('ui.trash_count', { count: totalCount }) }}
         </p>
       </div>
       <Button
         v-if="documents.length"
-        label="Empty trash"
+        :label="t('ui.empty_trash')"
         icon="pi pi-trash"
         severity="danger"
         outlined
@@ -125,7 +127,7 @@ function formatDeletedAt(ts: number) {
       :rowHover="true"
       class="trash-table"
     >
-      <Column field="title" header="Title" sortable>
+      <Column field="title" :header="t('document.title')" sortable>
         <template #body="{ data }">
           <span class="doc-title">{{ data.title }}</span>
         </template>
@@ -140,7 +142,7 @@ function formatDeletedAt(ts: number) {
           <div class="action-buttons">
             <Button
               icon="pi pi-replay"
-              label="Restore"
+              :label="t('ui.restore')"
               text
               size="small"
               @click="doRestore(data)"
@@ -148,7 +150,7 @@ function formatDeletedAt(ts: number) {
             />
             <Button
               icon="pi pi-times"
-              label="Delete"
+              :label="t('delete')"
               text
               size="small"
               severity="danger"
@@ -160,7 +162,7 @@ function formatDeletedAt(ts: number) {
       </Column>
     </DataTable>
 
-    <EmptyState v-else icon="pi pi-trash" message="Trash is empty" />
+    <EmptyState v-else icon="pi pi-trash" :message="t('ui.trash_empty')" />
   </div>
 </template>
 

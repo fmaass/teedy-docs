@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { resetPassword } from '../api/user'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
@@ -9,6 +10,7 @@ import { useToast } from 'primevue/usetoast'
 
 const props = defineProps<{ resetKey: string }>()
 const router = useRouter()
+const { t } = useI18n()
 const toast = useToast()
 
 const password = ref('')
@@ -27,28 +29,28 @@ interface PasswordResetError {
 async function handleReset() {
   error.value = ''
   if (!password.value) {
-    error.value = 'Password is required'
+    error.value = t('ui.password_reset.password_required')
     return
   }
   if (password.value.length < 8) {
-    error.value = 'Password must be at least 8 characters'
+    error.value = t('ui.password_reset.password_min_length')
     return
   }
   if (password.value !== passwordConfirm.value) {
-    error.value = 'Passwords do not match'
+    error.value = t('ui.password_reset.passwords_mismatch')
     return
   }
   loading.value = true
   try {
     await resetPassword(props.resetKey, password.value)
-    toast.add({ severity: 'success', summary: 'Password changed. You can now sign in.', life: 5000 })
+    toast.add({ severity: 'success', summary: t('ui.password_reset.password_changed'), life: 5000 })
     router.push({ name: 'login' })
   } catch (errorResponse: unknown) {
     const type = (errorResponse as PasswordResetError).response?.data?.type
     if (type === 'KeyNotFound') {
-      error.value = 'This reset link has expired or is invalid. Please request a new one.'
+      error.value = t('ui.password_reset.link_expired')
     } else {
-      error.value = 'Failed to reset password. Please try again.'
+      error.value = t('ui.password_reset.failed')
     }
   } finally {
     loading.value = false
@@ -61,14 +63,14 @@ async function handleReset() {
     <div class="teedy-login-card">
       <div class="teedy-login-brand">
         <h1>teedy</h1>
-        <p>Set new password</p>
+        <p>{{ t('ui.password_reset.set_new_password') }}</p>
       </div>
 
       <Message v-if="error" severity="error" :closable="false" class="mb-4">{{ error }}</Message>
 
       <form @submit.prevent="handleReset">
         <div class="teedy-login-field">
-          <label for="reset-pass">New password</label>
+          <label for="reset-pass">{{ t('ui.password_reset.new_password') }}</label>
           <Password
             inputId="reset-pass"
             v-model="password"
@@ -82,7 +84,7 @@ async function handleReset() {
         </div>
 
         <div class="teedy-login-field">
-          <label for="reset-confirm">Confirm new password</label>
+          <label for="reset-confirm">{{ t('ui.password_reset.confirm_password') }}</label>
           <Password
             inputId="reset-confirm"
             v-model="passwordConfirm"
@@ -96,14 +98,14 @@ async function handleReset() {
 
         <Button
           type="submit"
-          label="Set new password"
+          :label="t('ui.password_reset.submit')"
           icon="pi pi-check"
           :loading="loading"
           class="w-full"
         />
 
         <div class="back-link">
-          <router-link :to="{ name: 'login' }">Back to sign in</router-link>
+          <router-link :to="{ name: 'login' }">{{ t('ui.password_reset.back_to_login') }}</router-link>
         </div>
       </form>
     </div>

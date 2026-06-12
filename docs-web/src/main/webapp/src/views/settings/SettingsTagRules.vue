@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import api from '../../api/client'
 import { listTags } from '../../api/tag'
@@ -15,6 +16,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -47,11 +49,11 @@ const form = ref({
   enabled: true,
 })
 
-const ruleTypes = [
-  { label: 'Title regex', value: 'TITLE_REGEX' },
-  { label: 'Filename regex', value: 'FILENAME_REGEX' },
-  { label: 'Content regex', value: 'CONTENT_REGEX' },
-]
+const ruleTypes = computed(() => [
+  { label: t('ui.tag_rules.type_title_regex'), value: 'TITLE_REGEX' },
+  { label: t('ui.tag_rules.type_filename_regex'), value: 'FILENAME_REGEX' },
+  { label: t('ui.tag_rules.type_content_regex'), value: 'CONTENT_REGEX' },
+])
 
 const { data: rules, isLoading: loading } = useQuery({
   queryKey: ['tagmatchrules'],
@@ -74,10 +76,10 @@ const { mutate: saveRule } = useMutation({
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tagmatchrules'] })
     showDialog.value = false
-    toast.add({ severity: 'success', summary: 'Rule saved', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.tag_rules.rule_saved'), life: 2000 })
   },
   onError: (error: unknown) => {
-    const message = (error as ApiError).response?.data?.message || 'Failed to save rule'
+    const message = (error as ApiError).response?.data?.message || t('ui.tag_rules.failed_save')
     toast.add({ severity: 'error', summary: message, life: 3000 })
   },
 })
@@ -86,10 +88,10 @@ const { mutate: deleteRule } = useMutation({
   mutationFn: (id: string) => api.delete(`/tagmatchrule/${id}`),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tagmatchrules'] })
-    toast.add({ severity: 'success', summary: 'Rule deleted', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.tag_rules.rule_deleted'), life: 2000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to delete rule', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.tag_rules.failed_delete'), life: 3000 })
   },
 })
 
@@ -117,8 +119,8 @@ function handleSave() {
 
 function handleDelete(rule: Rule) {
   confirm.require({
-    message: `Delete this auto-tagging rule?`,
-    header: 'Delete rule',
+    message: t('ui.tag_rules.delete_confirm'),
+    header: t('ui.tag_rules.delete_title'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -134,23 +136,22 @@ function getTagName(tagId: string) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-4">
-      <h2 style="margin: 0">Auto-tagging rules</h2>
-      <Button label="Add rule" icon="pi pi-plus" size="small" @click="openCreate" />
+      <h2 style="margin: 0">{{ t('ui.tag_rules.title') }}</h2>
+      <Button :label="t('ui.tag_rules.add_rule')" icon="pi pi-plus" size="small" @click="openCreate" />
     </div>
 
     <p class="text-sm text-muted mb-4">
-      Auto-tagging rules automatically apply tags to documents when their title, filename,
-      or extracted content matches a regex pattern.
+      {{ t('ui.tag_rules.description') }}
     </p>
 
     <DataTable :value="rules ?? []" :loading="loading" size="small" stripedRows>
-      <Column header="Tag" style="width: 150px">
+      <Column :header="t('ui.tag_rules.tag')" style="width: 150px">
         <template #body="{ data }">{{ getTagName(data.tag_id) }}</template>
       </Column>
-      <Column field="rule_type" header="Type" style="width: 140px" />
-      <Column field="pattern" header="Pattern" />
-      <Column field="order" header="Order" style="width: 70px" />
-      <Column header="Enabled" style="width: 80px">
+      <Column field="rule_type" :header="t('ui.tag_rules.type')" style="width: 140px" />
+      <Column field="pattern" :header="t('ui.tag_rules.pattern')" />
+      <Column field="order" :header="t('ui.tag_rules.order')" style="width: 70px" />
+      <Column :header="t('enabled')" style="width: 80px">
         <template #body="{ data }">
           <i :class="data.enabled ? 'pi pi-check-circle' : 'pi pi-times-circle'" :style="{ color: data.enabled ? 'var(--teedy-enabled-color)' : 'var(--teedy-danger)' }" />
         </template>
@@ -162,44 +163,44 @@ function getTagName(tagId: string) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-bolt" message="No auto-tagging rules defined yet" />
+        <EmptyState icon="pi pi-bolt" :message="t('ui.tag_rules.no_rules')" />
       </template>
     </DataTable>
 
-    <Dialog v-model:visible="showDialog" :header="editId ? 'Edit rule' : 'New rule'" modal style="width: 480px">
+    <Dialog v-model:visible="showDialog" :header="editId ? t('ui.tag_rules.edit_rule') : t('ui.tag_rules.new_rule')" modal style="width: 480px">
       <div class="form-field">
-        <label for="rule-tag">Tag</label>
+        <label for="rule-tag">{{ t('ui.tag_rules.tag') }}</label>
         <Select
           v-model="form.tag_id"
           inputId="rule-tag"
           :options="tags ?? []"
           optionLabel="name"
           optionValue="id"
-          placeholder="Select a tag"
+          :placeholder="t('ui.tag_rules.select_tag')"
           class="w-full"
         />
       </div>
       <div class="form-field">
-        <label for="rule-type">Rule type</label>
+        <label for="rule-type">{{ t('ui.tag_rules.type') }}</label>
         <Select v-model="form.rule_type" inputId="rule-type" :options="ruleTypes" optionLabel="label" optionValue="value" class="w-full" />
       </div>
       <div class="form-field">
-        <label for="rule-pattern">Regex pattern</label>
-        <InputText id="rule-pattern" v-model="form.pattern" class="w-full" placeholder="e.g. invoice.*\d{4}" />
+        <label for="rule-pattern">{{ t('ui.tag_rules.pattern') }}</label>
+        <InputText id="rule-pattern" v-model="form.pattern" class="w-full" :placeholder="t('ui.tag_rules.regex_placeholder')" />
       </div>
       <div class="form-field">
-        <label for="rule-order">Execution order</label>
+        <label for="rule-order">{{ t('ui.tag_rules.execution_order') }}</label>
         <InputNumber v-model="form.order" inputId="rule-order" :min="0" class="w-full" />
       </div>
       <div class="form-field">
         <label class="flex items-center gap-2">
           <ToggleSwitch v-model="form.enabled" />
-          Enabled
+          {{ t('enabled') }}
         </label>
       </div>
       <template #footer>
-        <Button label="Cancel" severity="secondary" text @click="showDialog = false" />
-        <Button :label="editId ? 'Save' : 'Create'" icon="pi pi-check" @click="handleSave" />
+        <Button :label="t('cancel')" severity="secondary" text @click="showDialog = false" />
+        <Button :label="editId ? t('save') : t('create')" icon="pi pi-check" @click="handleSave" />
       </template>
     </Dialog>
   </div>

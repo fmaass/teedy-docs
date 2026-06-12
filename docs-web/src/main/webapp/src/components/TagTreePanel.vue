@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { type Tag } from '../api/tag'
 import Tree from 'primevue/tree'
 import SelectButton from 'primevue/selectbutton'
+
+const { t } = useI18n()
 
 interface TagTreeNode {
   key: string
@@ -104,7 +107,7 @@ function getNodeCount(node: any): number | undefined {
       </template>
     </Tree>
     <div v-if="!tagTreeNodes.length" class="tag-empty">
-      <span class="meta-text">No tags yet</span>
+      <span class="meta-text">{{ t('document.no_tags') }}</span>
     </div>
   </div>
 </template>

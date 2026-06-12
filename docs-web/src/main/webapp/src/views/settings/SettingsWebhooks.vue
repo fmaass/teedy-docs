@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { listWebhooks, createWebhook, deleteWebhook, WEBHOOK_EVENTS, type WebhookItem } from '../../api/webhook'
 import DataTable from 'primevue/datatable'
@@ -12,6 +13,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -37,10 +39,10 @@ const addMutation = useMutation({
     showAddDialog.value = false
     newUrl.value = ''
     queryClient.invalidateQueries({ queryKey: ['webhooks'] })
-    toast.add({ severity: 'success', summary: 'Webhook added', life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.webhooks.webhook_added'), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to add webhook', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.webhooks.failed_add'), life: 3000 })
   },
 })
 
@@ -48,10 +50,10 @@ const deleteMutation = useMutation({
   mutationFn: (id: string) => deleteWebhook(id),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['webhooks'] })
-    toast.add({ severity: 'success', summary: 'Webhook deleted', life: 3000 })
+    toast.add({ severity: 'success', summary: t('ui.webhooks.webhook_deleted'), life: 3000 })
   },
   onError: () => {
-    toast.add({ severity: 'error', summary: 'Failed to delete webhook', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.webhooks.failed_delete'), life: 3000 })
   },
 })
 
@@ -69,7 +71,7 @@ function doAdd() {
   const url = newUrl.value.trim()
   if (!url) return
   if (!isValidUrl(url)) {
-    urlError.value = 'Enter a valid HTTP(S) URL'
+    urlError.value = t('ui.webhooks.url_invalid')
     return
   }
   addMutation.mutate()
@@ -77,8 +79,8 @@ function doAdd() {
 
 function confirmDelete(webhook: WebhookItem) {
   confirm.require({
-    message: `Delete webhook for "${formatEvent(webhook.event)}" to ${webhook.url}?`,
-    header: 'Delete webhook',
+    message: t('ui.webhooks.delete_confirm', { event: formatEvent(webhook.event), url: webhook.url }),
+    header: t('ui.webhooks.delete_title'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -103,27 +105,27 @@ function formatDate(ts: number) {
   <div class="webhooks-settings">
     <div class="section-header">
       <div>
-        <h2>Webhooks</h2>
+        <h2>{{ t('ui.webhooks.title') }}</h2>
         <p class="section-desc">
-          Receive HTTP POST notifications when document lifecycle events occur.
+          {{ t('ui.webhooks.description') }}
           The payload is <code>{"event": "EVENT_NAME", "id": "entity_id"}</code>.
         </p>
       </div>
-      <Button label="Add webhook" icon="pi pi-plus" size="small" @click="showAddDialog = true" />
+      <Button :label="t('ui.webhooks.add_webhook')" icon="pi pi-plus" size="small" @click="showAddDialog = true" />
     </div>
 
     <DataTable :value="webhooks" stripedRows :loading="isLoading" class="webhooks-table">
-      <Column header="Event" style="width: 220px">
+      <Column :header="t('ui.webhooks.event')" style="width: 220px">
         <template #body="{ data }">
           <code class="event-badge">{{ formatEvent(data.event) }}</code>
         </template>
       </Column>
-      <Column field="url" header="URL">
+      <Column field="url" :header="t('ui.webhooks.url')">
         <template #body="{ data }">
           <span class="webhook-url">{{ data.url }}</span>
         </template>
       </Column>
-      <Column header="Created" style="width: 130px">
+      <Column :header="t('ui.webhooks.created')" style="width: 130px">
         <template #body="{ data }">
           <span class="meta">{{ formatDate(data.create_date) }}</span>
         </template>
@@ -134,26 +136,26 @@ function formatDate(ts: number) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-link" message="No webhooks configured" />
+        <EmptyState icon="pi pi-link" :message="t('ui.webhooks.no_webhooks')" />
       </template>
     </DataTable>
 
     <!-- Add dialog -->
-    <Dialog v-model:visible="showAddDialog" header="Add webhook" :modal="true" :style="{ width: '480px' }">
+    <Dialog v-model:visible="showAddDialog" :header="t('ui.webhooks.add_title')" :modal="true" :style="{ width: '480px' }">
       <div class="form-fields">
         <div class="form-field">
-          <label for="webhook-event">Event</label>
+          <label for="webhook-event">{{ t('ui.webhooks.event') }}</label>
           <Select v-model="newEvent" inputId="webhook-event" :options="eventOptions" optionLabel="label" optionValue="value" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="webhook-url">URL</label>
-          <InputText id="webhook-url" v-model="newUrl" placeholder="https://example.com/webhook" class="w-full" :invalid="!!urlError" @keyup.enter="doAdd" />
+          <label for="webhook-url">{{ t('ui.webhooks.url') }}</label>
+          <InputText id="webhook-url" v-model="newUrl" :placeholder="t('ui.webhooks.url_placeholder')" class="w-full" :invalid="!!urlError" @keyup.enter="doAdd" />
           <small v-if="urlError" class="url-error">{{ urlError }}</small>
         </div>
       </div>
       <template #footer>
-        <Button label="Cancel" severity="secondary" text @click="showAddDialog = false" />
-        <Button label="Add" :disabled="!newUrl.trim()" :loading="addMutation.isPending.value" @click="doAdd" />
+        <Button :label="t('cancel')" severity="secondary" text @click="showAddDialog = false" />
+        <Button :label="t('add')" :disabled="!newUrl.trim()" :loading="addMutation.isPending.value" @click="doAdd" />
       </template>
     </Dialog>
 

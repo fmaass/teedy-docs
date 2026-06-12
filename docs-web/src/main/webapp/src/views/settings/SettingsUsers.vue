@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { listUsers, createUser, updateUser, deleteUser, type UserListItem } from '../../api/user'
 import Button from 'primevue/button'
@@ -13,6 +14,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { formatDate, formatStorage } from '../../composables/useFormatters'
 import EmptyState from '../../components/EmptyState.vue'
 
+const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
@@ -36,7 +38,7 @@ function openAddDialog() {
 
 async function handleAdd() {
   if (!addForm.value.username || !addForm.value.password || !addForm.value.email) {
-    toast.add({ severity: 'warn', summary: 'All fields are required', life: 2000 })
+    toast.add({ severity: 'warn', summary: t('ui.users.all_fields_required'), life: 2000 })
     return
   }
   addLoading.value = true
@@ -44,7 +46,7 @@ async function handleAdd() {
     await createUser(addForm.value.username, addForm.value.password, addForm.value.email, addForm.value.storage_quota)
     queryClient.invalidateQueries({ queryKey: ['users'] })
     showAddDialog.value = false
-    toast.add({ severity: 'success', summary: 'User created', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.users.user_created'), life: 2000 })
   } catch (error: unknown) {
     const msg = getCreateUserErrorMessage(error)
     toast.add({ severity: 'error', summary: msg, life: 3000 })
@@ -74,9 +76,9 @@ async function handleEdit() {
     await updateUser(editTarget.value.username, data)
     queryClient.invalidateQueries({ queryKey: ['users'] })
     showEditDialog.value = false
-    toast.add({ severity: 'success', summary: 'User updated', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.users.user_updated'), life: 2000 })
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to update user', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.users.failed_update'), life: 3000 })
   } finally {
     editLoading.value = false
   }
@@ -84,8 +86,8 @@ async function handleEdit() {
 
 function confirmDelete(user: UserListItem) {
   confirm.require({
-    message: `Delete user "${user.username}"? This cannot be undone.`,
-    header: 'Delete user',
+    message: t('ui.users.delete_confirm', { username: user.username }),
+    header: t('ui.users.delete_user'),
     icon: 'pi pi-trash',
     acceptProps: { severity: 'danger' },
     rejectProps: { severity: 'secondary', outlined: true },
@@ -93,9 +95,9 @@ function confirmDelete(user: UserListItem) {
       try {
         await deleteUser(user.username)
         queryClient.invalidateQueries({ queryKey: ['users'] })
-        toast.add({ severity: 'success', summary: 'User deleted', life: 2000 })
+        toast.add({ severity: 'success', summary: t('ui.users.user_deleted'), life: 2000 })
       } catch {
-        toast.add({ severity: 'error', summary: 'Failed to delete user', life: 3000 })
+        toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
       }
     },
   })
@@ -103,7 +105,7 @@ function confirmDelete(user: UserListItem) {
 
 function getCreateUserErrorMessage(error: unknown): string {
   const maybeType = (error as { response?: { data?: { type?: string } } })?.response?.data?.type
-  return maybeType === 'AlreadyExistingUsername' ? 'Username already in use' : 'Failed to create user'
+  return maybeType === 'AlreadyExistingUsername' ? t('ui.users.username_taken') : t('ui.users.failed_create')
 }
 
 function userRowClass(data: UserListItem): string {
@@ -115,8 +117,8 @@ function userRowClass(data: UserListItem): string {
 <template>
   <div>
     <div class="users-header">
-      <h2>Users</h2>
-      <Button label="Add user" icon="pi pi-plus" size="small" @click="openAddDialog" />
+      <h2>{{ t('ui.users.title') }}</h2>
+      <Button :label="t('ui.users.add_user')" icon="pi pi-plus" size="small" @click="openAddDialog" />
     </div>
 
     <DataTable
@@ -127,7 +129,7 @@ function userRowClass(data: UserListItem): string {
       class="users-table"
       size="small"
     >
-      <Column header="Username">
+      <Column :header="t('ui.users.username')">
         <template #body="{ data }">
           <span class="user-name">
             <i class="pi pi-user" aria-hidden="true" />
@@ -137,19 +139,19 @@ function userRowClass(data: UserListItem): string {
           </span>
         </template>
       </Column>
-      <Column field="email" header="Email">
+      <Column field="email" :header="t('ui.users.email')">
         <template #body="{ data }">
           <span class="user-email">{{ data.email }}</span>
         </template>
       </Column>
-      <Column header="Storage">
+      <Column :header="t('ui.users.storage')">
         <template #body="{ data }">
           <span class="user-storage">
             {{ formatStorage(data.storage_current) }} / {{ formatStorage(data.storage_quota) }}
           </span>
         </template>
       </Column>
-      <Column header="Created">
+      <Column :header="t('ui.users.created')">
         <template #body="{ data }">
           <span class="user-date">{{ formatDate(data.create_date) }}</span>
         </template>
@@ -163,47 +165,47 @@ function userRowClass(data: UserListItem): string {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-users" message="No users found." />
+        <EmptyState icon="pi pi-users" :message="t('ui.users.no_users')" />
       </template>
     </DataTable>
 
     <!-- Add user dialog -->
-    <Dialog v-model:visible="showAddDialog" header="Add user" :style="{ width: '400px' }" modal>
+    <Dialog v-model:visible="showAddDialog" :header="t('ui.users.add_user')" :style="{ width: '400px' }" modal>
       <div class="dialog-form">
         <div class="form-field">
-          <label for="add-user-name">Username *</label>
+          <label for="add-user-name">{{ t('ui.users.username') }} *</label>
           <InputText id="add-user-name" v-model="addForm.username" class="w-full" autofocus />
         </div>
         <div class="form-field">
-          <label for="add-user-email">Email *</label>
+          <label for="add-user-email">{{ t('ui.users.email') }} *</label>
           <InputText id="add-user-email" v-model="addForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="add-user-pass">Password *</label>
+          <label for="add-user-pass">{{ t('ui.users.password') }} *</label>
           <Password v-model="addForm.password" inputId="add-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
       </div>
       <template #footer>
-        <Button label="Cancel" severity="secondary" text @click="showAddDialog = false" />
-        <Button label="Create" icon="pi pi-check" :loading="addLoading" @click="handleAdd" />
+        <Button :label="t('cancel')" severity="secondary" text @click="showAddDialog = false" />
+        <Button :label="t('create')" icon="pi pi-check" :loading="addLoading" @click="handleAdd" />
       </template>
     </Dialog>
 
     <!-- Edit user dialog -->
-    <Dialog v-model:visible="showEditDialog" :header="`Edit ${editTarget?.username}`" :style="{ width: '400px' }" modal>
+    <Dialog v-model:visible="showEditDialog" :header="t('ui.users.edit_user', { username: editTarget?.username })" :style="{ width: '400px' }" modal>
       <div class="dialog-form">
         <div class="form-field">
-          <label for="edit-user-email">Email</label>
+          <label for="edit-user-email">{{ t('ui.users.email') }}</label>
           <InputText id="edit-user-email" v-model="editForm.email" type="email" class="w-full" />
         </div>
         <div class="form-field">
-          <label for="edit-user-pass">New password <span class="text-muted">(leave blank to keep current)</span></label>
+          <label for="edit-user-pass">{{ t('ui.account.new_password') }} <span class="text-muted">({{ t('ui.users.new_password_hint') }})</span></label>
           <Password v-model="editForm.password" inputId="edit-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
       </div>
       <template #footer>
-        <Button label="Cancel" severity="secondary" text @click="showEditDialog = false" />
-        <Button label="Save" icon="pi pi-check" :loading="editLoading" @click="handleEdit" />
+        <Button :label="t('cancel')" severity="secondary" text @click="showEditDialog = false" />
+        <Button :label="t('save')" icon="pi pi-check" :loading="editLoading" @click="handleEdit" />
       </template>
     </Dialog>
   </div>

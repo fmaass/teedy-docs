@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { listTags, createTag, type Tag } from '../../api/tag'
@@ -11,6 +12,7 @@ import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 
+const { t } = useI18n()
 const router = useRouter()
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -44,9 +46,9 @@ interface ApiError {
 
 const tagTreeNodes = computed(() => {
   const allTags = tagList.value
-  const rootTags = allTags.filter((t) => !t.parent)
+  const rootTags = allTags.filter((tag) => !tag.parent)
   function buildNode(tag: Tag): TagTreeNode {
-    const children = allTags.filter((t) => t.parent === tag.id)
+    const children = allTags.filter((child) => child.parent === tag.id)
     return {
       key: tag.id,
       label: tag.name,
@@ -58,8 +60,8 @@ const tagTreeNodes = computed(() => {
 })
 
 const parentOptions = computed(() => [
-  { label: '(none — root level)', value: null },
-  ...tagList.value.map((t) => ({ label: t.name, value: t.id })),
+  { label: t('ui.tags_page.none_root'), value: null },
+  ...tagList.value.map((tag) => ({ label: tag.name, value: tag.id })),
 ])
 
 const { mutate: addTag } = useMutation({
@@ -68,10 +70,10 @@ const { mutate: addTag } = useMutation({
     newTagName.value = ''
     newTagParent.value = null
     queryClient.invalidateQueries({ queryKey: ['tags'] })
-    toast.add({ severity: 'success', summary: 'Tag created', life: 2000 })
+    toast.add({ severity: 'success', summary: t('ui.tags_page.tag_created'), life: 2000 })
   },
   onError: (error: unknown) => {
-    const message = (error as ApiError).response?.data?.message || 'Failed to create tag'
+    const message = (error as ApiError).response?.data?.message || t('ui.tags_page.failed_create_tag')
     toast.add({ severity: 'error', summary: message, life: 3000 })
   },
 })
@@ -89,19 +91,19 @@ function selectTag(node: { key: string }) {
 <template>
   <div class="tag-list-page">
     <div class="page-header">
-      <h1>Tags</h1>
-      <p class="page-subtitle">Organize documents with tags. Click a tag to edit its name, color, or parent.</p>
+      <h1>{{ t('ui.tags_page.title') }}</h1>
+      <p class="page-subtitle">{{ t('ui.tags_page.subtitle') }}</p>
     </div>
 
     <!-- Create tag -->
     <Card class="mb-4" style="max-width: 520px">
       <template #content>
-        <h3 class="section-title">Create tag</h3>
+        <h3 class="section-title">{{ t('ui.tags_page.create_tag') }}</h3>
         <div class="create-row">
           <ColorPicker v-model="newTagColor" />
           <InputText
             v-model="newTagName"
-            placeholder="Tag name"
+            :placeholder="t('ui.tags_page.tag_name_placeholder')"
             class="flex-1"
             @keydown.enter="handleAddTag"
           />
@@ -112,11 +114,11 @@ function selectTag(node: { key: string }) {
             :options="parentOptions"
             optionLabel="label"
             optionValue="value"
-            placeholder="Parent tag (optional)"
+            :placeholder="t('ui.tags_page.parent_placeholder')"
             class="flex-1"
             showClear
           />
-          <Button label="Create" icon="pi pi-plus" @click="handleAddTag" />
+          <Button :label="t('create')" icon="pi pi-plus" @click="handleAddTag" />
         </div>
       </template>
     </Card>
@@ -124,7 +126,7 @@ function selectTag(node: { key: string }) {
     <!-- Tag tree -->
     <Card>
       <template #content>
-        <div v-if="isLoading" class="text-muted text-sm">Loading tags...</div>
+        <div v-if="isLoading" class="text-muted text-sm">{{ t('ui.tags_page.loading_tags') }}</div>
         <Tree
           v-else-if="tagTreeNodes.length"
           :value="tagTreeNodes"
@@ -141,7 +143,7 @@ function selectTag(node: { key: string }) {
         </Tree>
         <div v-else class="empty-state">
           <i class="pi pi-tags" />
-          <p>No tags yet. Create one above.</p>
+          <p>{{ t('ui.tags_page.no_tags') }}</p>
         </div>
       </template>
     </Card>

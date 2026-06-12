@@ -102,9 +102,9 @@ async function handleForgot() {
     await requestPasswordReset(forgotUsername.value.trim())
     showForgot.value = false
     forgotUsername.value = ''
-    toast.add({ severity: 'info', summary: 'If this username exists, a password reset email has been sent.', life: 5000 })
+    toast.add({ severity: 'info', summary: t('ui.forgot_password.sent'), life: 5000 })
   } catch {
-    toast.add({ severity: 'error', summary: 'Failed to send reset email', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.forgot_password.failed'), life: 3000 })
   } finally {
     forgotLoading.value = false
   }
@@ -116,10 +116,10 @@ async function handleForgot() {
     <div class="teedy-login-card">
       <div class="teedy-login-brand">
         <h1>teedy</h1>
-        <p>Document Management</p>
+        <p>{{ t('ui.document_management') }}</p>
       </div>
 
-      <Message v-if="oidcError" severity="warn" :closable="false" class="mb-4">Single sign-on failed. You can try again or sign in with a local account.</Message>
+      <Message v-if="oidcError" severity="warn" :closable="false" class="mb-4">{{ t('ui.sso_failed') }}</Message>
       <Message v-if="error" severity="error" :closable="false" class="mb-4">{{ error }}</Message>
 
       <form @submit.prevent="handleLogin">
@@ -190,20 +190,20 @@ async function handleForgot() {
     </div>
 
     <!-- Forgot password dialog -->
-    <Dialog v-model:visible="showForgot" header="Reset password" :style="{ width: '360px' }" modal>
+    <Dialog v-model:visible="showForgot" :header="t('ui.forgot_password.title')" :style="{ width: '360px' }" modal>
       <p class="text-sm text-muted mb-3">
-        Enter your username to receive a password reset link by email.
+        {{ t('ui.forgot_password.message') }}
       </p>
       <InputText
         v-model="forgotUsername"
-        placeholder="Username"
+        :placeholder="t('ui.forgot_password.username_placeholder')"
         class="w-full"
         autofocus
         @keyup.enter="handleForgot"
       />
       <template #footer>
-        <Button label="Cancel" severity="secondary" text @click="showForgot = false" />
-        <Button label="Send reset link" icon="pi pi-send" :loading="forgotLoading" @click="handleForgot" />
+        <Button :label="t('cancel')" severity="secondary" text @click="showForgot = false" />
+        <Button :label="t('ui.forgot_password.submit')" icon="pi pi-send" :loading="forgotLoading" @click="handleForgot" />
       </template>
     </Dialog>
   </div>

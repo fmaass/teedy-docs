@@ -12,7 +12,7 @@
     "login_failed_message": "Usuario o contraseña incorrectos",
     "password_lost_btn": "¿Contraseña olvidada?",
     "password_lost_sent_title": "Correo de reestablecimiento de contraseña enviado",
-    "password_lost_sent_message": "Se ha enviado un correo a <strong>{{ username }}</strong> para reestablecer su contraseña",
+    "password_lost_sent_message": "Se ha enviado un correo a <strong>{username}</strong> para reestablecer su contraseña",
     "password_lost_error_title": "Error al reestablecer la contraseña",
     "password_lost_error_message": "Imposible enviar correo de reestablecimiento de contraseña, por favor, contacte a su administrador para hacerlo manualmente"
   },
@@ -32,11 +32,11 @@
     "nav_documents": "Documentos",
     "nav_tags": "Etiquetas",
     "nav_users_groups": "Usuarios y Grupos",
-    "error_info": "{{ count }} nuevo error{{ count > 1 ? 's' : '' }}",
-    "logged_as": "Sesión iniciada como {{ username }}",
+    "error_info": "{count} nuevo error{count}",
+    "logged_as": "Sesión iniciada como {username}",
     "nav_settings": "Ajustes",
     "logout": "Cerrar sesión",
-    "global_quota_warning": "<strong>¡Advertencia!</strong> Cuota global casi alcanzada en {{ current | number: 0 }}MB ({{ percent | number: 1 }}%) usados en {{ total | number: 0 }}MB"
+    "global_quota_warning": "<strong>¡Advertencia!</strong> Cuota global casi alcanzada en {current}MB ({percent}%) usados en {total}MB"
   },
   "document": {
     "navigation_up": "Subir un nivel",
@@ -62,7 +62,7 @@
     "no_tags": "Ninguna etiqueta",
     "no_documents": "No hay documento(s) en la base de datos",
     "search": "Buscar",
-    "search_empty": "Sin coincidencias para <strong>\"{{ search }}\"</strong>",
+    "search_empty": "Sin coincidencias para <strong>\"{search}\"</strong>",
     "shared": "Compartido",
     "current_step_name": "Progreso actual",
     "title": "Título",
@@ -84,16 +84,16 @@
     "page_size_20": "20 por página",
     "page_size_30": "30 por página",
     "upgrade_quota": "Para actualizar su cuota, pregunte al administrador",
-    "quota": "{{ current | number: 0 }}MB ({{ percent | number: 1 }}%) usados en {{ total | number: 0 }}MB",
-    "count": "{{ count }} documento{{ count > 1 ? 's' : '' }} encontrado{{ count > 1 ? 's' : '' }}",
-    "last_updated": "Último actualizado {{ date | timeAgo: dateFormat }}",
+    "quota": "{current}MB ({percent}%) usados en {total}MB",
+    "count": "{count} documento{count} encontrado{count}",
+    "last_updated": "Último actualizado {date}",
     "view": {
       "delete_comment_title": "Eliminar comentario",
       "delete_comment_message": "¿Desea realmente eliminar este comentario?",
       "delete_document_title": "Eliminar documento",
       "delete_document_message": "¿Desea realmente eliminar este documento?",
       "shared_document_title": "Documento compartido",
-      "shared_document_message": "Puede compartir el documento ofreciendo este enlace. Tenga en cuenta que cualquiera que tenga este enlace puede ver el documento.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{{ link }}\" onclick=\"this.select(); document.execCommand('copy');\" />",
+      "shared_document_message": "Puede compartir el documento ofreciendo este enlace. Tenga en cuenta que cualquiera que tenga este enlace puede ver el documento.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
       "not_found": "Documento no encontrado",
       "forbidden": "Acceso denegado",
       "download_files": "Descargar archivos",
@@ -130,7 +130,7 @@
         "workflow_start_label": "¿Qué flujo de trabajo iniciar?",
         "add_more_workflow": "Añadir más flujos de trabajo",
         "start_workflow_submit": "Iniciar flujo de trabajo",
-        "full_name": "<strong>{{ name }}</strong> iniciado a {{ create_date | date }}",
+        "full_name": "<strong>{name}</strong> iniciado a {create_date}",
         "cancel_workflow": "Cancelar el flujo de trabajo actual",
         "cancel_workflow_title": "Cancelar flujo de trabajo",
         "cancel_workflow_message": "¿Desea realmente cancelar el flujo de trabajo actual?",
@@ -158,7 +158,7 @@
       "title_placeholder": "Nombre dado al recurso",
       "description_placeholder": "Cuenta del recurso",
       "new_files": "Nuevos archivos",
-      "orphan_files": "+ {{ count }} archivo{{ count > 1 ? 's' : '' }}",
+      "orphan_files": "+ {count} archivo{count}",
       "additional_metadata": "Metadatos adicionales",
       "subject_placeholder": "Tema del recurso",
       "identifier_placeholder": "Una referencia inequívoca al recurso dentro de un contexto dado",
@@ -233,7 +233,7 @@
       "name": "Nombre",
       "color": "Color",
       "parent": "Principal",
-      "info": "Los permisos en esta etiqueta también se aplicarán a los documentos etiquetados <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{{ name }}</span>",
+      "info": "Los permisos en esta etiqueta también se aplicarán a los documentos etiquetados <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span>",
       "circular_reference_title": "Referencia circular",
       "circular_reference_message": "La jerarquía de las etiquetas principales se encuentra en un búcle redundante, elija otra principal."
     }
@@ -243,17 +243,17 @@
       "members": "Miembros",
       "no_members": "Sin miembros",
       "related_links": "Enlaces relacionados",
-      "edit_group": "Editar {{ name }} grupo"
+      "edit_group": "Editar {name} grupo"
     }
   },
   "user": {
     "profile": {
       "groups": "Grupos",
       "quota_used": "Cuota usada",
-      "percent_used": "{{ percent | number: 0 }}% Usado",
+      "percent_used": "{percent}% Usado",
       "related_links": "Enlaces relacionados",
-      "document_created": "Documentos creados por {{ username }}",
-      "edit_user": "Editar {{ username }} usuario"
+      "document_created": "Documentos creados por {username}",
+      "edit_user": "Editar {username} usuario"
     }
   },
   "usergroup": {
@@ -290,7 +290,7 @@
         "delete_user_message": "¿Desea realmente eliminar este usuario? Todos los documentos, archivos y etiquetas asociados serán eliminados",
         "edit_user_failed_title": "El usuario ya existe",
         "edit_user_failed_message": "Este nombre de usuario ya fue escogido por otro usuario",
-        "edit_user_title": "Editar \"{{ username }}\"",
+        "edit_user_title": "Editar \"{username}\"",
         "add_user_title": "Añadir usuario",
         "username": "Usuario",
         "email": "Correo",
@@ -302,7 +302,7 @@
         "disabled": "Usuario deshabilitado",
         "password_reset_btn": "Enviar correo de reestablecimiento de contraseña a este usuario",
         "password_lost_sent_title": "Correo de reestablecimiento enviado",
-        "password_lost_sent_message": "Un correo de reestablecimiento de contraseña a sido enviado a <strong>{{ username }}</strong>",
+        "password_lost_sent_message": "Un correo de reestablecimiento de contraseña a sido enviado a <strong>{username}</strong>",
         "disable_totp_btn": "Desactivar autenticación en dos pasos para este usuario",
         "disable_totp_title": "Desactivar autenticación en dos pasos",
         "disable_totp_message": "¿Desea realmente desactivar la autenticación en dos pasos para este usuario?"
@@ -316,7 +316,7 @@
       "edit": {
         "delete_workflow_title": "Eliminar flujo de trabajo",
         "delete_workflow_message": "¿Desea realmente eliminar este flujo de trabajo? Los flujos de trabajo ejecutándose actualmente no serán eliminados",
-        "edit_workflow_title": "Editar \"{{ name }}\"",
+        "edit_workflow_title": "Editar \"{name}\"",
         "add_workflow_title": "Añadir flujo de trabajo",
         "name": "Nombre",
         "name_placeholder": "Nombre del paso o descripción",
@@ -336,14 +336,14 @@
       "enable_totp": "Activar autenticación en dos pasos",
       "enable_totp_message": "Asegúrese de tener una aplicación compatible con TOTP en su teléfono lista para agregar una nueva cuenta",
       "title": "Autenticación en dos pasos",
-      "message_1": "La autenticación en dos pasos le permite añadir una capa de seguridad en su <strong>{{ appName }}</strong> cuenta.<br/>Antes de activar esta característica, compruebe que disponga de una app compatible con TOTP en su teléfono:",
+      "message_1": "La autenticación en dos pasos le permite añadir una capa de seguridad en su <strong>{appName}</strong> cuenta.<br/>Antes de activar esta característica, compruebe que disponga de una app compatible con TOTP en su teléfono:",
       "message_google_authenticator": "Para Android, iOS, y Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
       "message_duo_mobile": "Para Android y iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
       "message_authenticator": "Para Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Estas aplicaciones generan automaticamente un código de validación que cambia cada cirto tiempo.<br/>Necesitará introducir el código cada vez que acceda a <strong>{{ appName }}</strong>.",
-      "secret_key": "Su clave secreta es: <strong>{{ secret }}</strong>",
+      "message_2": "Estas aplicaciones generan automaticamente un código de validación que cambia cada cirto tiempo.<br/>Necesitará introducir el código cada vez que acceda a <strong>{appName}</strong>.",
+      "secret_key": "Su clave secreta es: <strong>{secret}</strong>",
       "secret_key_warning": "Configure your TOTP app on your phone with this secret key now, you will not be able to access it later.",
-      "totp_enabled_message": "La autenticación en dos pasos esta habilitada par su cuenta.<br/>Cada vez que inicie sesión en <strong>{{ appName }}</strong>, se le pedirá el código de su teléfono.<br/>Si pierde su teléfono, no podrá volver a iniciar sesión, pero sesiones activas le permitirán regenerar la clave secreta.",
+      "totp_enabled_message": "La autenticación en dos pasos esta habilitada par su cuenta.<br/>Cada vez que inicie sesión en <strong>{appName}</strong>, se le pedirá el código de su teléfono.<br/>Si pierde su teléfono, no podrá volver a iniciar sesión, pero sesiones activas le permitirán regenerar la clave secreta.",
       "disable_totp": {
         "disable_totp": "Desactivar autenticación en dos pasos",
         "message": "Su cuenta dejará de estar protegida con la autenticación en dos pasos.",
@@ -363,7 +363,7 @@
         "delete_group_message": "¿Desea realmente eliminar este grupo?",
         "edit_group_failed_title": "El grupo ya existe",
         "edit_group_failed_message": "Este nombre de grupo ya fue escogido por otro grupo",
-        "edit_group_title": "Editar \"{{ name }}\"",
+        "edit_group_title": "Editar \"{name}\"",
         "add_group_title": "Añadir grupo",
         "name": "Nombre",
         "parent_group": "Grupo principal",
@@ -381,7 +381,7 @@
     },
     "config": {
       "title_guest_access": "Acceso invitado",
-      "message_guest_access": "Acceso invitado es un modo en el que cualquiera puede acceder {{ appName }} sin contraseña.<br/>Como un usuario normal, el invitado solo puede acceder a sus documentos, y aquellos accesibles a través de permisos.<br/>",
+      "message_guest_access": "Acceso invitado es un modo en el que cualquiera puede acceder {appName} sin contraseña.<br/>Como un usuario normal, el invitado solo puede acceder a sus documentos, y aquellos accesibles a través de permisos.<br/>",
       "enable_guest_access": "Activar acceso invitado",
       "disable_guest_access": "Desactivar acceso invitado",
       "title_theme": "Personalizar apariencia",
@@ -419,14 +419,14 @@
       "folder": "Carpeta IMAP",
       "tag": "Etiqueta añadida a documentos importado",
       "test": "Comprobar parámetros",
-      "last_sync": "Última sincronización: {{ data.date | date: 'medium' }}, {{ data.count }} mensaje{{ data.count > 1 ? 's' : '' }} importado{{ data.count > 1 ? 's' : '' }}",
-      "test_success": "La conexión con la bandeja de entrada es correcta ({{ count }} mensaje{{ count > 1 ? 's' : '' }} <strong>no leido{{ count > 1 ? 's' : '' }}</strong>)",
+      "last_sync": "Última sincronización: {data.date}, {data.count} mensaje{data} importado{data}",
+      "test_success": "La conexión con la bandeja de entrada es correcta ({count} mensaje{count} <strong>no leido{count}</strong>)",
       "test_fail": "Ha ocurrido un error al conectar con la bandeja de entrada, por favor, compruebe los parámetros",
       "saved": "Configuración IMAP guardada correctamente"
     },
     "monitoring": {
       "background_tasks": "Tareas en segundo plano",
-      "queued_tasks": "Actualmente hay {{ count }} tarea{{ count > 1 ? 's' : '' }} en cola.",
+      "queued_tasks": "Actualmente hay {count} tarea{count} en cola.",
       "queued_tasks_explain": "Procesamiento de archivos, creación de miniaturas, actualización del índice y reconocimiento óptico de caracteres (OCR) son tareas en segundo plano. Gran cantidad de tareas sin procesar resultarán en búsquedas incompletas.",
       "server_logs": "Registros del servidor",
       "log_date": "Fecha",
