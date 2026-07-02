@@ -54,17 +54,32 @@ public class TagDao {
      * @param tagIdSet Set of tag ID
      */
     public void updateTagList(String documentId, Set<String> tagIdSet) {
+        updateTagList(documentId, tagIdSet, null);
+    }
+
+    /**
+     * Update tags on a document, restricting which existing links may be removed.
+     *
+     * @param documentId Document ID
+     * @param tagIdSet Set of tag IDs the document should end up with
+     * @param deletableTagIdSet Tags the caller is allowed to remove; existing links whose tag is NOT in
+     *                          this set are preserved even if absent from tagIdSet. A null set means all
+     *                          links are deletable (system callers with full visibility).
+     */
+    public void updateTagList(String documentId, Set<String> tagIdSet, Set<String> deletableTagIdSet) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        
+
         // Get current tag links
         Query q = em.createQuery("select dt from DocumentTag dt where dt.documentId = :documentId and dt.deleteDate is null");
         q.setParameter("documentId", documentId);
         @SuppressWarnings("unchecked")
         List<DocumentTag> documentTagList = q.getResultList();
-        
-        // Deleting tags no longer linked
+
+        // Deleting tags no longer linked. Only remove links the caller is allowed to see/remove;
+        // links to tags outside deletableTagIdSet (e.g. tags invisible to the acting user) are preserved.
         for (DocumentTag documentTag : documentTagList) {
-            if (!tagIdSet.contains(documentTag.getTagId())) {
+            boolean deletable = deletableTagIdSet == null || deletableTagIdSet.contains(documentTag.getTagId());
+            if (deletable && !tagIdSet.contains(documentTag.getTagId())) {
                 documentTag.setDeleteDate(new Date());
             }
         }

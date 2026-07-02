@@ -1305,4 +1305,75 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
                 .get(JsonObject.class).getJsonNumber("storage_current").longValue();
     }
+
+    /**
+     * SEC-04 / BL-009: editing the tags of a shared document must preserve tag
+     * links the editor cannot see. A WRITE-sharing editor who saves only their
+     * own visible tags must not silently delete the owner's private tag.
+     */
+    @Test
+    public void testUpdateTagsPreservesInvisibleTags() {
+        // Owner A: a private tag and a document carrying it
+        clientUtil.createUser("tagkeep1");
+        String t1 = clientUtil.login("tagkeep1");
+        String tagAId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form().param("name", "OwnerPrivateTag").param("color", "#123456")), JsonObject.class)
+                .getString("id");
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("title", "Shared editable doc")
+                        .param("language", "eng")
+                        .param("tags", tagAId)), JsonObject.class)
+                .getString("id");
+
+        // Share the document to B with WRITE (to edit) and READ (to view)
+        clientUtil.createUser("tagkeep2");
+        String t2 = clientUtil.login("tagkeep2");
+        for (String perm : new String[]{"WRITE", "READ"}) {
+            target().path("/acl").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                    .put(Entity.form(new Form()
+                            .param("source", docId)
+                            .param("perm", perm)
+                            .param("target", "tagkeep2")
+                            .param("type", "USER")), JsonObject.class);
+        }
+
+        // B creates its own tag and edits the shared doc to carry only that tag
+        String tagBId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form().param("name", "EditorTag").param("color", "#654321")), JsonObject.class)
+                .getString("id");
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .post(Entity.form(new Form()
+                        .param("title", "Shared editable doc")
+                        .param("language", "eng")
+                        .param("tags", tagBId)), JsonObject.class);
+
+        // A must still see its private tag on the document (link preserved)
+        JsonArray aTags = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .get(JsonObject.class).getJsonArray("tags");
+        Assertions.assertTrue(tagsContain(aTags, tagAId),
+                "owner's invisible tag must be preserved after the editor's tag update");
+
+        // B sees the tag it added, but not A's private tag (invisible to B)
+        JsonArray bTags = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class).getJsonArray("tags");
+        Assertions.assertTrue(tagsContain(bTags, tagBId));
+        Assertions.assertFalse(tagsContain(bTags, tagAId));
+    }
+
+    private boolean tagsContain(JsonArray tags, String tagId) {
+        for (int i = 0; i < tags.size(); i++) {
+            if (tags.getJsonObject(i).getString("id").equals(tagId)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

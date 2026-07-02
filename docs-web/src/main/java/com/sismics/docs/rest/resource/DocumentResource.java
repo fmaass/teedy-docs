@@ -1246,18 +1246,20 @@ public class DocumentResource extends BaseResource {
         if (tagList != null) {
             TagDao tagDao = new TagDao();
             Set<String> tagSet = new HashSet<>();
-            Set<String> tagIdSet = new HashSet<>();
+            Set<String> visibleTagIdSet = new HashSet<>();
             List<TagDto> tagDtoList = tagDao.findByCriteria(new TagCriteria().setTargetIdList(getTargetIdList(null)), null);
             for (TagDto tagDto : tagDtoList) {
-                tagIdSet.add(tagDto.getId());
+                visibleTagIdSet.add(tagDto.getId());
             }
             for (String tagId : tagList) {
-                if (!tagIdSet.contains(tagId)) {
+                if (!visibleTagIdSet.contains(tagId)) {
                     throw new ClientException("TagNotFound", MessageFormat.format("Tag not found: {0}", tagId));
                 }
                 tagSet.add(tagId);
             }
-            tagDao.updateTagList(documentId, tagSet);
+            // Only remove links to tags the acting user can see; tags invisible to them (e.g. an owner's
+            // private tag on a shared document) must be preserved.
+            tagDao.updateTagList(documentId, tagSet, visibleTagIdSet);
         }
     }
 
