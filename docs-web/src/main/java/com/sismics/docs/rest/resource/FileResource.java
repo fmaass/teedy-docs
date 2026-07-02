@@ -278,7 +278,7 @@ public class FileResource extends BaseResource {
         }
 
         // Get the file
-        File file = findFile(id, null);
+        File file = findFile(id, null, PermType.WRITE);
 
         // Validate input data
         name = ValidationUtil.validateLength(name, "name", 1, 200, false);
@@ -498,7 +498,7 @@ public class FileResource extends BaseResource {
         }
 
         // Get versions
-        File file = findFile(id, null);
+        File file = findFile(id, null, PermType.READ);
         FileDao fileDao = new FileDao();
         List<File> fileList = Lists.newArrayList(file);
         if (file.getVersionId() != null) {
@@ -545,7 +545,7 @@ public class FileResource extends BaseResource {
         }
 
         // Get the file
-        File file = findFile(id, null);
+        File file = findFile(id, null, PermType.WRITE);
 
         // Delete the file
         FileDao fileDao = new FileDao();
@@ -606,7 +606,7 @@ public class FileResource extends BaseResource {
         }
 
         // Get the file
-        File file = findFile(fileId, shareId);
+        File file = findFile(fileId, shareId, PermType.READ);
 
         // Get the stored file
         UserDao userDao = new UserDao();
@@ -802,13 +802,13 @@ public class FileResource extends BaseResource {
      * @param shareId Share ID
      * @return File
      */
-    private File findFile(String fileId, String shareId) {
+    private File findFile(String fileId, String shareId, PermType permType) {
         FileDao fileDao = new FileDao();
         File file = fileDao.getFile(fileId);
         if (file == null) {
             throw new NotFoundException();
         }
-        checkFileAccessible(shareId, file);
+        checkFileAccessible(shareId, file, permType);
         return file;
     }
 
@@ -823,17 +823,18 @@ public class FileResource extends BaseResource {
         FileDao fileDao = new FileDao();
         List<File> files = fileDao.getFiles(filesIds);
         for (File file : files) {
-            checkFileAccessible(null, file);
+            checkFileAccessible(null, file, PermType.READ);
         }
         return files;
     }
 
     /**
-     * Check if a file is accessible to the current user
+     * Check if a file is accessible to the current user at the given permission level.
      * @param shareId Share ID
-     * @param file
+     * @param file File
+     * @param permType Permission required on the parent document (READ to view, WRITE to mutate)
      */
-    private void checkFileAccessible(String shareId, File file) {
+    private void checkFileAccessible(String shareId, File file, PermType permType) {
         if (file.getDocumentId() == null) {
             // It's an orphan file
             if (!file.getUserId().equals(principal.getId())) {
@@ -843,7 +844,7 @@ public class FileResource extends BaseResource {
         } else {
             // Check document accessibility
             AclDao aclDao = new AclDao();
-            if (!aclDao.checkPermission(file.getDocumentId(), PermType.READ, getTargetIdList(shareId))) {
+            if (!aclDao.checkPermission(file.getDocumentId(), permType, getTargetIdList(shareId))) {
                 throw new ForbiddenClientException();
             }
         }

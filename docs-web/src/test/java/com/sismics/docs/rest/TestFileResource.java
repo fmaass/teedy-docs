@@ -486,4 +486,95 @@ public class TestFileResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
                 .get(JsonObject.class).getJsonNumber("storage_current").longValue();
     }
+
+    /**
+     * SEC-02: renaming and deleting a file must require WRITE on the parent
+     * document, not merely READ. A user with only a READ ACL on a shared
+     * document must not be able to rename or delete its files.
+     */
+    @Test
+    public void testFileMutationRequiresWrite() throws Exception {
+        // Owner creates a document with a file
+        clientUtil.createUser("filewrite1");
+        String t1 = clientUtil.login("filewrite1");
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("title", "File write perm doc")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+        String fileId = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, t1, documentId);
+
+        // Share the document READ-only with a second user
+        clientUtil.createUser("filewrite2");
+        String t2 = clientUtil.login("filewrite2");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "READ")
+                        .param("target", "filewrite2")
+                        .param("type", "USER")), JsonObject.class);
+
+        // READ-only user may read the file data ...
+        Response response = target().path("/file/" + fileId + "/data").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // ... may list its versions (read path stays READ) ...
+        response = target().path("/file/" + fileId + "/versions").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // ... may download it via the zip-by-files endpoint (read path stays READ) ...
+        response = target().path("/file/zip").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .post(Entity.form(new Form().param("files", fileId)));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // ... but must NOT rename it
+        response = target().path("/file/" + fileId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .post(Entity.form(new Form().param("name", "hijacked-name")));
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
+
+        // ... and must NOT delete it
+        response = target().path("/file/" + fileId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .delete();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
+
+        // A non-owner granted WRITE on the document CAN rename and delete its files
+        // (proves the gate keys on the WRITE permission, not on document ownership)
+        clientUtil.createUser("filewrite3");
+        String t3 = clientUtil.login("filewrite3");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "WRITE")
+                        .param("target", "filewrite3")
+                        .param("type", "USER")), JsonObject.class);
+        String file2Id = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, t1, documentId);
+        json = target().path("/file/" + file2Id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .post(Entity.form(new Form().param("name", "write-user-renamed")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        json = target().path("/file/" + file2Id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // The owner (WRITE) can still rename and delete
+        json = target().path("/file/" + fileId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .post(Entity.form(new Form().param("name", "owner-renamed")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        json = target().path("/file/" + fileId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+    }
 }
