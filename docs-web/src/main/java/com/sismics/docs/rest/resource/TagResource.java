@@ -358,7 +358,7 @@ public class TagResource extends BaseResource {
         }
 
         TagDao tagDao = new TagDao();
-        java.util.Map<String, Long> counts = tagDao.getTagDocumentCounts();
+        java.util.Map<String, Long> counts = tagDao.getTagDocumentCounts(getTargetIdList(null));
 
         JsonObjectBuilder stats = Json.createObjectBuilder();
         for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {
@@ -398,12 +398,13 @@ public class TagResource extends BaseResource {
             }
         }
 
+        java.util.List<String> targetIdList = getTargetIdList(null);
         java.util.Map<String, Long> counts = orMode
-                ? tagDao.getCoOccurringTagCountsOr(selectedTagIds)
-                : tagDao.getCoOccurringTagCounts(selectedTagIds);
+                ? tagDao.getCoOccurringTagCountsOr(selectedTagIds, targetIdList)
+                : tagDao.getCoOccurringTagCounts(selectedTagIds, targetIdList);
         long total = selectedTagIds.isEmpty() ? 0
-                : orMode ? tagDao.countDocumentsWithAnyTag(selectedTagIds)
-                         : tagDao.countDocumentsWithAllTags(selectedTagIds);
+                : orMode ? tagDao.countDocumentsWithAnyTag(selectedTagIds, targetIdList)
+                         : tagDao.countDocumentsWithAllTags(selectedTagIds, targetIdList);
 
         JsonObjectBuilder facets = Json.createObjectBuilder();
         for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {
@@ -437,7 +438,7 @@ public class TagResource extends BaseResource {
         }
 
         TagDao tagDao = new TagDao();
-        List<Object[]> matrix = tagDao.getFullCoOccurrenceMatrix();
+        List<Object[]> matrix = tagDao.getFullCoOccurrenceMatrix(getTargetIdList(null));
 
         JsonArrayBuilder pairs = Json.createArrayBuilder();
         for (Object[] row : matrix) {
