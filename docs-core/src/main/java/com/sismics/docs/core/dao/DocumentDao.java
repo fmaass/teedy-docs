@@ -71,7 +71,20 @@ public class DocumentDao {
         q.setParameter("userId", userId);
         return q.getResultList();
     }
-    
+
+    /**
+     * Returns the list of all trashed (soft-deleted) documents owned by a user.
+     *
+     * @param userId User ID
+     * @return List of trashed documents
+     */
+    public List<Document> findDeletedByUserId(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Document> q = em.createQuery("select d from Document d where d.userId = :userId and d.deleteDate is not null", Document.class);
+        q.setParameter("userId", userId);
+        return q.getResultList();
+    }
+
     /**
      * Returns an active document with permission checking.
      * 

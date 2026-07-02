@@ -1203,28 +1203,16 @@ public class DocumentResource extends BaseResource {
         DocumentDao documentDao = new DocumentDao();
         FileDao fileDao = new FileDao();
 
-        DocumentCriteria documentCriteria = new DocumentCriteria();
-        documentCriteria.setDeleted(true);
-        documentCriteria.setTargetIdList(getTargetIdList(null));
-        SortCriteria sortCriteria = new SortCriteria(3, false);
-
+        // Scope to the caller's own trashed documents. Selecting by ACL is wrong here:
+        // trashing soft-deletes a document's ACLs, so an ACL-filtered search returns
+        // nothing for a non-admin owner and every owner's trash for an admin (who skips
+        // the ACL check). Ownership scoping mirrors the single-doc permanentDelete above
+        // and keeps deletion/quota events attributed to the real owner (the caller).
         int count = 0;
-        int batchSize = 100;
-        boolean hasMore = true;
-        while (hasMore) {
-            PaginatedList<DocumentDto> paginatedList = PaginatedLists.create(batchSize, 0);
-            try {
-                AppContext.getInstance().getIndexingHandler().findByCriteria(paginatedList, Lists.newArrayList(), documentCriteria, sortCriteria);
-            } catch (Exception e) {
-                throw new ServerException("SearchError", "Error listing trashed documents", e);
-            }
-
-            for (DocumentDto documentDto : paginatedList.getResultList()) {
-                fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), documentDto.getId());
-                documentDao.permanentDelete(documentDto.getId());
-                count++;
-            }
-            hasMore = !paginatedList.getResultList().isEmpty();
+        for (Document document : documentDao.findDeletedByUserId(principal.getId())) {
+            fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), document.getId());
+            documentDao.permanentDelete(document.getId());
+            count++;
         }
 
         JsonObjectBuilder response = Json.createObjectBuilder()

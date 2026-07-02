@@ -1168,4 +1168,141 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(1, tags.size());
         Assertions.assertEquals(tagBId, tags.getJsonObject(0).getString("id"));
     }
+
+    /**
+     * SEC-01: emptying trash must be scoped to the caller's own documents.
+     * A non-admin user can empty their own trash (regression: the ACL join
+     * required a live READ ACL, which is soft-deleted on trash, so this
+     * previously returned deleted_count == 0 for non-admins).
+     */
+    @Test
+    public void testEmptyTrashOwnerScope() {
+        clientUtil.createUser("emptytrash1");
+        String t1 = clientUtil.login("emptytrash1");
+
+        // Create a document
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("title", "Trash owner scope doc")
+                        .param("language", "eng")), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Trash it (soft-delete)
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // Empty own trash: exactly the one owned trashed doc is purged
+        json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonNumber("deleted_count").intValue());
+
+        // The doc is permanently gone (already purged by empty-trash)
+        Response response = target().path("/document/" + docId + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .delete();
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+    }
+
+    /**
+     * SEC-01 (cross-owner data-loss): emptying trash must NOT permanently
+     * delete documents owned by another user. Admin is the actor being
+     * restricted here (admin previously bypassed the ACL filter and purged
+     * every owner's trashed docs).
+     */
+    @Test
+    public void testEmptyTrashDoesNotPurgeOtherOwners() {
+        clientUtil.createUser("emptytrash2");
+        String t2 = clientUtil.login("emptytrash2");
+
+        // t2 creates and trashes a document
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form()
+                        .param("title", "Other owner trashed doc")
+                        .param("language", "eng")), JsonObject.class);
+        String docId = json.getString("id");
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .delete(JsonObject.class);
+
+        // Admin empties trash
+        String adminToken = adminToken();
+        target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+
+        // t2's trashed doc must have survived: t2 can still permanently delete it
+        json = target().path("/document/" + docId + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+    }
+
+    /**
+     * NF-01: empty-trash deletion/quota events must be attributed to the real
+     * owner. Emptying one's own trash releases the owner's storage; an admin
+     * emptying trash must not touch (nor release against the wrong account) a
+     * different owner's storage.
+     */
+    @Test
+    public void testEmptyTrashQuotaAttribution() throws Exception {
+        // --- Owner path: emptying own trash releases the owner's storage ---
+        clientUtil.createUser("emptytrash3");
+        String t3 = clientUtil.login("emptytrash3");
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .put(Entity.form(new Form()
+                        .param("title", "Quota owner doc")
+                        .param("language", "eng")), JsonObject.class);
+        String doc3Id = json.getString("id");
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, t3, doc3Id);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(t3));
+
+        // Trash keeps the file counted
+        target().path("/document/" + doc3Id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(t3));
+
+        // Emptying own trash releases the owner's storage
+        json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonNumber("deleted_count").intValue());
+        Assertions.assertEquals(0L, getUserQuota(t3));
+
+        // --- Cross-owner path: admin empty-trash must not affect another owner's storage ---
+        clientUtil.createUser("emptytrash4");
+        String t4 = clientUtil.login("emptytrash4");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t4)
+                .put(Entity.form(new Form()
+                        .param("title", "Quota other-owner doc")
+                        .param("language", "eng")), JsonObject.class);
+        String doc4Id = json.getString("id");
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, t4, doc4Id);
+        target().path("/document/" + doc4Id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t4)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(t4));
+
+        // Admin empties trash: t4's file is preserved and its storage unchanged
+        String adminToken = adminToken();
+        target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(t4));
+    }
+
+    private long getUserQuota(String userToken) {
+        return target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get(JsonObject.class).getJsonNumber("storage_current").longValue();
+    }
 }
