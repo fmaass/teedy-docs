@@ -68,6 +68,21 @@
       <param-name>enabled</param-name>
       <param-value>false</param-value>
     </init-param>
+    <!--
+      When header authentication is enabled, the X-Authenticated-User header is only trusted for
+      requests whose source IP is in a comma-separated allowlist of trusted proxies (exact IPs
+      and/or CIDR ranges, IPv4 or IPv6). If unset/empty, ALL header-based authentication is refused
+      (fail-closed). The proxy must OVERWRITE the header (a duplicated header is rejected), and the
+      built-in admin account can never be assumed via this header. Configure the allowlist via the
+      docs.header_authentication_trusted_proxies system property, or by uncommenting the init-param
+      below (a present init-param takes precedence over the system property, so leave it commented
+      out to use the system property):
+
+    <init-param>
+      <param-name>trusted_proxies</param-name>
+      <param-value>10.0.0.0/8,192.168.0.0/16</param-value>
+    </init-param>
+    -->
   </filter>
   
   <filter-mapping>

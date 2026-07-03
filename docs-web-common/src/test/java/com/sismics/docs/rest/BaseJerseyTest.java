@@ -95,6 +95,8 @@ public abstract class BaseJerseyTest extends JerseyTest {
     public void setUp() throws Exception {
         super.setUp();
         System.setProperty("docs.header_authentication", "true");
+        // Trust the Grizzly loopback client so the header-auth integration test can authenticate.
+        System.setProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY, "127.0.0.1,::1,0:0:0:0:0:0:0:1");
 
         clientUtil = new ClientUtil(target());
 
@@ -148,6 +150,8 @@ public abstract class BaseJerseyTest extends JerseyTest {
     @AfterEach
     public void tearDown() throws Exception {
         super.tearDown();
+        System.clearProperty("docs.header_authentication");
+        System.clearProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY);
         if (wiser != null) {
             wiser.stop();
         }
