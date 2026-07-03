@@ -136,7 +136,6 @@
     "edit": {
       "document_edited_with_errors": "文档编辑成功但部分文件没能上传",
       "document_added_with_errors": "文档成功添加但部分文件没能上传",
-      "document_added": "文档成功上传 (与{count}个文件)",
       "quota_reached": "达到限额",
       "primary_metadata": "主要元数据",
       "title_placeholder": "资源的性质或类型",
@@ -189,7 +188,6 @@
   "tag": {
     "new_tag": "新标签",
     "search": "搜索",
-    "edit_tag": "更改标签",
     "default": {
       "title": "标签",
       "message_1": "<strong>标签</strong> 是和文档相关的标示.",
@@ -246,7 +244,6 @@
     "menu_vocabularies": "词条",
     "menu_configuration": "配置",
     "menu_inbox": "收件箱扫描",
-    "menu_server_logs": "服务器日志",
     "user": {
       "title": "用户 <small>管理</small>",
       "add_user": "添加用户",
@@ -375,12 +372,6 @@
       "last_sync": "上次同步：{data.date}，{data.count}消息导入",
       "test_success": "与收件箱的连接成功（{count}消息）",
       "test_fail": "连接到收件箱时发生错误，请检查参数"
-    },
-    "log": {
-      "title": "服务器 <small>日志</small>",
-      "date": "日期",
-      "tag": "标签",
-      "message": "信息"
     },
     "session": {
       "title": "打开 <small>会话</small>",

@@ -108,7 +108,7 @@ function formatDate(ts: number) {
         <h2>{{ t('ui.webhooks.title') }}</h2>
         <p class="section-desc">
           {{ t('ui.webhooks.description') }}
-          The payload is <code>{"event": "EVENT_NAME", "id": "entity_id"}</code>.
+          {{ t('ui.webhooks.payload_hint') }} <code>{"event": "EVENT_NAME", "id": "entity_id"}</code>.
         </p>
       </div>
       <Button :label="t('ui.webhooks.add_webhook')" icon="pi pi-plus" size="small" @click="showAddDialog = true" />
@@ -132,7 +132,7 @@ function formatDate(ts: number) {
       </Column>
       <Column header="" style="width: 60px">
         <template #body="{ data }">
-          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete webhook" />
+          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" :aria-label="t('ui.webhooks.delete_title')" />
         </template>
       </Column>
       <template #empty>

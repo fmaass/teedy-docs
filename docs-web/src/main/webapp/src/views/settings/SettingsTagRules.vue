@@ -158,8 +158,8 @@ function getTagName(tagId: string) {
       </Column>
       <Column header="" style="width: 100px">
         <template #body="{ data }">
-          <Button icon="pi pi-pencil" text rounded size="small" @click="openEdit(data)" aria-label="Edit rule" />
-          <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="handleDelete(data)" aria-label="Delete rule" />
+          <Button icon="pi pi-pencil" text rounded size="small" @click="openEdit(data)" :aria-label="t('ui.tag_rules.edit_rule')" />
+          <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="handleDelete(data)" :aria-label="t('ui.tag_rules.delete_title')" />
         </template>
       </Column>
       <template #empty>

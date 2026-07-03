@@ -134,8 +134,8 @@ function userRowClass(data: UserListItem): string {
           <span class="user-name">
             <i class="pi pi-user" aria-hidden="true" />
             {{ data.username }}
-            <span v-if="data.disabled" class="badge-disabled">disabled</span>
-            <span v-if="data.totp_enabled" class="badge-totp" v-tooltip="'2FA enabled'">2FA</span>
+            <span v-if="data.disabled" class="badge-disabled">{{ t('disabled') }}</span>
+            <span v-if="data.totp_enabled" class="badge-totp" v-tooltip="t('ui.users.totp_enabled')">2FA</span>
           </span>
         </template>
       </Column>
@@ -159,8 +159,8 @@ function userRowClass(data: UserListItem): string {
       <Column header="" style="width: 90px">
         <template #body="{ data }">
           <span class="user-actions">
-            <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="'Edit'" />
-            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="'Delete'" />
+            <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="t('edit')" :aria-label="t('edit')" />
+            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
           </span>
         </template>
       </Column>

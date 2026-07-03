@@ -805,7 +805,8 @@
       "edit_user": "Edit {username}",
       "all_fields_required": "All fields are required",
       "new_password_hint": "leave blank to keep current",
-      "password": "Password"
+      "password": "Password",
+      "totp_enabled": "2FA enabled"
     },
     "apikeys": {
       "title": "API Keys",
@@ -845,7 +846,8 @@
       "failed_add": "Failed to add webhook",
       "failed_delete": "Failed to delete webhook",
       "delete_title": "Delete webhook",
-      "delete_confirm": "Delete webhook for \"{event}\" to {url}?"
+      "delete_confirm": "Delete webhook for \"{event}\" to {url}?",
+      "payload_hint": "The payload is"
     },
     "config": {
       "title": "Configuration",
@@ -898,7 +900,8 @@
     "nav": {
       "settings": "Settings",
       "documents": "Documents",
-      "manage_tags": "Manage tags"
+      "manage_tags": "Manage tags",
+      "administration": "Administration"
     },
     "date": "Date",
     "user": "User",
@@ -916,6 +919,15 @@
     "menu": "Menu",
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",
     "app_name": "teedy",
-    "document_management": "Document Management"
+    "document_management": "Document Management",
+    "actions": "Actions",
+    "trash_deleted": "Deleted",
+    "back_to_documents": "Back to documents",
+    "overview": "Overview",
+    "details": "Details",
+    "n_files": "{count} file | {count} files",
+    "copy_to_clipboard": "Copy to clipboard",
+    "confirm_rename": "Confirm rename",
+    "cancel_rename": "Cancel rename"
   }
 }

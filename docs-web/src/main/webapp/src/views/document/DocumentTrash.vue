@@ -132,12 +132,12 @@ function formatDeletedAt(ts: number) {
           <span class="doc-title">{{ data.title }}</span>
         </template>
       </Column>
-      <Column header="Deleted" style="width: 180px" sortable sortField="delete_date">
+      <Column :header="t('ui.trash_deleted')" style="width: 180px" sortable sortField="delete_date">
         <template #body="{ data }">
           <span class="doc-meta">{{ formatDeletedAt(data.delete_date) }}</span>
         </template>
       </Column>
-      <Column header="Actions" style="width: 200px">
+      <Column :header="t('ui.actions')" style="width: 200px">
         <template #body="{ data }">
           <div class="action-buttons">
             <Button

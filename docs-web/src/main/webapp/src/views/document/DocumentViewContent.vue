@@ -151,8 +151,8 @@ function confirmDelete(file: { id: string; name: string }) {
 
           <div class="file-actions">
             <template v-if="renamingId === file.id">
-              <Button icon="pi pi-check" text rounded size="small" severity="success" @click="commitRename(file.id)" aria-label="Confirm rename" />
-              <Button icon="pi pi-times" text rounded size="small" severity="secondary" @click="cancelRename" aria-label="Cancel rename" />
+              <Button icon="pi pi-check" text rounded size="small" severity="success" @click="commitRename(file.id)" :aria-label="t('ui.confirm_rename')" />
+              <Button icon="pi pi-times" text rounded size="small" severity="secondary" @click="cancelRename" :aria-label="t('ui.cancel_rename')" />
             </template>
             <template v-else>
               <Button

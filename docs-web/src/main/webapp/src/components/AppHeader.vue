@@ -31,7 +31,7 @@ async function handleLogout() {
       rounded
       size="small"
       @click="emit('toggleDrawer')"
-      aria-label="Menu"
+      :aria-label="t('ui.menu')"
     />
 
     <div class="action-spacer" />
@@ -52,8 +52,8 @@ async function handleLogout() {
         rounded
         size="small"
         @click="toggleDarkMode"
-        aria-label="Toggle dark mode"
-        v-tooltip.bottom="'Dark mode'"
+        :aria-label="t('ui.dark_mode')"
+        v-tooltip.bottom="t('ui.dark_mode')"
       />
       <span class="user-name">{{ auth.username }}</span>
       <Button

@@ -122,7 +122,7 @@ function handleDelete() {
             {{ formatDate(doc.create_date) }}
             <span v-if="doc.creator"> · <strong>{{ doc.creator }}</strong></span>
             <span v-if="doc.language" class="lang-badge">{{ languageLabel(doc.language) }}</span>
-            <span v-if="doc.file_count"> · {{ doc.file_count }} file{{ doc.file_count !== 1 ? 's' : '' }}</span>
+            <span v-if="doc.file_count"> · {{ t('ui.n_files', doc.file_count) }}</span>
           </p>
           <div v-if="doc.tags?.length" class="doc-header-tags">
             <TagBadge v-for="tag in doc.tags" :key="tag.id" :name="tag.name" :color="tag.color" />

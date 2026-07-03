@@ -109,7 +109,7 @@ const tagOptions = computed(() =>
 
       <Tabs v-model:value="slideOverTab">
         <TabList>
-          <Tab value="overview">Overview</Tab>
+          <Tab value="overview">{{ t('ui.overview') }}</Tab>
           <Tab value="files">{{ document.files?.length ? t('ui.files_count', { count: document.files.length }) : t('ui.files') }}</Tab>
         </TabList>
         <TabPanels>
@@ -120,7 +120,7 @@ const tagOptions = computed(() =>
                 <div class="slide-description" v-html="sanitizedDescription" />
               </div>
               <div class="slide-section">
-                <h4 class="slide-label">Details</h4>
+                <h4 class="slide-label">{{ t('ui.details') }}</h4>
                 <div class="slide-meta-grid">
                   <div class="meta-item"><span class="meta-key">{{ t('document.language') }}</span><span class="meta-val">{{ languageLabel(document.language) }}</span></div>
                   <div class="meta-item"><span class="meta-key">{{ t('document.creation_date') }}</span><span class="meta-val">{{ formatDate(document.create_date) }}</span></div>

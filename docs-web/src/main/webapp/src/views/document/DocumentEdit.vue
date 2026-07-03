@@ -324,7 +324,7 @@ async function handleSubmit() {
             severity="danger"
             size="small"
             @click="confirmDeleteExisting(file)"
-            aria-label="Remove file"
+            :aria-label="t('ui.remove_file')"
           />
         </div>
       </div>

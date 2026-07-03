@@ -33,7 +33,7 @@ function isNavActive(name: string) {
   <div class="admin-nav">
     <button class="back-to-docs" @click="emit('back')">
       <i class="pi pi-arrow-left" />
-      <span>Back to documents</span>
+      <span>{{ t('ui.back_to_documents') }}</span>
     </button>
 
     <template v-if="mode === 'tag'">
@@ -65,7 +65,7 @@ function isNavActive(name: string) {
         <span>{{ item.label }}</span>
       </router-link>
       <template v-if="isAdmin">
-        <div class="admin-nav-section">Administration</div>
+        <div class="admin-nav-section">{{ t('ui.nav.administration') }}</div>
         <router-link
           v-for="item in settingsAdminItems"
           :key="item.name"

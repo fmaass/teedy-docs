@@ -122,7 +122,7 @@ function formatDate(ts?: number) {
       </Column>
       <Column header="" style="width: 60px">
         <template #body="{ data }">
-          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" aria-label="Delete API key" />
+          <Button icon="pi pi-trash" text severity="danger" size="small" @click="confirmDelete(data)" :aria-label="t('ui.apikeys.delete_title')" />
         </template>
       </Column>
       <template #empty>
@@ -148,7 +148,7 @@ function formatDate(ts?: number) {
         <p class="key-warning">{{ t('ui.apikeys.copy_warning') }}</p>
         <div class="key-value-row">
           <code class="key-value">{{ createdKey }}</code>
-          <Button icon="pi pi-copy" text size="small" @click="copyKey" aria-label="Copy to clipboard" />
+          <Button icon="pi pi-copy" text size="small" @click="copyKey" :aria-label="t('ui.copy_to_clipboard')" />
         </div>
       </div>
       <template #footer>

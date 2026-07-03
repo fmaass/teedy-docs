@@ -109,6 +109,12 @@ jobs:
       - name: Install frontend dependencies
         run: cd docs-web/src/main/webapp && npm ci
 
+      - name: Check i18n key parity
+        run: cd docs-web/src/main/webapp && npm run i18n:check
+
+      - name: Lint frontend (i18n no-raw-text)
+        run: cd docs-web/src/main/webapp && npm run lint
+
       - name: Build with Maven
         run: ./mvnw --batch-mode -Pprod clean install -DskipTests
 
