@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -46,8 +46,12 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN dpkg-reconfigure -f noninteractive tzdata
 
+# SHA-512 pinned for JETTY_VERSION 12.0.21 (cross-checked against Maven Central .sha1).
+# Bump this when JETTY_VERSION changes, or the build fails closed.
+ENV JETTY_SHA512=f005b33d8062de928862cd2b63e5a07d43454fd69753e2d7959415baa07bb258de7579e659535839c9f31c160941c86b21f78f0ef20d6e8cf40d573eb653d7d4
 RUN wget -nv -O /tmp/jetty.tar.gz \
     "https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-home/${JETTY_VERSION}/jetty-home-${JETTY_VERSION}.tar.gz" \
+    && echo "${JETTY_SHA512}  /tmp/jetty.tar.gz" | sha512sum -c - \
     && tar xzf /tmp/jetty.tar.gz -C /opt \
     && rm /tmp/jetty.tar.gz \
     && mv /opt/jetty* /opt/jetty \

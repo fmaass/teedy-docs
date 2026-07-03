@@ -1,0 +1,12 @@
+# Keep the build context small and reproducible. Do NOT ignore docs.xml or
+# docs-web/target/docs-web-*.war — both are COPYed into the image.
+.git
+.github
+.vscode
+**/node_modules
+docs-importer
+docs/session-reviews
+*.iml
+.DS_Store
+teedy-docs-specification.md
+teedy-docs-specification.pdf
