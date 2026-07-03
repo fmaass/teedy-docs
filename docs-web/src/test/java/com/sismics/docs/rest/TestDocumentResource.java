@@ -12,6 +12,11 @@ import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
+import jakarta.json.JsonValue;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.MediaType;
@@ -1298,6 +1303,195 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(t4));
+    }
+
+    /**
+     * BL-004 (twin of SEC-01): listing trash must be scoped to the caller's own
+     * documents. A non-admin owner can see their own trashed document (regression:
+     * listTrash filtered by the Lucene ACL join, which requires a live READ ACL —
+     * soft-deleted on trash — so a non-admin's trash list was always empty).
+     */
+    @Test
+    public void testListTrashOwnerScope() {
+        clientUtil.createUser("listtrash1");
+        String t1 = clientUtil.login("listtrash1");
+
+        // Create a document and trash it (soft-delete)
+        String docId = trashNewDocument(t1, "List trash owner scope doc");
+
+        // The owner can list their own trashed document
+        JsonObject json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonNumber("total").intValue());
+        Assertions.assertTrue(trashListContains(json, docId),
+                "Owner's trash list must contain their own trashed document");
+    }
+
+    /**
+     * BL-004: the trash list must not leak another owner's trashed documents.
+     */
+    @Test
+    public void testListTrashDoesNotShowOtherOwners() {
+        clientUtil.createUser("listtrash2");
+        String t2 = clientUtil.login("listtrash2");
+        clientUtil.createUser("listtrash3");
+        String t3 = clientUtil.login("listtrash3");
+
+        // t2 creates and trashes a document
+        String doc2Id = trashNewDocument(t2, "Other owner list trash doc");
+
+        // t3's trash list must not contain t2's trashed document
+        JsonObject json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t3)
+                .get(JsonObject.class);
+        Assertions.assertFalse(trashListContains(json, doc2Id),
+                "Trash list must not leak another owner's trashed document");
+    }
+
+    /**
+     * BL-004: the trash list honors the `asc` order parameter over the delete date
+     * (default descending / most-recently-trashed first).
+     */
+    @Test
+    public void testListTrashSortOrder() throws InterruptedException {
+        clientUtil.createUser("listtrash4");
+        String t4 = clientUtil.login("listtrash4");
+
+        // Trash two documents with a gap so their delete dates are strictly distinct,
+        // making the expected ordering deterministic.
+        String docAId = trashNewDocument(t4, "List trash order doc A");
+        Thread.sleep(10);
+        String docBId = trashNewDocument(t4, "List trash order doc B");
+
+        // Default order is descending by delete date: the newest (B) comes first
+        List<String> descIds = trashListIds(target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t4)
+                .get(JsonObject.class));
+        Assertions.assertEquals(List.of(docBId, docAId), descIds);
+
+        // asc=true flips to ascending by delete date: the oldest (A) comes first
+        List<String> ascIds = trashListIds(target().path("/document/trash").queryParam("asc", "true").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t4)
+                .get(JsonObject.class));
+        Assertions.assertEquals(List.of(docAId, docBId), ascIds);
+    }
+
+    /**
+     * BL-004: the trash list is owner-scoped for the admin too (consistent with the
+     * owner-scoped emptyTrash/restore/permanentDelete) — admin does not see another
+     * owner's trashed documents in the list.
+     */
+    @Test
+    public void testListTrashAdminDoesNotSeeOtherOwners() {
+        clientUtil.createUser("listtrash6");
+        String t6 = clientUtil.login("listtrash6");
+
+        String doc6Id = trashNewDocument(t6, "Admin-should-not-see trashed doc");
+
+        // Admin lists trash: the other owner's trashed document must be absent
+        String adminToken = adminToken();
+        JsonObject json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertFalse(trashListContains(json, doc6Id),
+                "Admin's trash list must not contain another owner's trashed document");
+    }
+
+    /**
+     * BL-004: the trash list honors limit/offset paging in memory while total
+     * always reflects the full count of the caller's trashed documents.
+     */
+    @Test
+    public void testListTrashPagination() {
+        clientUtil.createUser("listtrash5");
+        String t5 = clientUtil.login("listtrash5");
+
+        // Trash three documents
+        String docAId = trashNewDocument(t5, "List trash page doc A");
+        String docBId = trashNewDocument(t5, "List trash page doc B");
+        String docCId = trashNewDocument(t5, "List trash page doc C");
+
+        // A very large limit combined with a non-zero offset must not overflow the in-memory
+        // pagination bounds (fromIndex + limit) and 500; it returns the tail of the list.
+        JsonObject huge = target().path("/document/trash")
+                .queryParam("limit", String.valueOf(Integer.MAX_VALUE))
+                .queryParam("offset", "1").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t5)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, huge.getInt("total"));
+        Assertions.assertEquals(2, huge.getJsonArray("documents").size());
+
+        // No limit: all three returned, total == 3
+        JsonObject full = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t5)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, full.getInt("total"));
+        Assertions.assertEquals(3, full.getJsonArray("documents").size());
+
+        // First page (limit=2): 2 documents, total still 3
+        JsonObject page1 = target().path("/document/trash").queryParam("limit", "2").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t5)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, page1.getInt("total"));
+        Assertions.assertEquals(2, page1.getJsonArray("documents").size());
+
+        // Second page (limit=2, offset=2): the remaining 1 document, total still 3
+        JsonObject page2 = target().path("/document/trash").queryParam("limit", "2").queryParam("offset", "2").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t5)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, page2.getInt("total"));
+        Assertions.assertEquals(1, page2.getJsonArray("documents").size());
+
+        // The two pages are disjoint and together cover all three trashed documents
+        Set<String> pageIds = new HashSet<>();
+        for (JsonValue v : page1.getJsonArray("documents")) {
+            pageIds.add(v.asJsonObject().getString("id"));
+        }
+        for (JsonValue v : page2.getJsonArray("documents")) {
+            Assertions.assertTrue(pageIds.add(v.asJsonObject().getString("id")),
+                    "paged results must not overlap across offset boundaries");
+        }
+        Assertions.assertEquals(Set.of(docAId, docBId, docCId), pageIds);
+    }
+
+    /**
+     * Creates a document for the given token, trashes it, and returns its id.
+     */
+    private String trashNewDocument(String token, String title) {
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", title)
+                        .param("language", "eng")), JsonObject.class);
+        String docId = json.getString("id");
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+        return docId;
+    }
+
+    /**
+     * @return the ordered list of document ids in a trash list response
+     */
+    private List<String> trashListIds(JsonObject trashResponse) {
+        List<String> ids = new ArrayList<>();
+        for (JsonValue value : trashResponse.getJsonArray("documents")) {
+            ids.add(value.asJsonObject().getString("id"));
+        }
+        return ids;
+    }
+
+    /**
+     * @return true if the trash list response's documents array contains a document with the given id
+     */
+    private boolean trashListContains(JsonObject trashResponse, String docId) {
+        for (JsonValue value : trashResponse.getJsonArray("documents")) {
+            if (docId.equals(value.asJsonObject().getString("id"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private long getUserQuota(String userToken) {

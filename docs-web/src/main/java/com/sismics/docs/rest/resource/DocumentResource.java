@@ -83,6 +83,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -1054,8 +1055,7 @@ public class DocumentResource extends BaseResource {
      * @apiGroup Document
      * @apiParam {Number} [limit] Total number of documents to return
      * @apiParam {Number} [offset] Start offset
-     * @apiParam {Number} [sort_column] Column index to sort on
-     * @apiParam {Boolean} [asc] If true, sort in ascending order
+     * @apiParam {Boolean} [asc] If true, order by delete date ascending (default: descending, most-recently-trashed first)
      * @apiSuccess {Object[]} documents List of trashed documents
      * @apiSuccess {Number} total Total number of trashed documents
      * @apiPermission user
@@ -1067,39 +1067,42 @@ public class DocumentResource extends BaseResource {
     public Response listTrash(
             @QueryParam("limit") Integer limit,
             @QueryParam("offset") Integer offset,
-            @QueryParam("sort_column") Integer sortColumn,
             @QueryParam("asc") Boolean asc) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
 
-        DocumentCriteria documentCriteria = new DocumentCriteria();
-        documentCriteria.setDeleted(true);
-        documentCriteria.setTargetIdList(getTargetIdList(null));
+        // Scope to the caller's own trashed documents. Selecting by ACL is wrong here:
+        // trashing soft-deletes a document's ACLs, and the search's ACL join requires a
+        // live READ ACL, so an ACL-filtered trash list is always empty for a non-admin
+        // owner. Ownership scoping mirrors emptyTrash/restore/permanentDelete, which are
+        // all keyed on the owner (== caller).
+        DocumentDao documentDao = new DocumentDao();
+        List<Document> deletedList = documentDao.findDeletedByUserId(principal.getId());
 
-        SortCriteria sortCriteria = new SortCriteria(sortColumn, asc);
-        PaginatedList<DocumentDto> paginatedList = PaginatedLists.create(limit, offset);
+        // Order by delete date; most-recently-trashed first unless ascending is requested.
+        Comparator<Document> byDeleteDate = Comparator.comparing(Document::getDeleteDate);
+        deletedList.sort(Boolean.TRUE.equals(asc) ? byDeleteDate : byDeleteDate.reversed());
 
-        try {
-            AppContext.getInstance().getIndexingHandler().findByCriteria(paginatedList, Lists.newArrayList(), documentCriteria, sortCriteria);
-        } catch (Exception e) {
-            throw new ServerException("SearchError", "Error searching trashed documents", e);
-        }
+        int total = deletedList.size();
+        int fromIndex = Math.min(offset == null ? 0 : Math.max(0, offset), total);
+        // Use long arithmetic for the upper bound so a large limit cannot overflow int and yield a negative toIndex.
+        int toIndex = limit == null ? total : (int) Math.min((long) fromIndex + Math.max(0, limit), (long) total);
 
         JsonArrayBuilder documents = Json.createArrayBuilder();
-        for (DocumentDto documentDto : paginatedList.getResultList()) {
+        for (Document document : deletedList.subList(fromIndex, toIndex)) {
             documents.add(Json.createObjectBuilder()
-                    .add("id", documentDto.getId())
-                    .add("title", documentDto.getTitle())
-                    .add("description", JsonUtil.nullable(documentDto.getDescription()))
-                    .add("language", documentDto.getLanguage())
-                    .add("create_date", documentDto.getCreateTimestamp())
-                    .add("delete_date", documentDto.getDeleteTimestamp()));
+                    .add("id", document.getId())
+                    .add("title", document.getTitle())
+                    .add("description", JsonUtil.nullable(document.getDescription()))
+                    .add("language", document.getLanguage())
+                    .add("create_date", document.getCreateDate().getTime())
+                    .add("delete_date", document.getDeleteDate().getTime()));
         }
 
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("documents", documents)
-                .add("total", paginatedList.getResultCount());
+                .add("total", total);
         return Response.ok().entity(response.build()).build();
     }
 
