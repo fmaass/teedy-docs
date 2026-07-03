@@ -31,8 +31,11 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.google.common.io.ByteStreams;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.DocumentUtil;
+import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.MetadataUtil;
 import com.sismics.docs.core.util.PdfUtil;
@@ -63,6 +66,7 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
@@ -79,8 +83,11 @@ import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -553,6 +560,157 @@ public class DocumentResource extends BaseResource {
                 .add("suggestions", suggestions);
 
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Export the current user's documents as a ZIP archive with a JSON manifest.
+     *
+     * @api {get} /document/export Export the current user's documents
+     * @apiDescription Streams a ZIP containing every document owned (created) by the caller,
+     * each document's files in a per-document folder, plus a manifest.json describing them.
+     * The export is scoped by creator, so it never leaks another user's documents.
+     * @apiName GetDocumentExport
+     * @apiGroup Document
+     * @apiSuccess {Object} zip The ZIP archive is the whole response
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission user
+     * @apiVersion 1.12.0
+     *
+     * @return Response
+     */
+    @GET
+    @Path("export")
+    @Produces({MediaType.APPLICATION_OCTET_STREAM, MediaType.TEXT_PLAIN})
+    public Response export() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        final String userId = principal.getId();
+        final String username = principal.getName();
+        final DocumentDao documentDao = new DocumentDao();
+        final FileDao fileDao = new FileDao();
+        final UserDao userDao = new UserDao();
+
+        // The caller's own (non-trashed) documents, scoped by creator so that an admin
+        // cannot accidentally export another user's data through this endpoint.
+        final List<Document> documentList = documentDao.findByUserId(userId);
+
+        StreamingOutput stream = outputStream -> {
+            JsonArrayBuilder documentsJson = Json.createArrayBuilder();
+            try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
+                int docIndex = 0;
+                for (Document document : documentList) {
+                    String folder = docIndex + "-" + sanitizePathSegment(document.getTitle());
+                    JsonArrayBuilder filesJson = Json.createArrayBuilder();
+
+                    List<File> fileList = fileDao.getByDocumentId(userId, document.getId());
+                    int fileIndex = 0;
+                    for (File file : fileList) {
+                        // Sanitize both segments so a crafted document title or file name cannot
+                        // escape the archive layout (ZIP-slip) on the recipient's machine.
+                        String entryName = folder + "/" + fileIndex + "-"
+                                + sanitizeFileName(file.getFullName(Integer.toString(fileIndex)));
+                        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
+                        // Files are encrypted with their creator's key.
+                        User fileUser = userDao.getById(file.getUserId());
+                        // A single missing/undecryptable file must not corrupt the whole export:
+                        // skip it and record the failure in the manifest instead of aborting.
+                        boolean exported = true;
+                        try (InputStream fileInputStream = Files.newInputStream(storedFile);
+                             InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, fileUser.getPrivateKey())) {
+                            zipOutputStream.putNextEntry(new ZipEntry(entryName));
+                            ByteStreams.copy(decryptedStream, zipOutputStream);
+                            zipOutputStream.closeEntry();
+                        } catch (Exception e) {
+                            exported = false;
+                        }
+                        JsonObjectBuilder fileJson = Json.createObjectBuilder()
+                                .add("id", file.getId())
+                                .add("name", JsonUtil.nullable(file.getName()))
+                                .add("mimetype", JsonUtil.nullable(file.getMimeType()))
+                                .add("size", JsonUtil.nullable(file.getSize()))
+                                .add("exported", exported)
+                                .add("path", JsonUtil.nullable(exported ? entryName : null));
+                        filesJson.add(fileJson);
+                        fileIndex++;
+                    }
+
+                    documentsJson.add(Json.createObjectBuilder()
+                            .add("id", document.getId())
+                            .add("title", JsonUtil.nullable(document.getTitle()))
+                            .add("description", JsonUtil.nullable(document.getDescription()))
+                            .add("subject", JsonUtil.nullable(document.getSubject()))
+                            .add("identifier", JsonUtil.nullable(document.getIdentifier()))
+                            .add("publisher", JsonUtil.nullable(document.getPublisher()))
+                            .add("format", JsonUtil.nullable(document.getFormat()))
+                            .add("source", JsonUtil.nullable(document.getSource()))
+                            .add("type", JsonUtil.nullable(document.getType()))
+                            .add("coverage", JsonUtil.nullable(document.getCoverage()))
+                            .add("rights", JsonUtil.nullable(document.getRights()))
+                            .add("language", JsonUtil.nullable(document.getLanguage()))
+                            .add("create_date", document.getCreateDate().getTime())
+                            .add("update_date", document.getUpdateDate() != null
+                                    ? document.getUpdateDate().getTime() : document.getCreateDate().getTime())
+                            .add("files", filesJson));
+                    docIndex++;
+                }
+
+                // Manifest is written last, after every document has been enumerated.
+                String manifest = Json.createObjectBuilder()
+                        .add("generator", "Teedy")
+                        .add("username", username)
+                        .add("export_date", new Date().getTime())
+                        .add("document_count", documentList.size())
+                        .add("documents", documentsJson)
+                        .build().toString();
+                zipOutputStream.putNextEntry(new ZipEntry("manifest.json"));
+                zipOutputStream.write(manifest.getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.closeEntry();
+            }
+            outputStream.close();
+        };
+
+        return Response.ok(stream)
+                .header("Content-Type", "application/zip")
+                .header("Content-Disposition", "attachment; filename=\"teedy-export.zip\"")
+                .build();
+    }
+
+    /**
+     * Sanitize a string for use as a single ZIP path segment.
+     *
+     * @param value Raw value
+     * @return Safe path segment
+     */
+    private static String sanitizePathSegment(String value) {
+        if (StringUtils.isBlank(value)) {
+            return "document";
+        }
+        return value.replaceAll("\\W+", "_");
+    }
+
+    /**
+     * Reduce a file name to a safe single archive entry segment: strip any path
+     * separators and traversal, keeping the base name (and its extension).
+     *
+     * @param value Raw file name
+     * @return Safe file name
+     */
+    private static String sanitizeFileName(String value) {
+        if (StringUtils.isBlank(value)) {
+            return "file";
+        }
+        String name = value.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        name = name.replaceAll("\\p{Cntrl}", "").trim();
+        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
+            return "file";
+        }
+        return name;
     }
 
     /**

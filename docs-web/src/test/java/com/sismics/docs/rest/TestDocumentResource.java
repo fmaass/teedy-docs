@@ -10,19 +10,28 @@ import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import jakarta.json.Json;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
+import jakarta.json.JsonReader;
 import jakarta.json.JsonValue;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -1569,5 +1578,94 @@ public class TestDocumentResource extends BaseJerseyTest {
             }
         }
         return false;
+    }
+
+    /**
+     * Test the full-account export endpoint (GET /document/export). It must stream a ZIP
+     * containing a manifest plus the caller's OWN documents' files, scoped to the caller
+     * (a non-admin must not receive another user's documents).
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testDocumentExport() throws Exception {
+        // Two independent non-admin users, each with a document and a file
+        clientUtil.createUser("export1");
+        String export1Token = clientUtil.login("export1");
+        clientUtil.createUser("export2");
+        String export2Token = clientUtil.login("export2");
+
+        String doc1Id = clientUtil.createDocument(export1Token);
+        clientUtil.addFileToDocument(FILE_PIA_00452_JPG, export1Token, doc1Id);
+
+        String doc2Id = clientUtil.createDocument(export2Token);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, export2Token, doc2Id);
+
+        // export1 exports their account
+        Response response = target().path("/document/export").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, export1Token)
+                .get();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        Map<String, byte[]> entries = readZipEntries((InputStream) response.getEntity());
+
+        // Manifest is present and describes exactly the caller's own document
+        Assertions.assertTrue(entries.containsKey("manifest.json"), "manifest.json missing from export");
+        JsonObject manifest;
+        try (JsonReader reader = Json.createReader(new ByteArrayInputStream(entries.get("manifest.json")))) {
+            manifest = reader.readObject();
+        }
+        Assertions.assertEquals("export1", manifest.getString("username"));
+        JsonArray manifestDocs = manifest.getJsonArray("documents");
+        Assertions.assertEquals(1, manifestDocs.size());
+        Assertions.assertEquals(1, manifest.getInt("document_count"));
+        JsonObject manifestDoc = manifestDocs.getJsonObject(0);
+        Assertions.assertEquals(doc1Id, manifestDoc.getString("id"));
+        Assertions.assertEquals("Document Title", manifestDoc.getString("title"));
+
+        // No manifest document references export2's document
+        for (int i = 0; i < manifestDocs.size(); i++) {
+            Assertions.assertNotEquals(doc2Id, manifestDocs.getJsonObject(i).getString("id"));
+        }
+
+        // The manifest points at a real file entry, marked exported, that exists in the ZIP
+        // with byte-for-byte the original file's content (a strong positive, not just size).
+        JsonArray manifestFiles = manifestDoc.getJsonArray("files");
+        Assertions.assertEquals(1, manifestFiles.size());
+        JsonObject manifestFile = manifestFiles.getJsonObject(0);
+        Assertions.assertTrue(manifestFile.getBoolean("exported"));
+        String filePath = manifestFile.getString("path");
+        Assertions.assertTrue(entries.containsKey(filePath), "file entry " + filePath + " missing from ZIP");
+        byte[] ownFixture = Resources.toByteArray(Resources.getResource(FILE_PIA_00452_JPG));
+        Assertions.assertArrayEquals(ownFixture, entries.get(filePath));
+
+        // Scoping: export2's file must NOT appear in export1's export — checked by exact content.
+        byte[] otherFixture = Resources.toByteArray(Resources.getResource(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG));
+        for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+            Assertions.assertFalse(entry.getKey().contains("Einstein-Roosevelt-letter"),
+                    "export leaked another user's file name: " + entry.getKey());
+            Assertions.assertFalse(Arrays.equals(otherFixture, entry.getValue()),
+                    "export leaked another user's file content: " + entry.getKey());
+        }
+
+        // Anonymous callers are rejected
+        response = target().path("/document/export").request().get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()));
+    }
+
+    /**
+     * Read all entries of a ZIP stream into a name -> bytes map.
+     */
+    private Map<String, byte[]> readZipEntries(InputStream is) throws Exception {
+        Map<String, byte[]> entries = new HashMap<>();
+        try (ZipInputStream zis = new ZipInputStream(is)) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ByteStreams.copy(zis, baos);
+                entries.put(entry.getName(), baos.toByteArray());
+                zis.closeEntry();
+            }
+        }
+        return entries;
     }
 }
