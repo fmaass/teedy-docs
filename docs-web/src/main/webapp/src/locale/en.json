@@ -928,6 +928,8 @@
     "n_files": "{count} file | {count} files",
     "copy_to_clipboard": "Copy to clipboard",
     "confirm_rename": "Confirm rename",
-    "cancel_rename": "Cancel rename"
+    "cancel_rename": "Cancel rename",
+    "load_error": "Something went wrong while loading",
+    "retry": "Retry"
   }
 }

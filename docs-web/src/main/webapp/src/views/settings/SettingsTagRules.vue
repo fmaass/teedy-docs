@@ -15,6 +15,7 @@ import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -55,7 +56,7 @@ const ruleTypes = computed(() => [
   { label: t('ui.tag_rules.type_content_regex'), value: 'CONTENT_REGEX' },
 ])
 
-const { data: rules, isLoading: loading } = useQuery({
+const { data: rules, isLoading: loading, isError, refetch } = useQuery({
   queryKey: ['tagmatchrules'],
   queryFn: () => api.get('/tagmatchrule').then((r) => r.data.rules as Rule[]),
 })
@@ -163,7 +164,8 @@ function getTagName(tagId: string) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-bolt" :message="t('ui.tag_rules.no_rules')" />
+        <ErrorState v-if="isError" @retry="refetch()" />
+        <EmptyState v-else icon="pi pi-bolt" :message="t('ui.tag_rules.no_rules')" />
       </template>
     </DataTable>
 

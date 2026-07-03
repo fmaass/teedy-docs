@@ -10,13 +10,14 @@ import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
-const { data: trashData, isLoading } = useQuery({
+const { data: trashData, isLoading, isError, refetch } = useQuery({
   queryKey: ['trash'],
   queryFn: () => listTrash({ limit: 200 }).then((r) => r.data),
 })
@@ -161,6 +162,8 @@ function formatDeletedAt(ts: number) {
         </template>
       </Column>
     </DataTable>
+
+    <ErrorState v-else-if="isError" @retry="refetch()" />
 
     <EmptyState v-else icon="pi pi-trash" :message="t('ui.trash_empty')" />
   </div>

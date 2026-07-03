@@ -11,13 +11,14 @@ import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
-const { data: keysData, isLoading } = useQuery({
+const { data: keysData, isLoading, isError, refetch } = useQuery({
   queryKey: ['apikeys'],
   queryFn: () => listApiKeys().then((r) => r.data.api_keys),
 })
@@ -126,7 +127,8 @@ function formatDate(ts?: number) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-key" :message="t('ui.apikeys.no_keys')" />
+        <ErrorState v-if="isError" @retry="refetch()" />
+        <EmptyState v-else icon="pi pi-key" :message="t('ui.apikeys.no_keys')" />
       </template>
     </DataTable>
 

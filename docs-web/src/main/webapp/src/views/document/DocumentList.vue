@@ -11,6 +11,7 @@ import type { MenuItem } from 'primevue/menuitem'
 import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import DocumentTable from '../../components/DocumentTable.vue'
@@ -36,7 +37,7 @@ watch([() => tf.combinedSearch, () => tf.tagMode], () => {
   pageOffset.value = 0
 })
 
-const { data: documentsData, isLoading } = useQuery({
+const { data: documentsData, isLoading, isError, refetch } = useQuery({
   queryKey: computed(() => ['documents', {
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
@@ -228,6 +229,8 @@ const contextMenuItems = computed(() => {
         @page="onPage"
         @sort="onSort"
       />
+
+      <ErrorState v-else-if="isError" @retry="refetch()" />
 
       <EmptyState
         v-else

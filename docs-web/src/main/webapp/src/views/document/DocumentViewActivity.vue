@@ -7,6 +7,7 @@ import api from '../../api/client'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const doc = inject<Ref<DocumentDetail | null>>('document')!
@@ -20,7 +21,7 @@ interface AuditEntry {
 
 const docId = computed(() => doc.value?.id)
 
-const { data: logs, isLoading: loading } = useQuery({
+const { data: logs, isLoading: loading, isError, refetch } = useQuery({
   queryKey: computed(() => ['auditlog', docId.value]),
   queryFn: () => api.get('/auditlog', { params: { document: docId.value } }).then((r) => (r.data.logs || []) as AuditEntry[]),
   enabled: computed(() => !!docId.value),
@@ -42,7 +43,8 @@ function formatDate(ts: number) {
       <Column field="username" :header="t('ui.user')" style="width: 120px" />
       <Column field="message" :header="t('ui.action')" />
       <template #empty>
-        <EmptyState icon="pi pi-history" :message="t('ui.no_activity')" />
+        <ErrorState v-if="isError" @retry="refetch()" />
+        <EmptyState v-else icon="pi pi-history" :message="t('ui.no_activity')" />
       </template>
     </DataTable>
   </div>

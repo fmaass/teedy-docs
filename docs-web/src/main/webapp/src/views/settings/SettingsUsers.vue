@@ -13,13 +13,14 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { formatDate, formatStorage } from '../../composables/useFormatters'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
-const { data: usersData, isLoading: loading } = useQuery({
+const { data: usersData, isLoading: loading, isError, refetch } = useQuery({
   queryKey: ['users'],
   queryFn: () => listUsers().then((r) => r.data.users),
 })
@@ -165,7 +166,8 @@ function userRowClass(data: UserListItem): string {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-users" :message="t('ui.users.no_users')" />
+        <ErrorState v-if="isError" @retry="refetch()" />
+        <EmptyState v-else icon="pi pi-users" :message="t('ui.users.no_users')" />
       </template>
     </DataTable>
 

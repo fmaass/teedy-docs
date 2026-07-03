@@ -12,13 +12,14 @@ import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
-const { data: webhooksData, isLoading } = useQuery({
+const { data: webhooksData, isLoading, isError, refetch } = useQuery({
   queryKey: ['webhooks'],
   queryFn: () => listWebhooks().then((r) => r.data.webhooks),
 })
@@ -136,7 +137,8 @@ function formatDate(ts: number) {
         </template>
       </Column>
       <template #empty>
-        <EmptyState icon="pi pi-link" :message="t('ui.webhooks.no_webhooks')" />
+        <ErrorState v-if="isError" @retry="refetch()" />
+        <EmptyState v-else icon="pi pi-link" :message="t('ui.webhooks.no_webhooks')" />
       </template>
     </DataTable>
 

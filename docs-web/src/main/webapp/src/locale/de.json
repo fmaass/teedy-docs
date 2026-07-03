@@ -928,6 +928,8 @@
     "n_files": "{count} Datei | {count} Dateien",
     "copy_to_clipboard": "In die Zwischenablage kopieren",
     "confirm_rename": "Umbenennen bestätigen",
-    "cancel_rename": "Umbenennen abbrechen"
+    "cancel_rename": "Umbenennen abbrechen",
+    "load_error": "Beim Laden ist ein Fehler aufgetreten",
+    "retry": "Erneut versuchen"
   }
 }

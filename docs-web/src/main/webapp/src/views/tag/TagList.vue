@@ -11,6 +11,7 @@ import ColorPicker from 'primevue/colorpicker'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
+import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -21,7 +22,7 @@ const newTagName = ref('')
 const newTagColor = ref('2aabd2')
 const newTagParent = ref<string | null>(null)
 
-const { data: tags, isLoading } = useQuery({
+const { data: tags, isLoading, isError, refetch } = useQuery({
   queryKey: ['tags'],
   queryFn: () => listTags().then((r) => r.data.tags),
   staleTime: 60_000,
@@ -141,6 +142,7 @@ function selectTag(node: { key: string }) {
             </span>
           </template>
         </Tree>
+        <ErrorState v-else-if="isError" @retry="refetch()" />
         <div v-else class="empty-state">
           <i class="pi pi-tags" />
           <p>{{ t('ui.tags_page.no_tags') }}</p>
