@@ -12,6 +12,7 @@ import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -49,8 +50,18 @@ public class TrashPurgeService extends AbstractScheduledService {
         return Scheduler.newFixedDelaySchedule(1, 60, TimeUnit.MINUTES);
     }
 
-    private void purgeExpiredTrash() {
-        int retentionDays = getRetentionDays();
+    void purgeExpiredTrash() {
+        purgeExpiredTrash(getRetentionDays());
+    }
+
+    /**
+     * Purge trashed documents whose deletion is older than the given retention window.
+     * Package-private with an explicit retention so tests are deterministic and decoupled
+     * from the DOCS_TRASH_RETENTION_DAYS environment.
+     *
+     * @param retentionDays Retention window in days; a value &lt;= 0 disables purging
+     */
+    void purgeExpiredTrash(int retentionDays) {
         if (retentionDays <= 0) {
             return;
         }
@@ -71,17 +82,25 @@ public class TrashPurgeService extends AbstractScheduledService {
             TransactionUtil.handle(() -> {
                 FileDao fileDao = new FileDao();
                 DocumentDao documentDao = new DocumentDao();
+                // Attribute the deletion/quota events to the document's real owner, not "admin",
+                // so the owner's storage is released instead of admin's (matches per-doc permanentDelete).
+                Document document = documentDao.getDeletedById(documentId);
+                if (document == null) {
+                    // Already purged or restored between the scan and now.
+                    return;
+                }
+                String ownerId = document.getUserId();
                 List<File> fileList = fileDao.getAllByDocumentId(documentId);
                 for (File file : fileList) {
                     FileDeletedAsyncEvent event = new FileDeletedAsyncEvent();
-                    event.setUserId("admin");
+                    event.setUserId(ownerId);
                     event.setFileId(file.getId());
                     event.setFileSize(file.getSize());
                     ThreadLocalContext.get().addAsyncEvent(event);
                 }
 
                 DocumentDeletedAsyncEvent event = new DocumentDeletedAsyncEvent();
-                event.setUserId("admin");
+                event.setUserId(ownerId);
                 event.setDocumentId(documentId);
                 ThreadLocalContext.get().addAsyncEvent(event);
 
