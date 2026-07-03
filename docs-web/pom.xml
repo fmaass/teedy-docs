@@ -236,10 +236,10 @@
                 <configuration>
                   <target name="building">
                     <exec executable="cmd" dir="${project.basedir}/src/main/webapp" osfamily="windows" failonerror="true">
-                      <arg line="/c npm install" />
+                      <arg line="/c npm ci" />
                     </exec>
                     <exec executable="npm" dir="${project.basedir}/src/main/webapp" osfamily="unix" failonerror="true">
-                      <arg line="install" />
+                      <arg line="ci" />
                     </exec>
                     <exec executable="cmd" dir="${project.basedir}/src/main/webapp" osfamily="windows" failonerror="true">
                       <arg line="/c npm run build" />

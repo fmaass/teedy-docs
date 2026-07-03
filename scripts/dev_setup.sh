@@ -35,7 +35,7 @@ echo "Dependencies installed."
 cd "$(dirname "$0")/.." || exit 1
 
 echo "Installing frontend dependencies..."
-cd docs-web/src/main/webapp && npm install && cd ../../../..
+cd docs-web/src/main/webapp && npm ci && cd ../../../..
 
 echo "Building backend..."
 ./mvnw clean -DskipTests install
