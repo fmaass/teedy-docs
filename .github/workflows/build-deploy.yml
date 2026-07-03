@@ -118,3 +118,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+# DEP-02 PR-gating proof: this trivial change exercises the pull_request CI path.
