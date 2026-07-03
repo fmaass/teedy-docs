@@ -128,6 +128,7 @@ function typeIcon(type: string) {
             severity="danger"
             @click="confirmRemove(acl)"
             v-tooltip="t('ui.permissions.remove')"
+            :aria-label="t('ui.permissions.remove')"
           />
         </div>
       </div>

@@ -18,7 +18,8 @@ function toggleDarkMode() {
 
 async function handleLogout() {
   await auth.logout()
-  router.push({ name: 'login' })
+  // Land on the local login form, not straight back into an SSO auto-redirect loop.
+  router.push({ name: 'login', query: { local: '1' } })
 }
 </script>
 

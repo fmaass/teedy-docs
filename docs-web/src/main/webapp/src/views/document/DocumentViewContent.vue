@@ -163,6 +163,7 @@ function confirmDelete(file: { id: string; name: string }) {
                 severity="secondary"
                 @click="startRename(file)"
                 v-tooltip="t('rename')"
+                :aria-label="t('rename')"
               />
               <Button
                 icon="pi pi-trash"
@@ -172,6 +173,7 @@ function confirmDelete(file: { id: string; name: string }) {
                 severity="danger"
                 @click="confirmDelete(file)"
                 v-tooltip="t('ui.remove_file')"
+                :aria-label="t('ui.remove_file')"
               />
             </template>
           </div>

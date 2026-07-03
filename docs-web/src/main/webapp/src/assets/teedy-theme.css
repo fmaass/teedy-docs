@@ -135,6 +135,23 @@ a:hover {
 .mb-3 { margin-bottom: 0.75rem; }
 .mb-4 { margin-bottom: 1rem; }
 
+/* ── Accessibility: visible keyboard focus (WCAG 2.4.7) ──
+   Fallback outline for custom native buttons/links (.back-to-docs, .back-link,
+   .related-pill, .pdf-fallback-link, …) that had no focus style. PrimeVue styles
+   live in @layer primevue (see main.ts); this rule is unlayered, so it would
+   otherwise override PrimeVue's own focus rings regardless of :where() — exclude
+   any element carrying a PrimeVue `p-*` class so only custom controls are touched. */
+:where(
+  button:not([class*='p-']),
+  a:not([class*='p-']),
+  [role='button']:not([class*='p-']),
+  [tabindex]:not([tabindex='-1']):not([class*='p-'])
+):focus-visible {
+  outline: 2px solid var(--p-primary-color, #2aabd2);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 /* ── Dark mode ── */
 .dark-mode {
   color-scheme: dark;

@@ -15,7 +15,8 @@
     "password_lost_sent_message": "Eine E-Mail wurde an <strong>{username}</strong> gesendet, um dessen Passwort zurückzusetzen.",
     "password_lost_error_title": "Fehler beim Zurücksetzen des Passworts",
     "password_lost_error_message": "Wenn Sie keine E-Mail zum Zurücksetzen des Passworts senden können, wenden Sie sich bitte an Ihren Administrator, um einen manuellen Reset durchzuführen.",
-    "login_with_sso": "Mit SSO anmelden"
+    "login_with_sso": "Mit SSO anmelden",
+    "use_local_account": "Lokales Konto verwenden"
   },
   "passwordlost": {
     "title": "Passwort vergessen",

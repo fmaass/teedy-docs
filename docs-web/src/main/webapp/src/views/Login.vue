@@ -77,6 +77,13 @@ function handleOidcLogin() {
   window.location.href = `api/oidc/login?returnUrl=${returnUrl}`
 }
 
+// Pin local login: sets ?local so the SSO auto-redirect is suppressed and the
+// local account form is presented (also clears an SSO error query).
+function useLocalAccount() {
+  oidcError.value = false
+  router.replace({ name: 'login', query: { local: '1' } })
+}
+
 async function handleGuestLogin() {
   error.value = ''
   guestLoading.value = true
@@ -187,6 +194,15 @@ async function handleForgot() {
           @click="handleOidcLogin"
         />
       </div>
+
+      <button
+        v-if="oidcEnabled"
+        type="button"
+        class="local-account-link"
+        @click="useLocalAccount"
+      >
+        {{ t('login.use_local_account') }}
+      </button>
     </div>
 
     <!-- Forgot password dialog -->
@@ -236,5 +252,20 @@ async function handleForgot() {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--p-content-border-color);
+}
+
+.local-account-link {
+  display: block;
+  width: 100%;
+  margin-top: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--teedy-brand);
+  text-align: center;
+}
+.local-account-link:hover {
+  text-decoration: underline;
 }
 </style>
