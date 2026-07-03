@@ -13,26 +13,50 @@ public class DialectUtil {
      * @return Object not found
      */
     public static boolean isObjectNotFound(String message) {
-        return EMF.isDriverH2() && message.contains("not found") ||
-                EMF.isDriverPostgresql() && message.contains("does not exist");
+        return isObjectNotFound(message, EMF.isDriverPostgresql());
+    }
+
+    /**
+     * Checks if the error relates to an object not found, for an explicit dialect.
+     *
+     * @param message Error message
+     * @param postgresql True if the target dialect is PostgreSQL (else H2)
+     * @return Object not found
+     */
+    public static boolean isObjectNotFound(String message, boolean postgresql) {
+        return !postgresql && message.contains("not found") ||
+                postgresql && message.contains("does not exist");
     }
 
 
     /**
-     * Transform SQL dialect to current dialect.
+     * Transform SQL dialect to the driver's current dialect (derived from EMF).
      *
      * @param sql SQL to transform
      * @return Transformed SQL
      */
     public static String transform(String sql) {
+        return transform(sql, EMF.isDriverPostgresql());
+    }
+
+    /**
+     * Transform SQL from the HSQLDB/H2 source dialect to an explicit target dialect.
+     * Deriving the dialect from the connection (rather than the global EMF) lets the
+     * migration runner target a database independent of the app's configured driver.
+     *
+     * @param sql SQL to transform
+     * @param postgresql True if the target dialect is PostgreSQL (else H2)
+     * @return Transformed SQL, or null if the line does not apply to the target dialect
+     */
+    public static String transform(String sql, boolean postgresql) {
         if (sql.startsWith("!PGSQL!")) {
-            return EMF.isDriverH2() ? null : sql.substring(7);
+            return postgresql ? sql.substring(7) : null;
         }
         if (sql.startsWith("!H2!")) {
-            return EMF.isDriverPostgresql() ? null : sql.substring(4);
+            return postgresql ? null : sql.substring(4);
         }
 
-        if (EMF.isDriverPostgresql()) {
+        if (postgresql) {
             sql = transformToPostgresql(sql);
         }
         return sql;

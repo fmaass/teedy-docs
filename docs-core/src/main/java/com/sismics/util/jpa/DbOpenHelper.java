@@ -30,6 +30,8 @@ abstract class DbOpenHelper {
 
     private final Connection connection;
 
+    private final boolean postgresql;
+
     private final List<Exception> exceptions = new ArrayList<>();
 
     private Statement stmt;
@@ -41,6 +43,24 @@ abstract class DbOpenHelper {
      */
     DbOpenHelper(Connection connection) {
         this.connection = connection;
+        this.postgresql = isPostgresql(connection);
+    }
+
+    /**
+     * Derive the target dialect from the connection itself, so migrations transform
+     * correctly regardless of the app's globally-configured driver (e.g. a Postgres
+     * test connection while EMF is configured for H2).
+     */
+    private static boolean isPostgresql(Connection connection) {
+        if (connection == null) {
+            return false;
+        }
+        try {
+            String product = connection.getMetaData().getDatabaseProductName();
+            return product != null && product.toLowerCase().contains("postgresql");
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     public void open() {
@@ -58,7 +78,7 @@ abstract class DbOpenHelper {
                     oldVersion = Integer.parseInt(oldVersionStr);
                 }
             } catch (Exception e) {
-                if (DialectUtil.isObjectNotFound(e.getMessage())) {
+                if (DialectUtil.isObjectNotFound(e.getMessage(), postgresql)) {
                     log.info("Unable to get database version: Table T_CONFIG not found");
                 } else {
                     log.error("Unable to get database version", e);
@@ -88,6 +108,14 @@ abstract class DbOpenHelper {
         } catch (Exception e) {
             exceptions.add(e);
             log.error("Unable to complete schema update", e);
+            // Undo the partial upgrade (whole run is one transaction) and fail closed so the
+            // caller (EMF) refuses to boot on a partial schema.
+            try {
+                connection.rollback();
+            } catch (SQLException re) {
+                log.error("Unable to roll back failed schema update", re);
+            }
+            throw new IllegalStateException("Database schema update failed; aborting startup", e);
         } finally {
             try {
                 if (stmt != null) {
@@ -129,7 +157,7 @@ abstract class DbOpenHelper {
      * @param inputScript Script to execute
      * @throws IOException e
      */
-    private void executeScript(InputStream inputScript) throws IOException {
+    void executeScript(InputStream inputScript) throws IOException {
         List<String> lines = CharStreams.readLines(new InputStreamReader(inputScript));
 
         for (String sql : lines) {
@@ -137,7 +165,7 @@ abstract class DbOpenHelper {
                 continue;
             }
 
-            String transformed = DialectUtil.transform(sql);
+            String transformed = DialectUtil.transform(sql, postgresql);
             if (transformed != null) {
                 try {
                     log.debug(transformed);
@@ -148,6 +176,9 @@ abstract class DbOpenHelper {
                         log.error("Error executing SQL statement: {}", sql);
                         log.error(e.getMessage());
                     }
+                    // Fail fast: a swallowed statement error would let the script's final
+                    // DB_VERSION bump record success on a partial schema.
+                    throw new IllegalStateException("Migration statement failed: " + sql, e);
                 }
             }
         }

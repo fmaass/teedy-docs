@@ -56,16 +56,34 @@ public final class EMF {
                     }
                 };
                 openHelper.open();
+                failClosedIfMigrationErrors(openHelper);
 
                 emfInstance = Persistence.createEntityManagerFactory("transactions-optional", properties);
             } finally {
                 bootstrapConnection.close();
             }
         } catch (Throwable t) {
+            // Fail closed: a failed migration must refuse boot, not leave a null EMF that limps on a
+            // partial schema. An error in a static initializer surfaces as ExceptionInInitializerError.
             log.error("Error creating EMF", t);
+            throw new ExceptionInInitializerError(t);
         }
     }
     
+    /**
+     * Fail closed if the migration runner recorded any error: refuse to build the EMF on a
+     * partial schema. Extracted from the static initializer so the boot-refusal decision is
+     * unit-testable (the static init itself only runs once per JVM with the real, clean scripts).
+     *
+     * @param openHelper The migration runner after open()
+     */
+    static void failClosedIfMigrationErrors(DbOpenHelper openHelper) {
+        if (!openHelper.getExceptions().isEmpty()) {
+            throw new IllegalStateException("Database schema update reported "
+                    + openHelper.getExceptions().size() + " error(s); refusing to start on a partial schema");
+        }
+    }
+
     private static Properties getEntityManagerProperties() {
         // Use properties file if exists
         try {
