@@ -501,4 +501,48 @@ public class TestUserResource extends BaseJerseyTest {
                 .delete();
         Assertions.assertEquals(Response.Status.OK, Response.Status.fromStatusCode(response.getStatus()));
     }
+
+    /**
+     * Test that an administrator can reset another user's password directly, without any
+     * email/SMTP round-trip (the recovery path for a lost local password when mail is
+     * unconfigured — see the account recovery matrix in docs/). Proves the reset takes
+     * effect: the old password stops working and the new one logs in.
+     */
+    @Test
+    public void testAdminPasswordResetWithoutSmtp() {
+        // A regular user with the default test password
+        clientUtil.createUser("recovery1");
+
+        // The user can log in with the original password
+        Response response = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "recovery1")
+                        .param("password", "Test1234")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
+
+        // An admin resets the user's password directly — no password_lost/email involved
+        String adminToken = adminToken();
+        JsonObject json = target().path("/user/recovery1").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("password", "Recovered5678")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // The old password no longer works
+        response = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "recovery1")
+                        .param("password", "Test1234")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
+
+        // The new password logs the user in
+        response = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "recovery1")
+                        .param("password", "Recovered5678")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
+    }
 }
