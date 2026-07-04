@@ -269,16 +269,12 @@ public class LuceneIndexingHandler implements IndexingHandler {
 
         StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C c0, d.DOC_TITLE_C c1, d.DOC_DESCRIPTION_C c2, d.DOC_CREATEDATE_D c3, d.DOC_LANGUAGE_C c4, d.DOC_IDFILE_C, ");
         sb.append(" s.count c5, ");
-        sb.append(" rs2.RTP_ID_C c7, rs2.RTP_NAME_C, d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
+        sb.append(" d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
         sb.append(" from T_DOCUMENT d ");
         sb.append(" left join (SELECT count(s.SHA_ID_C) count, ac.ACL_SOURCEID_C " +
                 "   FROM T_SHARE s, T_ACL ac " +
                 "   WHERE ac.ACL_TARGETID_C = s.SHA_ID_C AND ac.ACL_DELETEDATE_D IS NULL AND " +
                 "         s.SHA_DELETEDATE_D IS NULL group by ac.ACL_SOURCEID_C) s on s.ACL_SOURCEID_C = d.DOC_ID_C ");
-        sb.append(" left join (select rs.*, rs3.idDocument " +
-                "from T_ROUTE_STEP rs " +
-                "join (select r.RTE_IDDOCUMENT_C idDocument, rs.RTP_IDROUTE_C idRoute, min(rs.RTP_ORDER_N) minOrder from T_ROUTE_STEP rs join T_ROUTE r on r.RTE_ID_C = rs.RTP_IDROUTE_C and r.RTE_DELETEDATE_D is null where rs.RTP_DELETEDATE_D is null and rs.RTP_ENDDATE_D is null group by rs.RTP_IDROUTE_C, r.RTE_IDDOCUMENT_C) rs3 on rs.RTP_IDROUTE_C = rs3.idRoute and rs.RTP_ORDER_N = rs3.minOrder " +
-                "where rs.RTP_IDTARGET_C in (:targetIdList)) rs2 on rs2.idDocument = d.DOC_ID_C ");
 
         // Add search criterias
         if (!SecurityUtil.skipAclCheck(criteria.getTargetIdList())) {
@@ -287,8 +283,11 @@ public class LuceneIndexingHandler implements IndexingHandler {
             sb.append(" left join T_DOCUMENT_TAG dta on dta.DOT_IDDOCUMENT_C = d.DOC_ID_C and dta.DOT_DELETEDATE_D is null ");
             sb.append(" left join T_ACL a2 on a2.ACL_TARGETID_C in (:targetIdList) and a2.ACL_SOURCEID_C = dta.DOT_IDTAG_C and a2.ACL_PERM_C = 'READ' and a2.ACL_DELETEDATE_D is null ");
             criteriaList.add("(a.ACL_ID_C is not null or a2.ACL_ID_C is not null)");
+            // The :targetIdList parameter is only referenced by the ACL joins above, so bind it
+            // only when those joins are present (i.e. not skipping the ACL check). Binding it
+            // unconditionally would make it an unknown parameter for admin/skip-ACL searches.
+            parameterMap.put("targetIdList", criteria.getTargetIdList());
         }
-        parameterMap.put("targetIdList", criteria.getTargetIdList());
         if (!Strings.isNullOrEmpty(criteria.getSimpleSearch()) || !Strings.isNullOrEmpty(criteria.getFullSearch())) {
             documentSearchMap = search(criteria.getSimpleSearch(), criteria.getFullSearch());
             if (documentSearchMap.isEmpty()) {
@@ -373,10 +372,6 @@ public class LuceneIndexingHandler implements IndexingHandler {
             criteriaList.add("d.DOC_IDUSER_C = :creatorId");
             parameterMap.put("creatorId", criteria.getCreatorId());
         }
-        if (criteria.getActiveRoute() != null && criteria.getActiveRoute()) {
-            criteriaList.add("rs2.RTP_ID_C is not null");
-        }
-
         criteriaList.add(trashQuery ? "d.DOC_DELETEDATE_D is not null" : "d.DOC_DELETEDATE_D is null");
 
         sb.append(" where ");
@@ -399,8 +394,6 @@ public class LuceneIndexingHandler implements IndexingHandler {
             documentDto.setFileId((String) o[i++]);
             Number shareCount = (Number) o[i++];
             documentDto.setShared(shareCount != null && shareCount.intValue() > 0);
-            documentDto.setActiveRoute(o[i++] != null);
-            documentDto.setCurrentStepName((String) o[i++]);
             documentDto.setUpdateTimestamp(((Timestamp) o[i++]).getTime());
             Timestamp deleteTs = (Timestamp) o[i];
             if (deleteTs != null) {

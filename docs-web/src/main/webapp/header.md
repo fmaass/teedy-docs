@@ -84,5 +84,3 @@ If a search `VALUE` is considered invalid, the search result will be empty.
   * `title:VALUE`: the title of the document must be `VALUE`
 * User
   * `by:VALUE`: the document creator's username must be `VALUE` with an exact match, the user must not be deleted
-* Workflow
-  * `workflow:VALUE`: if `VALUE` is `me` the document must have an active route, for other `VALUE`s the criteria is ignored

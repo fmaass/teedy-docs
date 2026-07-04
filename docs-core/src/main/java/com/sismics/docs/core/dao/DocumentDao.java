@@ -323,8 +323,6 @@ public class DocumentDao {
         em.createNativeQuery("delete from T_ACL where ACL_SOURCEID_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_RELATION where REL_IDDOCFROM_C = :id or REL_IDDOCTO_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_COMMENT where COM_IDDOC_C = :id").setParameter("id", id).executeUpdate();
-        em.createNativeQuery("delete from T_ROUTE_STEP where RTP_IDROUTE_C in (select RTE_ID_C from T_ROUTE where RTE_IDDOCUMENT_C = :id)").setParameter("id", id).executeUpdate();
-        em.createNativeQuery("delete from T_ROUTE where RTE_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_AUDIT_LOG where LOG_IDENTITY_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_FILE where FIL_IDDOC_C = :id").setParameter("id", id).executeUpdate();

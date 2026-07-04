@@ -96,15 +96,6 @@ public class DocumentDto {
      */
     private String creator;
 
-    /**
-     * A route is active.
-     */
-    private boolean activeRoute;
-
-    /**
-     * Current route step name.
-     */
-    private String currentStepName;
 
     /**
      * Deletion date.
@@ -253,29 +244,12 @@ public class DocumentDto {
         this.creator = creator;
     }
 
-    public boolean isActiveRoute() {
-        return activeRoute;
-    }
-
-    public void setActiveRoute(boolean activeRoute) {
-        this.activeRoute = activeRoute;
-    }
-
-    public String getCurrentStepName() {
-        return currentStepName;
-    }
-
     public Long getUpdateTimestamp() {
         return updateTimestamp;
     }
 
     public void setUpdateTimestamp(Long updateTimestamp) {
         this.updateTimestamp = updateTimestamp;
-    }
-
-    public DocumentDto setCurrentStepName(String currentStepName) {
-        this.currentStepName = currentStepName;
-        return this;
     }
 
     public Long getDeleteTimestamp() {

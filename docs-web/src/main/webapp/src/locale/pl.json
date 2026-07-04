@@ -53,7 +53,6 @@
     "search_after_update_date": "Zmienione po dacie",
     "search_tags": "Etykiety",
     "search_shared": "Tylko udostępnione dokumenty",
-    "search_workflow": "Przepływ przypisany do mnie",
     "search_clear": "Czyść",
     "any_language": "Dowolny język",
     "add_document": "Dodaj dokument",
@@ -64,7 +63,6 @@
     "search": "Szukaj",
     "search_empty": "Nie znaleziono wyników dla <strong>\"{search}\"</strong>",
     "shared": "Udostępniony",
-    "current_step_name": "Bieżący krok",
     "title": "Tytuł",
     "description": "Opis",
     "contributors": "Współtwórcy",
@@ -103,10 +101,6 @@
       "no_comments": "Brak komentarzy do tego dokumentu",
       "add_comment": "Dodaj komentarz",
       "error_loading_comments": "Błąd ładowania komentarzy",
-      "workflow_current": "Bieżący etap przepływu",
-      "workflow_comment": "Dodaj komentarz do przepływu",
-      "workflow_validated_title": "Etap przepływu sprawdzony",
-      "workflow_validated_message": "Etap przepływu został zweryfikowany poprawnie.",
       "content": {
         "content": "Treść",
         "delete_file_title": "Usuń plik",
@@ -123,18 +117,6 @@
         "open_versions": "Pokaż historię wersji",
         "display_mode_list": "Wyświetl pliki jako listę",
         "display_mode_grid": "Wyświetl pliki jako siatkę"
-      },
-      "workflow": {
-        "workflow": "Przepływ",
-        "message": "Zweryfikuj lub zaakceptuj dokument przez osoby z organizacji używając przepływów.",
-        "workflow_start_label": "Który przepływ uruchomić?",
-        "add_more_workflow": "Dodaj więcej przepływów",
-        "start_workflow_submit": "Uruchom przepływ",
-        "full_name": "<strong>{name}</strong> uruchomiony {create_date}",
-        "cancel_workflow": "Anuluj bieżący przepływ",
-        "cancel_workflow_title": "Anuluj przepływ",
-        "cancel_workflow_message": "Naprawdę chcesz anulować bieżący przepływ?",
-        "no_workflow": "Nie możesz uruchomoć żadnego przepływu dla tego dokumentu."
       },
       "permissions": {
         "permissions": "Uprawnienia",
@@ -180,7 +162,6 @@
       "footer_sismics": "Wykonane z <span class=\"fas fa-heart\"></span> przez <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "Dokumentacja API",
       "feedback": "Przeslij uwagi",
-      "workflow_document_list": "Dokumenty przypisane do ciebie",
       "select_all": "Zaznacz wszystko",
       "select_none": "Odznacz wszystko"
     },
@@ -272,7 +253,6 @@
     "menu_opened_sessions": "Otwarte sesje",
     "menu_file_importer": "Wsadowy import plików",
     "menu_general_settings": "Ustawienia główne",
-    "menu_workflow": "Przepływ",
     "menu_users": "Użytkownicy",
     "menu_groups": "Grupy",
     "menu_vocabularies": "Słowniki",
@@ -304,7 +284,6 @@
         "delete_user_title": "Usuń użytkownika",
         "delete_user_message": "Naprawdę chcesz usunąć tego użytkownika? Wszystkie powiązane dokumenty, pliki oraz etykiety zostaną usunięte",
         "user_used_title": "Użytkownicy w użyciu",
-        "user_used_message": "Ten użytkownik jest użyty w przepływie \"{name}\"",
         "edit_user_failed_title": "Użytkownik już istnieje",
         "edit_user_failed_message": "Nazwa użytkownika jest już używana",
         "edit_user_title": "Edytuj \"{username}\"",
@@ -323,30 +302,6 @@
         "disable_totp_btn": "Wyłącz uwierzytelnienie dwuskładnikowe dla tego użytkownika",
         "disable_totp_title": "Wyłącz uwierzytelnienie dwuskładnikowe",
         "disable_totp_message": "Jesteś pewien, że chcesz wyłączyć uwierzytelnienie wduskładnikowe dla tego użytkownika?"
-      }
-    },
-    "workflow": {
-      "title": "Konfiguracja przepływu",
-      "add_workflow": "Dodaj przepływ",
-      "name": "Nazwa",
-      "create_date": "Data utworzenia",
-      "edit": {
-        "delete_workflow_title": "Usuń przepływ",
-        "delete_workflow_message": "Naprawdę chcesz usunąć ten przepływ? Uruchomione przepływy nie mogą zostać usunięte",
-        "edit_workflow_title": "Edytuj \"{name}\"",
-        "add_workflow_title": "Dodaj przepływ",
-        "name": "Nazwa",
-        "name_placeholder": "Nazwa kroku lub opis",
-        "drag_help": "Przeciągnij i upuść aby, zmienić kolejność",
-        "type": "Typ kroku",
-        "type_approve": "Akceptacja",
-        "type_validate": "Sprawdzenie",
-        "target": "Przypisany do",
-        "target_help": "<strong>Akceptacja:</strong> Zaakceptuj lub odrzuć przegląd<br/><strong>Sprawdzenie:</strong> Przejrzyj i kontynuuj przepływ",
-        "add_step": "Dodaj krok przepływu",
-        "actions": "Co dzieje cię później?",
-        "remove_action": "Usuń akcję",
-        "acl_info": "Tylko użytkownicy i grupy zdefiniowane tutaj mogą wystartować przepływ na dokumencie."
       }
     },
     "security": {
@@ -381,7 +336,6 @@
         "edit_group_failed_title": "Grupa już istnieje",
         "edit_group_failed_message": "Ta nazwa grupy jest już zajęta przez inną grupę",
         "group_used_title": "Grupa w użyciu",
-        "group_used_message": "Ta grupa jest używana w przepływie \"{name}\"",
         "edit_group_title": "Edytuj \"{name}\"",
         "add_group_title": "Dodaj grupę",
         "name": "Nazwa",
@@ -531,8 +485,6 @@
       "Document": "Dokument",
       "File": "Plik",
       "Group": "Grupa",
-      "Route": "Przepływ",
-      "RouteModel": "Model przepływu",
       "Tag": "Etykieta",
       "User": "Użytkownik",
       "Webhook": "Webhook"
@@ -562,15 +514,6 @@
     "USER": "Użytkownik",
     "GROUP": "Grupa",
     "SHARE": "Udostępnienienie"
-  },
-  "workflow_type": {
-    "VALIDATE": "Sprawdzenie",
-    "APPROVE": "Zatwierdzenie"
-  },
-  "workflow_transition": {
-    "APPROVED": "Zatwierdzony",
-    "REJECTED": "odrzucony",
-    "VALIDATED": "Sprawdzony"
   },
   "validation": {
     "required": "Wymagany",

@@ -53,7 +53,6 @@
     "search_after_update_date": "Actualizado después de esta fecha",
     "search_tags": "Etiquetas",
     "search_shared": "Solo documentos compartidos",
-    "search_workflow": "Flujo de trabajo asignado a mi",
     "search_clear": "Limpiar",
     "any_language": "Cualquier idioma",
     "add_document": "Añadir un documento",
@@ -64,7 +63,6 @@
     "search": "Buscar",
     "search_empty": "Sin coincidencias para <strong>\"{search}\"</strong>",
     "shared": "Compartido",
-    "current_step_name": "Progreso actual",
     "title": "Título",
     "description": "Descripción",
     "contributors": "Contribuidores",
@@ -103,10 +101,6 @@
       "no_comments": "Aún no hay comentarios sobre este documento",
       "add_comment": "Añadir un comentario",
       "error_loading_comments": "Error al cargar comentarios",
-      "workflow_current": "Flujo de trabajo actual",
-      "workflow_comment": "Añadir comentario de flujo de trabajo",
-      "workflow_validated_title": "Flujo de trabajo validado",
-      "workflow_validated_message": "El flujo de trabajo ha sido validado con éxito",
       "content": {
         "content": "Contenido",
         "delete_file_title": "Eliminar archivo",
@@ -123,18 +117,6 @@
         "open_versions": "Mostrar historial de versiones",
         "display_mode_list": "Mostrar documentos en lista",
         "display_mode_grid": "Mostrar documentos en cuadrícula"
-      },
-      "workflow": {
-        "workflow": "Flujo de trabajo",
-        "message": "Verifique o valide sus documentos con gente de su organización usando flujos de trabajo.",
-        "workflow_start_label": "¿Qué flujo de trabajo iniciar?",
-        "add_more_workflow": "Añadir más flujos de trabajo",
-        "start_workflow_submit": "Iniciar flujo de trabajo",
-        "full_name": "<strong>{name}</strong> iniciado a {create_date}",
-        "cancel_workflow": "Cancelar el flujo de trabajo actual",
-        "cancel_workflow_title": "Cancelar flujo de trabajo",
-        "cancel_workflow_message": "¿Desea realmente cancelar el flujo de trabajo actual?",
-        "no_workflow": "No puede iniciar ningún flujo de trabajo en este documento."
       },
       "permissions": {
         "permissions": "Permisos",
@@ -180,7 +162,6 @@
       "footer_sismics": "Hecho a mano con <span class=\"fas fa-heart\"></span> por <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "Documentación API",
       "feedback": "Déjenos un comentario",
-      "workflow_document_list": "Documentos asignados para usted",
       "select_all": "Seleccionar todo",
       "select_none": "Deseleccionar"
     },
@@ -272,7 +253,6 @@
     "menu_opened_sessions": "Sesiones abiertas",
     "menu_file_importer": "Importador de archivos en masa",
     "menu_general_settings": "Ajustes generales",
-    "menu_workflow": "Flujo de trabajo",
     "menu_users": "Usuarios",
     "menu_groups": "Grupos",
     "menu_vocabularies": "Vocabularios",
@@ -306,30 +286,6 @@
         "disable_totp_btn": "Desactivar autenticación en dos pasos para este usuario",
         "disable_totp_title": "Desactivar autenticación en dos pasos",
         "disable_totp_message": "¿Desea realmente desactivar la autenticación en dos pasos para este usuario?"
-      }
-    },
-    "workflow": {
-      "title": "Configuración flujo de trabajo",
-      "add_workflow": "Añadir flujo de trabajo",
-      "name": "Nombre",
-      "create_date": "Fecha creación",
-      "edit": {
-        "delete_workflow_title": "Eliminar flujo de trabajo",
-        "delete_workflow_message": "¿Desea realmente eliminar este flujo de trabajo? Los flujos de trabajo ejecutándose actualmente no serán eliminados",
-        "edit_workflow_title": "Editar \"{name}\"",
-        "add_workflow_title": "Añadir flujo de trabajo",
-        "name": "Nombre",
-        "name_placeholder": "Nombre del paso o descripción",
-        "drag_help": "Arrastre y suelte para reordenar el paso",
-        "type": "Tipo de paso",
-        "type_approve": "Aprobar",
-        "type_validate": "Validar",
-        "target": "Asignado a",
-        "target_help": "<strong>Aprobar:</strong> Aceptar o rechazar la revisión <br/><strong>Validar:</strong> Revisar y continuar con el flujo de trabajo",
-        "add_step": "Añadir un paso de flujo de trabajo",
-        "actions": "¿Qué ocurre después?",
-        "remove_action": "Eliminar acción",
-        "acl_info": "Solo los usuarios y grupos definidos aquí podrán iniciar este flujo de trabajo en un documento"
       }
     },
     "security": {
@@ -504,8 +460,6 @@
       "Document": "Documento",
       "File": "Archivo",
       "Group": "Grupo",
-      "Route": "Flujo de trabajo",
-      "RouteModel": "Modelo flujo de trabajo",
       "Tag": "Etiqueta",
       "User": "Usuario",
       "Webhook": "Webhook"
@@ -535,15 +489,6 @@
     "USER": "Usuario",
     "GROUP": "Grupo",
     "SHARE": "Compartido"
-  },
-  "workflow_type": {
-    "VALIDATE": "Validación",
-    "APPROVE": "Aprobación"
-  },
-  "workflow_transition": {
-    "APPROVED": "Aprobado",
-    "REJECTED": "Rechazado",
-    "VALIDATED": "Validado"
   },
   "validation": {
     "required": "Requerido",

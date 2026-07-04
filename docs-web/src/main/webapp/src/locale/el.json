@@ -53,7 +53,6 @@
     "search_after_update_date": "Ενημερώθηκε μετά από αυτή την ημερομηνία",
     "search_tags": "Ετικέτες",
     "search_shared": "Μόνο κοινοποιημένα εγγραφα",
-    "search_workflow": "Ροή εγρασίας ανατεθειμένη σε εμένα",
     "search_clear": "Καθάρισμα",
     "any_language": "Οποιαδήποτε γλώσσα",
     "add_document": "Προσθήκη εγγράφου",
@@ -64,7 +63,6 @@
     "search": "Αναζήτηση",
     "search_empty": "Δεν υπάρχουν αποτελέσματα για <strong>\"{search}\"</strong>",
     "shared": "Κοινοποιήθηκε",
-    "current_step_name": "Τρέχον βήμα",
     "title": "Τίτλος",
     "description": "Περιγραφή",
     "contributors": "Συντελεστές",
@@ -103,10 +101,6 @@
       "no_comments": "Δεν υπάρχουν σχόλια σε αυτό το έγγραφο ακόμα",
       "add_comment": "Προσθήκη σχολίου",
       "error_loading_comments": "Σφάλμα φόρτωσης σχολίων",
-      "workflow_current": "Τρέχον βήμα ροής εργασίας",
-      "workflow_comment": "Προσθήκη σχολίου ροής εργασίας",
-      "workflow_validated_title": "Το βήμα ροής εργασίας επαληθεύτηκε",
-      "workflow_validated_message": "Το βήμα ροής εργασίας έχει επαληθευτεί επιτυχώς.",
       "content": {
         "content": "Περιεχόμενο",
         "delete_file_title": "Διαγραφή αρχείου",
@@ -123,18 +117,6 @@
         "open_versions": "Προβολή ιστορικού εκδόσεων",
         "display_mode_list": "Εμφάνιση αρχείων σε λίστα",
         "display_mode_grid": "Εμφάνιση αρχείων σε πλέγμα"
-      },
-      "workflow": {
-        "workflow": "Ροή εργασίας",
-        "message": "Επαλήθευσε ή επιβεβαίωσε τα έγγραφα σου με άτομα του οργανισμού σου με τη χρήση ροών εργασίας.",
-        "workflow_start_label": "Ποιά ροή εργασίας να ξεκινήσει;",
-        "add_more_workflow": "Προσθήκη περισσότερων ροών εργασίας",
-        "start_workflow_submit": "Έναρξη ροής εργασίας",
-        "full_name": "<strong>{name}</strong> ξεκίνησε στις {create_date}",
-        "cancel_workflow": "Ακύρωση τρέχουσας ροής εργασίας",
-        "cancel_workflow_title": "Ακύρωση της ροής εργασίας",
-        "cancel_workflow_message": "Θέλεις πραγματικά να ακυρώσης την τρέχουσα ροή εργασίας;",
-        "no_workflow": "Δεν μπορείς να ξεκινήσεις οποιαδήποτε ροή εργασίας σε αυτό το έγγραφο."
       },
       "permissions": {
         "permissions": "ʼδειες",
@@ -180,7 +162,6 @@
       "footer_sismics": "Δημιουργήθηκε με <span class=\"fas fa-heart\"></span> από <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "API Έγγραφα",
       "feedback": "Δώσε μας ανατροφοδότηση",
-      "workflow_document_list": "Έγγρφα που ανατέθηκαν σε εσένα",
       "select_all": "Επιλογή όλων",
       "select_none": "Επιλογή κανενός"
     },
@@ -272,7 +253,6 @@
     "menu_opened_sessions": "Ανοιχτές περιόδοι",
     "menu_file_importer": "Εισαγωγέας αρχείων όγκου",
     "menu_general_settings": "Γενικές ρυθμίσεις",
-    "menu_workflow": "Ροή εργασίας",
     "menu_users": "Χρήστες",
     "menu_groups": "Ομάδες",
     "menu_vocabularies": "Λεξιλόγια",
@@ -304,7 +284,6 @@
         "delete_user_title": "Διαγραφή χρήστη",
         "delete_user_message": "Θέλεις πραγματικά να διαγράψεις αυτό το χρήστη; Όλα τα σχετικά έγγραφα, αρχεία και ετικέτες θα διαγραφούν",
         "user_used_title": "Χρήστης σε χρήση",
-        "user_used_message": "Αυτός ο χρήστης χρησιμοποιείται στη ροή εργασίας \"{name}\"",
         "edit_user_failed_title": "Ο χρήστης υπάρχει ήδη",
         "edit_user_failed_message": "Αυτό το όνομα χρήστη έχει παρθεί ήδη από έναν άλλο χρήστη",
         "edit_user_title": "Επαξεργασία \"{username}\"",
@@ -323,30 +302,6 @@
         "disable_totp_btn": "Απενεργοποίηση επαλήθευσης δύο-σταδίων για αυτό το χρήστη",
         "disable_totp_title": "Απενεργοποίηση επαλήθευσης δύο σταδίων",
         "disable_totp_message": "Είσαι σίγουρος πως θέλεις να απενεργοποιήσεις την επαλήθευση δύο σταδίων για αυτό το χρήστη;"
-      }
-    },
-    "workflow": {
-      "title": "Διαμόρφωση ροής εργασίας",
-      "add_workflow": "Προσθήκηροής εργασίας",
-      "name": "Όνομα",
-      "create_date": "Ημερομηνία δημιουργίας",
-      "edit": {
-        "delete_workflow_title": "Διαγραφή ροής εργασίας",
-        "delete_workflow_message": "Θέλεις πραγματικά να διαγράψεις αυτή τη ροή εργασίας; Οι τρέχουσες ροές εργασίας δεν θα διαγραφούν",
-        "edit_workflow_title": "Επεξεργασία \"{name}\"",
-        "add_workflow_title": "Προσθήκη ροής εργασίας",
-        "name": "Όνομα",
-        "name_placeholder": "Όνομα βήματος ή περιγραφή",
-        "drag_help": "Σύρε και άφησε για επανάληψη παραγγελίας βήματος",
-        "type": "Είδος βήματος",
-        "type_approve": "Έγκριση",
-        "type_validate": "Επιβεβαίωση",
-        "target": "Αναθέτηκε σε",
-        "target_help": "<strong>Έγκριση:</strong> Αποδοχή ή απόρριψη αξιολόγησης<br/><strong>Επιβεβαίωση:</strong> Αξιολόγηση και συνέχιση της ροής εργασίας",
-        "add_step": "Προσθήκη βήματος ροής εργασίας",
-        "actions": "Τι γίνεται μετά;",
-        "remove_action": "Αφαίρεση ενέργειας",
-        "acl_info": "Μόνο χρήστες και ομάδες που καθορίζοντε εδώ θα είναι σε θέση να ξεκινήσουν αυτή τη ροή εργασίας σε ένα έγγραφο"
       }
     },
     "security": {
@@ -381,7 +336,6 @@
         "edit_group_failed_title": "Η ομάδα υπάρχει ήδη",
         "edit_group_failed_message": "Αυτό το όνομα ομάδας έχει ήδη παρθεί από μια άλλη ομάδα",
         "group_used_title": "Ομάδα σε χρήση",
-        "group_used_message": "Αυτή η ομάδα χρησιμοποιείται στη ροή εργασίας \"{name}\"",
         "edit_group_title": "Επεξεργασία \"{name}\"",
         "add_group_title": "Προσθήκη ομάδας",
         "name": "Όνομα",
@@ -531,8 +485,6 @@
       "Document": "Έγγραφο",
       "File": "Αρχείο",
       "Group": "Ομάδα",
-      "Route": "Ροή εργασίας",
-      "RouteModel": "Μοντέλο ροής εργασίας",
       "Tag": "Ετικέτα",
       "User": "Χρήστης",
       "Webhook": "Διαδικτυακός σύνδεσμος"
@@ -562,15 +514,6 @@
     "USER": "Χρήστης",
     "GROUP": "Ομάδα",
     "SHARE": "Κοινό"
-  },
-  "workflow_type": {
-    "VALIDATE": "Επαλήθευση",
-    "APPROVE": "Αποδοχή"
-  },
-  "workflow_transition": {
-    "APPROVED": "Εγκρίθηκε",
-    "REJECTED": "Απορρίφθηκε",
-    "VALIDATED": "Επαληθεύτηκε"
   },
   "validation": {
     "required": "Απαιτείται",

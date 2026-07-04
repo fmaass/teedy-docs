@@ -55,7 +55,6 @@
     "search_after_update_date": "Bearbeitet nach diesem Datum",
     "search_tags": "Tags",
     "search_shared": "Nur freigegebene Dokumente",
-    "search_workflow": "Mir zugeordneter Workflow",
     "search_clear": "Leeren",
     "any_language": "Jede Sprache",
     "add_document": "Dokument hinzufügen",
@@ -66,7 +65,6 @@
     "search": "Suche",
     "search_empty": "Kein Treffer für <strong>\"{search}\"</strong>",
     "shared": "Geteilt",
-    "current_step_name": "Aktueller Bearbeitungsschritt",
     "title": "Titel",
     "description": "Beschreibung",
     "contributors": "Mitwirkende",
@@ -105,10 +103,6 @@
       "no_comments": "Noch keine Kommentare zu diesem Dokument vorhanden",
       "add_comment": "Fügen sie einen Kommentar hinzu",
       "error_loading_comments": "Fehler beim Laden eines Kommentars",
-      "workflow_current": "Aktueller Workflow-Status",
-      "workflow_comment": "Fügen Sie einen Workflow-Kommentar hinzu",
-      "workflow_validated_title": "Workflow-Schritt validiert",
-      "workflow_validated_message": "Der Workflow-Schritt wurde erfolgreich validiert.",
       "content": {
         "content": "Inhalt",
         "delete_file_title": "Datei löschen",
@@ -125,18 +119,6 @@
         "open_versions": "Versionshistorie anzeigen",
         "display_mode_list": "Dateien als Liste anzeigen",
         "display_mode_grid": "Dateien als Raster anzeigen"
-      },
-      "workflow": {
-        "workflow": "Workflow",
-        "message": "Verifizieren oder validieren Sie Ihre Dokumente mit Mitarbeitern Ihres Unternehmens mit Hilfe von Workflows.",
-        "workflow_start_label": "Welcher Workflow soll gestartet werden?",
-        "add_more_workflow": "Fügen Sie weitere Workflows hinzu",
-        "start_workflow_submit": "Starten Sie den Workflow",
-        "full_name": "<strong>{name}</strong> gestartet am {create_date}",
-        "cancel_workflow": "Abbrechen des aktuellen Workflows",
-        "cancel_workflow_title": "Abbrechen des Workflows",
-        "cancel_workflow_message": "Wollen Sie den laufenden Workflow wirklich abbrechen?",
-        "no_workflow": "Sie können keinen Workflow für dieses Dokument starten."
       },
       "permissions": {
         "permissions": "Berechtigungen",
@@ -182,7 +164,6 @@
       "footer_sismics": "Programmiert mit <span class=\"fas fa-heart\"></span> von <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "API-Dokumentation",
       "feedback": "Geben Sie uns Ihr Feedback",
-      "workflow_document_list": "Mir zugeordnete Dokumente",
       "select_all": "Alle auswählen",
       "select_none": "Nichts auswählen"
     },
@@ -275,7 +256,6 @@
     "menu_opened_sessions": "Geöffnete Sitzungen",
     "menu_file_importer": "Massen-Datei-Importer",
     "menu_general_settings": "Allgemeine Einstellungen",
-    "menu_workflow": "Workflows",
     "menu_users": "Benutzerverwaltung",
     "menu_groups": "Gruppenverwaltung",
     "menu_vocabularies": "Vokabulareinträge",
@@ -308,7 +288,6 @@
         "delete_user_title": "Benutzer löschen",
         "delete_user_message": "Möchten Sie diesen Benutzer wirklich löschen? Alle zugehörigen Dokumente, Dateien und Tags werden gelöscht",
         "user_used_title": "Benutzer in Verwendung",
-        "user_used_message": "Dieser Benutzer wird im Workflow \"{name}\" benutzt",
         "edit_user_failed_title": "Dieser Benutzer existiert bereits",
         "edit_user_failed_message": "Dieser Benutzername wurde bereits von einem anderen Benutzer gewählt",
         "edit_user_title": "Benutzer \"{username}\" bearbeiten",
@@ -327,30 +306,6 @@
         "disable_totp_btn": "Zwei-Faktor-Authentifizierung für diesen Benutzer deaktivieren",
         "disable_totp_title": "Zwei-Faktor-Authentifizierung deaktivieren",
         "disable_totp_message": "Sind Sie sicher, dass sie die Zwei-Faktor-Authentifizierung für den Benutzer deaktivieren möchten?"
-      }
-    },
-    "workflow": {
-      "title": "Workflows",
-      "add_workflow": "Workflow hinzufügen",
-      "name": "Name",
-      "create_date": "Erstellungsdatum",
-      "edit": {
-        "delete_workflow_title": "Workflow löschen",
-        "delete_workflow_message": "Möchten Sie diesen Workflow wirklich löschen? Derzeit ausgeführte Workflows werden nicht gelöscht",
-        "edit_workflow_title": "Workflow \"{name}\" bearbeiten",
-        "add_workflow_title": "Neuen Workflow hinzufügen",
-        "name": "Name",
-        "name_placeholder": "Name des Bearbeitungschritts oder der Beschreibung",
-        "drag_help": "Drag & Drop, um die Schritte neu zu ordnen",
-        "type": "Bearbeitungsschritt",
-        "type_approve": "Genehmigen",
-        "type_validate": "Bestätigen",
-        "target": "Zugewiesen an",
-        "target_help": "<strong>Zulassen:</strong> Überprüfen und fortsetzen des Workflows<br/><strong>Genehmigen:</strong> Übernehmen oder lehnen Sie die Überprüfung ab",
-        "add_step": "Workflow-Schritt hinzufügen",
-        "actions": "Was passiert danach?",
-        "remove_action": "Aktion entfernen",
-        "acl_info": "Nur hier definierte Benutzer und Gruppen können diesen Workflow für ein Dokument starten"
       }
     },
     "security": {
@@ -385,7 +340,6 @@
         "edit_group_failed_title": "Gruppe existiert bereits",
         "edit_group_failed_message": "Dieser Gruppenname wird bereits von einer anderen Gruppe verwendet",
         "group_used_title": "Gruppe in Verwendung",
-        "group_used_message": "Diese Gruppe wird im Workflow \"{name}\" verwendet",
         "edit_group_title": "Gruppe \"{name}\" bearbeiten",
         "add_group_title": "Neue Gruppe hinzufügen",
         "name": "Name",
@@ -540,8 +494,6 @@
       "Document": "Dokument",
       "File": "Datei",
       "Group": "Gruppe",
-      "Route": "Workflow",
-      "RouteModel": "Workflow-Muster",
       "Tag": "Tag",
       "User": "Benutzer",
       "Webhook": "Webhook"
@@ -571,15 +523,6 @@
     "USER": "Benutzer",
     "GROUP": "Gruppe",
     "SHARE": "Geteilt"
-  },
-  "workflow_type": {
-    "VALIDATE": "Validierung",
-    "APPROVE": "Genehmigung"
-  },
-  "workflow_transition": {
-    "APPROVED": "Genehmigt",
-    "REJECTED": "Zurückgewiesen",
-    "VALIDATED": "Validiert"
   },
   "validation": {
     "required": "Erforderlich",

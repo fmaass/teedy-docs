@@ -53,7 +53,6 @@
     "search_after_update_date": "Përditësuar pas kësaj date",
     "search_tags": "Etiketa",
     "search_shared": "Vetëm dokumente të përbashkëta",
-    "search_workflow": "Rrjedha e punës më është caktuar",
     "search_clear": "Qartë",
     "any_language": "Çdo gjuhë",
     "add_document": "Shto një dokument",
@@ -64,7 +63,6 @@
     "search": "Kërko",
     "search_empty": "Nuk ka ndeshje për <strong>\"{search}\"</strong>",
     "shared": "Të përbashkëta",
-    "current_step_name": "Hapi aktual",
     "title": "Titulli",
     "description": "Përshkrim",
     "contributors": "Kontribuesit",
@@ -103,10 +101,6 @@
       "no_comments": "Ende nuk ka komente për këtë dokument",
       "add_comment": "Shto një koment",
       "error_loading_comments": "Gabim gjatë ngarkimit të komenteve",
-      "workflow_current": "Hapi aktual i rrjedhës së punës",
-      "workflow_comment": "Shto një koment të rrjedhës së punës",
-      "workflow_validated_title": "Hapi i rrjedhës së punës u vërtetua",
-      "workflow_validated_message": "Hapi i rrjedhës së punës është vërtetuar me sukses.",
       "content": {
         "content": "përmbajtja",
         "delete_file_title": "Fshi skedarin",
@@ -123,18 +117,6 @@
         "open_versions": "Shfaq historikun e versionit",
         "display_mode_list": "Shfaq skedarët në listë",
         "display_mode_grid": "Shfaq skedarët në rrjet"
-      },
-      "workflow": {
-        "workflow": "Rrjedha e punës",
-        "message": "Verifikoni ose vërtetoni dokumentet tuaja me njerëzit e organizatës suaj duke përdorur rrjedhat e punës.",
-        "workflow_start_label": "Cilin rrjedhë pune të filloni?",
-        "add_more_workflow": "Shto më shumë flukse pune",
-        "start_workflow_submit": "Filloni rrjedhën e punës",
-        "full_name": "<strong>{name}</strong> filloi më {create_date}",
-        "cancel_workflow": "Anuloni rrjedhën aktuale të punës",
-        "cancel_workflow_title": "Anuloni rrjedhën e punës",
-        "cancel_workflow_message": "Dëshiron vërtet të anulosh rrjedhën aktuale të punës?",
-        "no_workflow": "Nuk mund të filloni asnjë rrjedhë pune në këtë dokument."
       },
       "permissions": {
         "permissions": "Lejet",
@@ -180,7 +162,6 @@
       "footer_sismics": "E punuar me <span class=\"fas fa-heart\"></span> nga <a href=\"https://www.sismics.com\" target=\"_blank\">Sizmike</a>",
       "api_documentation": "Dokumentacioni API",
       "feedback": "Na jepni një koment",
-      "workflow_document_list": "Dokumentet e caktuara për ju",
       "select_all": "Selektoj të gjitha",
       "select_none": "Zgjidh asnjë"
     },
@@ -272,7 +253,6 @@
     "menu_opened_sessions": "Seancat e hapura",
     "menu_file_importer": "Importuesi i skedarëve në masë",
     "menu_general_settings": "Cilësimet e përgjithshme",
-    "menu_workflow": "Rrjedha e punës",
     "menu_users": "Përdoruesit",
     "menu_groups": "Grupet",
     "menu_vocabularies": "Fjalorët",
@@ -305,7 +285,6 @@
         "delete_user_title": "Fshi përdoruesin",
         "delete_user_message": "Dëshiron vërtet ta fshish këtë përdorues? ",
         "user_used_title": "Përdoruesi në përdorim",
-        "user_used_message": "Ky përdorues përdoret në rrjedhën e punës \"{name}\"",
         "edit_user_failed_title": "Përdoruesi ekziston tashmë",
         "edit_user_failed_message": "Ky emër përdoruesi është marrë tashmë nga një përdorues tjetër",
         "edit_user_title": "Redakto \"{username}\"",
@@ -324,30 +303,6 @@
         "disable_totp_btn": "Çaktivizo vërtetimin me dy faktorë për këtë përdorues",
         "disable_totp_title": "Çaktivizo vërtetimin me dy faktorë",
         "disable_totp_message": "Jeni i sigurt që dëshironi të çaktivizoni vërtetimin me dy faktorë për këtë përdorues?"
-      }
-    },
-    "workflow": {
-      "title": "Konfigurimi i rrjedhës së punës",
-      "add_workflow": "Shto një rrjedhë pune",
-      "name": "Emri",
-      "create_date": "Krijo datë",
-      "edit": {
-        "delete_workflow_title": "Fshi fluksin e punës",
-        "delete_workflow_message": "Dëshiron vërtet ta fshish këtë rrjedhë pune? ",
-        "edit_workflow_title": "Redakto \"{name}\"",
-        "add_workflow_title": "Shto një rrjedhë pune",
-        "name": "Emri",
-        "name_placeholder": "Emri ose përshkrimi i hapit",
-        "drag_help": "Zvarrit dhe lësho për të rirenditur hapin",
-        "type": "Lloji i hapit",
-        "type_approve": "Mirato",
-        "type_validate": "Vërtetoni",
-        "target": "Caktuar për",
-        "target_help": "<strong>Mirato:</strong> Pranoni ose refuzoni rishikimin<br/><strong>Vërteto:</strong> Rishikoni dhe vazhdoni rrjedhën e punës",
-        "add_step": "Shto një hap të rrjedhës së punës",
-        "actions": "Çfarë ndodh më pas?",
-        "remove_action": "Hiq veprimin",
-        "acl_info": "Vetëm përdoruesit dhe grupet e përcaktuara këtu do të mund të fillojnë këtë rrjedhë pune në një dokument"
       }
     },
     "security": {
@@ -382,7 +337,6 @@
         "edit_group_failed_title": "Grupi tashmë ekziston",
         "edit_group_failed_message": "Ky emër grupi është marrë tashmë nga një grup tjetër",
         "group_used_title": "Grupi në përdorim",
-        "group_used_message": "Ky grup përdoret në rrjedhën e punës \"{name}\"",
         "edit_group_title": "Redakto \"{name}\"",
         "add_group_title": "Shto një grup",
         "name": "Emri",
@@ -533,8 +487,6 @@
       "Document": "Dokumenti",
       "File": "Skedari",
       "Group": "Grupi",
-      "Route": "Rrjedha e punës",
-      "RouteModel": "Modeli i rrjedhës së punës",
       "Tag": "Etiketë",
       "User": "Përdoruesi",
       "Webhook": "Uebhook"
@@ -564,15 +516,6 @@
     "USER": "Përdoruesi",
     "GROUP": "Grupi",
     "SHARE": "Të përbashkëta"
-  },
-  "workflow_type": {
-    "VALIDATE": "Vleresimi",
-    "APPROVE": "Miratimi"
-  },
-  "workflow_transition": {
-    "APPROVED": "Miratuar",
-    "REJECTED": "Refuzuar",
-    "VALIDATED": "E vërtetuar"
   },
   "validation": {
     "required": "E detyrueshme",

@@ -55,7 +55,6 @@
     "search_after_update_date": "Updated after this date",
     "search_tags": "Tags",
     "search_shared": "Only shared documents",
-    "search_workflow": "Workflow assigned to me",
     "search_clear": "Clear",
     "any_language": "Any language",
     "add_document": "Add a document",
@@ -66,7 +65,6 @@
     "search": "Search",
     "search_empty": "No matches for <strong>\"{search}\"</strong>",
     "shared": "Shared",
-    "current_step_name": "Current step",
     "title": "Title",
     "description": "Description",
     "contributors": "Contributors",
@@ -105,10 +103,6 @@
       "no_comments": "No comments on this document yet",
       "add_comment": "Add a comment",
       "error_loading_comments": "Error loading comments",
-      "workflow_current": "Current workflow step",
-      "workflow_comment": "Add a workflow comment",
-      "workflow_validated_title": "Workflow step validated",
-      "workflow_validated_message": "The workflow step has been successfully validated.",
       "content": {
         "content": "Content",
         "delete_file_title": "Delete file",
@@ -125,18 +119,6 @@
         "open_versions": "Show version history",
         "display_mode_list": "Display files in list",
         "display_mode_grid": "Display files in grid"
-      },
-      "workflow": {
-        "workflow": "Workflow",
-        "message": "Verify or validate your documents with people of your organization using workflows.",
-        "workflow_start_label": "Which workflow to start?",
-        "add_more_workflow": "Add more workflows",
-        "start_workflow_submit": "Start workflow",
-        "full_name": "<strong>{name}</strong> started on {create_date}",
-        "cancel_workflow": "Cancel the current workflow",
-        "cancel_workflow_title": "Cancel the workflow",
-        "cancel_workflow_message": "Do you really want to cancel the current workflow?",
-        "no_workflow": "You cannot start any workflow on this document."
       },
       "permissions": {
         "permissions": "Permissions",
@@ -182,7 +164,6 @@
       "footer_sismics": "Crafted with <span class=\"fas fa-heart\"></span> by <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "API Documentation",
       "feedback": "Give us a feedback",
-      "workflow_document_list": "Documents assigned to you",
       "select_all": "Select all",
       "select_none": "Select none"
     },
@@ -275,7 +256,6 @@
     "menu_opened_sessions": "Opened sessions",
     "menu_file_importer": "Bulk file importer",
     "menu_general_settings": "General settings",
-    "menu_workflow": "Workflow",
     "menu_users": "Users",
     "menu_groups": "Groups",
     "menu_vocabularies": "Vocabularies",
@@ -308,7 +288,6 @@
         "delete_user_title": "Delete user",
         "delete_user_message": "Do you really want to delete this user? All associated documents, files and tags will be deleted",
         "user_used_title": "User in use",
-        "user_used_message": "This user is used in the workflow \"{name}\"",
         "edit_user_failed_title": "User already exists",
         "edit_user_failed_message": "This username is already taken by another user",
         "edit_user_title": "Edit \"{username}\"",
@@ -327,30 +306,6 @@
         "disable_totp_btn": "Disable two-factor authentification for this user",
         "disable_totp_title": "Disable two-factor authentication",
         "disable_totp_message": "Are you sure you want to disable two-factor authentication for this user?"
-      }
-    },
-    "workflow": {
-      "title": "Workflow configuration",
-      "add_workflow": "Add a workflow",
-      "name": "Name",
-      "create_date": "Create date",
-      "edit": {
-        "delete_workflow_title": "Delete workflow",
-        "delete_workflow_message": "Do you really want to delete this workflow? Currently running workflows will not be deleted",
-        "edit_workflow_title": "Edit \"{name}\"",
-        "add_workflow_title": "Add a workflow",
-        "name": "Name",
-        "name_placeholder": "Step name or description",
-        "drag_help": "Drag and drop to reorder the step",
-        "type": "Step type",
-        "type_approve": "Approve",
-        "type_validate": "Validate",
-        "target": "Assigned to",
-        "target_help": "<strong>Approve:</strong> Accept or reject the review<br/><strong>Validate:</strong> Review and continue the workflow",
-        "add_step": "Add a workflow step",
-        "actions": "What happens after?",
-        "remove_action": "Remove action",
-        "acl_info": "Only users and groups defined here will be able to start this workflow on a document"
       }
     },
     "security": {
@@ -385,7 +340,6 @@
         "edit_group_failed_title": "Group already exists",
         "edit_group_failed_message": "This group name is already taken by another group",
         "group_used_title": "Group in use",
-        "group_used_message": "This group is used in the workflow \"{name}\"",
         "edit_group_title": "Edit \"{name}\"",
         "add_group_title": "Add a group",
         "name": "Name",
@@ -540,8 +494,6 @@
       "Document": "Document",
       "File": "File",
       "Group": "Group",
-      "Route": "Workflow",
-      "RouteModel": "Workflow model",
       "Tag": "Tag",
       "User": "User",
       "Webhook": "Webhook"
@@ -571,15 +523,6 @@
     "USER": "User",
     "GROUP": "Group",
     "SHARE": "Shared"
-  },
-  "workflow_type": {
-    "VALIDATE": "Validation",
-    "APPROVE": "Approbation"
-  },
-  "workflow_transition": {
-    "APPROVED": "Approved",
-    "REJECTED": "Rejected",
-    "VALIDATED": "Validated"
   },
   "validation": {
     "required": "Required",

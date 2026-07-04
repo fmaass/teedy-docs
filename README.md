@@ -39,7 +39,6 @@ Teedy is an open source, lightweight document management system for individuals 
 - Full text search in all supported files
 - All [Dublin Core](http://dublincore.org/) metadata
 - Custom user-defined metadata
-- Workflow system
 - 256-bit AES encryption of stored files
 - File versioning
 - Tag system with nesting

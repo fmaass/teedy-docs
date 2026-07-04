@@ -53,7 +53,6 @@
     "search_after_update_date": "Atualizado depois desta data",
     "search_tags": "Etiquetas",
     "search_shared": "Apenas documentos partilhados",
-    "search_workflow": "Fluxo de trabalho atribuído a mim",
     "search_clear": "Limpar",
     "any_language": "Qualquer idioma",
     "add_document": "Adicionar um documento",
@@ -64,7 +63,6 @@
     "search": "Pesquisar",
     "search_empty": "Sem correspondências para <strong>\"{search}\"</strong>",
     "shared": "Partilhado",
-    "current_step_name": "Passo atual",
     "title": "Título",
     "description": "Descrição",
     "contributors": "Contribuidores",
@@ -103,10 +101,6 @@
       "no_comments": "Ainda não existem comentários neste documento",
       "add_comment": "Adicionar um comentário",
       "error_loading_comments": "Erro ao carregar os comentários",
-      "workflow_current": "Etapa atual do fluxo de trabalho",
-      "workflow_comment": "Adicionar um comentário ao fluxo de trabalho",
-      "workflow_validated_title": "Etapa do fluxo de trabalho validada",
-      "workflow_validated_message": "A etapa do fluxo de trabalho foi validada com sucesso.",
       "content": {
         "content": "Conteúdo",
         "delete_file_title": "Apagar ficheiro",
@@ -123,18 +117,6 @@
         "open_versions": "Mostrar histórico de versões",
         "display_mode_list": "Mostrar ficheiros em lista",
         "display_mode_grid": "Mostrar ficheiros em grelha"
-      },
-      "workflow": {
-        "workflow": "Fluxo de trabalho",
-        "message": "Verifique ou valide os seus documentos com pessoas da sua organização utilizando fluxos de trabalho.",
-        "workflow_start_label": "Qual fluxo de trabalho deseja iniciar?",
-        "add_more_workflow": "Adicionar mais fluxos de trabalho",
-        "start_workflow_submit": "Iniciar fluxo de trabalho",
-        "full_name": "<strong>{name}</strong> iniciado em {create_date}",
-        "cancel_workflow": "Cancelar o fluxo de trabalho atual",
-        "cancel_workflow_title": "Cancelar o fluxo de trabalho",
-        "cancel_workflow_message": "Tem a certeza que pretende cancelar o fluxo de trabalho atual?",
-        "no_workflow": "Não é possível iniciar qualquer fluxo de trabalho neste documento."
       },
       "permissions": {
         "permissions": "Permissões",
@@ -180,7 +162,6 @@
       "footer_sismics": "Desenvolvido com <span class=\"fas fa-heart\"></span> por <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
       "api_documentation": "Documentação da API",
       "feedback": "Dê-nos um feedback",
-      "workflow_document_list": "Documentos atribuídos a si",
       "select_all": "Selecionar tudo",
       "select_none": "Não selecionar nenhum"
     },
@@ -272,7 +253,6 @@
     "menu_opened_sessions": "Sessões abertas",
     "menu_file_importer": "Importador de ficheiros em massa",
     "menu_general_settings": "Definições gerais",
-    "menu_workflow": "Fluxo de trabalho",
     "menu_users": "Utilizadores",
     "menu_groups": "Grupos",
     "menu_vocabularies": "Vocabulários",
@@ -304,7 +284,6 @@
         "delete_user_title": "Apagar utilizador",
         "delete_user_message": "Tem a certeza de que deseja apagar este utilizador? Todos os documentos, ficheiros e etiquetas associados serão apagados",
         "user_used_title": "Utilizador em uso",
-        "user_used_message": "Este utilizador é utilizado no fluxo de trabalho \"{name}\"",
         "edit_user_failed_title": "Utilizador já existe",
         "edit_user_failed_message": "Este nome de utilizador já está em uso por outro utilizador",
         "edit_user_title": "Editar \"{username}\"",
@@ -323,30 +302,6 @@
         "disable_totp_btn": "Desativar autenticação de dois fatores para este utilizador",
         "disable_totp_title": "Desativar autenticação de dois fatores",
         "disable_totp_message": "Tem a certeza de que deseja desativar a autenticação de dois fatores para este utilizador?"
-      },
-      "workflow": {}
-    },
-    "workflow": {
-      "title": "Configuração de fluxo de trabalho",
-      "add_workflow": "Adicionar um fluxo de trabalho",
-      "name": "Nome",
-      "edit": {
-        "delete_workflow_title": "Eliminar fluxo de trabalho",
-        "delete_workflow_message": "Tem a certeza de que deseja eliminar este fluxo de trabalho? Os fluxos de trabalho em execução não serão eliminados",
-        "edit_workflow_title": "Editar \"{name}\"",
-        "add_workflow_title": "Adicionar um fluxo de trabalho",
-        "name": "Nome",
-        "name_placeholder": "Nome ou descrição da etapa",
-        "drag_help": "Arrastar e soltar para reordenar a etapa",
-        "type": "Tipo de etapa",
-        "type_approve": "Aprovar",
-        "type_validate": "Validar",
-        "target": "Atribuído a",
-        "target_help": "<strong>Aprovar:</strong> Aceitar ou rejeitar a revisão<br/><strong>Validar:</strong> Rever e continuar o fluxo de trabalho",
-        "add_step": "Adicionar uma etapa ao fluxo de trabalho",
-        "actions": "O que acontece a seguir?",
-        "remove_action": "Remover ação",
-        "acl_info": "Apenas os utilizadores e grupos definidos aqui poderão iniciar este fluxo de trabalho num documento"
       }
     },
     "security": {
@@ -381,7 +336,6 @@
         "edit_group_failed_title": "Grupo já existe",
         "edit_group_failed_message": "Este nome de grupo já está em uso por outro grupo",
         "group_used_title": "Grupo em uso",
-        "group_used_message": "Este grupo é utilizado no fluxo de trabalho \"{name}\"",
         "edit_group_title": "Editar \"{name}\"",
         "add_group_title": "Adicionar um grupo",
         "name": "Nome",
@@ -531,8 +485,6 @@
       "Document": "Documento",
       "File": "Ficheiro",
       "Group": "Grupo",
-      "Route": "Fluxo de trabalho",
-      "RouteModel": "Modelo de fluxo de trabalho",
       "Tag": "Tag",
       "User": "Utilizador",
       "Webhook": "Webhook"
@@ -562,15 +514,6 @@
     "USER": "Utilizador",
     "GROUP": "Grupo",
     "SHARE": "Partilhado"
-  },
-  "workflow_type": {
-    "VALIDATE": "Validação",
-    "APPROVE": "Aprovação"
-  },
-  "workflow_transition": {
-    "APPROVED": "Aprovado",
-    "REJECTED": "Rejeitado",
-    "VALIDATED": "Validado"
   },
   "validation": {
     "required": "Obrigatório",

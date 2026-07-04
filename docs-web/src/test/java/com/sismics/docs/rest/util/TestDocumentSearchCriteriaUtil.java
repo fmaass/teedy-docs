@@ -41,7 +41,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getCreatorId(), user.getId());
@@ -50,7 +49,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
         DocumentSearchCriteriaUtil.addHttpSearchParams(
                 documentCriteria,
                 "missing",
-                null,
                 null,
                 null,
                 null,
@@ -86,7 +84,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getCreateDateMin(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
@@ -100,7 +97,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "2022-03-27",
-                null,
                 null,
                 null,
                 null,
@@ -134,7 +130,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getFullSearch(), "full");
@@ -158,7 +153,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getLanguage(), "fra");
@@ -171,7 +165,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "unknown",
-                null,
                 null,
                 null,
                 null,
@@ -204,7 +197,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getMimeType(), MimeType.IMAGE_GIF);
@@ -222,7 +214,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 true,
-                null,
                 null,
                 null,
                 null,
@@ -247,7 +238,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "simple",
-                null,
                 null,
                 null,
                 null,
@@ -299,7 +289,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 allTagDtoList
         );
         Assertions.assertEquals(documentCriteria.getTagIdList(), List.of(Collections.singletonList(tag1.getId())));
@@ -316,7 +305,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "tag2",
-                null,
                 null,
                 null,
                 null,
@@ -367,7 +355,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 null,
-                null,
                 allTagDtoList
         );
         Assertions.assertEquals(documentCriteria.getExcludedTagIdList(), List.of(Collections.singletonList(tag1.getId())));
@@ -385,7 +372,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "tag2",
-                null,
                 null,
                 null,
                 null,
@@ -412,7 +398,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 "title1,title2",
                 null,
                 null,
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getTitleList(), Arrays.asList(new String[]{"title1", "title2"}));
@@ -435,7 +420,6 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "2022-03-27",
-                null,
                 null,
                 null
         );
@@ -460,34 +444,9 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 null,
                 null,
                 "2022-03-27",
-                null,
                 null
         );
         Assertions.assertEquals(documentCriteria.getUpdateDateMax(), Date.from(LocalDate.of(2022, 3, 27).atStartOfDay(ZoneId.systemDefault()).toInstant()));
-    }
-
-    @Test
-    public void testHttpParamsWorkflow()  {
-        DocumentCriteria documentCriteria = new DocumentCriteria();
-        DocumentSearchCriteriaUtil.addHttpSearchParams(
-                documentCriteria,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                "me",
-                null
-        );
-        Assertions.assertTrue(documentCriteria.getActiveRoute());
     }
 
 }
