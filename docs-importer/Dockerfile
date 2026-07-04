@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /build
 COPY main.js package-lock.json package.json ./
-RUN npm install && npm install -g @yao-pkg/pkg
+RUN npm ci && npm install -g @yao-pkg/pkg
 RUN pkg -t node20-alpine-x64 .
 
 FROM alpine

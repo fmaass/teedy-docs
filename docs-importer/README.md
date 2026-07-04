@@ -47,7 +47,7 @@ docker run --name teedy-import -d -e TEEDY_TAG=2071fdf7-0e26-409d-b53d-f25823a5e
 ## Build from sources
 
 ```console
-npm install
+npm ci
 npm install -g pkg
 pkg .
 ```
