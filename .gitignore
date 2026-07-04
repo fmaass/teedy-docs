@@ -24,6 +24,13 @@ docs/*
 
 #macos
 .DS_Store
+
+# Editors
 .cursor/
+.vscode/
 CLAUDE.md
 docs/session-reviews/
+
+# Generated project specification exports (ARCHIMEDES)
+teedy-docs-specification.md
+teedy-docs-specification.pdf
