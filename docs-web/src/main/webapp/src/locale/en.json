@@ -258,7 +258,6 @@
     "menu_general_settings": "General settings",
     "menu_users": "Users",
     "menu_groups": "Groups",
-    "menu_vocabularies": "Vocabularies",
     "menu_configuration": "Configuration",
     "menu_inbox": "Inbox scanning",
     "menu_ldap": "LDAP authentication",
@@ -436,16 +435,6 @@
       "current_session": "This is the current session",
       "clear_message": "All other devices connected to this account will be disconnected",
       "clear": "Clear all other sessions"
-    },
-    "vocabulary": {
-      "title": "Vocabulary entries",
-      "choose_vocabulary": "Choose a vocabulary to edit",
-      "type": "Type",
-      "coverage": "Coverage",
-      "rights": "Rights",
-      "value": "Value",
-      "order": "Order",
-      "new_entry": "New entry"
     },
     "fileimporter": {
       "title": "Bulk file importer",

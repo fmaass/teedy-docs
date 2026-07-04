@@ -258,7 +258,6 @@
     "menu_general_settings": "Allgemeine Einstellungen",
     "menu_users": "Benutzerverwaltung",
     "menu_groups": "Gruppenverwaltung",
-    "menu_vocabularies": "Vokabulareinträge",
     "menu_configuration": "Einstellungen",
     "menu_inbox": "Posteingang durchsuchen",
     "menu_ldap": "LDAP Authentifizierung",
@@ -436,16 +435,6 @@
       "current_session": "Dies ist die aktuelle Sitzung",
       "clear_message": "Alle anderen mit diesem Konto verbundenen Geräte werden getrennt",
       "clear": "Alle anderen Sitzungen löschen"
-    },
-    "vocabulary": {
-      "title": "Vokabular",
-      "choose_vocabulary": "Wählen Sie ein Vokabular aus, das Sie bearbeiten möchten.",
-      "type": "Typ",
-      "coverage": "Abdeckung",
-      "rights": "Rechte",
-      "value": "Wert",
-      "order": "Reihenfolge",
-      "new_entry": "Neuer Eintrag"
     },
     "fileimporter": {
       "title": "Massen-Datei-Importer",

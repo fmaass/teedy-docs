@@ -255,7 +255,6 @@
     "menu_general_settings": "Ustawienia główne",
     "menu_users": "Użytkownicy",
     "menu_groups": "Grupy",
-    "menu_vocabularies": "Słowniki",
     "menu_configuration": "Konfiguracja",
     "menu_inbox": "Skanowanie skrzynki wejściowej",
     "menu_ldap": "Uwierzytelnienie LDAP",
@@ -427,16 +426,6 @@
       "current_session": "To jest bieżąca sesja",
       "clear_message": "Wszystkie inne urządzenia podłączone do tego konta zostaną odłączone",
       "clear": "Wyczyść pozostałe sesje"
-    },
-    "vocabulary": {
-      "title": "Hasła słownikowe",
-      "choose_vocabulary": "Wybierz słownik do edycji",
-      "type": "Rodzaj",
-      "coverage": "Zakres",
-      "rights": "Prawa",
-      "value": "Wartość",
-      "order": "Kolejność",
-      "new_entry": "Nowa pozycja"
     },
     "fileimporter": {
       "title": "Wsadowy importer plików",

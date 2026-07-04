@@ -225,7 +225,6 @@
     "menu_general_settings": "Общие настройки",
     "menu_users": "Пользователи",
     "menu_groups": "Группы",
-    "menu_vocabularies": "Словари",
     "menu_configuration": "Конфигурация",
     "menu_inbox": "Входящие сканирования",
     "user": {
@@ -345,16 +344,6 @@
       "current_session": "Это текущая сессия",
       "clear_message": "Все остальные устройства, подключенные к этой учетной записи, будут отключены",
       "clear": "Очистить все остальные сеансы"
-    },
-    "vocabulary": {
-      "title": "Словарь <small>записи</small>",
-      "choose_vocabulary": "Выберите словарь для редактирования",
-      "type": "Тип",
-      "coverage": "Покрытие",
-      "rights": "Права",
-      "value": "Стоимость",
-      "order": "Порядок",
-      "new_entry": "Новая запись"
     }
   },
   "feedback": {

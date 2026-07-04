@@ -255,7 +255,6 @@
     "menu_general_settings": "Definições gerais",
     "menu_users": "Utilizadores",
     "menu_groups": "Grupos",
-    "menu_vocabularies": "Vocabulários",
     "menu_configuration": "Configuração",
     "menu_inbox": "Verificação de caixa de entrada",
     "menu_ldap": "Autenticação LDAP",
@@ -427,16 +426,6 @@
       "current_session": "Esta é a sessão atual",
       "clear_message": "Todos os outros dispositivos conectados a esta conta serão desconectados",
       "clear": "Limpar todas as outras sessões"
-    },
-    "vocabulary": {
-      "title": "Entradas de vocabulário",
-      "choose_vocabulary": "Escolha um vocabulário para editar",
-      "type": "Tipo",
-      "coverage": "Cobertura",
-      "rights": "Direitos",
-      "value": "Valor",
-      "order": "Ordem",
-      "new_entry": "Nova entrada"
     },
     "fileimporter": {
       "title": "Importador em massa de ficheiros",

@@ -255,7 +255,6 @@
     "menu_general_settings": "Ajustes generales",
     "menu_users": "Usuarios",
     "menu_groups": "Grupos",
-    "menu_vocabularies": "Vocabularios",
     "menu_configuration": "Configuración",
     "menu_inbox": "Escaneo bandeja de entrada",
     "menu_monitoring": "Monitorización",
@@ -402,16 +401,6 @@
       "current_session": "Esta es la sesión actual",
       "clear_message": "El resto de los dispositivos conectados a esta cuenta serán desconectados",
       "clear": "Eliminar el resto de las sesiones"
-    },
-    "vocabulary": {
-      "title": "Entradas de vocabulario",
-      "choose_vocabulary": "Seleccione un vocabulario para editar",
-      "type": "Tipo",
-      "coverage": "Cobertura",
-      "rights": "Derechos",
-      "value": "Valor",
-      "order": "Órden",
-      "new_entry": "Nueva entrada"
     },
     "fileimporter": {
       "title": "Importador de archivos en masa",

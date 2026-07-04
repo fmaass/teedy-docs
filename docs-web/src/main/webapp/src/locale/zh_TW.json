@@ -225,7 +225,6 @@
     "menu_general_settings": "一般設置",
     "menu_users": "用戶",
     "menu_groups": "群組",
-    "menu_vocabularies": "詞條",
     "menu_configuration": "配置",
     "menu_inbox": "收件箱掃描",
     "user": {
@@ -345,16 +344,6 @@
       "current_session": "這是目前會話",
       "clear_message": "該帳號的所有其他連接將終止",
       "clear": "清除所有其他會話"
-    },
-    "vocabulary": {
-      "title": "詞條 <small>輸入</small>",
-      "choose_vocabulary": "選擇一個詞條編輯",
-      "type": "類型",
-      "coverage": "覆蓋",
-      "rights": "權利",
-      "value": "值",
-      "order": "顺序",
-      "new_entry": "新輸入"
     }
   },
   "feedback": {

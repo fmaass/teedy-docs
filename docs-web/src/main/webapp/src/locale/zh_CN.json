@@ -225,7 +225,6 @@
     "menu_general_settings": "一般设置",
     "menu_users": "用户",
     "menu_groups": "群组",
-    "menu_vocabularies": "词条",
     "menu_configuration": "配置",
     "menu_inbox": "收件箱扫描",
     "user": {
@@ -345,16 +344,6 @@
       "current_session": "这是目前会话",
       "clear_message": "该帐号的所有其他连接将终止",
       "clear": "清除所有其他会话"
-    },
-    "vocabulary": {
-      "title": "词条 <small>输入</small>",
-      "choose_vocabulary": "选择一个词条编辑",
-      "type": "类型",
-      "coverage": "覆盖",
-      "rights": "权利",
-      "value": "值",
-      "order": "顺序",
-      "new_entry": "新输入"
     }
   },
   "feedback": {

@@ -255,7 +255,6 @@
     "menu_general_settings": "Cilësimet e përgjithshme",
     "menu_users": "Përdoruesit",
     "menu_groups": "Grupet",
-    "menu_vocabularies": "Fjalorët",
     "menu_configuration": "Konfigurimi",
     "menu_inbox": "Skanimi i kutisë hyrëse",
     "menu_ldap": "Autentifikimi LDAP",
@@ -429,16 +428,6 @@
       "current_session": "Ky është sesioni aktual",
       "clear_message": "Të gjitha pajisjet e tjera të lidhura me këtë llogari do të shkëputen",
       "clear": "Pastro të gjitha seancat e tjera"
-    },
-    "vocabulary": {
-      "title": "Shënimet e fjalorit",
-      "choose_vocabulary": "Zgjidhni një fjalor për të redaktuar",
-      "type": "Lloji",
-      "coverage": "Mbulimi",
-      "rights": "Të drejtat",
-      "value": "Vlera",
-      "order": "Rendit",
-      "new_entry": "Hyrje e re"
     },
     "fileimporter": {
       "title": "Importuesi i skedarëve në masë",
