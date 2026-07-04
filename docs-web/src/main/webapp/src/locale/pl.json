@@ -257,22 +257,8 @@
     "menu_groups": "Grupy",
     "menu_configuration": "Konfiguracja",
     "menu_inbox": "Skanowanie skrzynki wejściowej",
-    "menu_ldap": "Uwierzytelnienie LDAP",
     "menu_metadata": "Niestandardowe metadane",
     "menu_monitoring": "Monitorowanie",
-    "ldap": {
-      "title": "Uwierzytelnienie LDAP",
-      "enabled": "Włącz uwierzytelnienie LDAP",
-      "host": "Adres (host) LDAP",
-      "port": "Port LDAP (domyślnie 389)",
-      "admin_dn": "Admin DN",
-      "admin_password": "Admin password",
-      "base_dn": "Podstawowy DN wyszukiwania",
-      "filter": "Filtr wyszukiwania (musi zawierać określenie USERNAME, np. \"(uid=USERNAME)\")",
-      "default_email": "Domyślny e-mail dla użytkowników LDAP",
-      "default_storage": "Domyślny magazyn dla użytkowników LDAP",
-      "saved": "LDAP configuration saved successfully"
-    },
     "user": {
       "title": "Zarządzanie użytkownikami",
       "add_user": "Dodaj użytkownika",

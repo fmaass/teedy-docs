@@ -1,8 +1,5 @@
 package com.sismics.docs.rest;
 
-import java.io.File;
-
-import com.google.common.io.Resources;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetup;
@@ -14,15 +11,6 @@ import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
-import org.apache.directory.api.ldap.model.name.Dn;
-import org.apache.directory.server.core.api.DirectoryService;
-import org.apache.directory.server.core.api.partition.Partition;
-import org.apache.directory.server.core.factory.DefaultDirectoryServiceFactory;
-import org.apache.directory.server.core.factory.DirectoryServiceFactory;
-import org.apache.directory.server.core.partition.impl.avl.AvlPartition;
-import org.apache.directory.server.ldap.LdapServer;
-import org.apache.directory.server.protocol.shared.store.LdifFileLoader;
-import org.apache.directory.server.protocol.shared.transport.TcpTransport;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +28,6 @@ public class TestAppResource extends BaseJerseyTest {
     // Record if config has been changed by previous test runs
     private static boolean configInboxChanged = false;
     private static boolean configSmtpChanged = false;
-    private static boolean configLdapChanged = false;
 
     @Test
     public void testAppResource() {
@@ -404,98 +391,4 @@ public class TestAppResource extends BaseJerseyTest {
         greenMail.stop();
     }
 
-    /**
-     * Test the LDAP authentication.
-     */
-    @Test
-    public void testLdapAuthentication() throws Exception {
-        // Start LDAP server
-        final DirectoryServiceFactory factory = new DefaultDirectoryServiceFactory();
-        factory.init("Test");
-
-        final DirectoryService directoryService = factory.getDirectoryService();
-        directoryService.getChangeLog().setEnabled(false);
-        directoryService.setShutdownHookEnabled(true);
-
-        final Partition partition = new AvlPartition(directoryService.getSchemaManager());
-        partition.setId("Test");
-        partition.setSuffixDn(new Dn(directoryService.getSchemaManager(), "o=TEST"));
-        partition.initialize();
-        directoryService.addPartition(partition);
-
-        final LdapServer ldapServer = new LdapServer();
-        ldapServer.setTransports(new TcpTransport("localhost", 11389));
-        ldapServer.setDirectoryService(directoryService);
-
-        directoryService.startup();
-        ldapServer.start();
-
-        // Load test data in LDAP
-        new LdifFileLoader(directoryService.getAdminSession(), new File(Resources.getResource("test.ldif").getFile()), null).execute();
-
-        // Login admin
-        String adminToken = adminToken();
-
-        // Get the LDAP configuration
-        JsonObject json = target().path("/app/config_ldap").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
-                .get(JsonObject.class);
-        if (!configLdapChanged) {
-                Assertions.assertFalse(json.getBoolean("enabled"));
-        }
-
-        // Change LDAP configuration
-        target().path("/app/config_ldap").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
-                .post(Entity.form(new Form()
-                        .param("enabled", "true")
-                        .param("host", "localhost")
-                        .param("port", "11389")
-                        .param("usessl", "false")
-                        .param("admin_dn", "uid=admin,ou=system")
-                        .param("admin_password", "secret")
-                        .param("base_dn", "o=TEST")
-                        .param("filter", "(&(objectclass=inetOrgPerson)(uid=USERNAME))")
-                        .param("default_email", "devnull@teedy.io")
-                        .param("default_storage", "100000000")
-                ), JsonObject.class);
-        configLdapChanged = true;
-
-        // Get the LDAP configuration
-        json = target().path("/app/config_ldap").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
-                .get(JsonObject.class);
-        Assertions.assertTrue(json.getBoolean("enabled"));
-        Assertions.assertEquals("localhost", json.getString("host"));
-        Assertions.assertEquals(11389, json.getJsonNumber("port").intValue());
-        Assertions.assertEquals("uid=admin,ou=system", json.getString("admin_dn"));
-        Assertions.assertEquals("secret", json.getString("admin_password"));
-        Assertions.assertEquals("o=TEST", json.getString("base_dn"));
-        Assertions.assertEquals("(&(objectclass=inetOrgPerson)(uid=USERNAME))", json.getString("filter"));
-        Assertions.assertEquals("devnull@teedy.io", json.getString("default_email"));
-        Assertions.assertEquals(100000000L, json.getJsonNumber("default_storage").longValue());
-
-        // Login with a LDAP user
-        String ldapTopen = clientUtil.login("ldap1", "secret", false);
-
-        // Check user informations
-        json = target().path("/user").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ldapTopen)
-                .get(JsonObject.class);
-        Assertions.assertEquals("ldap1@teedy.io", json.getString("email"));
-
-        // List all documents
-        json = target().path("/document/list")
-                .queryParam("sort_column", 3)
-                .queryParam("asc", true)
-                .request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ldapTopen)
-                .get(JsonObject.class);
-        JsonArray documents = json.getJsonArray("documents");
-        Assertions.assertEquals(0, documents.size());
-
-        // Stop LDAP server
-        ldapServer.stop();
-        directoryService.shutdown();
-    }
 }

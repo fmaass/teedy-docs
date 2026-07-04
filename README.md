@@ -30,7 +30,6 @@ Teedy is an open source, lightweight document management system for individuals 
 
 - Responsive user interface
 - Optical character recognition
-- LDAP authentication
 - OpenID Connect (OIDC) / SSO authentication
 - Header-based proxy authentication
 - Support image, PDF, ODT, DOCX, PPTX files

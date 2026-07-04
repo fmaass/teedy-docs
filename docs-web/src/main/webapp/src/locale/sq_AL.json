@@ -257,23 +257,8 @@
     "menu_groups": "Grupet",
     "menu_configuration": "Konfigurimi",
     "menu_inbox": "Skanimi i kutisë hyrëse",
-    "menu_ldap": "Autentifikimi LDAP",
     "menu_metadata": "Meta të dhëna të personalizuara",
     "menu_monitoring": "Monitorimi",
-    "ldap": {
-      "title": "Autentifikimi LDAP",
-      "enabled": "Aktivizo vërtetimin LDAP",
-      "host": "Emri i hostit LDAP",
-      "port": "Porta LDAP (389 si parazgjedhje)",
-      "usessl": "Aktivizo SSL (ldaps)",
-      "admin_dn": "Admin DN",
-      "admin_password": "Fjalëkalimi i administratorit",
-      "base_dn": "Kërkimi bazë DN",
-      "filter": "Filtri i kërkimit (duhet të përmbajë USERNAME, p.sh. \"(uid=USERNAME)\")",
-      "default_email": "Email-i i parazgjedhur për përdoruesin LDAP",
-      "default_storage": "Hapësira ruajtëse e paracaktuar për përdoruesin LDAP",
-      "saved": "Konfigurimi LDAP u ruajt me sukses"
-    },
     "user": {
       "title": "Menaxhimi i përdoruesve",
       "add_user": "Shto një përdorues",

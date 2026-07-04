@@ -257,22 +257,8 @@
     "menu_groups": "Grupos",
     "menu_configuration": "Configuração",
     "menu_inbox": "Verificação de caixa de entrada",
-    "menu_ldap": "Autenticação LDAP",
     "menu_metadata": "Metadados personalizados",
     "menu_monitoring": "Monitorização",
-    "ldap": {
-      "title": "Autenticação LDAP",
-      "enabled": "Ativar autenticação LDAP",
-      "host": "Nome do anfitrião LDAP",
-      "port": "Porta LDAP (por defeito 389)",
-      "admin_dn": "DN do administrador",
-      "admin_password": "Palavra-passe do administrador",
-      "base_dn": "DN de pesquisa base",
-      "filter": "Filtro de pesquisa (deve conter USERNAME, por exemplo, \"(uid=USERNAME)\")",
-      "default_email": "E-mail padrão para utilizador LDAP",
-      "default_storage": "Armazenamento padrão para utilizador LDAP",
-      "saved": "Configuração LDAP guardada com sucesso"
-    },
     "user": {
       "title": "Gestão de Utilizadores",
       "add_user": "Adicionar utilizador",

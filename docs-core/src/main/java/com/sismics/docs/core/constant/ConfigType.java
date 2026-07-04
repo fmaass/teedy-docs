@@ -54,20 +54,6 @@ public enum ConfigType {
     INBOX_DELETE_IMPORTED,
 
     /**
-     * LDAP connection.
-     */
-    LDAP_ENABLED,
-    LDAP_HOST,
-    LDAP_PORT,
-    LDAP_USESSL,
-    LDAP_ADMIN_DN,
-    LDAP_ADMIN_PASSWORD,
-    LDAP_BASE_DN,
-    LDAP_FILTER,
-    LDAP_DEFAULT_EMAIL,
-    LDAP_DEFAULT_STORAGE,
-
-    /**
      * Tag search mode: "PREFIX" (default, case-insensitive startsWith)
      * or "EXACT" (case-insensitive equals).
      */

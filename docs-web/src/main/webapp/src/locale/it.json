@@ -257,22 +257,8 @@
     "menu_groups": "Gruppi",
     "menu_configuration": "Configurazioni",
     "menu_inbox": "Scansione posta in arrivo",
-    "menu_ldap": "Autenticazione LDAP",
     "menu_metadata": "Metadati personalizzati",
     "menu_monitoring": "Monitoraggio",
-    "ldap": {
-      "title": "Autenticazione LDAP",
-      "enabled": "Abilita autenticazione LDAP",
-      "host": "hostname LDAP",
-      "port": "porta LDAP (389 di default)",
-      "admin_dn": "DN amministratore",
-      "admin_password": "Password amministratore",
-      "base_dn": "Ricerca base DN",
-      "filter": "Filtro di ricerca (deve contenere USERNAME, es. \"(uid=USERNAME)\")",
-      "default_email": "Email di default per utenti LDAP",
-      "default_storage": "Archiviazione di default per utenti LDAP",
-      "saved": "Configurazione LDAP salvata con successo"
-    },
     "user": {
       "title": "Gestione utenti",
       "add_user": "Aggiungi utente",
