@@ -115,6 +115,9 @@ jobs:
       - name: Lint frontend (i18n no-raw-text)
         run: cd docs-web/src/main/webapp && npm run lint
 
+      - name: Run frontend unit tests
+        run: cd docs-web/src/main/webapp && npm run test:unit
+
       - name: Build with Maven
         run: ./mvnw --batch-mode -Pprod clean install -DskipTests
 
