@@ -1731,6 +1731,107 @@ public class TestDocumentResource extends BaseJerseyTest {
     }
 
     /**
+     * The export must reject an over-cap account as a PREFLIGHT (before eagerly loading the
+     * documents) and must audit-log a successful export. Uses a low cap set via the system
+     * property seam so a small, bounded fixture (cap + 1 documents) proves the rejection
+     * without needing to load thousands of documents.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testDocumentExportGuard() throws Exception {
+        // Cap the export to 2 documents for this test.
+        System.setProperty(com.sismics.docs.core.util.ExportGuard.MAX_DOCUMENTS_PROPERTY, "2");
+        try {
+            clientUtil.createUser("exportguard");
+            String token = clientUtil.login("exportguard");
+
+            // Create cap + 1 (3) documents so the account is over the cap.
+            clientUtil.createDocument(token);
+            clientUtil.createDocument(token);
+            clientUtil.createDocument(token);
+
+            // Over-cap export is rejected with a 400 ExportTooLarge, WITHOUT loading everything.
+            Response response = target().path("/document/export").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .get();
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+            Assertions.assertEquals("ExportTooLarge", readErrorType(response));
+
+            // No Export audit-log row should have been written for the rejected export.
+            Assertions.assertEquals(0, countExportAuditLogs(token),
+                    "rejected over-cap export must not write an audit-log row");
+
+            // Now raise the cap so the same account is within bounds; the export succeeds
+            // and an Export audit-log row is written.
+            System.setProperty(com.sismics.docs.core.util.ExportGuard.MAX_DOCUMENTS_PROPERTY, "10");
+            response = target().path("/document/export").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .get();
+            Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+            // Drain the stream so the request completes.
+            readZipEntries((InputStream) response.getEntity());
+
+            Assertions.assertEquals(1, countExportAuditLogs(token),
+                    "successful export must write exactly one audit-log row");
+        } finally {
+            System.clearProperty(com.sismics.docs.core.util.ExportGuard.MAX_DOCUMENTS_PROPERTY);
+        }
+    }
+
+    /**
+     * The export must be disabled entirely when the feature flag is off.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testDocumentExportDisabled() throws Exception {
+        System.setProperty(com.sismics.docs.core.util.ExportGuard.ENABLED_PROPERTY, "false");
+        try {
+            clientUtil.createUser("exportdisabled");
+            String token = clientUtil.login("exportdisabled");
+            clientUtil.createDocument(token);
+
+            Response response = target().path("/document/export").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .get();
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+            Assertions.assertEquals("ExportDisabled", readErrorType(response));
+        } finally {
+            System.clearProperty(com.sismics.docs.core.util.ExportGuard.ENABLED_PROPERTY);
+        }
+    }
+
+    /**
+     * Read the JSON "type" field from an error response body. The export endpoint declares
+     * {@code @Produces} octet-stream, so the error entity's negotiated media type is not
+     * JSON; read the raw bytes and parse them as JSON here.
+     */
+    private String readErrorType(Response response) throws Exception {
+        byte[] body = ByteStreams.toByteArray((InputStream) response.getEntity());
+        try (JsonReader reader = Json.createReader(new ByteArrayInputStream(body))) {
+            return reader.readObject().getString("type");
+        }
+    }
+
+    /**
+     * Count the "Export"-class audit-log rows visible to the given user via GET /auditlog.
+     */
+    private int countExportAuditLogs(String token) {
+        JsonObject logs = target().path("/auditlog").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray logArray = logs.getJsonArray("logs");
+        int count = 0;
+        for (int i = 0; i < logArray.size(); i++) {
+            if ("Export".equals(logArray.getJsonObject(i).getString("class"))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * Read all entries of a ZIP stream into a name -> bytes map.
      */
     private Map<String, byte[]> readZipEntries(InputStream is) throws Exception {

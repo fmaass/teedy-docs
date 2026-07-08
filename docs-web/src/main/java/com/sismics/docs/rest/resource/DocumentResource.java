@@ -2,10 +2,12 @@ package com.sismics.docs.rest.resource;
 
 import com.google.common.collect.Lists;
 import com.sismics.docs.core.constant.AclType;
+import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.AclDao;
+import com.sismics.docs.core.dao.AuditLogDao;
 import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
@@ -26,12 +28,14 @@ import com.sismics.docs.core.event.DocumentTrashedAsyncEvent;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.model.jpa.AuditLog;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.google.common.io.ByteStreams;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.ExportGuard;
 import com.sismics.docs.core.util.DocumentUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
@@ -571,17 +575,60 @@ public class DocumentResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
+        // Optional kill switch for the whole endpoint (default enabled).
+        if (!ExportGuard.isEnabled()) {
+            throw new ClientException("ExportDisabled", "The export feature is disabled");
+        }
+
         final String userId = principal.getId();
         final String username = principal.getName();
         final DocumentDao documentDao = new DocumentDao();
         final FileDao fileDao = new FileDao();
         final UserDao userDao = new UserDao();
 
-        // The caller's own (non-trashed) documents, scoped by creator so that an admin
-        // cannot accidentally export another user's data through this endpoint.
-        final List<Document> documentList = documentDao.findByUserId(userId);
+        // PREFLIGHT size cap: count the caller's exportable documents (a COUNT query, not
+        // a full load) and reject BEFORE the eager load if it exceeds the configured cap.
+        // This is what prevents an OOM: we never materialize an over-cap document list.
+        final int maxDocuments = ExportGuard.getMaxDocuments();
+        final long documentCount = documentDao.countByUserId(userId);
+        if (documentCount > maxDocuments) {
+            throw new ClientException("ExportTooLarge", MessageFormat.format(
+                    "Export of {0} documents exceeds the maximum of {1}", documentCount, maxDocuments));
+        }
 
-        StreamingOutput stream = outputStream -> {
+        // Concurrency cap: only a bounded number of exports may buffer a manifest at once.
+        // Reject (rather than queue) when the cap is reached; the permit is released in the
+        // streaming finally so it spans the whole heap-buffering window, not just this method.
+        // Hold the exact semaphore instance the permit was acquired on: a mid-flight config
+        // change can rebuild the semaphore, and release must target that SAME instance.
+        final java.util.concurrent.Semaphore exportPermit = ExportGuard.tryAcquire();
+        if (exportPermit == null) {
+            throw new ServerException("ExportBusy", "Too many concurrent exports, try again later");
+        }
+
+        // Audit the export. It is a read, but the spec requires it be recorded; write the
+        // row here inside the request transaction (the streaming output runs after commit),
+        // keyed to the caller's own user entity.
+        boolean released = false;
+        try {
+            AuditLog exportAuditLog = new AuditLog();
+            exportAuditLog.setUserId(userId);
+            exportAuditLog.setEntityId(userId);
+            exportAuditLog.setEntityClass("Export");
+            exportAuditLog.setType(AuditLogType.CREATE);
+            exportAuditLog.setMessage(MessageFormat.format(
+                    "Exported {0} document(s)", documentCount));
+            new AuditLogDao().create(exportAuditLog);
+
+            // The caller's own (non-trashed) documents, scoped by creator so that an admin
+            // cannot accidentally export another user's data through this endpoint.
+            final List<Document> documentList = documentDao.findByUserId(userId);
+
+            StreamingOutput stream = outputStream -> {
+            // Release the concurrency permit once the manifest buffering / streaming is done,
+            // whichever way it ends. This spans the heap-heavy window, not just the resource
+            // method (which returns before the stream is serialized).
+            try {
             JsonArrayBuilder documentsJson = Json.createArrayBuilder();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
                 int docIndex = 0;
@@ -654,12 +701,24 @@ public class DocumentResource extends BaseResource {
                 zipOutputStream.closeEntry();
             }
             outputStream.close();
+            } finally {
+                ExportGuard.release(exportPermit);
+            }
         };
 
+        // The stream now owns releasing the permit; from here a normal return hands it off.
+        released = true;
         return Response.ok(stream)
                 .header("Content-Type", "application/zip")
                 .header("Content-Disposition", "attachment; filename=\"teedy-export.zip\"")
                 .build();
+        } finally {
+            // If we acquired a permit but never handed it to a running stream (an exception
+            // between acquire and return), release it here to avoid leaking a permit.
+            if (!released) {
+                ExportGuard.release(exportPermit);
+            }
+        }
     }
 
     /**

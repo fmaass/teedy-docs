@@ -73,6 +73,22 @@ public class DocumentDao {
     }
 
     /**
+     * Counts the active (non-trashed) documents owned by a user without loading them.
+     *
+     * <p>Used as a preflight bound for the full-account export so an over-cap account
+     * can be rejected before its documents are eagerly loaded into heap.</p>
+     *
+     * @param userId User ID
+     * @return Number of active documents owned by the user
+     */
+    public long countByUserId(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Long> q = em.createQuery("select count(d) from Document d where d.userId = :userId and d.deleteDate is null", Long.class);
+        q.setParameter("userId", userId);
+        return q.getSingleResult();
+    }
+
+    /**
      * Returns the list of all trashed (soft-deleted) documents owned by a user.
      *
      * @param userId User ID
