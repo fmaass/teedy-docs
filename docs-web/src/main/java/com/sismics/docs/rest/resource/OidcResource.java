@@ -76,6 +76,16 @@ public class OidcResource extends BaseResource {
     private static final long JWKS_MIN_REFRESH_INTERVAL_MS = 60 * 1000;
     private static volatile boolean configValidated = false;
 
+    /**
+     * Test seam: clears cached config/discovery so a test can exercise the
+     * misconfiguration path after a valid config has already been validated.
+     */
+    static void resetConfigCacheForTest() {
+        configValidated = false;
+        discoveryCache = null;
+        jwksCache = null;
+    }
+
     private static final String PROP_ENABLED = "docs.oidc_enabled";
     private static final String PROP_ISSUER = "docs.oidc_issuer";
     private static final String PROP_CLIENT_ID = "docs.oidc_client_id";
@@ -97,8 +107,11 @@ public class OidcResource extends BaseResource {
 
         String configError = validateConfig();
         if (configError != null) {
+            // Redirect to the SPA login error page instead of a raw 500. A 500 at the
+            // login entry point auto-redirects the browser back into a loop; the error
+            // page renders a message and offers a route back to the local login form.
             log.error("OIDC misconfigured: {}", configError);
-            return Response.serverError().build();
+            return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
         }
 
         try {
@@ -184,10 +197,11 @@ public class OidcResource extends BaseResource {
 
             DecodedJWT idToken = verifyIdToken(idTokenStr);
 
-            // Verify nonce matches what we sent in the authorization request (fail closed)
+            // Verify nonce matches what we sent in the authorization request (fail closed).
+            // Never log the nonce values themselves (session-linking secret).
             String tokenNonce = getClaimAsString(idToken, "nonce");
             if (expectedNonce == null || !expectedNonce.equals(tokenNonce)) {
-                log.error("OIDC nonce mismatch: expected={}, got={}", expectedNonce, tokenNonce);
+                log.error("OIDC nonce mismatch");
                 return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
@@ -196,7 +210,8 @@ public class OidcResource extends BaseResource {
             String subject = idToken.getSubject();
             String issuer = System.getProperty(PROP_ISSUER);
 
-            log.info("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
+            // Per-login PII (sub/email/preferred_username) is DEBUG-only.
+            log.debug("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
 
             UserDao userDao = new UserDao();
             User user = null;
@@ -258,6 +273,13 @@ public class OidcResource extends BaseResource {
         DecodedJWT unverified = JWT.decode(idTokenStr);
         String kid = unverified.getKeyId();
 
+        // Require the exp claim to be present. OIDC mandates it; JWT.require only
+        // validates expiry when the claim exists, so a token with no exp would
+        // otherwise be accepted as never-expiring.
+        if (unverified.getExpiresAt() == null) {
+            throw new Exception("ID token missing required exp claim");
+        }
+
         List<RSAPublicKey> candidates = getSigningKeys(kid);
         if (candidates.isEmpty()) {
             candidates = refreshJwksAndRetry(kid);
@@ -276,6 +298,7 @@ public class OidcResource extends BaseResource {
                 JWTVerifier verifier = JWT.require(algo)
                         .withIssuer(issuer)
                         .withAudience(audience)
+                        .acceptExpiresAt(60)
                         .build();
                 return verifier.verify(idTokenStr);
             } catch (Exception e) {
@@ -291,6 +314,7 @@ public class OidcResource extends BaseResource {
                 JWTVerifier verifier = JWT.require(algo)
                         .withIssuer(issuer)
                         .withAudience(audience)
+                        .acceptExpiresAt(60)
                         .build();
                 return verifier.verify(idTokenStr);
             } catch (Exception e) {

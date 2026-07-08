@@ -17,7 +17,13 @@ function toggleDarkMode() {
 }
 
 async function handleLogout() {
-  await auth.logout()
+  const logoutUrl = await auth.logout()
+  if (logoutUrl) {
+    // RP-initiated logout: hand off to the IdP end_session_endpoint so the SSO
+    // session is terminated too (it redirects back to us afterwards).
+    window.location.href = logoutUrl
+    return
+  }
   // Land on the local login form, not straight back into an SSO auto-redirect loop.
   router.push({ name: 'login', query: { local: '1' } })
 }

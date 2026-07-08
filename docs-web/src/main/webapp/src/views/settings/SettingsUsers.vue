@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { listUsers, createUser, updateUser, deleteUser, type UserListItem } from '../../api/user'
+import { listUsers, createUser, updateUser, deleteUser, disableUserTotp, type UserListItem } from '../../api/user'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
@@ -104,6 +104,25 @@ function confirmDelete(user: UserListItem) {
   })
 }
 
+function confirmDisableTotp(user: UserListItem) {
+  confirm.require({
+    message: t('ui.users.disable_totp_message'),
+    header: t('ui.users.disable_totp_title'),
+    icon: 'pi pi-shield',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: async () => {
+      try {
+        await disableUserTotp(user.username)
+        queryClient.invalidateQueries({ queryKey: ['users'] })
+        toast.add({ severity: 'success', summary: t('ui.users.totp_disabled'), life: 2000 })
+      } catch {
+        toast.add({ severity: 'error', summary: t('ui.users.failed_disable_totp'), life: 3000 })
+      }
+    },
+  })
+}
+
 function getCreateUserErrorMessage(error: unknown): string {
   const maybeType = (error as { response?: { data?: { type?: string } } })?.response?.data?.type
   return maybeType === 'AlreadyExistingUsername' ? t('ui.users.username_taken') : t('ui.users.failed_create')
@@ -157,9 +176,10 @@ function userRowClass(data: UserListItem): string {
           <span class="user-date">{{ formatDate(data.create_date) }}</span>
         </template>
       </Column>
-      <Column header="" style="width: 90px">
+      <Column header="" style="width: 128px">
         <template #body="{ data }">
           <span class="user-actions">
+            <Button v-if="data.totp_enabled" icon="pi pi-shield" text rounded size="small" severity="warn" @click="confirmDisableTotp(data)" v-tooltip="t('ui.users.disable_totp_btn')" :aria-label="t('ui.users.disable_totp_btn')" />
             <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="t('edit')" :aria-label="t('edit')" />
             <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
           </span>

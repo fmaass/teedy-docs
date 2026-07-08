@@ -64,6 +64,12 @@ export function deleteUser(username: string) {
   return api.delete(`/user/${username}`)
 }
 
+// Admin recovery for a TOTP-locked user: clears the user's TOTP key so they can
+// log in again (Authelia owns 2FA; Teedy only provides admin recovery).
+export function disableUserTotp(username: string) {
+  return api.post(`/user/${username}/disable_totp`)
+}
+
 export function requestPasswordReset(username: string) {
   const params = new URLSearchParams()
   params.set('username', username)

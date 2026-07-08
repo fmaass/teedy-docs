@@ -724,7 +724,12 @@
       "all_fields_required": "All fields are required",
       "new_password_hint": "leave blank to keep current",
       "password": "Password",
-      "totp_enabled": "2FA enabled"
+      "totp_enabled": "2FA enabled",
+      "disable_totp_btn": "Disable two-factor authentication",
+      "disable_totp_title": "Disable two-factor authentication",
+      "disable_totp_message": "Disable two-factor authentication for this user? Use this to recover a user locked out of their authenticator.",
+      "totp_disabled": "Two-factor authentication disabled",
+      "failed_disable_totp": "Failed to disable two-factor authentication"
     },
     "apikeys": {
       "title": "API Keys",

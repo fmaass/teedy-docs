@@ -135,11 +135,33 @@ describe('auth store', () => {
       await store.login('dave', 'pw', false)
       expect(store.user).not.toBeNull()
 
-      await store.logout()
+      const result = await store.logout()
 
       expect(mockApiLogout).toHaveBeenCalledTimes(1)
       expect(store.user).toBeNull()
       expect(store.initialized).toBe(false)
+      expect(result).toBeNull()
+    })
+
+    // R-020: RP-initiated logout — the store surfaces the provider logout_url so
+    // the UI can hand the browser off to end the IdP session.
+    it('returns the logout_url when the backend supplies one', async () => {
+      mockApiLogout.mockResolvedValue({ data: { logout_url: 'https://idp.example.com/logout' } } as any)
+      const store = useAuthStore()
+
+      const result = await store.logout()
+
+      expect(result).toBe('https://idp.example.com/logout')
+      expect(store.user).toBeNull()
+    })
+
+    it('returns null when the backend supplies no logout_url', async () => {
+      mockApiLogout.mockResolvedValue({ data: {} } as any)
+      const store = useAuthStore()
+
+      const result = await store.logout()
+
+      expect(result).toBeNull()
     })
   })
 })

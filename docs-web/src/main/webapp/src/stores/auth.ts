@@ -25,10 +25,19 @@ export const useAuthStore = defineStore('auth', () => {
     await fetchCurrentUser()
   }
 
-  async function logout() {
-    await apiLogout()
-    user.value = null
-    initialized.value = false
+  // RP-initiated logout: the backend returns the provider end_session_endpoint as
+  // logout_url when the session was OIDC-backed. Returned to the caller so the UI
+  // can navigate the browser there to end the IdP session too.
+  async function logout(): Promise<string | null> {
+    let logoutUrl: string | null = null
+    try {
+      const { data } = await apiLogout()
+      logoutUrl = (data as { logout_url?: string })?.logout_url ?? null
+    } finally {
+      user.value = null
+      initialized.value = false
+    }
+    return logoutUrl
   }
 
   return { user, initialized, isAnonymous, isAdmin, username, fetchCurrentUser, login, logout }

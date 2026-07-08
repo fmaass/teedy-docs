@@ -11,6 +11,7 @@ import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
+import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
@@ -78,6 +79,11 @@ public class AppContext {
     private TrashPurgeService trashPurgeService;
 
     /**
+     * OIDC state purge service.
+     */
+    private OidcStatePurgeService oidcStatePurgeService;
+
+    /**
      * Asynchronous executors.
      */
     private List<ThreadPoolExecutor> asyncExecutorList;
@@ -123,6 +129,11 @@ public class AppContext {
         trashPurgeService = new TrashPurgeService();
         trashPurgeService.startAsync();
         trashPurgeService.awaitRunning();
+
+        // Start OIDC state purge service
+        oidcStatePurgeService = new OidcStatePurgeService();
+        oidcStatePurgeService.startAsync();
+        oidcStatePurgeService.awaitRunning();
 
         // Register fonts
         PdfUtil.registerFonts();
@@ -267,6 +278,10 @@ public class AppContext {
 
         if (trashPurgeService != null) {
             trashPurgeService.stopAsync();
+        }
+
+        if (oidcStatePurgeService != null) {
+            oidcStatePurgeService.stopAsync();
         }
 
         instance = null;

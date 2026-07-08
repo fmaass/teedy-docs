@@ -50,13 +50,11 @@ describe('api client response interceptor', () => {
     expect(window.location.hash).toBe('#/login')
   })
 
-  // CURRENT behavior — A10 WILL FLIP THIS ASSERTION.
-  // Today a 403 also redirects to #/login. Phase A10 changes 403 to an
-  // "access-denied, stay on page" behavior; when it does, this assertion must
-  // change from '#/login' to expecting NO redirect (hash stays '').
-  it('redirects to #/login on a 403 response [A10 WILL FLIP THIS]', async () => {
+  // A10 (R-013): a 403 is authenticated-but-forbidden. The interceptor must NOT
+  // redirect to login — the caller shows "access denied" and stays on the page.
+  it('does NOT redirect on a 403 response (access-denied, stay on page)', async () => {
     await expect(capturedHandlers.rejected!(makeError(403))).rejects.toBeDefined()
-    expect(window.location.hash).toBe('#/login') // A10: change to expect '' (no redirect)
+    expect(window.location.hash).toBe('')
   })
 
   it('does NOT redirect on a 500 response', async () => {
