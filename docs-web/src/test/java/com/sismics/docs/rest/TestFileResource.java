@@ -577,4 +577,35 @@ public class TestFileResource extends BaseJerseyTest {
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
     }
+
+    /**
+     * Regression test for stored XSS: an uploaded text/html original file must be
+     * served as an attachment (never inline), so it cannot execute same-origin.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testOriginalHtmlServedAsAttachment() throws Exception {
+        // Login
+        clientUtil.createUser("file_xss");
+        String token = clientUtil.login("file_xss");
+
+        // Create a document and upload an HTML file
+        String documentId = clientUtil.createDocument(token);
+        String fileId = clientUtil.addFileToDocument(FILE_XSS_HTML, token, documentId);
+
+        // Download the original file (no size parameter)
+        Response response = target().path("/file/" + fileId + "/data").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // The original file must be forced to download, not rendered inline
+        String contentDisposition = response.getHeaderString("Content-Disposition");
+        Assertions.assertNotNull(contentDisposition);
+        Assertions.assertTrue(contentDisposition.toLowerCase().startsWith("attachment"),
+                "Original file download must use Content-Disposition: attachment, got: " + contentDisposition);
+        Assertions.assertFalse(contentDisposition.toLowerCase().startsWith("inline"),
+                "Original file download must not be served inline, got: " + contentDisposition);
+    }
 }

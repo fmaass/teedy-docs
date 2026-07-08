@@ -49,6 +49,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
     protected static final String FILE_VIDEO_WEBM = "file/video.webm";
     protected static final String FILE_WIKIPEDIA_PDF = "file/wikipedia.pdf";
     protected static final String FILE_WIKIPEDIA_ZIP = "file/wikipedia.zip";
+    protected static final String FILE_XSS_HTML = "file/xss.html";
 
     /**
      * Test HTTP server.

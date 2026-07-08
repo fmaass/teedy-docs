@@ -16,7 +16,7 @@ Teedy is an open source, lightweight document management system for individuals 
 - **Header-based proxy authentication** (e.g., Authelia, Authentik) with auto-skip login
 - **Java 21 + Jetty 12 + Jakarta EE 10** (upgraded from Java 11 / Jetty 9)
 - **Multi-arch Docker images** (amd64 + arm64) published to GitHub Container Registry
-- **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed, JWT bearer filter with iss/aud checks
+- **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed
 - **API key authentication** for programmatic access (`Authorization: Bearer tdapi_*`)
 - **Trash / recycle bin** with soft-delete, restore, permanent delete, and auto-purge
 - **Vue 3 frontend** replacing AngularJS (PrimeVue 4, Vite 7, Pinia 3, TypeScript 5.9, vue-i18n)
@@ -204,18 +204,6 @@ Without the `claims_policy`, the ID token will only contain the `sub` claim (an 
 ### Coexistence with Header Auth
 
 OIDC and header-based proxy auth (`-Ddocs.header_authentication=true`) can both be active simultaneously. Header auth is useful as a fallback for API access from the local network, while OIDC provides proper per-user identity for browser sessions.
-
-## JWT Bearer Authentication
-
-For API-to-API authentication using JWT bearer tokens (e.g., from Keycloak), configure:
-
-| Property | Required | Description |
-|----------|----------|-------------|
-| `docs.jwt_authentication` | Yes | Set to `true` to enable |
-| `docs.jwt_expected_issuer` | Yes | Expected `iss` claim (must match exactly) |
-| `docs.jwt_expected_audience` | Yes | Expected `aud` claim |
-
-If JWT authentication is enabled without both `issuer` and `audience` configured, it will be automatically disabled (fail closed).
 
 ## Examples
 

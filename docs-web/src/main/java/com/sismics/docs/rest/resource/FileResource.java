@@ -666,9 +666,19 @@ public class FileResource extends BaseResource {
             return Response.status(Status.SERVICE_UNAVAILABLE).build();
         }
 
+        // User-uploaded original content (size == null) carries a user-controlled MIME type and can be an
+        // active document (HTML, SVG). Force it to download as an attachment and lock it down with a
+        // restrictive CSP so it cannot execute same-origin (stored XSS). App-generated thumbnails and the
+        // "web"/"thumb" size variations are trusted images and keep their inline disposition.
+        boolean isOriginal = size == null;
+        String disposition = isOriginal ? "attachment" : "inline";
         Response.ResponseBuilder builder = Response.ok(stream)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=utf-8''" + filenameEncode(  file.getFullName("data") ))
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition + "; filename*=utf-8''" + filenameEncode(  file.getFullName("data") ))
                 .header(HttpHeaders.CONTENT_TYPE, mimeType);
+        if (isOriginal) {
+            builder.header("Content-Security-Policy", "sandbox; default-src 'none'")
+                    .header("X-Content-Type-Options", "nosniff");
+        }
         if (decrypt) {
             // Cache real files
             builder.header(HttpHeaders.CACHE_CONTROL, "private")
