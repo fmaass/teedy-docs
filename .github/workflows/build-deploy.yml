@@ -29,6 +29,9 @@ jobs:
       - name: Install test dependencies
         run: sudo apt-get update && sudo apt-get -y -q --no-install-recommends install ffmpeg mediainfo tesseract-ocr tesseract-ocr-deu
 
+      - name: Check db.version covers latest migration
+        run: bash scripts/check-db-version.sh
+
       - name: Run tests
         run: ./mvnw --batch-mode test
 
