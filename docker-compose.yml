@@ -1,4 +1,3 @@
-version: '3'
 services:
   teedy-server:
     image: ghcr.io/fmaass/teedy-docs:latest

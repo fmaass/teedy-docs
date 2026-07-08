@@ -61,7 +61,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v2.8.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.0.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -212,10 +212,9 @@ In the following examples some passwords are exposed in cleartext. This was done
 ### Default, using PostgreSQL
 
 ```yaml
-version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.5.0
+    image: ghcr.io/fmaass/teedy-docs:v3.0.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -260,10 +259,9 @@ networks:
 ### Using the internal database (only for testing)
 
 ```yaml
-version: '3'
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v2.5.0
+    image: ghcr.io/fmaass/teedy-docs:v3.0.0
     restart: unless-stopped
     ports:
       - 8080:8080
