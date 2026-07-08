@@ -84,7 +84,7 @@ public class TrashPurgeService extends AbstractScheduledService {
                 DocumentDao documentDao = new DocumentDao();
                 // Attribute the deletion/quota events to the document's real owner, not "admin",
                 // so the owner's storage is released instead of admin's (matches per-doc permanentDelete).
-                Document document = documentDao.getDeletedById(documentId);
+                Document document = documentDao.getDeletedByIdSystem(documentId);
                 if (document == null) {
                     // Already purged or restored between the scan and now.
                     return;

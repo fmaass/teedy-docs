@@ -104,7 +104,11 @@ public class TestShareResource extends BaseJerseyTest {
         byte[] fileBytes = ByteStreams.toByteArray(is);
         Assertions.assertEquals(163510, fileBytes.length);
         
-        // Deletes the share (not allowed)
+        // Cross-user share delete is DELIBERATELY not-found-style (400 DocumentNotFound),
+        // NOT 403. Returning 403 would confirm to an unauthorized user that the share
+        // (and its underlying document) exists — an existence-disclosure leak. Not-found
+        // semantics keep the resource indistinguishable from one that never existed.
+        // Do NOT "fix" this to 403.
         clientUtil.createUser("share2");
         String share2Token = clientUtil.login("share2");
         response = target().path("/share/" + share1Id).request()

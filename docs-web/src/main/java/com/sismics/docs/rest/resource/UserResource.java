@@ -383,10 +383,16 @@ public class UserResource extends BaseResource {
 
         JsonObjectBuilder response = Json.createObjectBuilder();
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
-        NewCookie cookie = new NewCookie(
-                TokenBasedSecurityFilter.COOKIE_NAME, token,
-                "/", null, NewCookie.DEFAULT_VERSION, null,
-                maxAge, (Date) null, true, true);
+        // SameSite=Lax mitigates CSRF while still permitting top-level cross-site
+        // navigations (needed for the OIDC redirect return, which Strict would break).
+        NewCookie cookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+                .value(token)
+                .path("/")
+                .maxAge(maxAge)
+                .secure(true)
+                .httpOnly(true)
+                .sameSite(NewCookie.SameSite.LAX)
+                .build();
         return Response.ok().entity(response.build()).cookie(cookie).build();
     }
 
@@ -429,9 +435,19 @@ public class UserResource extends BaseResource {
             }
         }
 
-        // Build response with cleared cookie
+        // Build response with cleared cookie. Flags must match the login cookie
+        // (secure, httpOnly, SameSite=Lax) so the browser overwrites/expires the
+        // same cookie instead of leaving the authenticated one in place.
         JsonObjectBuilder response = Json.createObjectBuilder();
-        NewCookie cookie = new NewCookie(TokenBasedSecurityFilter.COOKIE_NAME, null, "/", null, 1, null, -1, new Date(1), false, false);
+        NewCookie cookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+                .value(null)
+                .path("/")
+                .maxAge(-1)
+                .expiry(new Date(1))
+                .secure(true)
+                .httpOnly(true)
+                .sameSite(NewCookie.SameSite.LAX)
+                .build();
 
         // Determine external logout redirect (priority: explicit URL > OIDC end_session > none)
         String logoutUrl = System.getProperty("docs.logout_url");
@@ -568,7 +584,7 @@ public class UserResource extends BaseResource {
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or connected as guest
      * @apiError (client) ValidationError Validation error
-     * @apiPermission user
+     * @apiPermission admin
      * @apiVersion 1.5.0
      *
      * @param username Username

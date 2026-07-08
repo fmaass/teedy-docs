@@ -180,4 +180,55 @@ public class TestTrashResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
+
+    /**
+     * A non-owner emptying their own (empty) trash must NOT touch another user's
+     * trashed documents. Empty-trash is scoped to the caller's own trash; if that
+     * guard were removed (e.g. scoped by ACL/admin), the victim's document would be
+     * permanently deleted here.
+     */
+    @Test
+    public void testEmptyTrashCrossUser() {
+        String adminToken = adminToken();
+
+        // Two ordinary users
+        clientUtil.createUser("empty_owner");
+        String ownerToken = clientUtil.login("empty_owner");
+        clientUtil.createUser("empty_attacker");
+        String attackerToken = clientUtil.login("empty_attacker");
+
+        // Owner creates and trashes a document
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Owner trashed doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String ownerDocId = json.getString("id");
+        target().path("/document/" + ownerDocId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .delete(JsonObject.class);
+
+        // Attacker empties trash: their own trash is empty, so nothing is deleted
+        json = target().path("/document/trash").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, attackerToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(0, json.getInt("deleted_count"),
+                "empty-trash must only delete the caller's own trashed documents");
+
+        // The owner's document still exists in trash and is restorable (was not purged)
+        Response response = target().path("/document/" + ownerDocId + "/restore").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(200, response.getStatus(),
+                "the owner's trashed document must survive another user's empty-trash");
+
+        // Cleanup
+        target().path("/user/empty_owner").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        target().path("/user/empty_attacker").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
 }

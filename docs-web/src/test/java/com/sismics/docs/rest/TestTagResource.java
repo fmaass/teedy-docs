@@ -237,4 +237,61 @@ public class TestTagResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
+
+    /**
+     * A user must not be able to mutate or delete another user's tag. Both the
+     * update (POST) and delete (DELETE) endpoints require a WRITE ACL and return
+     * NOT_FOUND otherwise. Each assertion fails if the corresponding WRITE ACL
+     * guard in TagResource is removed.
+     */
+    @Test
+    public void testTagCrossUserDenied() {
+        String adminToken = adminToken();
+
+        // Owner and stranger
+        clientUtil.createUser("tag_owner");
+        String ownerToken = clientUtil.login("tag_owner");
+        clientUtil.createUser("tag_stranger");
+        String strangerToken = clientUtil.login("tag_stranger");
+
+        // Owner creates a tag
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("name", "OwnerTag")
+                        .param("color", "#123456")), JsonObject.class);
+        String ownerTagId = json.getString("id");
+        Assertions.assertNotNull(ownerTagId);
+
+        // Stranger cannot update the owner's tag
+        Response response = target().path("/tag/" + ownerTagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .post(Entity.form(new Form()
+                        .param("name", "Hijacked")
+                        .param("color", "#000000")));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()),
+                "a user must not update another user's tag");
+
+        // Stranger cannot delete the owner's tag
+        response = target().path("/tag/" + ownerTagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .delete();
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()),
+                "a user must not delete another user's tag");
+
+        // The owner's tag is unchanged (mutation/delete were actually denied)
+        json = target().path("/tag/" + ownerTagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals("OwnerTag", json.getString("name"));
+        Assertions.assertEquals("#123456", json.getString("color"));
+
+        // Cleanup
+        target().path("/user/tag_owner").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        target().path("/user/tag_stranger").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
 }

@@ -269,12 +269,40 @@ public class DocumentDao {
     }
 
     /**
-     * Gets a soft-deleted document by its ID.
+     * Gets a soft-deleted document by its ID, scoped to its owner.
+     *
+     * <p>The owner filter is part of the signature so cross-user misuse is impossible
+     * at the DAO level: a caller cannot fetch (and then restore/purge) a trashed
+     * document owned by another user. For the non-user-scoped system purge, use
+     * {@link #getDeletedByIdSystem(String)}.
+     *
+     * @param id Document ID
+     * @param userId Owner user ID the document must belong to
+     * @return Document or null (also null if it exists but is owned by another user)
+     */
+    public Document getDeletedById(String id, String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Document> q = em.createQuery("select d from Document d where d.id = :id and d.userId = :userId and d.deleteDate is not null", Document.class);
+        q.setParameter("id", id);
+        q.setParameter("userId", userId);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Gets a soft-deleted document by its ID without an owner filter.
+     *
+     * <p>Reserved for system-level, non-user-scoped operations (e.g. the scheduled
+     * trash purge) that must act on every user's trash. User-facing endpoints must
+     * use {@link #getDeletedById(String, String)} instead.
      *
      * @param id Document ID
      * @return Document or null
      */
-    public Document getDeletedById(String id) {
+    public Document getDeletedByIdSystem(String id) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         TypedQuery<Document> q = em.createQuery("select d from Document d where d.id = :id and d.deleteDate is not null", Document.class);
         q.setParameter("id", id);

@@ -140,4 +140,70 @@ public class TestCommentResource extends BaseJerseyTest {
                 .get(JsonObject.class);
         Assertions.assertEquals(0, json.getJsonArray("comments").size());
     }
+
+    /**
+     * A user with neither ownership nor an ACL on a document must be denied every
+     * comment operation on it (read, add, delete) — the endpoint returns NOT_FOUND
+     * rather than disclosing the document's existence. Each assertion fails if the
+     * corresponding READ/WRITE ACL guard in CommentResource is removed.
+     */
+    @Test
+    public void testCommentCrossUserDenied() {
+        String adminToken = adminToken();
+
+        // Owner and an unrelated user
+        clientUtil.createUser("comment_owner");
+        String ownerToken = clientUtil.login("comment_owner");
+        clientUtil.createUser("comment_stranger");
+        String strangerToken = clientUtil.login("comment_stranger");
+
+        // Owner creates a document and a comment on it
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Owner comment doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+        json = target().path("/comment").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("id", documentId)
+                        .param("content", "Owner's private comment")), JsonObject.class);
+        String ownerCommentId = json.getString("id");
+
+        // Stranger cannot read comments (no READ ACL)
+        Response response = target().path("/comment/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .get();
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // Stranger cannot add a comment (no READ ACL)
+        response = target().path("/comment").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .put(Entity.form(new Form()
+                        .param("id", documentId)
+                        .param("content", "Stranger comment")));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // Stranger cannot delete the owner's comment (no WRITE ACL / not the author)
+        response = target().path("/comment/" + ownerCommentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .delete();
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // The owner's comment is intact (delete was actually denied, not silently applied)
+        json = target().path("/comment/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("comments").size());
+
+        // Cleanup
+        target().path("/user/comment_owner").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        target().path("/user/comment_stranger").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
 }

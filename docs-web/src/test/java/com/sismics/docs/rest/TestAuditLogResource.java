@@ -8,6 +8,8 @@ import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 import java.util.Date;
 
 /**
@@ -127,8 +129,62 @@ public class TestAuditLogResource extends BaseJerseyTest {
     }
     
     /**
+     * A non-admin must not be able to read another user's audit log entries:
+     *   - Querying a document they have no READ ACL on returns NOT_FOUND (the
+     *     document-scoped ACL guard). Fails if that guard is removed.
+     *   - The unscoped (per-user) log is filtered to the caller's own principal, so
+     *     it never contains another user's entries.
+     */
+    @Test
+    public void testAuditLogCrossUserDenied() throws Exception {
+        String adminToken = adminToken();
+
+        // Victim creates a document (generating audit log entries)
+        clientUtil.createUser("audit_victim");
+        String victimToken = clientUtil.login("audit_victim");
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, victimToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Victim private document")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String victimDocId = json.getString("id");
+
+        // Attacker has no ACL on the victim's document
+        clientUtil.createUser("audit_attacker");
+        String attackerToken = clientUtil.login("audit_attacker");
+
+        // Attacker cannot read the victim's document audit log
+        Response response = target().path("/auditlog")
+                .queryParam("document", victimDocId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, attackerToken)
+                .get();
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()),
+                "a non-admin must not read another user's document audit log");
+
+        // Attacker's own (unscoped) audit log must not leak the victim's entries
+        json = target().path("/auditlog").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, attackerToken)
+                .get(JsonObject.class);
+        JsonArray logs = json.getJsonArray("logs");
+        for (int i = 0; i < logs.size(); i++) {
+            Assertions.assertEquals("audit_attacker", logs.getJsonObject(i).getString("username"),
+                    "the per-user audit log must only contain the caller's own entries");
+        }
+
+        // Cleanup
+        target().path("/user/audit_victim").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        target().path("/user/audit_attacker").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
      * Count logs by class.
-     * 
+     *
      * @param logs Logs
      * @param clazz Class
      * @return Count by class

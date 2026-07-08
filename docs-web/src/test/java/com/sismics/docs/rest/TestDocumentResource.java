@@ -1803,6 +1803,51 @@ public class TestDocumentResource extends BaseJerseyTest {
     }
 
     /**
+     * RR-08: an explicitly empty create_date must be treated as omitted, not rejected
+     * or parsed as an error. ValidationUtil.validateDate treats an empty/blank string
+     * as null (nullable=true), so document creation and update succeed and the server
+     * assigns/keeps a valid create_date. This guards against a regression where an
+     * empty string would be fed to the numeric parser and throw a 400/500.
+     */
+    @Test
+    public void testEmptyCreateDate() {
+        clientUtil.createUser("emptycreatedate");
+        String token = clientUtil.login("emptycreatedate");
+
+        // Create with an empty-string create_date: accepted, treated as omitted
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Empty create_date doc")
+                        .param("language", "eng")
+                        .param("create_date", "")), JsonObject.class);
+        String documentId = json.getString("id");
+        Assertions.assertNotNull(documentId);
+
+        // The server assigned a valid (non-null, positive) create_date
+        json = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertNotNull(json.getJsonNumber("create_date"));
+        Assertions.assertTrue(json.getJsonNumber("create_date").longValue() > 0);
+
+        // Update with an empty-string create_date is likewise accepted (200), not a 400
+        Response response = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Empty create_date doc updated")
+                        .param("language", "eng")
+                        .param("create_date", "")));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // Cleanup
+        String adminToken = adminToken();
+        target().path("/user/emptycreatedate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
      * Read the JSON "type" field from an error response body. The export endpoint declares
      * {@code @Produces} octet-stream, so the error entity's negotiated media type is not
      * JSON; read the raw bytes and parse them as JSON here.

@@ -9,10 +9,7 @@ public enum AclType {
     /**
      * User created ACL.
      */
-    USER,
-    
-    /**
-     * ACL created by the routing module.
-     */
-    ROUTING
+    USER
+    // The ROUTING value was removed with the workflow/routing subsystem (ADR-0004).
+    // Migration dbupdate-037-0.sql deletes any pre-existing T_ACL rows with ACL_TYPE_C='ROUTING'.
 }

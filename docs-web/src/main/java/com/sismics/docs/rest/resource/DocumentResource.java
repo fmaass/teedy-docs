@@ -1366,8 +1366,10 @@ public class DocumentResource extends BaseResource {
         }
 
         DocumentDao documentDao = new DocumentDao();
-        Document document = documentDao.getDeletedById(id);
-        if (document == null || !document.getUserId().equals(principal.getId())) {
+        // Owner-scoped fetch: a document owned by another user resolves to null (404),
+        // never disclosing its existence or allowing a cross-user restore.
+        Document document = documentDao.getDeletedById(id, principal.getId());
+        if (document == null) {
             throw new NotFoundException();
         }
 
@@ -1408,8 +1410,10 @@ public class DocumentResource extends BaseResource {
 
         DocumentDao documentDao = new DocumentDao();
         FileDao fileDao = new FileDao();
-        Document document = documentDao.getDeletedById(id);
-        if (document == null || !document.getUserId().equals(principal.getId())) {
+        // Owner-scoped fetch: another user's trashed document resolves to null (404),
+        // making a cross-user permanent delete impossible at the DAO level.
+        Document document = documentDao.getDeletedById(id, principal.getId());
+        if (document == null) {
             throw new NotFoundException();
         }
 

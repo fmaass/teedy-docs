@@ -246,11 +246,16 @@ public class OidcResource extends BaseResource {
             String tokenValue = authTokenDao.create(authToken);
             authTokenDao.deleteOldSessionToken(user.getId());
 
-            NewCookie cookie = new NewCookie(
-                    TokenBasedSecurityFilter.COOKIE_NAME, tokenValue,
-                    "/", null, NewCookie.DEFAULT_VERSION, null,
-                    TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME,
-                    (Date) null, true, true);
+            // SameSite=Lax (not Strict): the cookie is set on a top-level redirect
+            // back from the IdP, and Strict would drop it on that cross-site navigation.
+            NewCookie cookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+                    .value(tokenValue)
+                    .path("/")
+                    .maxAge(TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME)
+                    .secure(true)
+                    .httpOnly(true)
+                    .sameSite(NewCookie.SameSite.LAX)
+                    .build();
 
             String redirectTarget = oidcState.getReturnUrl();
             if (redirectTarget == null || !redirectTarget.startsWith("/#/")) {

@@ -66,7 +66,7 @@ public class TestTrashPurgeService extends BaseTransactionalTest {
         boolean[] docGone = new boolean[1];
         TransactionUtil.handle(() -> {
             ownerStorage[0] = new UserDao().getById(owner.getId()).getStorageCurrent();
-            docGone[0] = new DocumentDao().getDeletedById(documentId) == null;
+            docGone[0] = new DocumentDao().getDeletedByIdSystem(documentId) == null;
         });
         Assertions.assertEquals(0L, ownerStorage[0], "purge must release the owner's storage, not admin's");
         Assertions.assertTrue(docGone[0], "the expired document must be permanently purged");
