@@ -88,60 +88,86 @@ public class FileProcessingAsyncListener {
      * @param isFileCreated True if the file was just created
      */
     private void processFile(FileEvent event, boolean isFileCreated) {
-        AtomicReference<File> file = new AtomicReference<>();
-        AtomicReference<User> user = new AtomicReference<>();
+        try {
+            AtomicReference<File> file = new AtomicReference<>();
+            AtomicReference<User> user = new AtomicReference<>();
 
-        // Open a first transaction to get what we need to start the processing
-        TransactionUtil.handle(() -> {
-            // Generate thumbnail, extract content
-            file.set(new FileDao().getActiveById(event.getFileId()));
-            if (file.get() == null) {
-                // The file has been deleted since
+            // Open a first transaction to get what we need to start the processing
+            TransactionUtil.handle(() -> {
+                // Generate thumbnail, extract content
+                file.set(new FileDao().getActiveById(event.getFileId()));
+                if (file.get() == null) {
+                    // The file has been deleted since
+                    return;
+                }
+
+                // Get the creating user from the database for its private key
+                UserDao userDao = new UserDao();
+                user.set(userDao.getById(file.get().getUserId()));
+            });
+
+            // Process the file outside of a transaction
+            if (user.get() == null || file.get() == null) {
+                // The user or file has been deleted
+                FileUtil.endProcessingFile(event.getFileId());
                 return;
             }
+            String content = extractContent(event, user.get(), file.get());
 
-            // Get the creating user from the database for its private key
-            UserDao userDao = new UserDao();
-            user.set(userDao.getById(file.get().getUserId()));
-        });
+            // Open a new transaction to save the file content
+            AtomicReference<String> documentId = new AtomicReference<>();
+            AtomicReference<String> fileName = new AtomicReference<>();
+            TransactionUtil.handle(() -> {
+                FileDao fileDao = new FileDao();
+                File freshFile = fileDao.getActiveById(event.getFileId());
+                if (freshFile == null) {
+                    return;
+                }
 
-        // Process the file outside of a transaction
-        if (user.get() == null || file.get() == null) {
-            // The user or file has been deleted
+                freshFile.setContent(content);
+                fileDao.update(freshFile);
+
+                if (isFileCreated) {
+                    AppContext.getInstance().getIndexingHandler().createFile(freshFile);
+                } else {
+                    AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
+                }
+
+                documentId.set(freshFile.getDocumentId());
+                fileName.set(freshFile.getName());
+            });
+
+            // Apply auto-tagging rules
+            if (documentId.get() != null) {
+                applyAutoTagRules(documentId.get(), fileName.get(), content);
+            }
+
             FileUtil.endProcessingFile(event.getFileId());
+        } finally {
+            // Deterministically delete the plaintext temp file this event carried. All
+            // producers (upload, attach, manual re-process, EML import) hand ownership
+            // of the decrypted/unencrypted file to this event; this is the single point
+            // where its lifetime ends. The PhantomReference sweep in FileService remains
+            // only as a backstop.
+            deleteUnencryptedFile(event);
+        }
+    }
+
+    /**
+     * Delete the plaintext temporary file carried by a file event, if any.
+     *
+     * @param event File event
+     */
+    void deleteUnencryptedFile(FileEvent event) {
+        Path unencryptedFile = event.getUnencryptedFile();
+        if (unencryptedFile == null) {
             return;
         }
-        String content = extractContent(event, user.get(), file.get());
-
-        // Open a new transaction to save the file content
-        AtomicReference<String> documentId = new AtomicReference<>();
-        AtomicReference<String> fileName = new AtomicReference<>();
-        TransactionUtil.handle(() -> {
-            FileDao fileDao = new FileDao();
-            File freshFile = fileDao.getActiveById(event.getFileId());
-            if (freshFile == null) {
-                return;
-            }
-
-            freshFile.setContent(content);
-            fileDao.update(freshFile);
-
-            if (isFileCreated) {
-                AppContext.getInstance().getIndexingHandler().createFile(freshFile);
-            } else {
-                AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
-            }
-
-            documentId.set(freshFile.getDocumentId());
-            fileName.set(freshFile.getName());
-        });
-
-        // Apply auto-tagging rules
-        if (documentId.get() != null) {
-            applyAutoTagRules(documentId.get(), fileName.get(), content);
+        try {
+            Files.deleteIfExists(unencryptedFile);
+        } catch (Exception e) {
+            log.warn("Unable to delete temporary file: " + unencryptedFile, e);
         }
-
-        FileUtil.endProcessingFile(event.getFileId());
     }
 
     /**

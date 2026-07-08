@@ -5,8 +5,10 @@ import com.sismics.docs.core.dao.WebhookDao;
 import com.sismics.docs.core.dao.criteria.WebhookCriteria;
 import com.sismics.docs.core.dao.dto.WebhookDto;
 import com.sismics.docs.core.model.jpa.Webhook;
+import com.sismics.docs.core.util.WebhookUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
 
@@ -91,6 +93,12 @@ public class WebhookResource extends BaseResource {
         // Validate input
         WebhookEvent event = WebhookEvent.valueOf(ValidationUtil.validateLength(eventStr, "event", 1, 50, false));
         url = ValidationUtil.validateLength(url, "url", 1, 1024, false);
+
+        // Reject URLs that could be used for server-side request forgery
+        if (!WebhookUtil.isUrlAllowed(url)) {
+            throw new ClientException("ValidationError",
+                    "url must be a public http/https URL (loopback, link-local and private addresses are not allowed)");
+        }
 
         // Create the webhook
         WebhookDao webhookDao = new WebhookDao();

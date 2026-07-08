@@ -67,19 +67,24 @@ public class FileUtil {
         BufferedImage deskewedImage = Scalr.rotate(resizedImage, - imageDeskew.getSkewAngle(), Scalr.OP_ANTIALIAS, Scalr.OP_GRAYSCALE);
         resizedImage.flush();
         Path tmpFile = AppContext.getInstance().getFileService().createTemporaryFile();
-        ImageIO.write(deskewedImage, "tiff", tmpFile.toFile());
+        try {
+            ImageIO.write(deskewedImage, "tiff", tmpFile.toFile());
 
-        List<String> result = Lists.newLinkedList(Arrays.asList("tesseract", tmpFile.toAbsolutePath().toString(), "stdout", "-l", language));
-        ProcessBuilder pb = new ProcessBuilder(result);
-        Process process = pb.start();
+            List<String> result = Lists.newLinkedList(Arrays.asList("tesseract", tmpFile.toAbsolutePath().toString(), "stdout", "-l", language));
+            ProcessBuilder pb = new ProcessBuilder(result);
+            Process process = pb.start();
 
-        // Consume the process error stream
-        final String commandName = pb.command().get(0);
-        new InputStreamReaderThread(process.getErrorStream(), commandName).start();
+            // Consume the process error stream
+            final String commandName = pb.command().get(0);
+            new InputStreamReaderThread(process.getErrorStream(), commandName).start();
 
-        // Consume the data as text
-        try (InputStream is = process.getInputStream()) {
-            return CharStreams.toString(new InputStreamReader(is, StandardCharsets.UTF_8));
+            // Consume the data as text
+            try (InputStream is = process.getInputStream()) {
+                return CharStreams.toString(new InputStreamReader(is, StandardCharsets.UTF_8));
+            }
+        } finally {
+            // Delete the plaintext TIFF as soon as tesseract has consumed it
+            Files.deleteIfExists(tmpFile);
         }
     }
 

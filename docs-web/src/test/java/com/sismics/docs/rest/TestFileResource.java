@@ -488,6 +488,81 @@ public class TestFileResource extends BaseJerseyTest {
     }
 
     /**
+     * SEC A3-03: when a file upload fails in FileUtil.createFile BEFORE the async event
+     * that owns the plaintext temp is queued (here: a quota breach), the unencrypted
+     * temp file must not be left behind. No async event is queued on this failure path,
+     * so there is no async-deletion race to make the count flaky.
+     */
+    @Test
+    public void testUploadFailureDeletesTempFile() throws Exception {
+        clientUtil.createUser("file_leak"); // 1MB quota
+        String token = clientUtil.login("file_leak");
+
+        // Fill the quota with three 292KB uploads (~878KB)
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
+
+        long before = countSismicsTempFiles();
+
+        // The fourth upload breaches the 1MB quota: createFile throws QuotaReached after
+        // writing the temp, before queuing the async event.
+        try {
+            clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
+            Assertions.fail("Expected quota breach");
+        } catch (jakarta.ws.rs.BadRequestException ignored) {
+        }
+
+        long after = countSismicsTempFiles();
+        Assertions.assertTrue(after <= before,
+                "Plaintext temp file leaked on failed upload: before=" + before + " after=" + after);
+    }
+
+    /**
+     * SEC A3-03b: when the server-side multipart copy aborts BEFORE createFile (here: the
+     * oversize limit is exceeded mid-copy, after the plaintext temp already exists on
+     * disk), the temp created at the top of the upload must still be deleted. This
+     * exercises the copy phase — the cleanup scope must cover creation + copy, not only
+     * createFile.
+     */
+    @Test
+    public void testUploadCopyFailureDeletesTempFile() throws Exception {
+        clientUtil.createUser("file_copy_err");
+        String token = clientUtil.login("file_copy_err");
+
+        long before = countSismicsTempFiles();
+
+        // Force the oversize path to trip during the server-side copy loop: the real file
+        // (292KB) exceeds this 1KB cap, so the resource writes the temp, then throws
+        // PayloadTooLarge before ever reaching createFile.
+        System.setProperty("docs.max_upload_size", "1024");
+        try (InputStream is = Resources.getResource(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG).openStream()) {
+            StreamDataBodyPart part = new StreamDataBodyPart("file", is, "large.png");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                Response response = target().register(MultiPartFeature.class)
+                        .path("/file").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(multiPart.bodyPart(part), MediaType.MULTIPART_FORM_DATA_TYPE));
+                Assertions.assertNotEquals(Status.OK.getStatusCode(), response.getStatus(),
+                        "Oversize upload must be rejected");
+            }
+        } finally {
+            System.clearProperty("docs.max_upload_size");
+        }
+
+        long after = countSismicsTempFiles();
+        Assertions.assertTrue(after <= before,
+                "Plaintext temp file leaked on oversize copy failure: before=" + before + " after=" + after);
+    }
+
+    private long countSismicsTempFiles() throws Exception {
+        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        try (java.util.stream.Stream<Path> files = Files.list(tmpDir)) {
+            return files.filter(p -> p.getFileName().toString().startsWith("sismics_docs")).count();
+        }
+    }
+
+    /**
      * SEC-02: renaming and deleting a file must require WRITE on the parent
      * document, not merely READ. A user with only a READ ACL on a shared
      * document must not be able to rename or delete its files.

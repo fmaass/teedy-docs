@@ -79,6 +79,8 @@ import javax.mail.Message;
 import javax.mail.MessagingException;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -106,6 +108,10 @@ import java.util.UUID;
  */
 @Path("/document")
 public class DocumentResource extends BaseResource {
+    /**
+     * Logger.
+     */
+    private static final Logger log = LoggerFactory.getLogger(DocumentResource.class);
 
     /**
      * Returns a document.
@@ -1073,71 +1079,107 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         ValidationUtil.validateRequired(fileBodyPart, "file");
 
-        // Save the file to a temporary file
-        java.nio.file.Path unencryptedFile;
-        try {
-            unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile();
-            Files.copy(fileBodyPart.getValueAs(InputStream.class), unencryptedFile, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw new ServerException("StreamError", "Error reading the input file", e);
-        }
-
-        // Read the EML file
+        // Read the EML file and add its files. The original EML temp is created inside the
+        // cleanup scope so a failure during its multipart copy also deletes it. EmailUtil
+        // extracts each attachment into its own plaintext temp file; ownership of a temp
+        // transfers to the async event queued by FileUtil.createFile only once that call
+        // returns normally. Any temp not handed off (copy/parse/createFile failure) is
+        // deleted by the finally below.
+        java.nio.file.Path unencryptedFile = null;
         Properties props = new Properties();
         Session mailSession = Session.getDefaultInstance(props, null);
         EmailUtil.MailContent mailContent = new EmailUtil.MailContent();
-        try (InputStream inputStream = Files.newInputStream(unencryptedFile)) {
-            Message message = new MimeMessage(mailSession, inputStream);
-            mailContent.setSubject(message.getSubject());
-            mailContent.setDate(message.getSentDate());
-            EmailUtil.parseMailContent(message, mailContent);
-        } catch (IOException | MessagingException e) {
-            throw new ServerException("StreamError", "Error reading the temporary file", e);
-        }
-
-        // Create the document
-        Document document = new Document();
-        document.setUserId(principal.getId());
-        if (mailContent.getSubject() == null) {
-            document.setTitle("Imported email from EML file");
-        } else {
-            document.setTitle(StringUtils.abbreviate(mailContent.getSubject(), 100));
-        }
-        document.setDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000));
-        document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
-        document.setFormat("EML");
-        document.setSource("Email");
-        document.setLanguage(ConfigUtil.getConfigStringValue(ConfigType.DEFAULT_LANGUAGE));
-        if (mailContent.getDate() == null) {
-            document.setCreateDate(new Date());
-        } else {
-            document.setCreateDate(mailContent.getDate());
-        }
-
-        // Save the document, create the base ACLs
-        DocumentUtil.createDocument(document, principal.getId());
-
-        // Raise a document created event
-        DocumentCreatedAsyncEvent documentCreatedAsyncEvent = new DocumentCreatedAsyncEvent();
-        documentCreatedAsyncEvent.setUserId(principal.getId());
-        documentCreatedAsyncEvent.setDocumentId(document.getId());
-        ThreadLocalContext.get().addAsyncEvent(documentCreatedAsyncEvent);
-
-        // Add files to the document
+        Set<java.nio.file.Path> handedOffTemps = new HashSet<>();
         try {
-            for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
-                FileUtil.createFile(fileContent.getName(), null, fileContent.getFile(), fileContent.getSize(),
-                        document.getLanguage(), principal.getId(), document.getId());
+            // Save the uploaded EML to a temporary file
+            try {
+                unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile();
+                Files.copy(fileBodyPart.getValueAs(InputStream.class), unencryptedFile, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException e) {
+                throw new ServerException("StreamError", "Error reading the input file", e);
             }
-        } catch (IOException e) {
-            throw new ClientException(e.getMessage(), e.getMessage(), e);
-        } catch (Exception e) {
-            throw new ServerException("FileError", "Error adding a file", e);
-        }
 
-        JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("id", document.getId());
-        return Response.ok().entity(response.build()).build();
+            try (InputStream inputStream = Files.newInputStream(unencryptedFile)) {
+                Message message = new MimeMessage(mailSession, inputStream);
+                mailContent.setSubject(message.getSubject());
+                mailContent.setDate(message.getSentDate());
+                EmailUtil.parseMailContent(message, mailContent);
+            } catch (IOException | MessagingException e) {
+                throw new ServerException("StreamError", "Error reading the temporary file", e);
+            }
+
+            // Create the document
+            Document document = new Document();
+            document.setUserId(principal.getId());
+            if (mailContent.getSubject() == null) {
+                document.setTitle("Imported email from EML file");
+            } else {
+                document.setTitle(StringUtils.abbreviate(mailContent.getSubject(), 100));
+            }
+            document.setDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000));
+            document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
+            document.setFormat("EML");
+            document.setSource("Email");
+            document.setLanguage(ConfigUtil.getConfigStringValue(ConfigType.DEFAULT_LANGUAGE));
+            if (mailContent.getDate() == null) {
+                document.setCreateDate(new Date());
+            } else {
+                document.setCreateDate(mailContent.getDate());
+            }
+
+            // Save the document, create the base ACLs
+            DocumentUtil.createDocument(document, principal.getId());
+
+            // Raise a document created event
+            DocumentCreatedAsyncEvent documentCreatedAsyncEvent = new DocumentCreatedAsyncEvent();
+            documentCreatedAsyncEvent.setUserId(principal.getId());
+            documentCreatedAsyncEvent.setDocumentId(document.getId());
+            ThreadLocalContext.get().addAsyncEvent(documentCreatedAsyncEvent);
+
+            // Add files to the document
+            try {
+                for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
+                    FileUtil.createFile(fileContent.getName(), null, fileContent.getFile(), fileContent.getSize(),
+                            document.getLanguage(), principal.getId(), document.getId());
+                    // Ownership transferred to the async event queued by createFile
+                    handedOffTemps.add(fileContent.getFile());
+                }
+            } catch (IOException e) {
+                throw new ClientException(e.getMessage(), e.getMessage(), e);
+            } catch (Exception e) {
+                throw new ServerException("FileError", "Error adding a file", e);
+            }
+
+            JsonObjectBuilder response = Json.createObjectBuilder()
+                    .add("id", document.getId());
+            return Response.ok().entity(response.build()).build();
+        } finally {
+            // Delete the original EML temp (only needed for parsing) and any attachment
+            // temp whose ownership was not handed off to a queued async event.
+            deleteTempIfExists(unencryptedFile, "EML");
+            for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
+                if (!handedOffTemps.contains(fileContent.getFile())) {
+                    deleteTempIfExists(fileContent.getFile(), "EML attachment");
+                }
+            }
+        }
+    }
+
+    /**
+     * Delete a plaintext temporary file, logging on failure.
+     *
+     * @param path Temp file (may be null)
+     * @param label Human-readable label for logging
+     */
+    private void deleteTempIfExists(java.nio.file.Path path, String label) {
+        if (path == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            log.warn("Unable to delete temporary " + label + " file: " + path, e);
+        }
     }
 
     /**

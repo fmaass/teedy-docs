@@ -59,7 +59,9 @@ public class FileService extends AbstractScheduledService {
     private void deleteTemporaryFiles() throws Exception {
         TemporaryPathReference ref;
         while ((ref = (TemporaryPathReference) referenceQueue.poll()) != null) {
-            Files.delete(Paths.get(ref.path));
+            // Backstop only: producers now delete their own temp files deterministically,
+            // so the file is usually already gone by the time it is GC-collected.
+            Files.deleteIfExists(Paths.get(ref.path));
             referenceSet.remove(ref);
         }
     }

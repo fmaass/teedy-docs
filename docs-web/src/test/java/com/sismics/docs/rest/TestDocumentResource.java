@@ -30,6 +30,8 @@ import jakarta.ws.rs.core.Response.Status;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.time.ZoneId;
@@ -837,6 +839,83 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals("refugee status determination.pdf", files.getJsonObject(1).getString("name"));
         Assertions.assertEquals(279276L, files.getJsonObject(1).getJsonNumber("size").longValue());
         Assertions.assertEquals("application/pdf", files.getJsonObject(1).getString("mimetype"));
+    }
+
+    /**
+     * SEC A3-04: when an EML import fails while adding attachments (quota too small for
+     * the first attachment), the plaintext attachment temp files extracted by EmailUtil
+     * must be deleted. With the quota below the smallest attachment, no attachment hands
+     * off to an async event, so the temp-file count is race-free.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testEmlImportFailureDeletesAttachmentTemps() throws Exception {
+        // 100KB quota: smaller than either EML attachment (251KB, 279KB)
+        clientUtil.createUser("document_eml_leak", 100000);
+        String token = clientUtil.login("document_eml_leak");
+
+        long before = countSismicsTempFiles();
+
+        try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
+            StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("file", is, "test_mail.eml");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                Response response = target()
+                        .register(MultiPartFeature.class)
+                        .path("/document/eml").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(multiPart.bodyPart(streamDataBodyPart),
+                                MediaType.MULTIPART_FORM_DATA_TYPE));
+                // Import must fail on the quota breach
+                Assertions.assertNotEquals(Status.OK.getStatusCode(), response.getStatus());
+            }
+        }
+
+        long after = countSismicsTempFiles();
+        Assertions.assertTrue(after <= before,
+                "EML attachment temp file(s) leaked on failed import: before=" + before + " after=" + after);
+    }
+
+    /**
+     * SEC A3-04b: the ORIGINAL EML temp (created at the top of importEml, now inside the
+     * cleanup scope) must be deleted on a failed import, not just the attachment temps.
+     * With the quota below the first attachment, the import fails and the temp count must
+     * return EXACTLY to baseline — proving the EML temp AND both attachment temps are all
+     * removed. A regression that drops the EML-temp delete leaves a residual (count > baseline).
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testEmlImportFailureDeletesEmlTemp() throws Exception {
+        // 100KB quota: smaller than either EML attachment (251KB, 279KB)
+        clientUtil.createUser("document_eml_temp", 100000);
+        String token = clientUtil.login("document_eml_temp");
+
+        long before = countSismicsTempFiles();
+
+        try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
+            StreamDataBodyPart part = new StreamDataBodyPart("file", is, "test_mail.eml");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                Response response = target().register(MultiPartFeature.class)
+                        .path("/document/eml").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(multiPart.bodyPart(part), MediaType.MULTIPART_FORM_DATA_TYPE));
+                Assertions.assertNotEquals(Status.OK.getStatusCode(), response.getStatus(),
+                        "Import must fail on the quota breach");
+            }
+        }
+
+        long after = countSismicsTempFiles();
+        // Exact return to baseline: EML temp + both attachment temps all deleted.
+        Assertions.assertEquals(before, after,
+                "EML/attachment temp(s) leaked on failed import: before=" + before + " after=" + after);
+    }
+
+    private long countSismicsTempFiles() throws Exception {
+        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        try (java.util.stream.Stream<Path> f = Files.list(tmpDir)) {
+            return f.filter(p -> p.getFileName().toString().startsWith("sismics_docs")).count();
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ import com.sismics.docs.core.dao.criteria.WebhookCriteria;
 import com.sismics.docs.core.dao.dto.WebhookDto;
 import com.sismics.docs.core.event.*;
 import com.sismics.docs.core.util.TransactionUtil;
+import com.sismics.docs.core.util.WebhookUtil;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,9 +29,16 @@ public class WebhookAsyncListener {
     private static final Logger log = LoggerFactory.getLogger(WebhookAsyncListener.class);
 
     /**
-     * OkHttp client.
+     * OkHttp client. Redirect following is disabled: webhooks are fire-and-forget
+     * notifications with no need to follow a 3xx, and following one would let an
+     * allowed public URL redirect to a loopback/link-local/private address (e.g. the
+     * cloud metadata endpoint 169.254.169.254), bypassing the SSRF validation applied
+     * to the configured URL.
      */
-    private static final OkHttpClient client = new OkHttpClient();
+    static final OkHttpClient client = new OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build();
     public static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     @Subscribe
@@ -101,6 +109,12 @@ public class WebhookAsyncListener {
         RequestBody body = RequestBody.create("{\"event\": \"" + event.name() + "\", \"id\": \"" + id + "\"}", JSON);
 
         for (String webhookUrl : webhookUrlList) {
+            // Re-validate before the outbound call: blocks SSRF for webhooks that predate
+            // configuration-time validation and narrows the DNS-rebinding window.
+            if (!WebhookUtil.isUrlAllowed(webhookUrl)) {
+                log.warn("Skipping webhook with disallowed URL: " + webhookUrl);
+                continue;
+            }
             Request request = new Request.Builder()
                     .url(webhookUrl)
                     .post(body)

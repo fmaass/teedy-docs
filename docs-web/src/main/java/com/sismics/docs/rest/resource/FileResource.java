@@ -64,14 +64,21 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import jakarta.ws.rs.core.StreamingOutput;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * File REST resources.
- * 
+ *
  * @author bgamard
  */
 @Path("/file")
 public class FileResource extends BaseResource {
+    /**
+     * Logger.
+     */
+    private static final Logger log = LoggerFactory.getLogger(FileResource.class);
+
     /**
      * Add a file (with or without a document).
      *
@@ -128,36 +135,41 @@ public class FileResource extends BaseResource {
         // Keep unencrypted data temporary on disk
         String name = fileBodyPart.getContentDisposition() != null ?
                 URLDecoder.decode(fileBodyPart.getContentDisposition().getFileName(), StandardCharsets.UTF_8) : null;
-        long maxUploadSize = Long.parseLong(System.getenv().getOrDefault("DOCS_MAX_UPLOAD_SIZE", String.valueOf(500L * 1024 * 1024)));
-        java.nio.file.Path unencryptedFile;
-        long fileSize;
-        try {
-            unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile(name);
-            try (InputStream in = fileBodyPart.getValueAs(InputStream.class);
-                 java.io.OutputStream out = Files.newOutputStream(unencryptedFile)) {
-                long totalRead = 0;
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = in.read(buf)) != -1) {
-                    totalRead += n;
-                    if (totalRead > maxUploadSize) {
-                        Files.deleteIfExists(unencryptedFile);
-                        throw new ClientException("PayloadTooLarge",
-                                "File exceeds maximum upload size of " + (maxUploadSize / (1024 * 1024)) + " MB");
-                    }
-                    out.write(buf, 0, n);
-                }
-            }
-            fileSize = Files.size(unencryptedFile);
-        } catch (ClientException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new ServerException("StreamError", "Error reading the input file", e);
-        }
+        long maxUploadSize = resolveMaxUploadSize();
 
+        // The plaintext temp is created and populated here and its ownership is handed to
+        // the async event queued by createFile. The cleanup scope covers creation, the
+        // multipart stream copy, AND createFile: the flag starts false at creation, so ANY
+        // failure before hand-off (stream IOException, oversize, quota, encryption, ...)
+        // deletes the temp. It is deleted by FileProcessingAsyncListener once handed off.
+        java.nio.file.Path unencryptedFile = null;
+        boolean ownershipTransferred = false;
         try {
+            long fileSize;
+            try {
+                unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile(name);
+                try (InputStream in = fileBodyPart.getValueAs(InputStream.class);
+                     java.io.OutputStream out = Files.newOutputStream(unencryptedFile)) {
+                    long totalRead = 0;
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        totalRead += n;
+                        if (totalRead > maxUploadSize) {
+                            throw new ClientException("PayloadTooLarge",
+                                    "File exceeds maximum upload size of " + (maxUploadSize / (1024 * 1024)) + " MB");
+                        }
+                        out.write(buf, 0, n);
+                    }
+                }
+                fileSize = Files.size(unencryptedFile);
+            } catch (IOException e) {
+                throw new ServerException("StreamError", "Error reading the input file", e);
+            }
+
             String fileId = FileUtil.createFile(name, previousFileId, unencryptedFile, fileSize, documentDto == null ?
                     null : documentDto.getLanguage(), principal.getId(), documentId);
+            ownershipTransferred = true;
 
             // Always return OK
             JsonObjectBuilder response = Json.createObjectBuilder()
@@ -165,10 +177,20 @@ public class FileResource extends BaseResource {
                     .add("id", fileId)
                     .add("size", fileSize);
             return Response.ok().entity(response.build()).build();
+        } catch (ClientException | ServerException e) {
+            throw e;
         } catch (IOException e) {
             throw new ClientException(e.getMessage(), e.getMessage(), e);
         } catch (Exception e) {
             throw new ServerException("FileError", "Error adding a file", e);
+        } finally {
+            if (!ownershipTransferred && unencryptedFile != null) {
+                try {
+                    Files.deleteIfExists(unencryptedFile);
+                } catch (IOException e) {
+                    log.warn("Unable to delete orphaned temporary file: " + unencryptedFile, e);
+                }
+            }
         }
     }
     
@@ -227,9 +249,11 @@ public class FileResource extends BaseResource {
         fileDao.update(file);
         
         // Raise a new file updated event and document updated event (it wasn't sent during file creation)
+        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(id);
+        java.nio.file.Path unencryptedFile = null;
+        boolean ownershipTransferred = false;
         try {
-            java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(id);
-            java.nio.file.Path unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
+            unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
             FileUtil.startProcessingFile(id);
             FileUpdatedAsyncEvent fileUpdatedAsyncEvent = new FileUpdatedAsyncEvent();
             fileUpdatedAsyncEvent.setUserId(principal.getId());
@@ -237,13 +261,16 @@ public class FileResource extends BaseResource {
             fileUpdatedAsyncEvent.setFileId(file.getId());
             fileUpdatedAsyncEvent.setUnencryptedFile(unencryptedFile);
             ThreadLocalContext.get().addAsyncEvent(fileUpdatedAsyncEvent);
-            
+            ownershipTransferred = true;
+
             DocumentUpdatedAsyncEvent documentUpdatedAsyncEvent = new DocumentUpdatedAsyncEvent();
             documentUpdatedAsyncEvent.setUserId(principal.getId());
             documentUpdatedAsyncEvent.setDocumentId(documentId);
             ThreadLocalContext.get().addAsyncEvent(documentUpdatedAsyncEvent);
         } catch (Exception e) {
             throw new ServerException("AttachError", "Error attaching file to document", e);
+        } finally {
+            deleteOrphanTemp(unencryptedFile, storedFile, ownershipTransferred);
         }
 
         // Always return OK
@@ -335,9 +362,11 @@ public class FileResource extends BaseResource {
         User user = userDao.getById(file.getUserId());
 
         // Start the processing asynchronously
+        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(id);
+        java.nio.file.Path unencryptedFile = null;
+        boolean ownershipTransferred = false;
         try {
-            java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(id);
-            java.nio.file.Path unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
+            unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
             FileUtil.startProcessingFile(id);
             FileUpdatedAsyncEvent event = new FileUpdatedAsyncEvent();
             event.setUserId(principal.getId());
@@ -345,8 +374,11 @@ public class FileResource extends BaseResource {
             event.setFileId(file.getId());
             event.setUnencryptedFile(unencryptedFile);
             ThreadLocalContext.get().addAsyncEvent(event);
+            ownershipTransferred = true;
         } catch (Exception e) {
             throw new ServerException("ProcessingError", "Error processing this file", e);
+        } finally {
+            deleteOrphanTemp(unencryptedFile, storedFile, ownershipTransferred);
         }
 
         // Always return OK
@@ -354,7 +386,44 @@ public class FileResource extends BaseResource {
                 .add("status", "ok");
         return Response.ok().entity(response.build()).build();
     }
-    
+
+    /**
+     * Resolve the maximum upload size in bytes. Authoritative source is the
+     * DOCS_MAX_UPLOAD_SIZE environment variable (default 500MB). The
+     * {@code docs.max_upload_size} system property overrides it when set, providing a
+     * deterministic test seam for the oversize enforcement path.
+     *
+     * @return Max upload size in bytes
+     */
+    static long resolveMaxUploadSize() {
+        String prop = System.getProperty("docs.max_upload_size");
+        if (prop != null) {
+            return Long.parseLong(prop.trim());
+        }
+        return Long.parseLong(System.getenv().getOrDefault("DOCS_MAX_UPLOAD_SIZE", String.valueOf(500L * 1024 * 1024)));
+    }
+
+    /**
+     * Delete a decrypted plaintext temp file if ownership was not handed to a queued
+     * async event. Never deletes the stored file itself (decryptFile returns the stored
+     * file unchanged when the private key is null, e.g. in tests).
+     *
+     * @param unencryptedFile Decrypted temp file (may be null)
+     * @param storedFile Encrypted stored file (must never be deleted here)
+     * @param ownershipTransferred True if a queued event now owns the temp
+     */
+    private void deleteOrphanTemp(java.nio.file.Path unencryptedFile, java.nio.file.Path storedFile,
+                                  boolean ownershipTransferred) {
+        if (ownershipTransferred || unencryptedFile == null || unencryptedFile.equals(storedFile)) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(unencryptedFile);
+        } catch (IOException e) {
+            log.warn("Unable to delete orphaned temporary file: " + unencryptedFile, e);
+        }
+    }
+
     /**
      * Reorder files.
      *

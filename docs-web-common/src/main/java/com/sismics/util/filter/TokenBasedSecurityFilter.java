@@ -25,11 +25,53 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
     public static final String COOKIE_NAME = "auth_token";
 
     /**
+     * Default long-lived token lifetime, in days.
+     */
+    static final int DEFAULT_SESSION_LIFETIME_DAYS = 90;
+
+    /**
      * Lifetime of the long-lived authentication token in seconds.
      * Configurable via DOCS_SESSION_LIFETIME_DAYS env var (default 90 days).
      */
-    public static final int TOKEN_LONG_LIFETIME = Integer.parseInt(
-            System.getenv().getOrDefault("DOCS_SESSION_LIFETIME_DAYS", "90")) * 3600 * 24;
+    public static final int TOKEN_LONG_LIFETIME = resolveSessionLifetimeDays() * 3600 * 24;
+
+    /**
+     * Resolve the configured long-lived token lifetime in days, falling back to the
+     * default on a missing or malformed DOCS_SESSION_LIFETIME_DAYS. This must never
+     * throw: a malformed value would otherwise fail the static initializer and break
+     * all token-based authentication.
+     *
+     * @return Session lifetime in days
+     */
+    static int resolveSessionLifetimeDays() {
+        return resolveSessionLifetimeDays(System.getenv().get("DOCS_SESSION_LIFETIME_DAYS"));
+    }
+
+    /**
+     * Parse a raw session-lifetime value in days, falling back to the default on a
+     * null, blank, malformed, or non-positive value.
+     *
+     * @param raw Raw value (may be null)
+     * @return Session lifetime in days
+     */
+    static int resolveSessionLifetimeDays(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_SESSION_LIFETIME_DAYS;
+        }
+        try {
+            int days = Integer.parseInt(raw.trim());
+            if (days <= 0) {
+                LOG.warn("DOCS_SESSION_LIFETIME_DAYS must be positive, got '" + raw
+                        + "'; falling back to default " + DEFAULT_SESSION_LIFETIME_DAYS);
+                return DEFAULT_SESSION_LIFETIME_DAYS;
+            }
+            return days;
+        } catch (NumberFormatException e) {
+            LOG.warn("Invalid DOCS_SESSION_LIFETIME_DAYS '" + raw
+                    + "'; falling back to default " + DEFAULT_SESSION_LIFETIME_DAYS);
+            return DEFAULT_SESSION_LIFETIME_DAYS;
+        }
+    }
     
     /**
      * Lifetime of the authentication token in seconds, since last connection.

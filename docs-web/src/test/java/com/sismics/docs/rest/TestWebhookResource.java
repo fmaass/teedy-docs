@@ -1,8 +1,11 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.util.WebhookUtil;
 import com.sismics.docs.rest.resource.ThirdPartyWebhookResource;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import jakarta.json.JsonArray;
@@ -18,6 +21,20 @@ import java.util.Date;
  * @author bgamard
  */
 public class TestWebhookResource extends BaseJerseyTest {
+    /**
+     * The test targets a loopback webhook endpoint, which the SSRF guard blocks by
+     * default; opt in to private targets for the duration of the test.
+     */
+    @BeforeEach
+    public void allowPrivateWebhooks() {
+        System.setProperty(WebhookUtil.ALLOW_PRIVATE_PROPERTY, "true");
+    }
+
+    @AfterEach
+    public void resetPrivateWebhooks() {
+        System.clearProperty(WebhookUtil.ALLOW_PRIVATE_PROPERTY);
+    }
+
     /**
      * Test the webhook resource.
      */

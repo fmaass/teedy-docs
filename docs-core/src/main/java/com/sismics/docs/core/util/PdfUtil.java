@@ -56,6 +56,11 @@ public class PdfUtil {
         MemoryUsageSetting memUsageSettings = MemoryUsageSetting.setupMixed(1000000); // 1MB max memory usage
         memUsageSettings.setTempDir(new java.io.File(System.getProperty("java.io.tmpdir"))); // To OS temp
 
+        // Plaintext temp files decrypted below; they must outlive doc.save()/closer.close()
+        // because format handlers may lazily read them via the deferred closer, so they are
+        // deleted only after the PDF has been fully written.
+        List<Path> tempFiles = new java.util.ArrayList<>();
+
         // Create a blank PDF
         try (PDDocument doc = new PDDocument(memUsageSettings)) {
             // Add metadata
@@ -107,14 +112,26 @@ public class PdfUtil {
 
                 // Decrypt the file to a temporary file
                 Path unencryptedFile = EncryptionUtil.decryptFile(storedFile, file.getPrivateKey());
+                if (unencryptedFile != null && !unencryptedFile.equals(storedFile)) {
+                    tempFiles.add(unencryptedFile);
+                }
                 FormatHandler formatHandler = FormatHandlerUtil.find(file.getMimeType());
                 if (formatHandler != null) {
                     formatHandler.appendToPdf(unencryptedFile, doc, fitImageToPage, margin, memUsageSettings, closer);
                 }
             }
-            
+
             doc.save(outputStream); // Write to the output stream
             closer.close(); // Close all remaining opened PDF
+        } finally {
+            // Delete the plaintext temp files now that the PDF is fully written
+            for (Path tempFile : tempFiles) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    log.warn("Unable to delete temporary file: " + tempFile, e);
+                }
+            }
         }
     }
 

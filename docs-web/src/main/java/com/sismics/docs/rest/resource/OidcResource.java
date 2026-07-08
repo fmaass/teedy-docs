@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import java.io.StringReader;
 import java.math.BigInteger;
 import java.net.URI;
+import java.time.Duration;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
@@ -53,7 +54,19 @@ import static java.util.Optional.ofNullable;
 @Path("/oidc")
 public class OidcResource extends BaseResource {
     private static final Logger log = LoggerFactory.getLogger(OidcResource.class);
-    private static final OkHttpClient httpClient = new OkHttpClient();
+
+    /**
+     * Total per-call bound so a slow-drip IdP cannot pin a Jetty thread indefinitely.
+     * connect/read/write timeouts cap individual socket phases; callTimeout caps the
+     * whole call (DNS + connect + all redirects + reading the body).
+     */
+    static final long HTTP_CALL_TIMEOUT_SECONDS = 10;
+    static final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .connectTimeout(Duration.ofSeconds(HTTP_CALL_TIMEOUT_SECONDS))
+            .readTimeout(Duration.ofSeconds(HTTP_CALL_TIMEOUT_SECONDS))
+            .writeTimeout(Duration.ofSeconds(HTTP_CALL_TIMEOUT_SECONDS))
+            .callTimeout(Duration.ofSeconds(HTTP_CALL_TIMEOUT_SECONDS))
+            .build();
 
     private static final long STATE_TTL_MS = 10 * 60 * 1000;
 
