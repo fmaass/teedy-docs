@@ -46,14 +46,12 @@ public class AppContext {
     static final String ASYNC_QUEUE_CAPACITY_ENV = "DOCS_ASYNC_QUEUE_CAPACITY";
     static final int DEFAULT_ASYNC_QUEUE_CAPACITY = 1000;
     /**
-     * WARNING — retry is DEFAULT OFF (0) and must stay that way in production.
-     * <p>
-     * Enabling retry (count &gt; 0) makes {@link RetryingSubscriberExceptionHandler} re-invoke a failed
-     * async subscriber from the top. That is ONLY safe if EVERY async listener is idempotent — and they
-     * are NOT today. Concretely, {@code FileDeletedAsyncListener} commits the user's storage-quota
-     * decrement (updateQuota) BEFORE {@code FileUtil.delete()} can throw, so a retry after a delete
-     * failure double-subtracts the quota and corrupts storage accounting. Only enable retry in an
-     * environment where every registered listener has been verified idempotent.
+     * Async listener retry count. Default OFF (0) as the conservative posture, though the registered
+     * listeners are idempotent so retry is safe to enable. Enabling retry (count &gt; 0) makes
+     * {@link RetryingSubscriberExceptionHandler} re-invoke a failed async subscriber; that is safe
+     * because every listener is idempotent (quota reclamation now happens synchronously in the delete
+     * transaction, not in the async listener). See that class's Javadoc for the authoritative
+     * requirement and the per-listener state.
      */
     static final String ASYNC_RETRY_COUNT_PROPERTY = "docs.async_retry_count";
     static final String ASYNC_RETRY_COUNT_ENV = "DOCS_ASYNC_RETRY_COUNT";
@@ -231,20 +229,19 @@ public class AppContext {
      */
     private EventBus newAsyncEventBus() {
         // Retry is default OFF: with retryCount 0 the handler logs-and-drops on the first exception,
-        // matching the historical production behaviour (no re-invocation, no duplicate side effects).
-        // Retry is an opt-in ONLY safe when every async listener is idempotent (see the constant's
-        // Javadoc — FileDeletedAsyncListener is NOT idempotent today).
+        // matching the historical production behaviour (no re-invocation). Enabling it re-invokes
+        // failed subscribers; this is safe because the registered listeners are idempotent — quota
+        // reclamation happens synchronously in the delete transaction, not here (see
+        // RetryingSubscriberExceptionHandler's Javadoc for the per-listener state).
         int retryCount = EnvironmentUtil.getIntConfig(
                 ASYNC_RETRY_COUNT_PROPERTY, ASYNC_RETRY_COUNT_ENV, DEFAULT_ASYNC_RETRY_COUNT, 0);
         long retryBackoffMs = EnvironmentUtil.getIntConfig(
                 ASYNC_RETRY_BACKOFF_MS_PROPERTY, ASYNC_RETRY_BACKOFF_MS_ENV, DEFAULT_ASYNC_RETRY_BACKOFF_MS, 0);
         if (retryCount > 0 && !asyncRetryWarningLogged) {
             asyncRetryWarningLogged = true;
-            log.warn("Async listener retry is ENABLED (docs.async_retry_count={}). This re-invokes " +
-                    "failed subscribers and is ONLY safe if every async listener is idempotent. " +
-                    "It is NOT today: FileDeletedAsyncListener commits the quota decrement before " +
-                    "FileUtil.delete(), so a retry double-subtracts storage quota. Disable (set 0) " +
-                    "unless all listeners have been verified idempotent.", retryCount);
+            log.info("Async listener retry is enabled (docs.async_retry_count={}). Failed subscribers " +
+                    "are re-invoked; the registered listeners are idempotent, so re-delivery does not " +
+                    "double-apply side effects. Keep any newly added listener idempotent.", retryCount);
         }
         RetryingSubscriberExceptionHandler exceptionHandler =
                 new RetryingSubscriberExceptionHandler(retryCount, retryBackoffMs);

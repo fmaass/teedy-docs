@@ -17,14 +17,26 @@ import java.lang.reflect.Method;
  * behaviour, with no re-invocation. With {@code retryCount > 0} it re-invokes the failed subscriber
  * method up to that many times with a short backoff before finally logging the drop.
  * <p>
- * <b>WARNING — retry re-invokes subscribers and is UNSAFE for non-idempotent listeners.</b> Enabling
- * retry ({@code retryCount > 0}) re-runs a failed subscriber from the top, which duplicates any side
- * effect the subscriber already committed before the failure. The async listeners in this codebase
- * are NOT guaranteed idempotent. Concretely, {@code FileDeletedAsyncListener} commits the user's
- * storage-quota decrement ({@code updateQuota}) BEFORE {@code FileUtil.delete()} can throw — so if the
- * delete fails and this handler retries, the quota is subtracted again on every retry, corrupting the
- * user's storage accounting. Only set {@code retryCount > 0} in an environment where EVERY registered
- * async listener has been verified idempotent.
+ * <b>Retry re-invokes subscribers, so it is only safe when every async listener is idempotent — which
+ * they are today.</b> A retry re-runs a failed subscriber from the top, which would duplicate any side
+ * effect the subscriber committed before the failure. This is the single authoritative note on that
+ * requirement (referenced from {@code AppContext}, which reads the retry knob). Per-listener state:
+ * <ul>
+ *   <li>{@code FileDeletedAsyncListener} — idempotent: it performs only repeatable work (filesystem
+ *       {@code FileUtil.delete}, which no-ops on an already-absent file, and a Lucene delete-by-id).
+ *       It no longer touches the storage quota; the quota is reclaimed synchronously by the producer,
+ *       atomically with the delete transaction (see {@code FileUtil.resolveReclaimableSize} /
+ *       {@code FileUtil.reclaimUserQuota}), so a re-delivered event cannot double-subtract.</li>
+ *   <li>{@code DocumentCreatedAsyncListener} — idempotent: adds the creating contributor only if not
+ *       already present, so a re-delivery does not add a duplicate contributor row.</li>
+ *   <li>The remaining listeners perform only repeatable effects: index create/update/delete-by-id,
+ *       dedup-guarded contributor add ({@code DocumentUpdatedAsyncListener}), content re-extraction, and
+ *       fire-and-forget webhook/email notifications (at-least-once by nature).</li>
+ * </ul>
+ * Retry is therefore safe to enable ({@code retryCount > 0}); the default is kept at 0 as the
+ * conservative posture, so retry is turned on deliberately. When adding a new async listener, keep it
+ * idempotent — a retry must never double-apply an accumulating side effect such as a quota change or a
+ * unique-row insert.
  * <p>
  * Survival semantics are preserved regardless of the retry setting: this handler never propagates an
  * exception, so one bad event can never kill the executor thread.

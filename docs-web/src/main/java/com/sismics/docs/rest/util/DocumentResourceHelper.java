@@ -11,6 +11,7 @@ import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -18,6 +19,7 @@ import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
 import java.text.MessageFormat;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -54,15 +56,31 @@ public final class DocumentResourceHelper {
     }
 
     /**
-     * Fire the file-deleted events for every file of a document followed by the
-     * document-deleted event.
+     * Reclaim the storage quota for a document's files, then fire the file-deleted events (index +
+     * storage cleanup only) followed by the document-deleted event.
      *
+     * <p>The quota reclamation is synchronous, within the caller's delete transaction (where the file
+     * rows and their sizes are known and the files still exist on disk to size legacy UNKNOWN_SIZE
+     * rows). It commits or rolls back atomically with the permanent delete; the async
+     * {@code FileDeletedAsyncEvent} listener no longer touches the quota, so a retried event cannot
+     * double-subtract. {@link FileUtil#reclaimQuotaForDeletedDocumentFiles} reclaims only the files
+     * this document delete is responsible for (cascade-trashed with the document, i.e. not already
+     * reclaimed by an earlier individual file delete) and charges each file to its own uploader, so a
+     * collaborator's uploads count against the collaborator's quota.
+     *
+     * @param documentDao Document DAO
      * @param fileDao File DAO
-     * @param userId Acting user ID
+     * @param userId Acting user ID (used only to attribute the async events)
      * @param documentId Document ID
      */
-    public static void fireFileAndDocumentDeletedEvents(FileDao fileDao, String userId, String documentId) {
+    public static void fireFileAndDocumentDeletedEvents(DocumentDao documentDao, FileDao fileDao, String userId, String documentId) {
         List<File> fileList = fileDao.getAllByDocumentId(documentId);
+
+        // Reclaim quota for the files this document delete actually removes, per file owner.
+        Document trashedDocument = documentDao.getDeletedByIdSystem(documentId);
+        Date documentDeleteDate = trashedDocument == null ? null : trashedDocument.getDeleteDate();
+        FileUtil.reclaimQuotaForDeletedDocumentFiles(fileList, documentDeleteDate);
+
         for (File file : fileList) {
             FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
             fileDeletedAsyncEvent.setUserId(userId);

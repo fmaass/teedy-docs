@@ -14,6 +14,7 @@ import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
@@ -91,6 +92,15 @@ public class TrashPurgeService extends AbstractScheduledService {
                 }
                 String ownerId = document.getUserId();
                 List<File> fileList = fileDao.getAllByDocumentId(documentId);
+
+                // Reclaim quota synchronously, atomically with the permanent delete below (same
+                // transaction). The async FileDeletedAsyncEvent listener no longer touches the quota,
+                // so a retried event cannot double-subtract. reclaimQuotaForDeletedDocumentFiles
+                // reclaims only the files cascade-trashed with this document (matching document
+                // deleteDate — not files individually deleted earlier and already reclaimed) and
+                // charges each file to its own uploader.
+                FileUtil.reclaimQuotaForDeletedDocumentFiles(fileList, document.getDeleteDate());
+
                 for (File file : fileList) {
                     FileDeletedAsyncEvent event = new FileDeletedAsyncEvent();
                     event.setUserId(ownerId);

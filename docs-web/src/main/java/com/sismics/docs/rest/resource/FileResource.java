@@ -619,8 +619,17 @@ public class FileResource extends BaseResource {
         // Delete the file
         FileDao fileDao = new FileDao();
         fileDao.delete(file.getId(), principal.getId());
-        
-        // Raise a new file deleted event
+
+        // Reclaim the owner's storage quota synchronously, atomically with the delete: the file row
+        // and its size are known here and the file still exists on disk (needed to size legacy
+        // UNKNOWN_SIZE rows). Doing it in the delete transaction — instead of in the async
+        // FileDeletedAsyncEvent listener — means it commits or rolls back with the delete and a
+        // retried async event can never double-subtract.
+        User fileOwner = new UserDao().getById(file.getUserId());
+        long reclaimed = FileUtil.resolveReclaimableSize(file.getId(), file.getSize(), fileOwner);
+        FileUtil.reclaimUserQuota(file.getUserId(), reclaimed);
+
+        // Raise a new file deleted event (index + storage cleanup only; quota already reclaimed above)
         FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
         fileDeletedAsyncEvent.setUserId(principal.getId());
         fileDeletedAsyncEvent.setFileId(file.getId());

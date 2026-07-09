@@ -1323,7 +1323,7 @@ public class DocumentResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        DocumentResourceHelper.fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), id);
+        DocumentResourceHelper.fireFileAndDocumentDeletedEvents(documentDao, fileDao, principal.getId(), id);
         documentDao.permanentDelete(id);
 
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -1359,7 +1359,7 @@ public class DocumentResource extends BaseResource {
         // and keeps deletion/quota events attributed to the real owner (the caller).
         int count = 0;
         for (Document document : documentDao.findDeletedByUserId(principal.getId())) {
-            DocumentResourceHelper.fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), document.getId());
+            DocumentResourceHelper.fireFileAndDocumentDeletedEvents(documentDao, fileDao, principal.getId(), document.getId());
             documentDao.permanentDelete(document.getId());
             count++;
         }

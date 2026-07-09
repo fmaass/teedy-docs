@@ -43,12 +43,18 @@ public class DocumentCreatedAsyncListener {
                 return;
             }
 
-            // Add the first contributor (the creator of the document)
+            // Add the first contributor (the creator of the document), unless already present.
+            // The guard keeps this listener idempotent under the optional async retry: a
+            // re-delivery must not add a duplicate contributor row.
             ContributorDao contributorDao = new ContributorDao();
-            Contributor contributor = new Contributor();
-            contributor.setDocumentId(event.getDocumentId());
-            contributor.setUserId(event.getUserId());
-            contributorDao.create(contributor);
+            boolean alreadyContributor = contributorDao.findByDocumentId(event.getDocumentId()).stream()
+                    .anyMatch(c -> c.getUserId().equals(event.getUserId()));
+            if (!alreadyContributor) {
+                Contributor contributor = new Contributor();
+                contributor.setDocumentId(event.getDocumentId());
+                contributor.setUserId(event.getUserId());
+                contributorDao.create(contributor);
+            }
 
             // Update index
             AppContext.getInstance().getIndexingHandler().createDocument(document);
