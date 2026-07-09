@@ -986,6 +986,22 @@
     "confirm_rename": "Confirm rename",
     "cancel_rename": "Cancel rename",
     "load_error": "Something went wrong while loading",
-    "retry": "Retry"
+    "retry": "Retry",
+    "bulk": {
+      "toolbar": "Bulk actions",
+      "selected_count": "{count} selected",
+      "add_tag": "Add tag",
+      "set_language": "Set language",
+      "delete": "Delete",
+      "clear": "Clear selection",
+      "choose_tag": "Choose a tag",
+      "choose_language": "Choose a language",
+      "apply": "Apply",
+      "applying": "Applying… {done}/{total}",
+      "done": "Bulk action complete",
+      "summary_ok": "{count} document(s) updated",
+      "summary_partial": "{ok} succeeded, {failed} failed",
+      "delete_confirm": "Delete {count} document(s)? They will be moved to the trash."
+    }
   }
 }

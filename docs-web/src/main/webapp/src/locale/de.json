@@ -986,6 +986,22 @@
     "confirm_rename": "Umbenennen bestätigen",
     "cancel_rename": "Umbenennen abbrechen",
     "load_error": "Beim Laden ist ein Fehler aufgetreten",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "bulk": {
+      "toolbar": "Sammelaktionen",
+      "selected_count": "{count} ausgewählt",
+      "add_tag": "Schlagwort hinzufügen",
+      "set_language": "Sprache festlegen",
+      "delete": "Löschen",
+      "clear": "Auswahl aufheben",
+      "choose_tag": "Schlagwort auswählen",
+      "choose_language": "Sprache auswählen",
+      "apply": "Anwenden",
+      "applying": "Wird angewendet… {done}/{total}",
+      "done": "Sammelaktion abgeschlossen",
+      "summary_ok": "{count} Dokument(e) aktualisiert",
+      "summary_partial": "{ok} erfolgreich, {failed} fehlgeschlagen",
+      "delete_confirm": "{count} Dokument(e) löschen? Sie werden in den Papierkorb verschoben."
+    }
   }
 }

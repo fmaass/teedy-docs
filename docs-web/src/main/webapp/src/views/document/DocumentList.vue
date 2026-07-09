@@ -10,18 +10,28 @@ import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
 import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
+import BulkActionBar from '../../components/BulkActionBar.vue'
+import { updateDocument, deleteDocument } from '../../api/document'
+import {
+  runBulk,
+  buildAddTagParams,
+  buildLanguageParams,
+  type BulkResult,
+} from '../../utils/bulkOps'
 
 const { t } = useI18n()
 const router = useRouter()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
+const confirm = useConfirm()
 const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
@@ -191,6 +201,86 @@ const contextMenuItems = computed(() => {
   }
   return items
 })
+
+// --- Bulk operations ---
+//
+// Teedy exposes no bulk document endpoint, so each bulk action fans out over the
+// existing single-document endpoints (see src/utils/bulkOps.ts). We run the
+// operation over the current selection, drive a progress bar, and report a
+// per-document success/failure summary — ACL/permission failures surface as
+// individual failures rather than aborting the batch.
+
+const selectedDocs = ref<DocumentListItem[]>([])
+const bulkProgress = ref<[number, number] | null>(null)
+
+// Documents dropping out of the current page (paging, refetch) must not linger in
+// the selection — reconcile against what is actually rendered.
+watch(documents, (docs) => {
+  if (!selectedDocs.value.length) return
+  const visibleIds = new Set(docs.map((d) => d.id))
+  selectedDocs.value = selectedDocs.value.filter((d) => visibleIds.has(d.id))
+})
+
+function clearSelection() {
+  selectedDocs.value = []
+}
+
+function summariseBulk(result: BulkResult) {
+  const succeeded = result.succeeded.length
+  const failed = result.failed.length
+  if (failed === 0) {
+    toast.add({
+      severity: 'success',
+      summary: t('ui.bulk.done'),
+      detail: t('ui.bulk.summary_ok', { count: succeeded }),
+      life: 3000,
+    })
+  } else {
+    toast.add({
+      severity: succeeded ? 'warn' : 'error',
+      summary: t('ui.bulk.done'),
+      detail: t('ui.bulk.summary_partial', { ok: succeeded, failed }),
+      life: 6000,
+    })
+  }
+}
+
+async function runBulkOp(op: (doc: DocumentListItem) => Promise<unknown>) {
+  const docs = [...selectedDocs.value]
+  if (!docs.length || bulkProgress.value) return
+  bulkProgress.value = [0, docs.length]
+  try {
+    const result = await runBulk(docs, op, (done, total) => {
+      bulkProgress.value = [done, total]
+    })
+    summariseBulk(result)
+    clearSelection()
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+  } finally {
+    bulkProgress.value = null
+  }
+}
+
+function bulkAddTag(tagId: string) {
+  runBulkOp((doc) => updateDocument(doc.id, buildAddTagParams(doc, tagId)))
+}
+
+function bulkSetLanguage(language: string) {
+  runBulkOp((doc) => updateDocument(doc.id, buildLanguageParams(doc, language)))
+}
+
+function bulkDelete() {
+  const count = selectedDocs.value.length
+  if (!count) return
+  confirm.require({
+    message: t('ui.bulk.delete_confirm', { count }),
+    header: t('ui.bulk.delete'),
+    icon: 'pi pi-trash',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () => runBulkOp((doc) => deleteDocument(doc.id)),
+  })
+}
 </script>
 
 <template>
@@ -213,10 +303,25 @@ const contextMenuItems = computed(() => {
       />
     </div>
 
+    <!-- Bulk action toolbar -->
+    <div v-if="selectedDocs.length" class="bulk-bar-wrap">
+      <BulkActionBar
+        :count="selectedDocs.length"
+        :tags="tf.allTags"
+        :progress="bulkProgress"
+        @add-tag="bulkAddTag"
+        @set-language="bulkSetLanguage"
+        @delete="bulkDelete"
+        @clear="clearSelection"
+      />
+    </div>
+
     <!-- Document list -->
     <div class="doc-area">
       <DocumentTable
         v-if="documents.length || isLoading"
+        v-model:selection="selectedDocs"
+        selectable
         :documents="documents"
         :totalRecords="totalCount"
         :rows="PAGE_SIZE"
@@ -273,6 +378,13 @@ const contextMenuItems = computed(() => {
   flex-shrink: 0;
 }
 
+/* --- Bulk action toolbar --- */
+
+.bulk-bar-wrap {
+  padding: 0 1.5rem;
+  flex-shrink: 0;
+}
+
 /* --- Document area --- */
 
 .doc-area {
@@ -283,6 +395,7 @@ const contextMenuItems = computed(() => {
 
 @media (max-width: 1024px) {
   .address-bar { padding: 0.75rem 1rem 0; }
+  .bulk-bar-wrap { padding: 0 1rem; }
   .doc-area { padding: 0.75rem 1rem 1rem; }
 }
 </style>
