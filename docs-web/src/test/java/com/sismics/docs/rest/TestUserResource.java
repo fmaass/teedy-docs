@@ -434,7 +434,7 @@ public class TestUserResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .post(Entity.form(new Form()
                         .param("hostname", "localhost")
-                        .param("port", "2500")
+                        .param("port", Integer.toString(getSmtpPort()))
                         .param("from", "contact@sismicsdocs.com")
                 ), JsonObject.class);
 
