@@ -1,4 +1,4 @@
-import { ref, getCurrentInstance, onBeforeUnmount, type Ref } from 'vue'
+import { ref, getCurrentInstance, onBeforeUnmount, onMounted, type Ref } from 'vue'
 
 export interface ResizablePanelOptions {
   /** Default width applied when nothing valid is persisted, and on reset. */
@@ -93,15 +93,20 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
     setWidth(dragStartWidth + (e.clientX - dragStartX))
   }
 
+  // Idempotent: safe to call for pointerup, pointercancel, and unmount alike.
   function endDrag() {
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', endDrag)
+    window.removeEventListener('pointercancel', endDrag)
     document.body.style.removeProperty('cursor')
     document.body.style.removeProperty('user-select')
     persist()
   }
 
   function startDrag(e: PointerEvent) {
+    // Left/primary pointer only — ignore right/middle click and secondary pointers
+    // (a two-finger touch or right-drag must not start a resize).
+    if (e.button !== 0 || e.isPrimary === false) return
     e.preventDefault()
     dragStartX = e.clientX
     dragStartWidth = width.value
@@ -109,6 +114,7 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
     document.body.style.userSelect = 'none'
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
   }
 
   // --- Keyboard (separator a11y) ---
@@ -140,8 +146,19 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
     persist()
   }
 
-  // Only register the lifecycle hook inside a component setup (skips it in unit tests).
-  if (getCurrentInstance()) onBeforeUnmount(endDrag)
+  // Re-clamp on viewport resize so a width that exceeds the new viewport cap is
+  // pulled back in. No persist: the user's preferred width returns if the
+  // viewport grows again (load() re-applies the stored, larger value).
+  function onResize() {
+    width.value = apply(width.value)
+  }
+
+  // Only register lifecycle hooks inside a component setup (skips them in unit tests).
+  if (getCurrentInstance()) {
+    onBeforeUnmount(endDrag)
+    onMounted(() => window.addEventListener('resize', onResize))
+    onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+  }
 
   return { width, startDrag, onKeydown, reset }
 }

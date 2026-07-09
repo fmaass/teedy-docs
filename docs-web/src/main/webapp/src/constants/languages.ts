@@ -22,7 +22,6 @@ export const SUPPORTED_LANGUAGES = [
   { label: 'Norsk', value: 'nor' },
   { label: 'Latviešu', value: 'lav' },
   { label: 'Türkçe', value: 'tur' },
-  { label: 'Ελληνικά', value: 'ell' },
   { label: 'العربية', value: 'ara' },
   { label: 'עברית', value: 'heb' },
   { label: 'हिन्दी', value: 'hin' },

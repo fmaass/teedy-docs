@@ -16,7 +16,7 @@ import ErrorState from '../components/ErrorState.vue'
 const props = defineProps<{ documentId: string; shareId: string }>()
 const { t } = useI18n()
 
-const { data: doc, isLoading: loading, error } = useQuery({
+const { data: doc, isLoading: loading, error, refetch } = useQuery({
   queryKey: computed(() => ['share', props.documentId, props.shareId]),
   queryFn: () => getDocument(props.documentId, true, props.shareId).then((r) => r.data),
   retry: false,
@@ -48,7 +48,7 @@ function formatDate(ts: number) {
         <Skeleton height="16rem" />
       </div>
 
-      <ErrorState v-else-if="error || !doc" :message="t('ui.share.view.not_found')" />
+      <ErrorState v-else-if="error || !doc" :message="t('ui.share.view.not_found')" @retry="refetch()" />
 
       <template v-else>
         <header class="share-header">

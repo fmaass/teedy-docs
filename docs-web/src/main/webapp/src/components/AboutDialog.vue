@@ -21,6 +21,11 @@ const highlightKeys = [
   'ui.about.highlights.new_ui',
 ] as const
 
+// The What's-New bullets are hand-curated for a specific release, so the heading
+// is pinned to that release — NOT the live server version, which drifts ahead of
+// the bullets on every patch. The v{version} brand badge keeps the live version.
+const HIGHLIGHTS_VERSION = '3.0.0'
+
 const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
 
 async function loadVersion() {
@@ -54,7 +59,7 @@ watch(visible, (open) => {
       </div>
 
       <section class="about-section">
-        <h3 class="about-heading">{{ t('ui.about.whats_new_title', { version: version || '3.0.0' }) }}</h3>
+        <h3 class="about-heading">{{ t('ui.about.whats_new_title', { version: HIGHLIGHTS_VERSION }) }}</h3>
         <ul class="about-highlights">
           <li v-for="key in highlightKeys" :key="key">{{ t(key) }}</li>
         </ul>

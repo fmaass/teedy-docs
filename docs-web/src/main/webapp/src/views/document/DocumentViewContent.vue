@@ -66,22 +66,27 @@ const cameraInputRef = ref<HTMLInputElement | null>(null)
 
 async function uploadAll(files: File[]) {
   if (!doc.value || !files.length) return
+  // Snapshot the id: the injected ref can be cleared/replaced while a batch is
+  // in flight, and the finally block must still target the original document.
+  const documentId = doc.value.id
   uploading.value = true
   uploadProgress.value = {}
   uploadingNames.value = files.map((f) => f.name)
   try {
     for (let i = 0; i < files.length; i++) {
       uploadProgress.value[i] = 0
-      await uploadFile(doc.value.id, files[i], (pct) => {
+      await uploadFile(documentId, files[i], (pct) => {
         uploadProgress.value[i] = pct
       })
       uploadProgress.value[i] = 100
     }
-    queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
   } catch {
     toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
   } finally {
+    // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
+    // and skipping the refetch would leave them invisible (users re-upload dupes).
+    queryClient.invalidateQueries({ queryKey: ['document', documentId] })
     uploading.value = false
     uploadProgress.value = {}
     uploadingNames.value = []

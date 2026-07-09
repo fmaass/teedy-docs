@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mount } from '@vue/test-utils'
 import { clampWidth, useResizablePanel } from './useResizablePanel'
 
 const CFG = { defaultWidth: 250, minWidth: 200, maxWidth: 480, maxViewportFraction: 0.4 }
@@ -76,5 +77,104 @@ describe('useResizablePanel persistence', () => {
     reset()
     expect(width.value).toBe(250)
     expect(localStorage.getItem(KEY)).toBe('250')
+  })
+})
+
+describe('useResizablePanel pointer drag', () => {
+  const KEY = 'teedy_tag_panel_width'
+
+  beforeEach(() => localStorage.clear())
+  afterEach(() => {
+    localStorage.clear()
+    document.body.style.removeProperty('cursor')
+    document.body.style.removeProperty('user-select')
+  })
+
+  function pointerEvent(type: string, init: Partial<PointerEvent> = {}): PointerEvent {
+    // jsdom lacks a PointerEvent ctor; forge one on a MouseEvent whose read-only
+    // button/isPrimary getters are overridden to the requested values.
+    const e = new MouseEvent(type, { clientX: init.clientX ?? 0, button: init.button ?? 0 })
+    Object.defineProperty(e, 'isPrimary', { value: init.isPrimary ?? true, configurable: true })
+    Object.defineProperty(e, 'button', { value: init.button ?? 0, configurable: true })
+    return e as unknown as PointerEvent
+  }
+
+  it('ignores a non-primary (right/middle) button press', () => {
+    const { width, startDrag } = useResizablePanel({ viewportWidth: () => 2000 })
+    const before = width.value
+    startDrag(pointerEvent('pointerdown', { button: 2, clientX: 100 }))
+    // No move handler should be armed: a subsequent pointermove must not resize.
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 400 }))
+    expect(width.value).toBe(before)
+  })
+
+  it('ignores a non-primary pointer (isPrimary false)', () => {
+    const { width, startDrag } = useResizablePanel({ viewportWidth: () => 2000 })
+    const before = width.value
+    startDrag(pointerEvent('pointerdown', { isPrimary: false, clientX: 100 }))
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 400 }))
+    expect(width.value).toBe(before)
+  })
+
+  it('resizes on a primary-button drag and persists on pointerup', () => {
+    const { width, startDrag } = useResizablePanel({ viewportWidth: () => 2000 })
+    startDrag(pointerEvent('pointerdown', { clientX: 100 }))
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 150 }))
+    expect(width.value).toBe(300) // 250 + 50
+    expect(document.body.style.cursor).toBe('col-resize')
+    window.dispatchEvent(pointerEvent('pointerup', { clientX: 150 }))
+    expect(localStorage.getItem(KEY)).toBe('300')
+    // Listeners removed: another move must not resize.
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 400 }))
+    expect(width.value).toBe(300)
+  })
+
+  it('pointercancel ends the drag (restores cursor/user-select, removes listeners)', () => {
+    const { width, startDrag } = useResizablePanel({ viewportWidth: () => 2000 })
+    startDrag(pointerEvent('pointerdown', { clientX: 100 }))
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 150 }))
+    expect(width.value).toBe(300)
+    window.dispatchEvent(pointerEvent('pointercancel', { clientX: 150 }))
+    expect(document.body.style.cursor).toBe('')
+    expect(document.body.style.userSelect).toBe('')
+    // Move handler gone: further movement is ignored.
+    window.dispatchEvent(pointerEvent('pointermove', { clientX: 400 }))
+    expect(width.value).toBe(300)
+  })
+})
+
+describe('useResizablePanel window resize re-clamp', () => {
+  const KEY = 'teedy_tag_panel_width'
+  let viewport = 2000
+
+  beforeEach(() => {
+    localStorage.clear()
+    viewport = 2000
+  })
+  afterEach(() => localStorage.clear())
+
+  it('re-clamps an oversized width when the viewport shrinks (no persist)', () => {
+    localStorage.setItem(KEY, '460')
+    // Mount inside a component so the resize listener registers (getCurrentInstance()).
+    let panel!: ReturnType<typeof useResizablePanel>
+    const wrapper = mount({
+      template: '<div />',
+      setup() {
+        panel = useResizablePanel({ viewportWidth: () => viewport })
+        return {}
+      },
+    })
+    expect(panel.width.value).toBe(460)
+    // Viewport shrinks: 1000 * 0.4 = 400 becomes the binding cap.
+    viewport = 1000
+    window.dispatchEvent(new Event('resize'))
+    expect(panel.width.value).toBe(400)
+    // Re-clamp must NOT persist the shrunk value — the user's preference stays.
+    expect(localStorage.getItem(KEY)).toBe('460')
+    wrapper.unmount()
+    // After unmount the listener is gone: a further resize does nothing.
+    viewport = 3000
+    window.dispatchEvent(new Event('resize'))
+    expect(panel.width.value).toBe(400)
   })
 })
