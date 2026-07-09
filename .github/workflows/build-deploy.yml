@@ -90,6 +90,26 @@ jobs:
       - name: Run docs-core tests on PostgreSQL
         run: ./mvnw --batch-mode test -pl docs-core
 
+  docs-importer:
+    # Smoke-check the standalone Node.js bulk importer: install from the
+    # lockfile and verify the entry parses and its dependencies still resolve
+    # after the request -> fetch migration (ADR-0007 / RR-56).
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Install importer dependencies
+        run: cd docs-importer && npm ci
+
+      - name: Smoke-test importer
+        run: cd docs-importer && npm test
+
   build:
     runs-on: ubuntu-latest
     needs: [test, test-postgres]
