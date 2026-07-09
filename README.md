@@ -328,6 +328,36 @@ From the root directory:
 
 You will get your deployable WAR in the `docs-web/target` directory.
 
+### End-to-end tests
+
+End-to-end tests use [Playwright](https://playwright.dev/) to drive a **real
+running Teedy instance** — the production Docker image on port 8080 (embedded H2,
+default `admin`/`admin`). They log in through Teedy's **native form login**, not
+Authelia (Authelia only fronts the production deployment).
+
+Run them locally from the repository root:
+
+```console
+scripts/e2e-run.sh
+```
+
+The script builds the production WAR + Docker image (if not already built), boots
+the container, waits for `/api/user` to serve, runs the suite, and tears the
+container down. First run only: install the browser once with
+`cd docs-web/src/main/webapp && npx playwright install chromium`.
+
+To reuse an already-built image and skip the WAR/image build:
+
+```console
+E2E_IMAGE=teedy-e2e:local scripts/e2e-run.sh
+```
+
+The Playwright project lives in `docs-web/src/main/webapp` (`playwright.config.ts`,
+`e2e/`). `@playwright/test` is a dev dependency, so the browser is only downloaded
+in the e2e job — `npm ci` for the unit-test/build pipeline is unaffected. In CI the
+`e2e` job runs after `build`, reusing the WAR artifact, and the image publish gates
+on it.
+
 # Roadmap
 
 See the [GitHub releases and tags](https://github.com/fmaass/teedy-docs/releases) for shipped changes.

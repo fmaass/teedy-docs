@@ -220,9 +220,60 @@ jobs:
           name: docs-web.war
           path: docs-web/target/docs*.war
 
-  docker:
+  e2e:
+    # End-to-end tests against the REAL production Docker image (embedded H2,
+    # default admin/admin) driven by Playwright/Chromium via Teedy's NATIVE form
+    # login — NOT Authelia (Authelia only fronts production). Reuses the war
+    # artifact produced by `build` so the image is not rebuilt from Maven; the
+    # image PUBLISH (docker job) gates on this passing.
     runs-on: ubuntu-latest
     needs: [build]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Build e2e Docker image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-e2e:local
+
+      - name: Install e2e dependencies
+        run: cd docs-web/src/main/webapp && npm ci
+
+      - name: Install Playwright browser
+        run: cd docs-web/src/main/webapp && npx playwright install --with-deps chromium
+
+      - name: Run e2e suite (boots container, tears down)
+        env:
+          E2E_IMAGE: teedy-e2e:local
+        run: bash scripts/e2e-run.sh
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: docs-web/src/main/webapp/playwright-report
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [build, e2e]
     # Publish images only from publishable refs; never build/push on PRs or fix/** branches.
     if: >-
       github.event_name != 'pull_request' &&
