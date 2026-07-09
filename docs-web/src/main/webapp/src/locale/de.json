@@ -724,7 +724,12 @@
       "all_fields_required": "Alle Felder sind erforderlich",
       "new_password_hint": "leer lassen, um das aktuelle beizubehalten",
       "password": "Passwort",
-      "totp_enabled": "2FA aktiviert"
+      "totp_enabled": "2FA aktiviert",
+      "disable_totp_btn": "Zwei-Faktor-Authentifizierung deaktivieren",
+      "disable_totp_message": "Zwei-Faktor-Authentifizierung für diesen Benutzer deaktivieren? Damit können Sie einen aus seinem Authentifikator ausgesperrten Benutzer wiederherstellen.",
+      "disable_totp_title": "Zwei-Faktor-Authentifizierung deaktivieren",
+      "failed_disable_totp": "Zwei-Faktor-Authentifizierung konnte nicht deaktiviert werden",
+      "totp_disabled": "Zwei-Faktor-Authentifizierung deaktiviert"
     },
     "apikeys": {
       "title": "API-Schlüssel",
