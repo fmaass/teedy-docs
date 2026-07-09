@@ -644,6 +644,7 @@
     "document_created": "Document created",
     "document_updated": "Document updated",
     "failed_save_document": "Failed to save document",
+    "document_saved_files_failed": "Document saved, but some files could not be uploaded. Retry to upload the remaining files.",
     "trash": "Trash",
     "trash_count": "{count} document(s) in trash",
     "trash_empty": "Trash is empty",

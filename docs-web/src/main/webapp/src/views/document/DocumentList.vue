@@ -25,6 +25,7 @@ import {
   buildLanguageParams,
   type BulkResult,
 } from '../../utils/bulkOps'
+import { clampOffset } from '../../utils/pagination'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -69,6 +70,17 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
 
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
+
+// Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
+// the server returns zero rows while total is still positive — a false-empty page
+// with no paginator to escape. Clamp back to the last valid page when that happens.
+// Gated on !isLoading so the keep-previous phase (rows present) and the genuine-empty
+// case (total 0) both stay untouched.
+watch(documentsData, () => {
+  if (isLoading.value) return
+  const next = clampOffset(pageOffset.value, documents.value.length, totalCount.value, PAGE_SIZE)
+  if (next !== pageOffset.value) pageOffset.value = next
+})
 
 function onPage(event: DataTablePageEvent) {
   pageOffset.value = event.first

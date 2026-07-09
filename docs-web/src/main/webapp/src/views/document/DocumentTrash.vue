@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/vue-query'
+import { clampOffset } from '../../utils/pagination'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
 import { getAppInfo } from '../../api/app'
 import DataTable, { type DataTablePageEvent } from 'primevue/datatable'
@@ -32,6 +33,17 @@ const { data: trashData, isLoading, isError, refetch } = useQuery({
 
 const documents = computed(() => trashData.value?.documents ?? [])
 const totalCount = computed(() => trashData.value?.total ?? 0)
+
+// Deleting/emptying the last item of a page > 1 refetches with a now-stale offset
+// and the server returns zero rows while total is still positive — a false-empty
+// page with no paginator to escape. Clamp back to the last valid page when that
+// happens. Gated on !isLoading so the placeholder/keep-previous phase (rows present)
+// and the genuine-empty case (total 0) both stay untouched.
+watch(trashData, () => {
+  if (isLoading.value) return
+  const next = clampOffset(pageOffset.value, documents.value.length, totalCount.value, PAGE_SIZE)
+  if (next !== pageOffset.value) pageOffset.value = next
+})
 
 function onPage(event: DataTablePageEvent) {
   pageOffset.value = event.first

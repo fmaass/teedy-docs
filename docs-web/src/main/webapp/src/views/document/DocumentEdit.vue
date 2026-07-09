@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -34,21 +34,25 @@ const queryClient = useQueryClient()
 const { t } = useI18n()
 const isEdit = computed(() => !!props.id)
 
-const form = ref({
-  title: '',
-  description: '',
-  subject: '',
-  identifier: '',
-  publisher: '',
-  format: '',
-  source: '',
-  type: '',
-  coverage: '',
-  rights: '',
-  language: 'eng',
-  create_date: new Date(),
-  tags: [] as string[],
-})
+function defaultForm() {
+  return {
+    title: '',
+    description: '',
+    subject: '',
+    identifier: '',
+    publisher: '',
+    format: '',
+    source: '',
+    type: '',
+    coverage: '',
+    rights: '',
+    language: 'eng',
+    create_date: new Date(),
+    tags: [] as string[],
+  }
+}
+
+const form = ref(defaultForm())
 
 interface AttachedFile {
   id: string
@@ -61,6 +65,14 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+// CREATE-mode retry guard: once createDocument() succeeds we remember the new id, so
+// a subsequent Save (after a file-upload failure) updates that document instead of
+// creating a second one. uploadedCount tracks how many of the CURRENT pendingFiles
+// queue already uploaded, so a retry resumes at the first file that failed rather
+// than re-uploading the ones that already landed. Both reset once a save fully
+// succeeds (navigation away) or the file queue is replaced.
+const createdId = ref<string | null>(null)
+const uploadedCount = ref(0)
 // Per-file upload progress (0..100), keyed by array index into pendingFiles,
 // populated only while an upload is in flight so the ProgressBar shows real bytes.
 const uploadProgress = ref<Record<number, number>>({})
@@ -85,10 +97,24 @@ const tagOptions = computed(() =>
   tagFilter.allTags.map((t) => ({ label: t.name, value: t.id })),
 )
 
-onMounted(async () => {
+// Generation counter guarding initFromRoute against out-of-order async completion:
+// on rapid add -> edit / edit -> edit navigation, a stale getDocument(oldId) (or
+// /app, listMetadata) response can resolve AFTER the reset for the new target and
+// repopulate the form for the wrong document. Each init run captures its generation
+// at entry and re-checks after every await; a mismatch means a newer reset/init has
+// superseded it, so it stops without mutating state.
+let initGen = 0
+
+// Load (edit) or seed (create) the form for the current route target. Extracted from
+// onMounted because vue-router REUSES this component instance across document-add and
+// document-edit routes (same component, no keep-alive) — onMounted alone would leave
+// the previous target's state in place.
+async function initFromRoute() {
+  const gen = ++initGen
   if (isEdit.value && props.id) {
     try {
       const { data } = await getDocument(props.id, true)
+      if (gen !== initGen) return
       form.value.title = data.title || ''
       form.value.description = data.description || ''
       form.value.subject = data.subject || ''
@@ -113,26 +139,64 @@ onMounted(async () => {
       hydrateMetadataValues(data.metadata ?? [])
       existingFiles.value = data.files || []
     } catch {
+      // A stale run's failure must not toast or navigate away from the NEW target.
+      if (gen !== initGen) return
       toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
       router.back()
     }
   } else {
     try {
       const { data: appConfig } = await api.get('/app')
+      if (gen !== initGen) return
       if (appConfig.default_language) {
         form.value.language = appConfig.default_language
       }
     } catch { /* fall back to 'eng' */ }
+    if (gen !== initGen) return
 
     // New document: load field definitions so the user can fill them in.
     try {
       const { data } = await listMetadata()
+      if (gen !== initGen) return
       metadataDefinitions.value = data.metadata
       hydrateMetadataValues(data.metadata)
     } catch { /* no custom fields available */ }
+    if (gen !== initGen) return
 
     form.value.tags = [...tagFilter.selectedTagIds]
   }
+}
+
+// Drop everything tied to the PREVIOUS route target. Critically this clears the
+// create-retry state (createdId / uploadedCount): a half-created document from an
+// earlier document-add visit must never be silently updated when this reused
+// instance serves a fresh create (or inherited into an edit). The pending file
+// queue and loaded document state belong to the old target too.
+function resetForRouteChange() {
+  // Invalidate any in-flight initFromRoute immediately — even before the next init
+  // run bumps the generation again.
+  initGen++
+  form.value = defaultForm()
+  createdId.value = null
+  uploadedCount.value = 0
+  pendingFiles.value = []
+  uploadProgress.value = {}
+  uploadingFiles.value = false
+  fileUploadRef.value?.clear()
+  existingFiles.value = []
+  loadedRelations.value = []
+  metadataDefinitions.value = []
+  metadataValues.value = {}
+  metadataSetIds.value = new Set()
+}
+
+onMounted(initFromRoute)
+
+// Same component instance, different target (add -> edit, edit -> add, or another
+// document id): reset, then re-initialize for the new target.
+watch(() => props.id, () => {
+  resetForRouteChange()
+  initFromRoute()
 })
 
 // Seed the value map from a definition/value list, coercing each backend value to
@@ -167,14 +231,18 @@ function onBooleanToggle(id: string) {
 
 function onFileSelect(event: FileUploadSelectEvent) {
   pendingFiles.value = [...event.files]
+  // The queue changed — any prior partial-upload progress no longer maps to it.
+  uploadedCount.value = 0
 }
 
 function onFileRemove(event: FileUploadRemoveEvent) {
   pendingFiles.value = pendingFiles.value.filter((f) => f !== event.file)
+  uploadedCount.value = 0
 }
 
 function onFileClear() {
   pendingFiles.value = []
+  uploadedCount.value = 0
 }
 
 // Camera capture: a separate hidden <input capture> so mobile browsers open the
@@ -189,6 +257,7 @@ function onCameraCapture(event: Event) {
   const captured = input.files ? Array.from(input.files) : []
   if (captured.length) {
     pendingFiles.value = [...pendingFiles.value, ...captured]
+    uploadedCount.value = 0
   }
   // Reset so re-capturing the same-named photo fires change again.
   input.value = ''
@@ -250,6 +319,10 @@ async function handleSubmit() {
   }
 
   loading.value = true
+  // True once the document itself is persisted this attempt (created or updated), so
+  // a later file-upload failure reports "saved, files failed" rather than "not saved"
+  // — and never re-creates the document on retry.
+  let documentPersisted = false
   try {
     const params = buildDocParams()
     let resultId: string
@@ -257,26 +330,38 @@ async function handleSubmit() {
     if (isEdit.value && props.id) {
       await updateDocument(props.id, params)
       resultId = props.id
+    } else if (createdId.value) {
+      // A prior attempt already created this document (then a file upload failed):
+      // update it instead of creating a duplicate.
+      await updateDocument(createdId.value, params)
+      resultId = createdId.value
     } else {
       const { data: result } = await createDocument(params)
       resultId = result.id
+      createdId.value = resultId
     }
+    documentPersisted = true
 
     if (pendingFiles.value.length) {
       uploadingFiles.value = true
       uploadProgress.value = {}
       const files = pendingFiles.value
-      for (let i = 0; i < files.length; i++) {
+      // Resume at the first file that has not yet uploaded — files that succeeded on
+      // a previous attempt are not sent again.
+      for (let i = uploadedCount.value; i < files.length; i++) {
         uploadProgress.value[i] = 0
         await uploadFile(resultId, files[i], (pct) => {
           uploadProgress.value[i] = pct
         })
         uploadProgress.value[i] = 100
+        uploadedCount.value = i + 1
       }
       uploadingFiles.value = false
     }
     pendingFiles.value = []
     uploadProgress.value = {}
+    uploadedCount.value = 0
+    createdId.value = null
     fileUploadRef.value?.clear()
 
     await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -284,7 +369,14 @@ async function handleSubmit() {
     toast.add({ severity: 'success', summary: isEdit.value ? t('ui.document_updated') : t('ui.document_created'), life: 2000 })
     router.push({ name: 'document-view', params: { id: resultId } })
   } catch {
-    toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
+    // Distinguish the two failure modes: the document was saved but a file upload
+    // failed (retry uploads only the remaining files — no duplicate document), versus
+    // the save itself failed (nothing persisted). Stay on the form either way.
+    toast.add({
+      severity: 'error',
+      summary: documentPersisted ? t('ui.document_saved_files_failed') : t('ui.failed_save_document'),
+      life: 4000,
+    })
   } finally {
     loading.value = false
     uploadingFiles.value = false

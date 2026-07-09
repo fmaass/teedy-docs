@@ -644,6 +644,7 @@
     "document_created": "Dokument erstellt",
     "document_updated": "Dokument aktualisiert",
     "failed_save_document": "Dokument konnte nicht gespeichert werden",
+    "document_saved_files_failed": "Dokument gespeichert, aber einige Dateien konnten nicht hochgeladen werden. Erneut speichern, um die verbleibenden Dateien hochzuladen.",
     "trash": "Papierkorb",
     "trash_count": "{count} Dokument(e) im Papierkorb",
     "trash_empty": "Der Papierkorb ist leer",
