@@ -1,29 +1,48 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/vue-query'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
-import DataTable from 'primevue/datatable'
+import DataTable, { type DataTablePageEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
+import Tag from 'primevue/tag'
 import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
+import { daysUntilPurge, DEFAULT_RETENTION_DAYS } from '../../utils/trashRetention'
 
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
 const queryClient = useQueryClient()
 
+// --- Pagination (mirrors DocumentList: lazy PrimeVue paginator, server limit/offset) ---
+const PAGE_SIZE = 20
+const pageOffset = ref(0)
+
 const { data: trashData, isLoading, isError, refetch } = useQuery({
-  queryKey: ['trash'],
-  queryFn: () => listTrash({ limit: 200 }).then((r) => r.data),
+  queryKey: computed(() => ['trash', { offset: pageOffset.value }]),
+  queryFn: () => listTrash({ limit: PAGE_SIZE, offset: pageOffset.value }).then((r) => r.data),
+  placeholderData: keepPreviousData,
 })
 
 const documents = computed(() => trashData.value?.documents ?? [])
 const totalCount = computed(() => trashData.value?.total ?? 0)
+
+function onPage(event: DataTablePageEvent) {
+  pageOffset.value = event.first
+}
+
+// Retention window is not exposed by the API (see utils/trashRetention.ts); we display
+// a countdown against the backend's default window.
+const retentionDays = DEFAULT_RETENTION_DAYS
+
+function purgeCountdown(deleteDate: number) {
+  return daysUntilPurge(deleteDate, retentionDays)
+}
 
 const restoreMutation = useMutation({
   mutationFn: (id: string) => restoreDocument(id),
@@ -124,18 +143,35 @@ function formatDeletedAt(ts: number) {
     <DataTable
       v-else-if="documents.length"
       :value="documents"
+      :totalRecords="totalCount"
+      :rows="PAGE_SIZE"
+      :first="pageOffset"
+      lazy
+      paginator
       stripedRows
       :rowHover="true"
+      dataKey="id"
       class="trash-table"
+      @page="onPage"
     >
-      <Column field="title" :header="t('document.title')" sortable>
+      <Column field="title" :header="t('document.title')">
         <template #body="{ data }">
           <span class="doc-title">{{ data.title }}</span>
         </template>
       </Column>
-      <Column :header="t('ui.trash_deleted')" style="width: 180px" sortable sortField="delete_date">
+      <Column :header="t('ui.trash_deleted')" style="width: 180px">
         <template #body="{ data }">
           <span class="doc-meta">{{ formatDeletedAt(data.delete_date) }}</span>
+        </template>
+      </Column>
+      <Column :header="t('ui.trash_purges_in')" style="width: 160px">
+        <template #body="{ data }">
+          <Tag
+            :severity="purgeCountdown(data.delete_date) <= 3 ? 'warn' : 'secondary'"
+            :value="purgeCountdown(data.delete_date) === 0
+              ? t('ui.trash_purges_soon')
+              : t('ui.trash_purges_in_days', purgeCountdown(data.delete_date))"
+          />
         </template>
       </Column>
       <Column :header="t('ui.actions')" style="width: 200px">

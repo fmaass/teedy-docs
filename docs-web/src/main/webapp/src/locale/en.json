@@ -624,6 +624,9 @@
     "documents_deleted": "{count} document(s) permanently deleted",
     "failed_empty_trash": "Failed to empty trash",
     "failed_delete_permanently": "Failed to delete document",
+    "trash_purges_in": "Auto-purge",
+    "trash_purges_in_days": "in {count} day | in {count} days",
+    "trash_purges_soon": "Due for purge",
     "restore": "Restore",
     "permissions": {
       "direct": "Direct permissions",

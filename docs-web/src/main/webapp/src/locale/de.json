@@ -624,6 +624,9 @@
     "documents_deleted": "{count} Dokument(e) endgültig gelöscht",
     "failed_empty_trash": "Papierkorb konnte nicht geleert werden",
     "failed_delete_permanently": "Dokument konnte nicht gelöscht werden",
+    "trash_purges_in": "Automatisch gelöscht",
+    "trash_purges_in_days": "in {count} Tag | in {count} Tagen",
+    "trash_purges_soon": "Wird gelöscht",
     "restore": "Wiederherstellen",
     "permissions": {
       "direct": "Direkte Berechtigungen",
