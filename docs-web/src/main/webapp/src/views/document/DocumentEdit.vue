@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
-import { buildMetadataParams, type MetadataValue } from '../../composables/metadataSerialize'
+import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../composables/metadataSerialize'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import api from '../../api/client'
@@ -88,6 +88,11 @@ const metadataValues = ref<Record<string, MetadataValue>>({})
 // document or toggled by the user. Unset booleans stay out of this set so they are
 // omitted from the save rather than coerced to an explicit "false".
 const metadataSetIds = ref<Set<string>>(new Set())
+// Snapshot at load: did this document have ANY set custom-metadata value? Captured
+// once at hydration (edit mode) and NOT mutated by later user edits, so a save that
+// emits zero metadata params can tell a genuine clear-the-last-value ("send
+// metadata_reset=true") apart from a document that simply never had metadata.
+const metadataHadValuesAtLoad = ref(false)
 
 const fileUploadRef = ref()
 
@@ -188,6 +193,7 @@ function resetForRouteChange() {
   metadataDefinitions.value = []
   metadataValues.value = {}
   metadataSetIds.value = new Set()
+  metadataHadValuesAtLoad.value = false
 }
 
 onMounted(initFromRoute)
@@ -222,6 +228,7 @@ function hydrateMetadataValues(list: Array<{ id: string; type: string; value?: u
   }
   metadataValues.value = values
   metadataSetIds.value = setIds
+  metadataHadValuesAtLoad.value = setIds.size > 0
 }
 
 // A user toggling a boolean makes it explicitly set (so false is submitted, not omitted).
@@ -305,9 +312,16 @@ function buildDocParams() {
   // Only submit fields the user actually set — an unset numeric/date field sent as a
   // blank pair makes the backend reject the whole save; an unset boolean must not
   // silently become "false".
-  for (const meta of buildMetadataParams(metadataDefinitions.value, metadataValues.value, metadataSetIds.value)) {
+  const metaParams = buildMetadataParams(metadataDefinitions.value, metadataValues.value, metadataSetIds.value)
+  for (const meta of metaParams) {
     params.append('metadata_id', meta.id)
     params.append('metadata_value', meta.value)
+  }
+  // The backend preserves metadata on an omitted set, so clearing the last set value
+  // is otherwise a silent no-op. Send the clear-all sentinel ONLY on a genuine clear
+  // (the document HAD values at load and now emits zero params).
+  if (shouldResetMetadata(metadataHadValuesAtLoad.value, metaParams)) {
+    params.append('metadata_reset', 'true')
   }
   return params
 }

@@ -62,3 +62,18 @@ export function buildMetadataParams(
   }
   return params
 }
+
+/**
+ * Decide whether a document save must send the `metadata_reset=true` sentinel.
+ *
+ * The backend preserves custom-metadata values on an omitted set (POST
+ * /document/{id} — the P8 partial-update contract), so clearing the last set value
+ * would be a silent no-op. We send the clear-all sentinel ONLY on a genuine clear:
+ * the document HAD set metadata values at load, AND the current save emits zero
+ * metadata_id params. When params ARE present they are a normal update and take
+ * precedence (no sentinel); when the document never had values, an empty save is
+ * not a clear and must not send the sentinel either.
+ */
+export function shouldResetMetadata(hadSetValues: boolean, params: MetadataParam[]): boolean {
+  return hadSetValues && params.length === 0
+}

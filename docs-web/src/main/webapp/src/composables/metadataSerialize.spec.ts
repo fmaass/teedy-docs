@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildMetadataParams, serializeMetadataValue } from './metadataSerialize'
+import { buildMetadataParams, serializeMetadataValue, shouldResetMetadata } from './metadataSerialize'
 import type { MetadataDefinition } from '../api/metadata'
 
 const defs: MetadataDefinition[] = [
@@ -77,6 +77,28 @@ describe('buildMetadataParams — omit unset fields (backend rejects blank numer
       { id: 'dat', value: String(due.getTime()) },
       { id: 'bool', value: 'true' },
     ])
+  })
+})
+
+describe('shouldResetMetadata — send metadata_reset only on a genuine clear', () => {
+  it('true when the document HAD set values but now emits zero params', () => {
+    // The user cleared the last set metadata value; the backend preserves-on-omit,
+    // so we must send the explicit clear-all sentinel.
+    expect(shouldResetMetadata(true, [])).toBe(true)
+  })
+
+  it('false when the document NEVER had set values and emits zero params', () => {
+    // A document that simply never had metadata must not send the sentinel.
+    expect(shouldResetMetadata(false, [])).toBe(false)
+  })
+
+  it('false when params ARE present, even if the document had values', () => {
+    // A normal update with values takes precedence — no sentinel.
+    expect(shouldResetMetadata(true, [{ id: 'm1', value: 'x' }])).toBe(false)
+  })
+
+  it('false when params are present and the document had no prior values', () => {
+    expect(shouldResetMetadata(false, [{ id: 'm1', value: 'x' }])).toBe(false)
   })
 })
 

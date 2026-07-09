@@ -81,7 +81,14 @@ function buildTagParams(doc: DocumentListItem, tagIds: string[]): URLSearchParam
   const p = new URLSearchParams()
   p.set('title', doc.title)
   p.set('language', doc.language)
-  for (const id of tagIds) p.append('tags', id)
+  if (tagIds.length === 0) {
+    // The backend preserves tags on an omitted `tags` param, so an empty list is a
+    // silent no-op. Removing the LAST tag must send the explicit clear-all sentinel
+    // (POST /document/{id} tags_reset=true) — see the P8 partial-update contract.
+    p.set('tags_reset', 'true')
+  } else {
+    for (const id of tagIds) p.append('tags', id)
+  }
   return p
 }
 

@@ -116,6 +116,20 @@ describe('buildRemoveTagParams', () => {
     })
     const p = buildRemoveTagParams(d, 't1')
     expect(p.getAll('tags')).toEqual(['t2'])
+    // A non-empty result must NOT trigger the clear-all sentinel.
+    expect(p.has('tags_reset')).toBe(false)
+  })
+
+  it('emits tags_reset=true and NO tags param when the last tag is removed', () => {
+    // The backend preserves-on-omit, so an empty `tags` list would be a silent
+    // no-op. Removing the final tag must send the explicit clear-all sentinel.
+    const d = doc({ tags: [{ id: 't1', name: 'A', color: '#000' }] })
+    const p = buildRemoveTagParams(d, 't1')
+    expect(p.get('tags_reset')).toBe('true')
+    expect(p.has('tags')).toBe(false)
+    // title + language are still sent (required by the update contract).
+    expect(p.get('title')).toBe('Doc One')
+    expect(p.get('language')).toBe('eng')
   })
 })
 
