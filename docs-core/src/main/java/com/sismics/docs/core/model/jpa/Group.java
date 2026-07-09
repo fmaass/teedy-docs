@@ -25,7 +25,7 @@ public class Group implements Loggable {
     private String id;
     
     /**
-     * Vocabulary value.
+     * Parent group ID.
      */
     @Column(name = "GRP_IDPARENT_C", length = 36)
     private String parentId;
