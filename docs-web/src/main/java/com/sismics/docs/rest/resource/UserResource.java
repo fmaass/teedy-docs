@@ -18,6 +18,7 @@ import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.docs.rest.util.UserValidation;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -167,17 +168,12 @@ public class UserResource extends BaseResource {
         // Update the user
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
-        if (email != null) {
-            user.setEmail(email);
-        }
+        UserValidation.applyEmailUpdate(user, email);
         user = userDao.update(user, principal.getId());
-        
+
         // Change the password
-        if (StringUtils.isNotBlank(password)) {
-            user.setPassword(password);
-            userDao.updatePassword(user, principal.getId());
-        }
-        
+        UserValidation.applyPasswordUpdate(userDao, user, password, principal.getId());
+
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
@@ -237,9 +233,7 @@ public class UserResource extends BaseResource {
         }
 
         // Update the user
-        if (email != null) {
-            user.setEmail(email);
-        }
+        UserValidation.applyEmailUpdate(user, email);
         if (StringUtils.isNotBlank(storageQuotaStr)) {
             Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
             user.setStorageQuota(storageQuota);
@@ -261,13 +255,10 @@ public class UserResource extends BaseResource {
             }
         }
         user = userDao.update(user, principal.getId());
-        
+
         // Change the password
-        if (StringUtils.isNotBlank(password)) {
-            user.setPassword(password);
-            userDao.updatePassword(user, principal.getId());
-        }
-        
+        UserValidation.applyPasswordUpdate(userDao, user, password, principal.getId());
+
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
