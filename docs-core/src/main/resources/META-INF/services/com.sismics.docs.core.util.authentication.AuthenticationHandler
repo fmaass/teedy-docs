@@ -1,1 +1,2 @@
 com.sismics.docs.core.util.authentication.InternalAuthenticationHandler
+com.sismics.docs.core.util.authentication.LdapAuthenticationHandler

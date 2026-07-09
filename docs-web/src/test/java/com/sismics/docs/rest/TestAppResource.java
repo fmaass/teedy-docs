@@ -1,5 +1,6 @@
 package com.sismics.docs.rest;
 
+import com.google.common.io.Resources;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetup;
@@ -11,8 +12,19 @@ import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
+import org.apache.directory.api.ldap.model.name.Dn;
+import org.apache.directory.server.core.api.DirectoryService;
+import org.apache.directory.server.core.api.partition.Partition;
+import org.apache.directory.server.core.factory.DefaultDirectoryServiceFactory;
+import org.apache.directory.server.core.factory.DirectoryServiceFactory;
+import org.apache.directory.server.core.partition.impl.avl.AvlPartition;
+import org.apache.directory.server.ldap.LdapServer;
+import org.apache.directory.server.protocol.shared.store.LdifFileLoader;
+import org.apache.directory.server.protocol.shared.transport.TcpTransport;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.io.File;
 
 
 /**
@@ -28,6 +40,7 @@ public class TestAppResource extends BaseJerseyTest {
     // Record if config has been changed by previous test runs
     private static boolean configInboxChanged = false;
     private static boolean configSmtpChanged = false;
+    private static boolean configLdapChanged = false;
 
     @Test
     public void testAppResource() {
@@ -395,6 +408,210 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(0, lastSync.getJsonNumber("count").intValue());
 
         greenMail.stop();
+    }
+
+    /**
+     * Test the LDAP authentication.
+     */
+    @Test
+    public void testLdapAuthentication() throws Exception {
+        // Reserve an OS-assigned port for the embedded LDAP server (no fixed port,
+        // so parallel test runs on one host don't collide with BindException).
+        int ldapPort;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            ldapPort = socket.getLocalPort();
+        }
+
+        // Start LDAP server
+        final DirectoryServiceFactory factory = new DefaultDirectoryServiceFactory();
+        factory.init("Test");
+
+        final DirectoryService directoryService = factory.getDirectoryService();
+        directoryService.getChangeLog().setEnabled(false);
+        directoryService.setShutdownHookEnabled(true);
+
+        final Partition partition = new AvlPartition(directoryService.getSchemaManager());
+        partition.setId("Test");
+        partition.setSuffixDn(new Dn(directoryService.getSchemaManager(), "o=TEST"));
+        partition.initialize();
+        directoryService.addPartition(partition);
+
+        final LdapServer ldapServer = new LdapServer();
+        ldapServer.setTransports(new TcpTransport("localhost", ldapPort));
+        ldapServer.setDirectoryService(directoryService);
+
+        directoryService.startup();
+        ldapServer.start();
+
+        // Load test data in LDAP
+        new LdifFileLoader(directoryService.getAdminSession(), new File(Resources.getResource("test.ldif").getFile()), null).execute();
+
+        // Login admin
+        String adminToken = adminToken();
+
+        // Get the LDAP configuration
+        JsonObject json = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        if (!configLdapChanged) {
+                Assertions.assertFalse(json.getBoolean("enabled"));
+        }
+
+        // Change LDAP configuration
+        target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("enabled", "true")
+                        .param("host", "localhost")
+                        .param("port", Integer.toString(ldapPort))
+                        .param("usessl", "false")
+                        .param("admin_dn", "uid=admin,ou=system")
+                        .param("admin_password", "secret")
+                        .param("base_dn", "o=TEST")
+                        .param("filter", "(&(objectclass=inetOrgPerson)(uid=USERNAME))")
+                        .param("default_email", "devnull@teedy.io")
+                        .param("default_storage", "100000000")
+                ), JsonObject.class);
+        configLdapChanged = true;
+
+        // Get the LDAP configuration
+        json = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertTrue(json.getBoolean("enabled"));
+        Assertions.assertEquals("localhost", json.getString("host"));
+        Assertions.assertEquals(ldapPort, json.getJsonNumber("port").intValue());
+        Assertions.assertEquals("uid=admin,ou=system", json.getString("admin_dn"));
+        Assertions.assertEquals("secret", json.getString("admin_password"));
+        Assertions.assertEquals("o=TEST", json.getString("base_dn"));
+        Assertions.assertEquals("(&(objectclass=inetOrgPerson)(uid=USERNAME))", json.getString("filter"));
+        Assertions.assertEquals("devnull@teedy.io", json.getString("default_email"));
+        Assertions.assertEquals(100000000L, json.getJsonNumber("default_storage").longValue());
+
+        // Login with a LDAP user
+        String ldapTopen = clientUtil.login("ldap1", "secret", false);
+
+        // Check user informations
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ldapTopen)
+                .get(JsonObject.class);
+        Assertions.assertEquals("ldap1@teedy.io", json.getString("email"));
+
+        // List all documents
+        json = target().path("/document/list")
+                .queryParam("sort_column", 3)
+                .queryParam("asc", true)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ldapTopen)
+                .get(JsonObject.class);
+        JsonArray documents = json.getJsonArray("documents");
+        Assertions.assertEquals(0, documents.size());
+
+        // Security: an internal account must authenticate by its OWN password first.
+        // "admin" exists both internally (password "admin") and in LDAP (uid=admin,
+        // password "ldappass", mail admin-ldap@teedy.io). Logging in with the INTERNAL
+        // password must succeed and return the INTERNAL admin (not the LDAP-provisioned
+        // one). RED against the old LDAP-first @Priority(50) ordering, which would have
+        // bound admin against LDAP and hijacked the local account.
+        String adminInternalToken = clientUtil.login("admin", "admin", false);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminInternalToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals("admin", json.getString("username"));
+        // The LDAP-provisioned "admin" (mail admin-ldap@teedy.io) must NOT be who logged in.
+        Assertions.assertNotEquals("admin-ldap@teedy.io", json.getString("email"));
+        Assertions.assertTrue(json.getJsonArray("base_functions").toString().contains("ADMIN"));
+
+        // The LDAP password for "admin" must NOT authenticate the local admin account.
+        Response hijackResponse = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "admin")
+                        .param("password", "ldappass")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), hijackResponse.getStatus());
+
+        // Security: LDAP filter injection. A username of filter metacharacters
+        // ("*)(uid=*") must be escaped per RFC 4515 so it cannot broaden the search
+        // filter to match an arbitrary entry (e.g. ldap1). RED against the raw
+        // .replace("USERNAME", username), which would have matched and attempted a bind.
+        Response injectionResponse = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "*)(uid=*")
+                        .param("password", "secret")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), injectionResponse.getStatus());
+
+        // Security: RFC 4513 unauthenticated/anonymous simple bind. A valid username with an
+        // EMPTY password must be rejected before any LDAP bind, otherwise a permissive
+        // directory that accepts an anonymous bind (valid DN + empty password) would let an
+        // attacker authenticate/provision as any LDAP user with no password. RED against a
+        // handler that passes the empty password straight to ldapConnection.bind(dn, password).
+        Response emptyPasswordLogin = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "ldap1")
+                        .param("password", "")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), emptyPasswordLogin.getStatus());
+
+        // Security: origin partition — an LDAP-provisioned user must NEVER authenticate via a
+        // local password through the internal handler; they must always go through LDAP (so
+        // LDAP disable/revocation/password rules are enforced). Provision ldap2 via LDAP, then
+        // give it a valid LOCAL password as admin. A login with that LOCAL password must be
+        // rejected: the internal handler refuses isLdap() users, and LDAP rejects it because
+        // the real LDAP password is "secret2", not the local one. RED against internal auth
+        // accepting the local password (which would bypass LDAP entirely).
+        String ldap2Token = clientUtil.login("ldap2", "secret2", false);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ldap2Token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("ldap2@teedy.io", json.getString("email"));
+
+        Response setLocalPassword = target().path("/user/ldap2").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminInternalToken)
+                .post(Entity.form(new Form().param("password", "LocalPass1")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), setLocalPassword.getStatus());
+
+        Response localPasswordLogin = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "ldap2")
+                        .param("password", "LocalPass1")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), localPasswordLogin.getStatus());
+
+        // Security: a disabled LDAP-provisioned user must NOT be able to log in via LDAP,
+        // mirroring internal auth (which rejects disabled users). ldap1 was provisioned
+        // above; disable it as admin, then an LDAP login for ldap1 must be rejected.
+        // RED against a handler that returns the existing LDAP user without a disable check.
+        Response disableResponse = target().path("/user/ldap1").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminInternalToken)
+                .post(Entity.form(new Form().param("disabled", "true")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), disableResponse.getStatus());
+
+        Response disabledLdapLogin = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "ldap1")
+                        .param("password", "secret")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), disabledLdapLogin.getStatus());
+
+        // Security (partition trade-off): with LDAP globally disabled, an LDAP-origin user is
+        // locked out entirely — the internal handler refuses isLdap() users and the LDAP
+        // handler is off. This is correct for an LDAP-authoritative model (same as OIDC users
+        // when OIDC is disabled). ldap2 has a valid local password but must still be rejected.
+        target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminInternalToken)
+                .post(Entity.form(new Form().param("enabled", "false")), JsonObject.class);
+
+        Response ldapDisabledLockout = target().path("/user/login").request()
+                .post(Entity.form(new Form()
+                        .param("username", "ldap2")
+                        .param("password", "LocalPass1")
+                        .param("remember", "false")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), ldapDisabledLockout.getStatus());
+
+        // Stop LDAP server
+        ldapServer.stop();
+        directoryService.shutdown();
     }
 
 }
