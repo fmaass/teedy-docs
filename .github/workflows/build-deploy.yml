@@ -181,6 +181,23 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value={{branch}}-rc-{{sha}},enable=${{ startsWith(github.ref, 'refs/heads/release/') }}
 
+      # Runtime smoke test: build a single-arch amd64 image, load it into the local
+      # Docker daemon, boot the container standalone (embedded H2 — no DATABASE_URL),
+      # and assert a real API route serves. Catches a green build that produces an
+      # image that cannot actually start or serve (broken WAR, bad Jetty wiring,
+      # missing runtime dep). Buildx layer cache is reused by the multi-arch push below.
+      - name: Build smoke-test image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-smoke-test:local
+
+      - name: Smoke-test the container
+        run: bash scripts/docker-smoke-test.sh teedy-smoke-test:local
+
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
