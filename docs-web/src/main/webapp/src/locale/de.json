@@ -642,6 +642,28 @@
       "failed_add": "Berechtigung konnte nicht hinzugefügt werden",
       "failed_remove": "Berechtigung konnte nicht entfernt werden"
     },
+    "share": {
+      "title": "Freigabe-Links",
+      "hint": "Jeder mit einem Freigabe-Link kann dieses Dokument ohne Anmeldung ansehen.",
+      "none": "Keine aktiven Freigabe-Links.",
+      "unnamed": "Unbenannter Link",
+      "create": "Freigabe-Link erstellen",
+      "name_placeholder": "Link-Name (optional)",
+      "create_button": "Link erstellen",
+      "copy": "Link kopieren",
+      "copied": "Link in die Zwischenablage kopiert",
+      "copy_failed": "Link konnte nicht kopiert werden",
+      "created": "Freigabe-Link erstellt",
+      "failed_create": "Freigabe-Link konnte nicht erstellt werden",
+      "revoke": "Link widerrufen",
+      "revoke_confirm": "Freigabe-Link \"{name}\" widerrufen? Wer ihn verwendet, verliert den Zugriff.",
+      "revoked": "Freigabe-Link widerrufen",
+      "failed_revoke": "Freigabe-Link konnte nicht widerrufen werden",
+      "view": {
+        "not_found": "Dieses freigegebene Dokument ist nicht mehr verfügbar.",
+        "footer": "Freigegeben über Teedy"
+      }
+    },
     "tags_page": {
       "title": "Tags",
       "subtitle": "Organisieren Sie Dokumente mit Tags. Klicken Sie auf ein Tag, um Name, Farbe oder übergeordnetes Tag zu bearbeiten.",

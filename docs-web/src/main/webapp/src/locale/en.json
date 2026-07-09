@@ -642,6 +642,28 @@
       "failed_add": "Failed to add permission",
       "failed_remove": "Failed to remove permission"
     },
+    "share": {
+      "title": "Share links",
+      "hint": "Anyone with a share link can view this document without signing in.",
+      "none": "No active share links.",
+      "unnamed": "Unnamed link",
+      "create": "Create a share link",
+      "name_placeholder": "Link name (optional)",
+      "create_button": "Create link",
+      "copy": "Copy link",
+      "copied": "Link copied to clipboard",
+      "copy_failed": "Could not copy the link",
+      "created": "Share link created",
+      "failed_create": "Failed to create share link",
+      "revoke": "Revoke link",
+      "revoke_confirm": "Revoke the share link \"{name}\"? Anyone using it will lose access.",
+      "revoked": "Share link revoked",
+      "failed_revoke": "Failed to revoke share link",
+      "view": {
+        "not_found": "This shared document is no longer available.",
+        "footer": "Shared via Teedy"
+      }
+    },
     "tags_page": {
       "title": "Tags",
       "subtitle": "Organize documents with tags. Click a tag to edit its name, color, or parent.",

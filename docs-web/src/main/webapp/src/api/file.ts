@@ -9,9 +9,12 @@ export function uploadFile(documentId: string, file: File) {
   })
 }
 
-export function getFileUrl(fileId: string, size?: 'web' | 'thumb' | 'content') {
-  const params = size ? `?size=${size}` : ''
-  return `api/file/${fileId}/data${params}`
+export function getFileUrl(fileId: string, size?: 'web' | 'thumb' | 'content', shareId?: string) {
+  const query = new URLSearchParams()
+  if (size) query.set('size', size)
+  if (shareId) query.set('share', shareId)
+  const suffix = query.toString()
+  return `api/file/${fileId}/data${suffix ? `?${suffix}` : ''}`
 }
 
 export function deleteFile(fileId: string) {

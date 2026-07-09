@@ -4,9 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import { type DocumentDetail, type Acl, type InheritedAcl } from '../../api/document'
 import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../../api/acl'
+import { createShare, deleteShare, buildShareUrl } from '../../api/share'
 import Button from 'primevue/button'
 import AutoComplete from 'primevue/autocomplete'
 import Select from 'primevue/select'
+import InputText from 'primevue/inputtext'
 import TagBadge from '../../components/TagBadge.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
@@ -18,6 +20,8 @@ const confirm = useConfirm()
 const queryClient = useQueryClient()
 
 const acls = computed<Acl[]>(() => doc.value?.acls ?? [])
+// User/group ACLs only — SHARE ACLs are surfaced in the Share links section.
+const directAcls = computed<Acl[]>(() => acls.value.filter((a) => a.type !== 'SHARE'))
 const inheritedAcls = computed<InheritedAcl[]>(() => doc.value?.inherited_acls ?? [])
 
 // Group inherited ACLs by source tag
@@ -102,6 +106,64 @@ function permLabel(perm: string) {
 function typeIcon(type: string) {
   return type === 'GROUP' ? 'pi pi-users' : 'pi pi-user'
 }
+
+// --- Share-by-URL ---
+// Active shares are the SHARE-typed ACLs on this document; the ACL id is the
+// share token used in the public link. The share URL embeds this token, so the
+// entire share section (list, URLs, copy, create, revoke) is rendered only when
+// doc.writable — a read-only reader must not be able to read/redistribute it.
+const shares = computed(() =>
+  acls.value
+    .filter((a) => a.type === 'SHARE')
+    .map((a) => ({ id: a.id, name: a.name, url: buildShareUrl(doc.value!.id, a.id) })),
+)
+
+const shareName = ref('')
+const creatingShare = ref(false)
+
+async function handleCreateShare() {
+  if (!doc.value) return
+  creatingShare.value = true
+  try {
+    await createShare(doc.value.id, shareName.value)
+    queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
+    toast.add({ severity: 'success', summary: t('ui.share.created'), life: 2000 })
+    shareName.value = ''
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.share.failed_create'), life: 3000 })
+  } finally {
+    creatingShare.value = false
+  }
+}
+
+async function copyShareUrl(url: string) {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.add({ severity: 'success', summary: t('ui.share.copied'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.share.copy_failed'), life: 3000 })
+  }
+}
+
+function confirmRevokeShare(share: { id: string; name: string }) {
+  confirm.require({
+    message: t('ui.share.revoke_confirm', { name: share.name || t('ui.share.unnamed') }),
+    header: t('ui.share.revoke'),
+    icon: 'pi pi-link',
+    acceptProps: { severity: 'danger' },
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: async () => {
+      if (!doc.value) return
+      try {
+        await deleteShare(share.id)
+        queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
+        toast.add({ severity: 'success', summary: t('ui.share.revoked'), life: 2000 })
+      } catch {
+        toast.add({ severity: 'error', summary: t('ui.share.failed_revoke'), life: 3000 })
+      }
+    },
+  })
+}
 </script>
 
 <template>
@@ -112,8 +174,8 @@ function typeIcon(type: string) {
       <h3>{{ t('ui.permissions.direct') }}</h3>
       <p class="section-hint">{{ t('ui.permissions.direct_hint') }}</p>
 
-      <div v-if="acls.length" class="acl-list">
-        <div v-for="acl in acls" :key="acl.id + acl.perm" class="acl-row">
+      <div v-if="directAcls.length" class="acl-list">
+        <div v-for="acl in directAcls" :key="acl.id + acl.perm" class="acl-row">
           <i :class="typeIcon(acl.type)" class="acl-icon" />
           <span class="acl-name">{{ acl.name }}</span>
           <span class="acl-badge" :class="acl.perm === 'WRITE' ? 'badge-write' : 'badge-read'">
@@ -133,6 +195,66 @@ function typeIcon(type: string) {
         </div>
       </div>
       <p v-else class="no-acl">{{ t('ui.permissions.no_direct') }}</p>
+    </section>
+
+    <!-- Share by URL. Gated ENTIRELY behind doc.writable: a read-only reader must
+         never see share tokens/URLs (they double as the anonymous access token),
+         otherwise they could redistribute access beyond what they may grant. -->
+    <section v-if="doc.writable" class="perm-section">
+      <h3>{{ t('ui.share.title') }}</h3>
+      <p class="section-hint">{{ t('ui.share.hint') }}</p>
+
+      <div v-if="shares.length" class="share-list">
+        <div v-for="share in shares" :key="share.id" class="share-row">
+          <i class="pi pi-link share-icon" aria-hidden="true" />
+          <div class="share-main">
+            <span class="share-name">{{ share.name || t('ui.share.unnamed') }}</span>
+            <span class="share-url">{{ share.url }}</span>
+          </div>
+          <Button
+            icon="pi pi-copy"
+            text
+            rounded
+            size="small"
+            severity="secondary"
+            @click="copyShareUrl(share.url)"
+            v-tooltip="t('ui.share.copy')"
+            :aria-label="t('ui.share.copy')"
+          />
+          <Button
+            icon="pi pi-times"
+            text
+            rounded
+            size="small"
+            severity="danger"
+            @click="confirmRevokeShare(share)"
+            v-tooltip="t('ui.share.revoke')"
+            :aria-label="t('ui.share.revoke')"
+          />
+        </div>
+      </div>
+      <p v-else class="no-acl">{{ t('ui.share.none') }}</p>
+
+      <!-- Create share form -->
+      <div class="add-acl-form">
+        <h4>{{ t('ui.share.create') }}</h4>
+        <div class="add-acl-row">
+          <InputText
+            v-model="shareName"
+            size="small"
+            class="add-acl-autocomplete"
+            :placeholder="t('ui.share.name_placeholder')"
+            @keyup.enter="handleCreateShare"
+          />
+          <Button
+            :label="t('ui.share.create_button')"
+            icon="pi pi-link"
+            size="small"
+            :loading="creatingShare"
+            @click="handleCreateShare"
+          />
+        </div>
+      </div>
 
       <!-- Add permission form -->
       <div v-if="doc.writable" class="add-acl-form">
@@ -311,5 +433,51 @@ function typeIcon(type: string) {
 
 .inherited-source {
   margin-bottom: 0.375rem;
+}
+
+.share-list {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.share-row:last-child {
+  border-bottom: none;
+}
+
+.share-icon {
+  color: var(--p-text-muted-color);
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.share-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.share-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.share-url {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
 }
 </style>

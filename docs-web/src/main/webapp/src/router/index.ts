@@ -18,6 +18,14 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      // Public share-by-URL view — reachable by logged-out visitors.
+      path: '/share/:documentId/:shareId',
+      name: 'share-view',
+      component: () => import('../views/ShareView.vue'),
+      props: true,
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('../views/AppLayout.vue'),
       children: [
