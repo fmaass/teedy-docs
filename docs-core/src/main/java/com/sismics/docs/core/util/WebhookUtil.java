@@ -6,6 +6,8 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Locale;
 
+import com.sismics.util.EnvironmentUtil;
+
 /**
  * Webhook URL validation utilities.
  *
@@ -36,11 +38,7 @@ public final class WebhookUtil {
      * @return true if private addresses are allowed
      */
     static boolean isPrivateAllowed() {
-        String prop = System.getProperty(ALLOW_PRIVATE_PROPERTY);
-        if (prop == null) {
-            prop = System.getenv("DOCS_WEBHOOK_ALLOW_PRIVATE");
-        }
-        return Boolean.parseBoolean(prop);
+        return EnvironmentUtil.getBooleanConfig(ALLOW_PRIVATE_PROPERTY, "DOCS_WEBHOOK_ALLOW_PRIVATE", false);
     }
 
     /**

@@ -16,6 +16,7 @@ import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.TransactionUtil;
+import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
 /**
@@ -24,6 +25,7 @@ import com.sismics.util.context.ThreadLocalContext;
 public class TrashPurgeService extends AbstractScheduledService {
     private static final Logger log = LoggerFactory.getLogger(TrashPurgeService.class);
 
+    private static final String RETENTION_DAYS_PROPERTY = "docs.trash_retention_days";
     private static final String ENV_RETENTION_DAYS = "DOCS_TRASH_RETENTION_DAYS";
     private static final int DEFAULT_RETENTION_DAYS = 30;
 
@@ -124,21 +126,16 @@ public class TrashPurgeService extends AbstractScheduledService {
 
     /**
      * Returns the configured trash retention window in days.
-     * Reads {@code DOCS_TRASH_RETENTION_DAYS} (falling back to {@link #DEFAULT_RETENTION_DAYS}).
+     * Reads the {@code docs.trash_retention_days} system property, falling back to the
+     * {@code DOCS_TRASH_RETENTION_DAYS} environment variable, then to
+     * {@link #DEFAULT_RETENTION_DAYS}. A malformed value falls back to the default; a
+     * valid value &lt;= 0 is returned as-is and disables purging (see {@link #purgeExpiredTrash(int)}).
      * Single source of truth for the retention window: the purge scheduler and the
      * /app REST endpoint (which surfaces it to the SPA countdown) both call this.
      *
      * @return Retention window in days
      */
     public static int getRetentionDays() {
-        String envValue = System.getenv(ENV_RETENTION_DAYS);
-        if (envValue != null) {
-            try {
-                return Integer.parseInt(envValue);
-            } catch (NumberFormatException e) {
-                log.warn("Invalid value for {}: {}, using default {}", ENV_RETENTION_DAYS, envValue, DEFAULT_RETENTION_DAYS);
-            }
-        }
-        return DEFAULT_RETENTION_DAYS;
+        return EnvironmentUtil.getIntConfig(RETENTION_DAYS_PROPERTY, ENV_RETENTION_DAYS, DEFAULT_RETENTION_DAYS);
     }
 }

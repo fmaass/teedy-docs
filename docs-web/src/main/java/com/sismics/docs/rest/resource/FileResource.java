@@ -39,6 +39,7 @@ import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.HttpUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -396,11 +397,7 @@ public class FileResource extends BaseResource {
      * @return Max upload size in bytes
      */
     static long resolveMaxUploadSize() {
-        String prop = System.getProperty("docs.max_upload_size");
-        if (prop != null) {
-            return Long.parseLong(prop.trim());
-        }
-        return Long.parseLong(System.getenv().getOrDefault("DOCS_MAX_UPLOAD_SIZE", String.valueOf(500L * 1024 * 1024)));
+        return EnvironmentUtil.getLongConfig("docs.max_upload_size", "DOCS_MAX_UPLOAD_SIZE", 500L * 1024 * 1024);
     }
 
     /**

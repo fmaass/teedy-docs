@@ -1,11 +1,16 @@
 package com.sismics.util;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Environment properties utilities.
  *
  * @author jtremeaux
  */
 public class EnvironmentUtil {
+
+    private static final Logger log = LoggerFactory.getLogger(EnvironmentUtil.class);
 
     private static String OS = System.getProperty("os.name").toLowerCase();
 
@@ -106,10 +111,7 @@ public class EnvironmentUtil {
      * @return Configured integer value
      */
     public static int getIntConfig(String systemProperty, String envVariable, int defaultValue, int minValue) {
-        String raw = System.getProperty(systemProperty);
-        if (raw == null || raw.isBlank()) {
-            raw = System.getenv(envVariable);
-        }
+        String raw = readRawConfig(systemProperty, envVariable);
         if (raw == null || raw.isBlank()) {
             return defaultValue;
         }
@@ -117,8 +119,102 @@ public class EnvironmentUtil {
             int value = Integer.parseInt(raw.trim());
             return value < minValue ? defaultValue : value;
         } catch (NumberFormatException e) {
+            log.warn("Invalid value for {}/{}: {}, using default {}", systemProperty, envVariable, raw, defaultValue);
             return defaultValue;
         }
+    }
+
+    /**
+     * Returns an integer configuration value with the standard property-then-env-then-default
+     * precedence and no lower bound (any parseable int, including zero and negatives, is
+     * accepted). A missing or malformed value falls back to the default, never throwing.
+     *
+     * @param systemProperty System property name
+     * @param envVariable Environment variable name
+     * @param defaultValue Default value
+     * @return Configured integer value
+     */
+    public static int getIntConfig(String systemProperty, String envVariable, int defaultValue) {
+        return getIntConfig(systemProperty, envVariable, defaultValue, Integer.MIN_VALUE);
+    }
+
+    /**
+     * Returns a long configuration value read from a system property, falling back to an
+     * environment variable, and finally to a default. A missing or malformed value falls back
+     * to the default so a misconfiguration can never throw.
+     *
+     * @param systemProperty System property name
+     * @param envVariable Environment variable name
+     * @param defaultValue Default value
+     * @return Configured long value
+     */
+    public static long getLongConfig(String systemProperty, String envVariable, long defaultValue) {
+        String raw = readRawConfig(systemProperty, envVariable);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Invalid value for {}/{}: {}, using default {}", systemProperty, envVariable, raw, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Returns a string configuration value read from a system property, falling back to an
+     * environment variable, and finally to a default.
+     *
+     * @param systemProperty System property name
+     * @param envVariable Environment variable name
+     * @param defaultValue Default value (may be null)
+     * @return Configured string value (trimmed), or the default if the resolved value is
+     *         absent or blank
+     */
+    public static String getStringConfig(String systemProperty, String envVariable, String defaultValue) {
+        String raw = readRawConfig(systemProperty, envVariable);
+        return (raw == null || raw.isBlank()) ? defaultValue : raw.trim();
+    }
+
+    /**
+     * Returns a boolean configuration value read from a system property, falling back to an
+     * environment variable, and finally to a default. Parsed with {@link Boolean#parseBoolean}
+     * (any value other than a case-insensitive {@code "true"} is false); a missing value falls
+     * back to the default.
+     *
+     * @param systemProperty System property name
+     * @param envVariable Environment variable name
+     * @param defaultValue Default value
+     * @return Configured boolean value
+     */
+    public static boolean getBooleanConfig(String systemProperty, String envVariable, boolean defaultValue) {
+        String raw = readRawConfig(systemProperty, envVariable);
+        return raw != null ? Boolean.parseBoolean(raw.trim()) : defaultValue;
+    }
+
+    /**
+     * Read a raw configuration value with strict property-wins precedence: if the system
+     * property is set (non-null), it wins and is returned AS-IS — even if blank — and the
+     * environment variable is NOT consulted. Only when the property is truly unset (null) is
+     * the environment variable consulted. Returns null only when NEITHER source is set.
+     *
+     * <p>The precedence decision is made on presence (non-null), not on blankness, so a
+     * present-but-blank property cannot silently fall through to the env var and flip a
+     * security-relevant default (e.g. a blank {@code docs.webhook_allow_private} must not let
+     * a {@code DOCS_WEBHOOK_ALLOW_PRIVATE=true} env var take effect). Downstream parsing then
+     * treats a blank value as the default for numeric reads (parse fails, falls back) and as
+     * false for {@link Boolean#parseBoolean}.</p>
+     *
+     * @param systemProperty System property name
+     * @param envVariable Environment variable name
+     * @return Raw value (property AS-IS if set, else env var), or null if neither is set
+     */
+    private static String readRawConfig(String systemProperty, String envVariable) {
+        String prop = System.getProperty(systemProperty);
+        if (prop != null) {
+            return prop;
+        }
+        return System.getenv(envVariable);
     }
 
     /**
