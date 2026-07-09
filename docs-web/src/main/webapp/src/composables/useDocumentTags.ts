@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, updateDocument, type DocumentDetail } from '../api/document'
 import { useToast } from 'primevue/usetoast'
 
-function buildFullParams(doc: DocumentDetail, tagIds: string[]): URLSearchParams {
+export function buildFullParams(doc: DocumentDetail, tagIds: string[]): URLSearchParams {
   const p = new URLSearchParams()
   p.set('title', doc.title)
   p.set('language', doc.language)
@@ -19,8 +19,12 @@ function buildFullParams(doc: DocumentDetail, tagIds: string[]): URLSearchParams
   for (const id of tagIds) p.append('tags', id)
   for (const r of doc.relations ?? []) p.append('relations', r.id)
   for (const m of doc.metadata ?? []) {
+    // Skip unset fields: the backend validates INTEGER/FLOAT/DATE values and rejects
+    // the ENTIRE save on a blank (Integer.parseInt("") -> 400). A set BOOLEAN false is
+    // meaningful and must still be sent (false != null && false !== '').
+    if (m.value == null || m.value === '') continue
     p.append('metadata_id', m.id)
-    p.append('metadata_value', m.value != null ? String(m.value) : '')
+    p.append('metadata_value', String(m.value))
   }
   return p
 }
