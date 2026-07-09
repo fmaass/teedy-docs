@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useTagFilterStore } from '../stores/tagFilter'
 import AppHeader from '../components/AppHeader.vue'
+import DefaultPasswordBanner from '../components/DefaultPasswordBanner.vue'
 import AdminNavPanel from '../components/AdminNavPanel.vue'
 import TagTreePanel from '../components/TagTreePanel.vue'
 import Button from 'primevue/button'
@@ -197,6 +198,7 @@ function handleMobileTagSelect(tagId: string) {
 
       <!-- Main content -->
       <div class="app-content">
+        <DefaultPasswordBanner />
         <router-view />
       </div>
     </div>

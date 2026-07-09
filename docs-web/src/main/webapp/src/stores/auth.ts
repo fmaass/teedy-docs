@@ -9,6 +9,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAnonymous = computed(() => !user.value || user.value.anonymous)
   const isAdmin = computed(() => user.value?.base_functions?.includes('ADMIN') ?? false)
   const username = computed(() => user.value?.username ?? '')
+  // R-042: GET /api/user sets is_default_password to true only when the current
+  // user is an admin AND the admin account still holds the built-in default
+  // password. Backend already gates it on ADMIN, so this getter mirrors the raw
+  // signal; the banner uses it to warn until the password is changed.
+  const hasDefaultPassword = computed(
+    () => !isAnonymous.value && (user.value?.is_default_password ?? false),
+  )
 
   async function fetchCurrentUser() {
     try {
@@ -40,5 +47,5 @@ export const useAuthStore = defineStore('auth', () => {
     return logoutUrl
   }
 
-  return { user, initialized, isAnonymous, isAdmin, username, fetchCurrentUser, login, logout }
+  return { user, initialized, isAnonymous, isAdmin, username, hasDefaultPassword, fetchCurrentUser, login, logout }
 })

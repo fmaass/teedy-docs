@@ -708,6 +708,11 @@
       "language_updated": "Language updated",
       "theme_switched": "Theme switched to {name}"
     },
+    "default_password_banner": {
+      "title": "Default admin password in use",
+      "message": "This administrator account still uses the built-in default password. Change it now to secure your instance.",
+      "cta": "Change password"
+    },
     "password_reset": {
       "set_new_password": "Set new password",
       "new_password": "New password",

@@ -708,6 +708,11 @@
       "language_updated": "Sprache aktualisiert",
       "theme_switched": "Design geändert zu {name}"
     },
+    "default_password_banner": {
+      "title": "Standard-Administratorpasswort in Verwendung",
+      "message": "Dieses Administratorkonto verwendet noch das voreingestellte Standardpasswort. Ändern Sie es jetzt, um Ihre Instanz abzusichern.",
+      "cta": "Passwort ändern"
+    },
     "password_reset": {
       "set_new_password": "Neues Passwort festlegen",
       "new_password": "Neues Passwort",
