@@ -112,7 +112,15 @@ public class TrashPurgeService extends AbstractScheduledService {
         log.info("Purged {} expired trashed documents", purged);
     }
 
-    private static int getRetentionDays() {
+    /**
+     * Returns the configured trash retention window in days.
+     * Reads {@code DOCS_TRASH_RETENTION_DAYS} (falling back to {@link #DEFAULT_RETENTION_DAYS}).
+     * Single source of truth for the retention window: the purge scheduler and the
+     * /app REST endpoint (which surfaces it to the SPA countdown) both call this.
+     *
+     * @return Retention window in days
+     */
+    public static int getRetentionDays() {
         String envValue = System.getenv(ENV_RETENTION_DAYS);
         if (envValue != null) {
             try {

@@ -1,11 +1,10 @@
 // Trash retention countdown helpers (D4 / R-043).
 //
 // The backend purges trashed documents after DOCS_TRASH_RETENTION_DAYS (default 30,
-// see TrashPurgeService.DEFAULT_RETENTION_DAYS). That value is NOT exposed by any
-// REST endpoint (/api/app does not carry it), so the frontend cannot read the real
-// configured window. We display a countdown against this default; if an operator
-// overrides DOCS_TRASH_RETENTION_DAYS server-side, the displayed count is an estimate.
-// Keep DEFAULT_RETENTION_DAYS in sync with the backend default.
+// see TrashPurgeService.DEFAULT_RETENTION_DAYS). /api/app now surfaces the configured
+// window as `trash_retention_days`, which DocumentTrash.vue passes into the countdown.
+// DEFAULT_RETENTION_DAYS is only a fallback for older servers that omit that field;
+// keep it in sync with the backend default.
 export const DEFAULT_RETENTION_DAYS = 30
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000

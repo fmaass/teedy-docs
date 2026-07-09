@@ -5,6 +5,8 @@ export interface AppInfo {
   min_version?: string
   guest_login?: boolean
   oidc_enabled?: boolean
+  // Trash retention window (days) before automatic purge; absent on older servers.
+  trash_retention_days?: number
 }
 
 // GET /api/app carries the running server version in `current_version`

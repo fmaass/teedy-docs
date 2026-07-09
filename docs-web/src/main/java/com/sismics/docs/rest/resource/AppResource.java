@@ -12,6 +12,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.service.InboxService;
+import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -74,6 +75,7 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} active_user_count Number of active users
      * @apiSuccess {String} global_storage_current Global storage currently used (in bytes)
      * @apiSuccess {String} global_storage_quota Maximum global storage (in bytes)
+     * @apiSuccess {Number} trash_retention_days Trash retention window in days before automatic purge
      * @apiPermission none
      * @apiVersion 1.5.0
      *
@@ -124,6 +126,10 @@ public class AppResource extends BaseResource {
         String maxUploadStr = System.getenv("DOCS_MAX_UPLOAD_SIZE");
         long maxUploadSize = maxUploadStr != null ? Long.parseLong(maxUploadStr) : 524288000L;
         response.add("max_upload_size", maxUploadSize);
+
+        // Trash retention window in days (single source of truth: TrashPurgeService),
+        // surfaced so the SPA trash countdown reflects the configured window.
+        response.add("trash_retention_days", TrashPurgeService.getRetentionDays());
 
         if (globalQuota > 0) {
             response.add("global_storage_quota", globalQuota);

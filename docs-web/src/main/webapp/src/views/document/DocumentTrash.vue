@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/vue-query'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
+import { getAppInfo } from '../../api/app'
 import DataTable, { type DataTablePageEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -36,12 +37,19 @@ function onPage(event: DataTablePageEvent) {
   pageOffset.value = event.first
 }
 
-// Retention window is not exposed by the API (see utils/trashRetention.ts); we display
-// a countdown against the backend's default window.
-const retentionDays = DEFAULT_RETENTION_DAYS
+// Retention window comes from /api/app (trash_retention_days, single source of truth
+// with the backend TrashPurgeService); fall back to the default if an older server
+// omits the field.
+const { data: appInfo } = useQuery({
+  queryKey: ['app-info'],
+  queryFn: () => getAppInfo(),
+  staleTime: Infinity,
+})
+
+const retentionDays = computed(() => appInfo.value?.trash_retention_days ?? DEFAULT_RETENTION_DAYS)
 
 function purgeCountdown(deleteDate: number) {
-  return daysUntilPurge(deleteDate, retentionDays)
+  return daysUntilPurge(deleteDate, retentionDays.value)
 }
 
 const restoreMutation = useMutation({
