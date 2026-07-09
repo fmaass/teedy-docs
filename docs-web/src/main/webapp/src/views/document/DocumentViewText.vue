@@ -30,6 +30,11 @@ const fileTexts = ref<FileText[]>([])
 const reprocessingId = ref<string | null>(null)
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+// Set once in onUnmounted. An in-flight pollProcessing() awaiting getFileList can
+// resolve AFTER the component is gone and re-arm the timer on a dead component
+// (OCR of a large PDF keeps processing=true for minutes). Every re-arm path checks
+// this first so a late resolution cannot resurrect the poll loop.
+let disposed = false
 
 function stopPolling() {
   if (pollTimer !== null) {
@@ -56,6 +61,7 @@ async function loadContent(ft: FileText) {
  * setTimeout guess with the backend's real `processing` signal.
  */
 async function pollProcessing() {
+  if (disposed) return
   const documentId = doc.value?.id
   if (!documentId) return
 
@@ -63,10 +69,14 @@ async function pollProcessing() {
   try {
     items = await getFileList(documentId)
   } catch {
-    // Transient failure — try again on the next tick if we were polling.
-    if (shouldPoll(fileTexts.value)) armPoll()
+    // Transient failure — try again on the next tick if we were polling and the
+    // component is still alive.
+    if (!disposed && shouldPoll(fileTexts.value)) armPoll()
     return
   }
+
+  // The await above may have resolved after unmount; bail before touching state.
+  if (disposed) return
 
   const byId = new Map(items.map((f) => [f.id, f]))
   for (const ft of fileTexts.value) {
@@ -84,6 +94,7 @@ async function pollProcessing() {
 }
 
 function armPoll() {
+  if (disposed) return
   stopPolling()
   pollTimer = setTimeout(pollProcessing, POLL_INTERVAL_MS)
 }
@@ -112,7 +123,10 @@ watch(() => doc.value?.files, (files) => {
   ensurePolling()
 }, { immediate: true })
 
-onUnmounted(stopPolling)
+onUnmounted(() => {
+  disposed = true
+  stopPolling()
+})
 
 async function handleReprocess(ft: FileText) {
   reprocessingId.value = ft.fileId

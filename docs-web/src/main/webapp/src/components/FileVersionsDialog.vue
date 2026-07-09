@@ -10,6 +10,7 @@ import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import { getFileVersions, getFileUrl, type FileVersion } from '../api/file'
 import { formatDate } from '../composables/useFormatters'
+import { createGeneration } from '../utils/staleGuard'
 
 const props = defineProps<{
   fileId: string | null
@@ -24,18 +25,31 @@ const versions = ref<FileVersion[]>([])
 const loading = ref(false)
 const error = ref(false)
 
+// Generation guard against out-of-order async completion. The caller
+// (DocumentViewContent) reuses ONE dialog instance, so opening file A then quickly
+// file B fires load twice; A's slower response must not overwrite B's versions under
+// B's title. Each run claims a generation at entry and re-checks after the await — a
+// mismatch means a newer load has superseded it, so the stale run stops without
+// mutating state.
+const gen = createGeneration()
+
 async function load(id: string) {
+  const myGen = gen.next()
   loading.value = true
   error.value = false
   try {
     // Newest version first for a natural history reading order.
     const list = await getFileVersions(id)
+    if (!gen.isCurrent(myGen)) return
     versions.value = [...list].sort((a, b) => b.version - a.version)
   } catch {
+    if (!gen.isCurrent(myGen)) return
     error.value = true
     versions.value = []
   } finally {
-    loading.value = false
+    // Only the newest run owns the loading flag; a superseded run must leave it
+    // set so the current in-flight load still shows its spinner.
+    if (gen.isCurrent(myGen)) loading.value = false
   }
 }
 

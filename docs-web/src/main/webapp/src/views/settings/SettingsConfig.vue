@@ -27,13 +27,23 @@ const { data: appConfig } = useQuery({
   queryFn: () => api.get('/app').then((r) => r.data),
 })
 
+// The user-editable text/select fields are SEEDED ONCE on first load. Reseeding on
+// every query emission would clobber unsaved edits, because toggleOcr's onSuccess
+// invalidates ['app-config'] and the ensuing refetch re-fires this watcher. Only the
+// OCR toggle deliberately reconciles from the server on every emission — it has no
+// Save button and relies on the refetch to confirm the persisted state (and the
+// error path restores it). maxUploadSize is read-only (env-driven), so it can seed
+// with the text fields on first load.
+let seeded = false
 watch(appConfig, (config) => {
-  if (config) {
+  if (!config) return
+  if (!seeded) {
     defaultLanguage.value = config.default_language || 'eng'
     tagSearchMode.value = config.tag_search_mode || 'PREFIX'
-    ocrEnabled.value = config.ocr_enabled !== false
     maxUploadSize.value = config.max_upload_size || 524288000
+    seeded = true
   }
+  ocrEnabled.value = config.ocr_enabled !== false
 }, { immediate: true })
 
 const searchModes = computed(() => [
