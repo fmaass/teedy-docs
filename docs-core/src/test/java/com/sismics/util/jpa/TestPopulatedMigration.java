@@ -273,12 +273,15 @@ public class TestPopulatedMigration {
         }
     }
 
-    private static boolean tableExists(Connection connection, String table) {
-        try (Statement s = connection.createStatement();
-             ResultSet rs = s.executeQuery("select 1 from " + table + " where 1 = 0")) {
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+    /**
+     * Transaction-safe existence check. A SELECT against a dropped table aborts the current
+     * PostgreSQL transaction ("current transaction is aborted"), poisoning every subsequent
+     * query. Probing information_schema instead never throws for a missing table, so the
+     * transaction stays clean. Case-insensitive to cover both dialects: H2 stores identifiers
+     * uppercase, PostgreSQL lowercase.
+     */
+    private static boolean tableExists(Connection connection, String table) throws Exception {
+        return scalarCount(connection,
+                "select count(*) from information_schema.tables where upper(table_name) = upper('" + table + "')") > 0;
     }
 }
