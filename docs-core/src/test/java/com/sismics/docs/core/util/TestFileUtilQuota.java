@@ -1,13 +1,18 @@
 package com.sismics.docs.core.util;
 
 import com.sismics.docs.BaseTransactionalTest;
+import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.mime.MimeType;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
+import java.util.List;
 
 /**
  * Tests the synchronous storage-quota reclamation helpers used by the file/document delete producers
@@ -135,5 +140,71 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
         Assertions.assertEquals(Long.valueOf(1_000L - 100L), userDao.getById(owner.getId()).getStorageCurrent());
         // Collaborator reclaimed their own file (250) from THEIR quota, not the owner's.
         Assertions.assertEquals(Long.valueOf(1_000L - 250L), userDao.getById(collab.getId()).getStorageCurrent());
+    }
+
+    /**
+     * BL-021 regression: a file a collaborator (B) uploaded into another user's (A) document is
+     * left stranded with {@code deleteDate == null} when A is deleted — {@code UserDao.delete}
+     * soft-deletes only A's OWN files, not B's uploads. At purge, the document's own deleteDate does
+     * not equal the stranded file's null deleteDate, so the old {@code documentDeleteDate.equals(...)}
+     * discriminator skipped it: B's bytes were hard-deleted but B's quota was never reclaimed. The
+     * relaxed discriminator must reclaim the stranded {@code deleteDate == null} file to B's quota.
+     *
+     * <p>Uses the REAL user-deletion path ({@code UserDao.delete}) so the collaborator file is
+     * genuinely stranded, then reproduces the purge reclaim exactly as {@code TrashPurgeService} and
+     * {@code DocumentResourceHelper} do (getAllByDocumentId + reclaim against the document deleteDate).
+     */
+    @Test
+    public void reclaimsStrandedCollaboratorFileWhenOwnerDeleted() throws Exception {
+        UserDao userDao = new UserDao();
+        DocumentDao documentDao = new DocumentDao();
+        FileDao fileDao = new FileDao();
+
+        User owner = createUser("bl021Owner");
+        User collab = createUser("bl021Collab");
+
+        // The collaborator's quota reflects their single upload; assert it returns to 0 after reclaim.
+        long collabFileSize = 250L;
+        User c = userDao.getById(collab.getId());
+        c.setStorageCurrent(collabFileSize);
+        userDao.updateQuota(c);
+
+        // A document owned by A.
+        Document document = new Document();
+        document.setUserId(owner.getId());
+        document.setLanguage("eng");
+        document.setTitle("BL-021 doc");
+        document.setCreateDate(new Date());
+        String documentId = documentDao.create(document, owner.getId());
+
+        // Collaborator B uploads a file INTO A's document (charged to B's quota).
+        File collabFile = new File();
+        collabFile.setDocumentId(documentId);
+        collabFile.setUserId(collab.getId());
+        collabFile.setVersion(0);
+        collabFile.setLatestVersion(true);
+        collabFile.setMimeType(MimeType.IMAGE_JPEG);
+        collabFile.setSize(collabFileSize);
+        String collabFileId = fileDao.create(collabFile, collab.getId());
+
+        // Delete owner A via the REAL user-deletion path. This soft-deletes A's OWN files and A's
+        // document, but leaves B's file with deleteDate == null (the stranded-file hole).
+        userDao.delete(owner.getUsername(), owner.getId());
+
+        // Sanity: the document is soft-deleted, but B's file remains un-deleted (stranded).
+        Document deletedDocument = documentDao.getDeletedByIdSystem(documentId);
+        Assertions.assertNotNull(deletedDocument, "owner's document must be soft-deleted");
+        Assertions.assertNotNull(deletedDocument.getDeleteDate());
+        List<File> allFiles = fileDao.getAllByDocumentId(documentId);
+        File strandedFile = allFiles.stream().filter(f -> f.getId().equals(collabFileId)).findFirst().orElseThrow();
+        Assertions.assertNull(strandedFile.getDeleteDate(),
+                "collaborator's file must be stranded with deleteDate == null after owner deletion");
+
+        // Reproduce the purge reclaim exactly as TrashPurgeService/DocumentResourceHelper do.
+        FileUtil.reclaimQuotaForDeletedDocumentFiles(allFiles, deletedDocument.getDeleteDate());
+
+        // The stranded collaborator file's bytes must be reclaimed to B's quota (back to 0).
+        Assertions.assertEquals(Long.valueOf(0L), userDao.getById(collab.getId()).getStorageCurrent(),
+                "stranded collaborator file must reclaim quota to its own uploader on purge");
     }
 }

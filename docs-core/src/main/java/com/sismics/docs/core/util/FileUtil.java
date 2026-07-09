@@ -335,13 +335,18 @@ public class FileUtil {
      *       then-active file in the SAME transaction — so those cascade-trashed files carry
      *       {@code file.deleteDate == document.deleteDate}. A file that was instead individually deleted
      *       earlier (via {@code FileResource.delete}) was already reclaimed then and carries an earlier,
-     *       different {@code deleteDate}; summing it here would double-subtract. So a file is reclaimed
-     *       here iff its {@code deleteDate} equals the document's {@code deleteDate} (or the document
+     *       different {@code deleteDate}; summing it here would double-subtract. And a file left
+     *       <i>stranded</i> with {@code deleteDate == null} — a WRITE collaborator's upload into a
+     *       document whose owner was later deleted, since {@code UserDao.delete} soft-deletes only the
+     *       owner's own files (BL-021) — is hard-deleted at purge and so must be reclaimed here too, or
+     *       the collaborator's storage leaks forever. So a file is reclaimed here iff its
+     *       {@code deleteDate} is null OR equals the document's {@code deleteDate} (or the document
      *       delete date is unknown, in which case we fall back to reclaiming all still-linked files —
-     *       matching the historical all-files behaviour). Note a plain {@code deleteDate == null} filter
-     *       does NOT work: by this point every file has been soft-deleted by the trash. This reuses the
-     *       same {@code file.deleteDate == document.deleteDate} invariant that {@code DocumentDao.restore}
-     *       already relies on to restore exactly the files cascade-trashed with a document.</li>
+     *       matching the historical all-files behaviour); a file is skipped ONLY when it carries a
+     *       non-null {@code deleteDate} that differs from the document's (already reclaimed earlier).
+     *       This reuses the same {@code file.deleteDate == document.deleteDate} invariant that
+     *       {@code DocumentDao.restore} already relies on to restore exactly the files cascade-trashed
+     *       with a document.</li>
      *   <li><b>Per-owner:</b> a file is charged to its own uploader ({@code file.getUserId()}), not
      *       the document owner — a WRITE collaborator can upload a file to another user's document, and
      *       that file counts against the collaborator's quota. Sizes are grouped by file owner and each
@@ -350,8 +355,9 @@ public class FileUtil {
      * </ul>
      *
      * @param files All files linked to the document (as returned by {@code getAllByDocumentId})
-     * @param documentDeleteDate The document's own deletion timestamp; a file is reclaimed only if its
-     *        deletion timestamp matches it. If {@code null}, all still-linked files are reclaimed.
+     * @param documentDeleteDate The document's own deletion timestamp; a file is reclaimed if its own
+     *        deletion timestamp is null or matches it, and skipped only when it is non-null and differs.
+     *        If {@code null}, all still-linked files are reclaimed.
      */
     public static void reclaimQuotaForDeletedDocumentFiles(List<File> files, Date documentDeleteDate) {
         if (files == null || files.isEmpty()) {
@@ -362,9 +368,19 @@ public class FileUtil {
         Map<String, Long> reclaimByOwner = new LinkedHashMap<>();
 
         for (File file : files) {
-            // Reclaim only the files cascade-deleted by THIS document delete (same deleteDate). Files
-            // individually deleted earlier were already reclaimed and carry a different deleteDate.
-            if (documentDeleteDate != null && !documentDeleteDate.equals(file.getDeleteDate())) {
+            // Reclaim the files this document delete is responsible for: those cascade-trashed with the
+            // document (same deleteDate) AND any file left stranded with a null deleteDate. A stranded
+            // file arises when a WRITE collaborator uploaded into another user's document and that owner
+            // was later deleted: UserDao.delete soft-deletes only the owner's OWN files, so the
+            // collaborator's upload keeps deleteDate == null (BL-021). Its bytes are hard-deleted at
+            // purge, so its quota must be reclaimed here or the collaborator's storage leaks forever.
+            //
+            // Skip ONLY a file that was individually deleted earlier (via FileResource.delete, which
+            // unconditionally stamps a non-null deleteDate) and thus already reclaimed then — such a
+            // file carries a non-null deleteDate that differs from the document's. A null deleteDate
+            // can never mark an already-reclaimed file, so relaxing the filter cannot double-reclaim.
+            if (file.getDeleteDate() != null && documentDeleteDate != null
+                    && !documentDeleteDate.equals(file.getDeleteDate())) {
                 continue;
             }
             String ownerId = file.getUserId();
