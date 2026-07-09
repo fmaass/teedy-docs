@@ -12,6 +12,7 @@ import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.format.FormatHandlerUtil;
 import com.sismics.docs.core.util.pdf.PdfPage;
 import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.io.ScratchFile;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.font.DocsPDType1Font;
@@ -62,7 +63,7 @@ public class PdfUtil {
         List<Path> tempFiles = new java.util.ArrayList<>();
 
         // Create a blank PDF
-        try (PDDocument doc = new PDDocument(memUsageSettings)) {
+        try (PDDocument doc = new PDDocument(() -> new ScratchFile(memUsageSettings))) {
             // Add metadata
             if (metadata) {
                 PDPage page = new PDPage();
