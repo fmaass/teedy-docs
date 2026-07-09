@@ -130,6 +130,11 @@ const router = createRouter({
               component: () => import('../views/settings/SettingsUsers.vue'),
             },
             {
+              path: 'groups',
+              name: 'settings-groups',
+              component: () => import('../views/settings/SettingsGroups.vue'),
+            },
+            {
               path: 'tag-rules',
               name: 'settings-tag-rules',
               component: () => import('../views/settings/SettingsTagRules.vue'),

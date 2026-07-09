@@ -52,6 +52,7 @@ const settingsNavItems = computed(() => [
 const settingsAdminItems = computed(() => [
   { label: t('ui.config.title'), icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
   { label: t('ui.users.title'), icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
+  { label: t('ui.groups.title'), icon: 'pi pi-sitemap', to: '/settings/groups', name: 'settings-groups' },
   { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
   { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
 ])
