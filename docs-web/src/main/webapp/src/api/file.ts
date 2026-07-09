@@ -29,6 +29,24 @@ export function toPercent(loaded: number, total?: number): number {
 }
 
 /**
+ * One entry of GET /file/list. The `processing` flag reflects the backend's
+ * in-memory processing set (FileUtil.isProcessingFile) — true while OCR /
+ * content extraction is still running for that file, false once it clears.
+ * This is the real signal used to drive the processing indicator; it is fresh
+ * on every list call because the backend recomputes it per request.
+ */
+export interface FileListItem {
+  id: string
+  processing: boolean
+  name: string | null
+  version: number
+  mimetype: string
+  document_id: string | null
+  create_date: number
+  size: number
+}
+
+/**
  * Upload a file to a document via PUT /api/file (multipart/form-data).
  * `onProgress` receives an integer 0..100 as the browser streams the body up,
  * so callers can render a real per-file progress bar. The percentage is derived
@@ -70,6 +88,16 @@ export function renameFile(fileId: string, name: string) {
 
 export function reprocessFile(fileId: string) {
   return api.post(`/file/${fileId}/process`)
+}
+
+/**
+ * List the files of a document, including the live `processing` flag for each.
+ * Backed by GET /file/list?id=<documentId>. Used to poll processing state
+ * cheaply without refetching the whole document detail.
+ */
+export async function getFileList(documentId: string): Promise<FileListItem[]> {
+  const res = await api.get(`/file/list`, { params: { id: documentId } })
+  return (res.data?.files ?? []) as FileListItem[]
 }
 
 /**

@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { getFileVersions, getFileUrl, uploadFile, toPercent, type FileVersion } from './file'
+import { getFileVersions, getFileList, getFileUrl, uploadFile, toPercent, type FileVersion } from './file'
 
 describe('getFileVersions', () => {
   beforeEach(() => {
@@ -43,6 +43,33 @@ describe('getFileVersions', () => {
   it('returns an empty array when files is null', async () => {
     mock.get.mockResolvedValueOnce({ data: { files: null } })
     expect(await getFileVersions('file-1')).toEqual([])
+  })
+})
+
+describe('getFileList', () => {
+  beforeEach(() => {
+    mock.get.mockClear()
+  })
+
+  it('GETs /file/list with the document id as a query param', async () => {
+    mock.get.mockResolvedValueOnce({ data: { files: [] } })
+    await getFileList('doc-1')
+    expect(mock.get).toHaveBeenCalledTimes(1)
+    expect(mock.get.mock.calls[0][0]).toBe('/file/list')
+    expect(mock.get.mock.calls[0][1]).toEqual({ params: { id: 'doc-1' } })
+  })
+
+  it('unwraps the files array (including the processing flag)', async () => {
+    const files = [
+      { id: 'f1', processing: true, name: 'a.pdf', version: 0, mimetype: 'application/pdf', document_id: 'doc-1', create_date: 1, size: 10 },
+    ]
+    mock.get.mockResolvedValueOnce({ data: { files } })
+    expect(await getFileList('doc-1')).toEqual(files)
+  })
+
+  it('returns an empty array when the response has no files field', async () => {
+    mock.get.mockResolvedValueOnce({ data: {} })
+    expect(await getFileList('doc-1')).toEqual([])
   })
 })
 
