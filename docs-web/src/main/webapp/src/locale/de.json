@@ -944,6 +944,17 @@
     "no_text_hint": "Aus dieser Datei wurde kein Text extrahiert. Prüfen Sie, ob die Dokumentsprache zum Dateiinhalt passt, und versuchen Sie es erneut.",
     "dark_mode": "Dunkelmodus",
     "menu": "Menü",
+    "about": {
+      "title": "Über",
+      "whats_new_title": "Neu in {version}",
+      "view_releases": "Alle Versionen anzeigen",
+      "highlights": {
+        "retirements": "Die veralteten Funktionen Workflow/Routen, Vokabular und LDAP wurden entfernt, um die Anwendung zu verschlanken.",
+        "security": "Sicherheitsverbesserungen: SSRF-Schutz für Webhooks, abgesicherter Dokumentexport, strengere OIDC-Token-Prüfung und SecureRandom für Wiederherstellungstokens.",
+        "header_auth": "Die Proxy-Header-Authentifizierung verweigert nun standardmäßig den Zugriff, sofern keine ausdrückliche Positivliste vertrauenswürdiger Proxys konfiguriert ist.",
+        "new_ui": "Neue Oberflächen: Countdown zur Papierkorb-Aufbewahrung, Dateiversionsverlauf und ein Warnhinweis bei Standardpasswort."
+      }
+    },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",
     "app_name": "teedy",
     "document_management": "Dokumentenverwaltung",

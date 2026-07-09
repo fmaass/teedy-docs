@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import Button from 'primevue/button'
+import AboutDialog from './AboutDialog.vue'
 
 defineProps<{ isMobile?: boolean }>()
 const emit = defineEmits<{ toggleDrawer: [] }>()
@@ -10,6 +12,8 @@ const emit = defineEmits<{ toggleDrawer: [] }>()
 const router = useRouter()
 const { t } = useI18n()
 const auth = useAuthStore()
+
+const aboutVisible = ref(false)
 
 function toggleDarkMode() {
   const isDark = document.documentElement.classList.toggle('dark-mode')
@@ -62,6 +66,15 @@ async function handleLogout() {
         :aria-label="t('ui.dark_mode')"
         v-tooltip.bottom="t('ui.dark_mode')"
       />
+      <Button
+        icon="pi pi-info-circle"
+        text
+        rounded
+        size="small"
+        @click="aboutVisible = true"
+        :aria-label="t('ui.about.title')"
+        v-tooltip.bottom="t('ui.about.title')"
+      />
       <span class="user-name">{{ auth.username }}</span>
       <Button
         icon="pi pi-sign-out"
@@ -73,6 +86,8 @@ async function handleLogout() {
         v-tooltip.bottom="t('index.logout')"
       />
     </div>
+
+    <AboutDialog v-model:visible="aboutVisible" />
   </header>
 </template>
 
