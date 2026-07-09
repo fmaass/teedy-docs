@@ -5,14 +5,13 @@ import com.sismics.docs.core.model.jpa.User;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * Helpers extracted from {@link com.sismics.docs.rest.resource.UserResource} to remove the
- * validation/field-assignment duplicated across the two {@code update} overloads. These are
- * exact moves of logic that previously lived inline in the resource; behavior is unchanged.
- *
- * @author jtremeaux
+ * Applies optional field updates to a {@link User} for the user-update endpoints:
+ * an e-mail is overwritten only when a value is submitted, and a password is
+ * (re)hashed and persisted only when a non-blank new password is submitted.
+ * Both helpers preserve the existing value when nothing was submitted.
  */
-public final class UserValidation {
-    private UserValidation() {
+public final class UserUpdateUtil {
+    private UserUpdateUtil() {
         // Utility class
     }
 

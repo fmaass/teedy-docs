@@ -6,6 +6,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
+import com.sismics.docs.core.dao.dto.TagCoOccurrence;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Tag;
@@ -459,14 +460,14 @@ public class TagResource extends BaseResource {
         }
 
         TagDao tagDao = new TagDao();
-        List<Object[]> matrix = tagDao.getFullCoOccurrenceMatrix(getTargetIdList(null));
+        List<TagCoOccurrence> matrix = tagDao.getFullCoOccurrenceMatrix(getTargetIdList(null));
 
         JsonArrayBuilder pairs = Json.createArrayBuilder();
-        for (Object[] row : matrix) {
+        for (TagCoOccurrence pair : matrix) {
             pairs.add(Json.createObjectBuilder()
-                    .add("tagA", (String) row[0])
-                    .add("tagB", (String) row[1])
-                    .add("count", ((Number) row[2]).longValue()));
+                    .add("tagA", pair.tagIdA())
+                    .add("tagB", pair.tagIdB())
+                    .add("count", pair.count()));
         }
 
         return Response.ok().entity(Json.createObjectBuilder()

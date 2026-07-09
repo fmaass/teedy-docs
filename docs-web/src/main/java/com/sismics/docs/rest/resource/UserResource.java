@@ -18,7 +18,7 @@ import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
-import com.sismics.docs.rest.util.UserValidation;
+import com.sismics.docs.rest.util.UserUpdateUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -168,11 +168,11 @@ public class UserResource extends BaseResource {
         // Update the user
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
-        UserValidation.applyEmailUpdate(user, email);
+        UserUpdateUtil.applyEmailUpdate(user, email);
         user = userDao.update(user, principal.getId());
 
         // Change the password
-        UserValidation.applyPasswordUpdate(userDao, user, password, principal.getId());
+        UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -233,7 +233,7 @@ public class UserResource extends BaseResource {
         }
 
         // Update the user
-        UserValidation.applyEmailUpdate(user, email);
+        UserUpdateUtil.applyEmailUpdate(user, email);
         if (StringUtils.isNotBlank(storageQuotaStr)) {
             Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
             user.setStorageQuota(storageQuota);
@@ -257,7 +257,7 @@ public class UserResource extends BaseResource {
         user = userDao.update(user, principal.getId());
 
         // Change the password
-        UserValidation.applyPasswordUpdate(userDao, user, password, principal.getId());
+        UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

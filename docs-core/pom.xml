@@ -201,6 +201,14 @@
       <version>${org.testcontainers.version}</version>
       <scope>test</scope>
     </dependency>
+
+    <!-- JSON-P implementation, needed at test runtime for code that builds JSON (e.g. ExportUtil);
+         production runtime gets it transitively via the web modules. -->
+    <dependency>
+      <groupId>org.eclipse.parsson</groupId>
+      <artifactId>parsson</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <profiles>

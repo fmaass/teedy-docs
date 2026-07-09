@@ -17,19 +17,15 @@ import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
-import org.apache.commons.lang3.StringUtils;
-
 import java.text.MessageFormat;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Helper methods extracted from {@link com.sismics.docs.rest.resource.DocumentResource}
- * to keep the REST endpoint methods thin. These are exact moves of logic that previously
- * lived as private methods on the resource; behavior is unchanged.
- *
- * @author bgamard
+ * Shared logic for the document REST endpoints: tag/relation list updates that respect the
+ * acting user's tag visibility, the delete-event fan-out for a document and its files, and the
+ * JSON builders for a document representation and its tag array. Keeps the endpoint methods thin.
  */
 public final class DocumentResourceHelper {
     private DocumentResourceHelper() {
@@ -43,10 +39,7 @@ public final class DocumentResourceHelper {
      * @return Safe path segment
      */
     public static String sanitizePathSegment(String value) {
-        if (StringUtils.isBlank(value)) {
-            return "document";
-        }
-        return value.replaceAll("\\W+", "_");
+        return com.sismics.docs.core.util.ExportUtil.sanitizePathSegment(value);
     }
 
     /**
@@ -57,19 +50,7 @@ public final class DocumentResourceHelper {
      * @return Safe file name
      */
     public static String sanitizeFileName(String value) {
-        if (StringUtils.isBlank(value)) {
-            return "file";
-        }
-        String name = value.replace('\\', '/');
-        int slash = name.lastIndexOf('/');
-        if (slash >= 0) {
-            name = name.substring(slash + 1);
-        }
-        name = name.replaceAll("\\p{Cntrl}", "").trim();
-        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
-            return "file";
-        }
-        return name;
+        return com.sismics.docs.core.util.ExportUtil.sanitizeFileName(value);
     }
 
     /**

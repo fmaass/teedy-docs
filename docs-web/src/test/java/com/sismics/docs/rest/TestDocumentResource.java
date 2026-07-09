@@ -1262,6 +1262,169 @@ public class TestDocumentResource extends BaseJerseyTest {
     }
 
     /**
+     * P8 contract: removing a document's LAST tag must persist. Sending zero {@code tags}
+     * params looks identical to "omitted" (preserve), so the client sends {@code tags_reset=true}
+     * to signal an explicit clear.
+     */
+    @Test
+    public void testUpdateDocumentTagsResetClearsLastTag() {
+        clientUtil.createUser("tagreset1");
+        String token = clientUtil.login("tagreset1");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "OnlyTag")
+                        .param("color", "#cccccc")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Reset Tag Doc")
+                        .param("language", "eng")
+                        .param("tags", tagId)), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Sanity: the tag is present
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("tags").size());
+
+        // Explicit clear of the last tag: no tags param, tags_reset=true
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Reset Tag Doc")
+                        .param("language", "eng")
+                        .param("tags_reset", "true")), JsonObject.class);
+
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(0, json.getJsonArray("tags").size());
+    }
+
+    /**
+     * P8 contract: omitting the {@code tags} param (no tags_reset) preserves the existing tag.
+     * This guards the backward-compatible path for old clients.
+     */
+    @Test
+    public void testUpdateDocumentTagsOmittedPreserves() {
+        clientUtil.createUser("tagreset2");
+        String token = clientUtil.login("tagreset2");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "KeepTag")
+                        .param("color", "#dddddd")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Keep Tag Doc")
+                        .param("language", "eng")
+                        .param("tags", tagId)), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Update title only: tag must be preserved
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Keep Tag Doc 2")
+                        .param("language", "eng")), JsonObject.class);
+
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("tags").size());
+        Assertions.assertEquals(tagId, json.getJsonArray("tags").getJsonObject(0).getString("id"));
+    }
+
+    /**
+     * P8 contract: clearing the LAST set custom-metadata value must persist. Sending zero
+     * {@code metadata_id} params looks like "omitted" (preserve), so the client sends
+     * {@code metadata_reset=true} to signal an explicit clear of all values.
+     */
+    @Test
+    public void testUpdateDocumentMetadataResetClearsLastValue() {
+        String adminToken = adminToken();
+        clientUtil.createUser("metareset1");
+        String token = clientUtil.login("metareset1");
+
+        JsonObject json = target().path("/metadata").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("name", "ResetStr")
+                        .param("type", "STRING")), JsonObject.class);
+        String metaId = json.getString("id");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Meta Reset Doc")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "keep me")), JsonObject.class);
+        String docId = json.getString("id");
+
+        // Sanity: value is set
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray metadata = json.getJsonArray("metadata");
+        JsonObject meta = findMetadata(metadata, metaId);
+        Assertions.assertEquals("keep me", meta.getString("value"));
+
+        // Explicit clear: no metadata_id params, metadata_reset=true
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Meta Reset Doc")
+                        .param("language", "eng")
+                        .param("metadata_reset", "true")), JsonObject.class);
+
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        meta = findMetadata(json.getJsonArray("metadata"), metaId);
+        Assertions.assertFalse(meta.containsKey("value"), "metadata value should be cleared");
+
+        // Backward-compat: omitting metadata_id and the sentinel preserves values.
+        // Re-set a value, then update title only.
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Meta Reset Doc")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "again")), JsonObject.class);
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Meta Reset Doc 2")
+                        .param("language", "eng")), JsonObject.class);
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        meta = findMetadata(json.getJsonArray("metadata"), metaId);
+        Assertions.assertEquals("again", meta.getString("value"), "omitted metadata must be preserved");
+    }
+
+    private static JsonObject findMetadata(JsonArray metadata, String metaId) {
+        for (int i = 0; i < metadata.size(); i++) {
+            JsonObject m = metadata.getJsonObject(i);
+            if (metaId.equals(m.getString("id"))) {
+                return m;
+            }
+        }
+        throw new AssertionError("metadata not found: " + metaId);
+    }
+
+    /**
      * SEC-01: emptying trash must be scoped to the caller's own documents.
      * A non-admin user can empty their own trash (regression: the ACL join
      * required a live READ ACL, which is soft-deleted on trash, so this

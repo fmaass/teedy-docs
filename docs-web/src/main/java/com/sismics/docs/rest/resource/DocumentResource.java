@@ -30,12 +30,10 @@ import com.sismics.docs.core.model.jpa.AuditLog;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
-import com.google.common.io.ByteStreams;
 import com.sismics.docs.core.util.ConfigUtil;
-import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.ExportGuard;
+import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
-import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.MetadataUtil;
 import com.sismics.docs.core.util.PdfUtil;
@@ -86,11 +84,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -582,8 +577,6 @@ public class DocumentResource extends BaseResource {
         final String userId = principal.getId();
         final String username = principal.getName();
         final DocumentDao documentDao = new DocumentDao();
-        final FileDao fileDao = new FileDao();
-        final UserDao userDao = new UserDao();
 
         // PREFLIGHT size cap: count the caller's exportable documents (a COUNT query, not
         // a full load) and reject BEFORE the eager load if it exceeds the configured cap.
@@ -602,7 +595,13 @@ public class DocumentResource extends BaseResource {
         // change can rebuild the semaphore, and release must target that SAME instance.
         final java.util.concurrent.Semaphore exportPermit = ExportGuard.tryAcquire();
         if (exportPermit == null) {
-            throw new ServerException("ExportBusy", "Too many concurrent exports, try again later");
+            // Expected, retryable throttle: answer 503 with a Retry-After hint rather than a 500.
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .header("Retry-After", 30)
+                    .entity(Json.createObjectBuilder()
+                            .add("type", "ExportBusy")
+                            .add("message", "Too many concurrent exports, try again later").build())
+                    .build();
         }
 
         // Audit the export. It is a read, but the spec requires it be recorded; write the
@@ -628,78 +627,9 @@ public class DocumentResource extends BaseResource {
             // whichever way it ends. This spans the heap-heavy window, not just the resource
             // method (which returns before the stream is serialized).
             try {
-            JsonArrayBuilder documentsJson = Json.createArrayBuilder();
-            try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
-                int docIndex = 0;
-                for (Document document : documentList) {
-                    String folder = docIndex + "-" + DocumentResourceHelper.sanitizePathSegment(document.getTitle());
-                    JsonArrayBuilder filesJson = Json.createArrayBuilder();
-
-                    List<File> fileList = fileDao.getByDocumentId(userId, document.getId());
-                    int fileIndex = 0;
-                    for (File file : fileList) {
-                        // Sanitize both segments so a crafted document title or file name cannot
-                        // escape the archive layout (ZIP-slip) on the recipient's machine.
-                        String entryName = folder + "/" + fileIndex + "-"
-                                + DocumentResourceHelper.sanitizeFileName(file.getFullName(Integer.toString(fileIndex)));
-                        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
-                        // Files are encrypted with their creator's key.
-                        User fileUser = userDao.getById(file.getUserId());
-                        // A single missing/undecryptable file must not corrupt the whole export:
-                        // skip it and record the failure in the manifest instead of aborting.
-                        boolean exported = true;
-                        try (InputStream fileInputStream = Files.newInputStream(storedFile);
-                             InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, fileUser.getPrivateKey())) {
-                            zipOutputStream.putNextEntry(new ZipEntry(entryName));
-                            ByteStreams.copy(decryptedStream, zipOutputStream);
-                            zipOutputStream.closeEntry();
-                        } catch (Exception e) {
-                            exported = false;
-                        }
-                        JsonObjectBuilder fileJson = Json.createObjectBuilder()
-                                .add("id", file.getId())
-                                .add("name", JsonUtil.nullable(file.getName()))
-                                .add("mimetype", JsonUtil.nullable(file.getMimeType()))
-                                .add("size", JsonUtil.nullable(file.getSize()))
-                                .add("exported", exported)
-                                .add("path", JsonUtil.nullable(exported ? entryName : null));
-                        filesJson.add(fileJson);
-                        fileIndex++;
-                    }
-
-                    documentsJson.add(Json.createObjectBuilder()
-                            .add("id", document.getId())
-                            .add("title", JsonUtil.nullable(document.getTitle()))
-                            .add("description", JsonUtil.nullable(document.getDescription()))
-                            .add("subject", JsonUtil.nullable(document.getSubject()))
-                            .add("identifier", JsonUtil.nullable(document.getIdentifier()))
-                            .add("publisher", JsonUtil.nullable(document.getPublisher()))
-                            .add("format", JsonUtil.nullable(document.getFormat()))
-                            .add("source", JsonUtil.nullable(document.getSource()))
-                            .add("type", JsonUtil.nullable(document.getType()))
-                            .add("coverage", JsonUtil.nullable(document.getCoverage()))
-                            .add("rights", JsonUtil.nullable(document.getRights()))
-                            .add("language", JsonUtil.nullable(document.getLanguage()))
-                            .add("create_date", document.getCreateDate().getTime())
-                            .add("update_date", document.getUpdateDate() != null
-                                    ? document.getUpdateDate().getTime() : document.getCreateDate().getTime())
-                            .add("files", filesJson));
-                    docIndex++;
-                }
-
-                // Manifest is written last, after every document has been enumerated.
-                String manifest = Json.createObjectBuilder()
-                        .add("generator", "Teedy")
-                        .add("username", username)
-                        .add("export_date", new Date().getTime())
-                        .add("document_count", documentList.size())
-                        .add("documents", documentsJson)
-                        .build().toString();
-                zipOutputStream.putNextEntry(new ZipEntry("manifest.json"));
-                zipOutputStream.write(manifest.getBytes(StandardCharsets.UTF_8));
-                zipOutputStream.closeEntry();
-            }
-            outputStream.close();
+                ExportUtil.writeExportZip(userId, username, documentList, outputStream);
+            } catch (Exception e) {
+                throw new IOException("Error writing export archive", e);
             } finally {
                 ExportGuard.release(exportPermit);
             }
@@ -1045,9 +975,19 @@ public class DocumentResource extends BaseResource {
 
         documentDao.update(document, principal.getId());
 
-        // Update tags, relations, metadata only when their params are present in the form
-        if (form.containsKey("tags")) {
-            DocumentResourceHelper.updateTagList(id, tagList, getTargetIdList(null));
+        // Update tags, relations, metadata only when their params are present in the form.
+        // Partial-update contract: omitting a param preserves the existing value. But when a
+        // client empties a previously-set collection, it sends ZERO of that param, which is
+        // indistinguishable from "omitted". A client that intends an explicit clear sends the
+        // matching *_reset=true sentinel; old clients that never send it keep the old
+        // preserve-on-omit semantics.
+        boolean tagsReset = Boolean.parseBoolean(form.getFirst("tags_reset"));
+        boolean metadataReset = Boolean.parseBoolean(form.getFirst("metadata_reset"));
+        if (form.containsKey("tags") || tagsReset) {
+            // updateTagList treats a null list as "no change"; a reset with no tags supplied
+            // must clear, so pass an empty (non-null) list.
+            List<String> effectiveTags = tagList != null ? tagList : new ArrayList<>();
+            DocumentResourceHelper.updateTagList(id, effectiveTags, getTargetIdList(null));
         }
         if (form.containsKey("relations")) {
             DocumentResourceHelper.updateRelationList(id, relationList);
@@ -1058,6 +998,9 @@ public class DocumentResource extends BaseResource {
             } catch (Exception e) {
                 throw new ClientException("ValidationError", e.getMessage());
             }
+        } else if (metadataReset) {
+            // Explicit clear of the last remaining metadata value (zero metadata_id params).
+            MetadataUtil.clearMetadata(document.getId());
         }
 
         // Raise a document updated event

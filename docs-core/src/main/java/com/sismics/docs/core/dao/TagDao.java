@@ -3,6 +3,7 @@ package com.sismics.docs.core.dao;
 import com.google.common.base.Joiner;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
+import com.sismics.docs.core.dao.dto.TagCoOccurrence;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.model.jpa.DocumentTag;
 import com.sismics.docs.core.model.jpa.Tag;
@@ -79,6 +80,45 @@ public class TagDao {
         }
         List<String> visible = filterVisibleTagIds(ids, targetIdList);
         return visible == null || visible.isEmpty() ? null : visible;
+    }
+
+    /**
+     * Appends the FROM / alive-document join / optional ACL join / WHERE prefix shared by the
+     * per-tag aggregate facet queries. The aggregate SELECT clause
+     * ({@code dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C)}) and any query-specific
+     * suffix (co-occurrence subquery, GROUP BY) are the caller's responsibility.
+     *
+     * @param sb Query builder (the caller has already appended the SELECT clause)
+     * @param acl Whether the caller's ACL scoping applies (binds {@code :targetIdList})
+     * @param excludeIds Visible exclude IDs (binds {@code :excludeTagIds}), or null for none
+     */
+    private static void appendFacetBase(StringBuilder sb, boolean acl, List<String> excludeIds) {
+        sb.append("from T_DOCUMENT_TAG dt " +
+                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null ");
+        if (acl) {
+            sb.append(TAG_READ_ACL_JOIN);
+        }
+        sb.append("where dt.DOT_DELETEDATE_D is null ");
+        if (acl) {
+            sb.append("and a.ACL_ID_C is not null ");
+        }
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
+        }
+    }
+
+    /**
+     * Maps aggregate rows of shape {@code [tagId, count]} to a tag-ID → count map.
+     *
+     * @param rows Native-query result rows
+     * @return Map of tag ID to document count
+     */
+    private static Map<String, Long> rowsToCountMap(List<Object[]> rows) {
+        Map<String, Long> result = new HashMap<>();
+        for (Object[] row : rows) {
+            result.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        return result;
     }
 
     /**
@@ -356,19 +396,8 @@ public class TagDao {
         boolean acl = isAclScoped(targetIdList);
         List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
-                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
-                "from T_DOCUMENT_TAG dt " +
-                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append(TAG_READ_ACL_JOIN);
-        }
-        sb.append("where dt.DOT_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append("and a.ACL_ID_C is not null ");
-        }
-        if (excludeIds != null) {
-            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
-        }
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) ");
+        appendFacetBase(sb, acl, excludeIds);
         sb.append("group by dt.DOT_IDTAG_C");
         Query q = em.createNativeQuery(sb.toString());
         if (acl) {
@@ -377,12 +406,7 @@ public class TagDao {
         if (excludeIds != null) {
             q.setParameter("excludeTagIds", excludeIds);
         }
-        List<Object[]> rows = q.getResultList();
-        Map<String, Long> result = new HashMap<>();
-        for (Object[] row : rows) {
-            result.put((String) row[0], ((Number) row[1]).longValue());
-        }
-        return result;
+        return rowsToCountMap(q.getResultList());
     }
 
     /**
@@ -421,19 +445,8 @@ public class TagDao {
         boolean acl = isAclScoped(targetIdList);
         List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
-                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
-                "from T_DOCUMENT_TAG dt " +
-                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append(TAG_READ_ACL_JOIN);
-        }
-        sb.append("where dt.DOT_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append("and a.ACL_ID_C is not null ");
-        }
-        if (excludeIds != null) {
-            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
-        }
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) ");
+        appendFacetBase(sb, acl, excludeIds);
         sb.append("and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
                 "and dt.DOT_IDDOCUMENT_C in (" +
                 "  select dt2.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt2 " +
@@ -452,12 +465,7 @@ public class TagDao {
         }
         q.setParameter("selectedTagIds", selectedTagIds);
         q.setParameter("selectedCount", (long) selectedTagIds.size());
-        List<Object[]> rows = q.getResultList();
-        Map<String, Long> result = new HashMap<>();
-        for (Object[] row : rows) {
-            result.put((String) row[0], ((Number) row[1]).longValue());
-        }
-        return result;
+        return rowsToCountMap(q.getResultList());
     }
 
     /**
@@ -543,19 +551,8 @@ public class TagDao {
         boolean acl = isAclScoped(targetIdList);
         List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
-                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
-                "from T_DOCUMENT_TAG dt " +
-                "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append(TAG_READ_ACL_JOIN);
-        }
-        sb.append("where dt.DOT_DELETEDATE_D is null ");
-        if (acl) {
-            sb.append("and a.ACL_ID_C is not null ");
-        }
-        if (excludeIds != null) {
-            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
-        }
+                "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) ");
+        appendFacetBase(sb, acl, excludeIds);
         sb.append("and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
                 "and dt.DOT_IDDOCUMENT_C in (" +
                 "  select dt2.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt2 " +
@@ -571,22 +568,17 @@ public class TagDao {
             q.setParameter("excludeTagIds", excludeIds);
         }
         q.setParameter("selectedTagIds", visibleSelected);
-        List<Object[]> rows = q.getResultList();
-        Map<String, Long> result = new HashMap<>();
-        for (Object[] row : rows) {
-            result.put((String) row[0], ((Number) row[1]).longValue());
-        }
-        return result;
+        return rowsToCountMap(q.getResultList());
     }
 
     /**
      * Returns the full co-occurrence matrix: for every pair of tags
      * that appear together on at least one non-deleted document, the count.
      *
-     * @return List of [tagIdA, tagIdB, count] triples (A < B lexicographically to avoid dupes)
+     * @return List of {@link TagCoOccurrence} entries (tagIdA &lt; tagIdB lexicographically to avoid dupes)
      */
     @SuppressWarnings("unchecked")
-    public List<Object[]> getFullCoOccurrenceMatrix(List<String> targetIdList) {
+    public List<TagCoOccurrence> getFullCoOccurrenceMatrix(List<String> targetIdList) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         boolean acl = isAclScoped(targetIdList);
         StringBuilder sb = new StringBuilder(
@@ -610,7 +602,12 @@ public class TagDao {
         if (acl) {
             q.setParameter("targetIdList", targetIdList);
         }
-        return q.getResultList();
+        List<Object[]> rows = q.getResultList();
+        List<TagCoOccurrence> result = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            result.add(new TagCoOccurrence((String) row[0], (String) row[1], ((Number) row[2]).longValue()));
+        }
+        return result;
     }
 
     /**
