@@ -60,7 +60,7 @@ const { data: appInfo } = useQuery({
 
 const retentionDays = computed(() => appInfo.value?.trash_retention_days ?? DEFAULT_RETENTION_DAYS)
 
-function purgeCountdown(deleteDate: number) {
+function purgeCountdown(deleteDate: number): number | null {
   return daysUntilPurge(deleteDate, retentionDays.value)
 }
 
@@ -187,10 +187,16 @@ function formatDeletedAt(ts: number) {
       <Column :header="t('ui.trash_purges_in')" style="width: 160px">
         <template #body="{ data }">
           <Tag
-            :severity="purgeCountdown(data.delete_date) <= 3 ? 'warn' : 'secondary'"
+            v-if="purgeCountdown(data.delete_date) === null"
+            severity="secondary"
+            :value="t('ui.trash_purges_disabled')"
+          />
+          <Tag
+            v-else
+            :severity="(purgeCountdown(data.delete_date) as number) <= 3 ? 'warn' : 'secondary'"
             :value="purgeCountdown(data.delete_date) === 0
               ? t('ui.trash_purges_soon')
-              : t('ui.trash_purges_in_days', purgeCountdown(data.delete_date))"
+              : t('ui.trash_purges_in_days', purgeCountdown(data.delete_date) as number)"
           />
         </template>
       </Column>

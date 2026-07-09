@@ -660,6 +660,7 @@
     "trash_purges_in": "Auto-purge",
     "trash_purges_in_days": "in {count} day | in {count} days",
     "trash_purges_soon": "Due for purge",
+    "trash_purges_disabled": "Auto-purge off",
     "restore": "Restore",
     "permissions": {
       "direct": "Direct permissions",

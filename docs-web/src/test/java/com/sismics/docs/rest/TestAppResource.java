@@ -49,6 +49,12 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals("eng", json.getString("default_language"));
         Assertions.assertTrue(json.containsKey("global_storage_current"));
         Assertions.assertTrue(json.getJsonNumber("active_user_count").longValue() > 0);
+        // Trash retention window (P7): /api/app must surface the configured purge
+        // window as a number so the trash view can render an honest countdown.
+        // The raw value is returned verbatim, so a present <= 0 value (auto-purge
+        // disabled) is legal — do not assert a sign here.
+        Assertions.assertTrue(json.containsKey("trash_retention_days"));
+        Assertions.assertNotNull(json.getJsonNumber("trash_retention_days"));
 
         // Rebuild Lucene index
         Response response = target().path("/app/batch/reindex").request()

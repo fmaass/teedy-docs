@@ -660,6 +660,7 @@
     "trash_purges_in": "Automatisch gelöscht",
     "trash_purges_in_days": "in {count} Tag | in {count} Tagen",
     "trash_purges_soon": "Wird gelöscht",
+    "trash_purges_disabled": "Automatische Löschung deaktiviert",
     "restore": "Wiederherstellen",
     "permissions": {
       "direct": "Direkte Berechtigungen",

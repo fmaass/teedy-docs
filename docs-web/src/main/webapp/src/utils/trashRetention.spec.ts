@@ -32,8 +32,21 @@ describe('daysUntilPurge', () => {
     expect(daysUntilPurge(NOW - 3 * MS_PER_DAY, 7, NOW)).toBe(4)
   })
 
-  it('defaults the retention window to DEFAULT_RETENTION_DAYS', () => {
+  it('defaults the retention window to DEFAULT_RETENTION_DAYS when the field is absent', () => {
+    // undefined models an older server that omits trash_retention_days -> count down.
     expect(daysUntilPurge(NOW, undefined, NOW)).toBe(DEFAULT_RETENTION_DAYS)
+  })
+
+  it('returns null when retention is 0 (auto-purge disabled)', () => {
+    expect(daysUntilPurge(NOW - 45 * MS_PER_DAY, 0, NOW)).toBeNull()
+  })
+
+  it('returns null when retention is negative (auto-purge disabled)', () => {
+    expect(daysUntilPurge(NOW - 45 * MS_PER_DAY, -1, NOW)).toBeNull()
+  })
+
+  it('still counts down for a positive retention window (disabled path is not triggered)', () => {
+    expect(daysUntilPurge(NOW - 5 * MS_PER_DAY, 30, NOW)).toBe(25)
   })
 
   it('DEFAULT_RETENTION_DAYS mirrors the backend default of 30', () => {
