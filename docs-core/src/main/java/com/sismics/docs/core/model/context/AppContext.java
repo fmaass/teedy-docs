@@ -259,13 +259,31 @@ public class AppContext {
             // instead of dropping events or growing the queue without limit.
             int queueCapacity = EnvironmentUtil.getIntConfig(
                     ASYNC_QUEUE_CAPACITY_PROPERTY, ASYNC_QUEUE_CAPACITY_ENV, DEFAULT_ASYNC_QUEUE_CAPACITY, 1);
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(threadCount, threadCount,
-                    1L, TimeUnit.MINUTES,
-                    new LinkedBlockingQueue<>(queueCapacity),
-                    new ThreadPoolExecutor.CallerRunsPolicy());
+            ThreadPoolExecutor executor = newBoundedAsyncExecutor(threadCount, queueCapacity);
             asyncExecutorList.add(executor);
             return new AsyncEventBus(executor, exceptionHandler);
         }
+    }
+
+    /**
+     * Construct the {@link ThreadPoolExecutor} backing an async event bus: a fixed pool with a
+     * bounded {@link LinkedBlockingQueue} work queue and a {@link ThreadPoolExecutor.CallerRunsPolicy}
+     * rejection policy. When the queue is full, the producing thread runs the task itself, applying
+     * backpressure instead of dropping events or growing the queue without limit.
+     *
+     * <p>Package-private and static so the bounded-queue behaviour can be exercised directly by a
+     * unit test — the production async path uses a synchronous {@link EventBus} under unit tests
+     * (see {@link EnvironmentUtil#isUnitTest()}), so this factory is otherwise unreachable in tests.
+     *
+     * @param threadCount   Core and maximum pool size
+     * @param queueCapacity Bounded work-queue capacity
+     * @return A configured bounded thread pool executor
+     */
+    static ThreadPoolExecutor newBoundedAsyncExecutor(int threadCount, int queueCapacity) {
+        return new ThreadPoolExecutor(threadCount, threadCount,
+                1L, TimeUnit.MINUTES,
+                new LinkedBlockingQueue<>(queueCapacity),
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     /**
