@@ -6,7 +6,7 @@
   <groupId>com.sismics.docs</groupId>
   <artifactId>docs-parent</artifactId>
   <packaging>pom</packaging>
-  <version>3.0.0</version>
+  <version>3.1.0</version>
 
   <name>Docs Parent</name>
 
@@ -317,6 +317,12 @@
       </dependency>
 
       <dependency>
+        <groupId>org.eclipse.parsson</groupId>
+        <artifactId>parsson-media</artifactId>
+        <version>${parsson.version}</version>
+      </dependency>
+
+      <dependency>
         <groupId>jakarta.json</groupId>
         <artifactId>jakarta.json-api</artifactId>
         <version>${jakarta.json.jakarta.json-api.version}</version>
@@ -386,6 +392,12 @@
         <groupId>org.apache.pdfbox</groupId>
         <artifactId>pdfbox</artifactId>
         <version>${org.apache.pdfbox.pdfbox.version}</version>
+        <exclusions>
+          <exclusion>
+            <groupId>commons-logging</groupId>
+            <artifactId>commons-logging</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
 
       <dependency>
@@ -430,6 +442,10 @@
           <exclusion>
             <groupId>log4j</groupId>
             <artifactId>log4j</artifactId>
+          </exclusion>
+          <exclusion>
+            <groupId>commons-logging</groupId>
+            <artifactId>commons-logging</artifactId>
           </exclusion>
         </exclusions>
       </dependency>
