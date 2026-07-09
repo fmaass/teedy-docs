@@ -1,5 +1,5 @@
 import { computed, type Ref } from 'vue'
-import type { Tag, CoOccurrencePair } from '../api/tag'
+import { isMetaTag, type Tag, type CoOccurrencePair } from '../api/tag'
 import type { TreeNode } from 'primevue/treenode'
 
 export function useCoOccurrenceTree(
@@ -25,7 +25,10 @@ export function useCoOccurrenceTree(
   })
 
   const treeNodes = computed<TreeNode[]>(() => {
+    // Facets hides meta-tags (`__`-prefixed) from BOTH the top-level roots and the
+    // co-occurrence children. They still appear in Tree mode / search / picker.
     return allTags.value
+      .filter((tag) => !isMetaTag(tag.name))
       .map((tag) => {
         const count = stats.value[tag.id] ?? 0
         const coTags = adjacency.value.get(tag.id)
@@ -33,7 +36,7 @@ export function useCoOccurrenceTree(
           ? [...coTags.entries()]
               .map(([otherId, coCount]) => {
                 const other = tagMap.value.get(otherId)
-                if (!other) return null
+                if (!other || isMetaTag(other.name)) return null
                 return {
                   key: `${tag.id}__${otherId}`,
                   label: other.name,

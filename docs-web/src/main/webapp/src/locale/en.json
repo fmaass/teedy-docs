@@ -592,6 +592,7 @@
     "add_first_document": "Add your first document",
     "add_document": "Add document",
     "manage_tags": "Manage tags",
+    "resize_panel": "Resize tag panel",
     "back_to_tags": "Back to tags",
     "failed_to_load": "Failed to load {item}",
     "new_document": "New document",

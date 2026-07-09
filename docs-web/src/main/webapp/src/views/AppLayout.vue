@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useTagFilterStore } from '../stores/tagFilter'
+import { useResizablePanel } from '../composables/useResizablePanel'
 import AppHeader from '../components/AppHeader.vue'
 import DefaultPasswordBanner from '../components/DefaultPasswordBanner.vue'
 import AdminNavPanel from '../components/AdminNavPanel.vue'
@@ -25,6 +26,13 @@ const modeOptions: Array<{ label: string; value: 'and' | 'or' }> = [
 const isMobile = ref(false)
 const drawerOpen = ref(false)
 let mql: MediaQueryList
+
+const {
+  width: panelWidth,
+  startDrag: startPanelResize,
+  onKeydown: onPanelResizeKey,
+  reset: resetPanelWidth,
+} = useResizablePanel()
 
 function updateMobile(e: MediaQueryListEvent | MediaQueryList) {
   isMobile.value = e.matches
@@ -80,7 +88,11 @@ function handleMobileTagSelect(tagId: string) {
 
     <div class="app-body">
       <!-- Desktop left panel -->
-      <aside v-if="!isMobile" class="left-panel">
+      <aside
+        v-if="!isMobile"
+        class="left-panel"
+        :style="{ width: panelWidth + 'px', minWidth: panelWidth + 'px' }"
+      >
         <!-- Brand + add document -->
         <div class="panel-brand-row">
           <router-link to="/document" class="panel-brand">teedy</router-link>
@@ -146,6 +158,21 @@ function handleMobileTagSelect(tagId: string) {
             <span>{{ t('ui.nav.settings') }}</span>
           </router-link>
         </div>
+
+        <!-- Resize handle (desktop only) -->
+        <div
+          class="panel-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          tabindex="0"
+          :aria-label="t('ui.resize_panel')"
+          :aria-valuenow="panelWidth"
+          aria-valuemin="200"
+          aria-valuemax="480"
+          @pointerdown="startPanelResize"
+          @keydown="onPanelResizeKey"
+          @dblclick="resetPanelWidth"
+        />
       </aside>
 
       <!-- Mobile drawer -->
@@ -226,12 +253,46 @@ function handleMobileTagSelect(tagId: string) {
 /* --- Left panel --- */
 
 .left-panel {
+  position: relative;
   width: 250px;
   min-width: 250px;
+  flex-shrink: 0;
   border-right: 1px solid var(--p-content-border-color);
   display: flex;
   flex-direction: column;
   background: var(--p-content-background);
+}
+
+/* --- Resize handle --- */
+
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background 0.12s;
+  touch-action: none;
+}
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.12s;
+}
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after {
+  background: var(--p-primary-color);
+}
+.panel-resizer:focus-visible {
+  outline: none;
 }
 
 .panel-brand-row {

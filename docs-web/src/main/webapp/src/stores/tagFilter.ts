@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { listTags, getTagStats, getTagFacets, getTagCoOccurrence, type Tag, type CoOccurrencePair } from '../api/tag'
+import { listTags, getTagStats, getTagFacets, getTagCoOccurrence, isMetaTag, type Tag, type CoOccurrencePair } from '../api/tag'
 import { useCoOccurrenceTree } from '../composables/useCoOccurrenceTree'
 
 export const useTagFilterStore = defineStore('tagFilter', () => {
@@ -100,12 +100,16 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     selectedTagIds.value.size > 0 || excludedTagIds.value.size > 0 || debouncedText.value.trim().length > 0,
   )
 
+  // Facet co-occurrence suggestion pills. Meta-tags (`__`-prefixed) are hidden
+  // from suggestions; `tagCounts` itself is left intact so Tree-mode counts are
+  // unaffected. Already-selected meta-tags still render via `selectedTags` (the
+  // removable active chips), so the user can always deselect them.
   const relatedTags = computed(() => {
     if (selectedTagIds.value.size === 0) return []
     return Object.entries(tagCounts.value)
       .map(([id, count]) => ({ tag: tagMap.value.get(id), count }))
       .filter((e): e is { tag: Tag; count: number } =>
-        !!e.tag && e.count > 0 && !selectedTagIds.value.has(e.tag.id),
+        !!e.tag && e.count > 0 && !selectedTagIds.value.has(e.tag.id) && !isMetaTag(e.tag.name),
       )
       .sort((a, b) => b.count - a.count)
       .slice(0, 8)

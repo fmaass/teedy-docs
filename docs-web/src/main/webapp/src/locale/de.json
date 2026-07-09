@@ -592,6 +592,7 @@
     "add_first_document": "Fügen Sie Ihr erstes Dokument hinzu",
     "add_document": "Dokument hinzufügen",
     "manage_tags": "Tags verwalten",
+    "resize_panel": "Tag-Leiste anpassen",
     "back_to_tags": "Zurück zu den Tags",
     "failed_to_load": "{item} konnte nicht geladen werden",
     "new_document": "Neues Dokument",

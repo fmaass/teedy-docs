@@ -8,6 +8,16 @@ export interface Tag {
   count?: number
 }
 
+/**
+ * A meta-tag is an auto/system tag whose name is prefixed with a double
+ * underscore (e.g. `__recent`, `__review`). These are hidden from the FACETS
+ * navigation and suggestion lists only — they still appear in Tree mode, search,
+ * the tag picker, and as active filter chips.
+ */
+export function isMetaTag(name: string | undefined | null): boolean {
+  return !!name && name.startsWith('__')
+}
+
 export function listTags() {
   return api.get<{ tags: Tag[] }>('/tag/list')
 }

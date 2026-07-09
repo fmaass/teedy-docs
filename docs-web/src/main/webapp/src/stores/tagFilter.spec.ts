@@ -18,11 +18,15 @@ vi.mock('vue-router', () => ({
   useRoute: () => mockRoute,
 }))
 
-// Each useQuery call returns a data ref; we hand back tags for the first call
-// (listTags) and empty data for the stats/facets/co-occurrence calls. The store
-// distinguishes them only by consuming `.data`, so a shared tags ref for the
-// tag list plus empty refs for the rest is sufficient for action-logic tests.
+// Each useQuery call returns a data ref keyed by the query name so the store's
+// OWN getters (facet tree building, tagCounts) run for real against controllable
+// data. `tags` -> the tag list, `tagStats` -> per-tag doc counts, and
+// `tagCoOccurrence` -> the co-occurrence pairs that drive the facet children.
 const tagsRef = ref<Tag[]>([])
+const statsRef = ref<Record<string, number> | undefined>(undefined)
+const coOccurrenceRef = ref<Array<{ tagA: string; tagB: string; count: number }> | undefined>(
+  undefined,
+)
 vi.mock('@tanstack/vue-query', () => ({
   useQuery: (opts: any) => {
     const key = opts.queryKey
@@ -30,6 +34,8 @@ vi.mock('@tanstack/vue-query', () => ({
     const resolved = typeof key === 'object' && 'value' in key ? key.value : key
     const name = Array.isArray(resolved) ? resolved[0] : resolved
     if (name === 'tags') return { data: tagsRef }
+    if (name === 'tagStats') return { data: statsRef }
+    if (name === 'tagCoOccurrence') return { data: coOccurrenceRef }
     return { data: ref(undefined) }
   },
 }))
@@ -42,6 +48,14 @@ const TAGS: Tag[] = [
   { id: 'c', name: 'gamma', color: '#333', parent: null },
 ]
 
+// A flat set (no parent nesting) exercised in facets mode, where the tree is
+// built from co-occurrence pairs rather than parent/child hierarchy.
+const FLAT_TAGS: Tag[] = [
+  { id: 'a', name: 'alpha', color: '#111', parent: null },
+  { id: 'b', name: 'beta', color: '#222', parent: null },
+  { id: 'c', name: 'gamma', color: '#333', parent: null },
+]
+
 describe('tagFilter store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -50,6 +64,8 @@ describe('tagFilter store', () => {
     push.mockClear()
     replace.mockClear()
     tagsRef.value = TAGS
+    statsRef.value = undefined
+    coOccurrenceRef.value = undefined
   })
 
   describe('resolveCompoundKey', () => {
@@ -140,6 +156,126 @@ describe('tagFilter store', () => {
       const store = useTagFilterStore()
       store.debouncedText = 'hello'
       expect(store.hasActiveFilters).toBe(true)
+    })
+  })
+
+  describe('facets mode', () => {
+    // Co-occurrence: alpha+beta (3), beta+gamma (2). All three tags have docs.
+    function seedFacets() {
+      tagsRef.value = FLAT_TAGS
+      statsRef.value = { a: 5, b: 6, c: 4 }
+      coOccurrenceRef.value = [
+        { tagA: 'a', tagB: 'b', count: 3 },
+        { tagA: 'b', tagB: 'c', count: 2 },
+      ]
+    }
+
+    it('builds one top-level node per tag with docCount>0, keyed by tag id', () => {
+      seedFacets()
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      const nodes = store.activeTreeNodes
+      expect(nodes.map((n) => n.key).sort()).toEqual(['a', 'b', 'c'])
+      expect(nodes.map((n) => n.label).sort()).toEqual(['alpha', 'beta', 'gamma'])
+    })
+
+    it('omits tags with a zero doc count from the facet tree', () => {
+      tagsRef.value = FLAT_TAGS
+      statsRef.value = { a: 5, b: 0, c: 4 } // beta has no docs
+      coOccurrenceRef.value = []
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      expect(store.activeTreeNodes.map((n) => n.key).sort()).toEqual(['a', 'c'])
+    })
+
+    it('gives each top-level node compound co-occurrence children keyed `parent__child`', () => {
+      seedFacets()
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      const beta = store.activeTreeNodes.find((n) => n.key === 'b')!
+      // beta co-occurs with alpha and gamma
+      expect(beta.children.map((c: any) => c.key).sort()).toEqual(['b__a', 'b__c'])
+      const childA = beta.children.find((c: any) => c.key === 'b__a')!
+      expect(childA.label).toBe('alpha')
+    })
+
+    it('clicking a top-level facet selects exactly that tag', () => {
+      seedFacets()
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.toggleTag('a') // top-level node key === tag id
+      expect([...store.selectedTagIds]).toEqual(['a'])
+    })
+
+    it("clicking a co-occurrence child key 'A__B' selects B (not A, not a fixed tag)", () => {
+      seedFacets()
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.toggleTag('a__b') // child under alpha, representing beta
+      expect([...store.selectedTagIds]).toEqual(['b'])
+      expect(store.selectedTagIds.has('a')).toBe(false)
+    })
+
+    it('does NOT pull in ancestors in facets mode (that is tree-only behavior)', () => {
+      tagsRef.value = TAGS // b has parent a
+      statsRef.value = { a: 1, b: 1, c: 1 }
+      coOccurrenceRef.value = []
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.toggleTag('b')
+      expect([...store.selectedTagIds]).toEqual(['b'])
+      expect(store.selectedTagIds.has('a')).toBe(false)
+    })
+
+    it('resolves the child key to the child tag for exclusion on second toggle', () => {
+      seedFacets()
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.toggleTag('a__c') // select gamma via a compound key
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      store.toggleTag('a__c') // second toggle excludes the SAME resolved tag
+      expect(store.selectedTagIds.has('c')).toBe(false)
+      expect(store.excludedTagIds.has('c')).toBe(true)
+    })
+  })
+
+  describe('meta-tag hiding (facets-scoped)', () => {
+    // alpha, beta (normal) + __recent (meta), all with docs.
+    const META_TAGS: Tag[] = [
+      { id: 'a', name: 'alpha', color: '#111', parent: null },
+      { id: 'b', name: 'beta', color: '#222', parent: null },
+      { id: 'm', name: '__recent', color: '#999', parent: null },
+    ]
+
+    it('Tree mode nodes STILL include `__`-prefixed tags (filter is facets-only)', () => {
+      tagsRef.value = META_TAGS
+      const store = useTagFilterStore()
+      store.viewMode = 'tree'
+      const keys = store.tagTreeNodes.map((n) => n.key)
+      expect(keys).toContain('m')
+      expect(store.tagTreeNodes.find((n) => n.key === 'm')!.label).toBe('__recent')
+    })
+
+    it('facet suggestions (relatedTags) exclude `__`-prefixed tags', () => {
+      tagsRef.value = META_TAGS
+      statsRef.value = { a: 3, b: 2, m: 9 }
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.selectedTagIds = new Set(['a']) // drives relatedTags off tagCounts
+      const suggested = store.relatedTags.map((e) => e.tag.id)
+      expect(suggested).toContain('b')
+      expect(suggested).not.toContain('m') // __recent hidden from suggestions
+    })
+
+    it('an already-selected `__` tag still renders as an active chip (representable)', () => {
+      tagsRef.value = META_TAGS
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.selectedTagIds = new Set(['m']) // meta-tag selected (e.g. from Tree/URL)
+      // selectedTags powers the removable active chips — must include the meta-tag.
+      expect(store.selectedTags.map((t) => t.id)).toContain('m')
+      // ...but it is NOT re-suggested to itself.
+      expect(store.relatedTags.map((e) => e.tag.id)).not.toContain('m')
     })
   })
 
