@@ -14,6 +14,7 @@ import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.PdfUtil;
+import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.util.ClasspathScanner;
 import com.sismics.util.EnvironmentUtil;
@@ -37,6 +38,29 @@ public class AppContext {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(AppContext.class);
+
+    /**
+     * Configuration for the bounded async work queue and listener retry.
+     */
+    static final String ASYNC_QUEUE_CAPACITY_PROPERTY = "docs.async_queue_capacity";
+    static final String ASYNC_QUEUE_CAPACITY_ENV = "DOCS_ASYNC_QUEUE_CAPACITY";
+    static final int DEFAULT_ASYNC_QUEUE_CAPACITY = 1000;
+    /**
+     * WARNING — retry is DEFAULT OFF (0) and must stay that way in production.
+     * <p>
+     * Enabling retry (count &gt; 0) makes {@link RetryingSubscriberExceptionHandler} re-invoke a failed
+     * async subscriber from the top. That is ONLY safe if EVERY async listener is idempotent — and they
+     * are NOT today. Concretely, {@code FileDeletedAsyncListener} commits the user's storage-quota
+     * decrement (updateQuota) BEFORE {@code FileUtil.delete()} can throw, so a retry after a delete
+     * failure double-subtracts the quota and corrupts storage accounting. Only enable retry in an
+     * environment where every registered listener has been verified idempotent.
+     */
+    static final String ASYNC_RETRY_COUNT_PROPERTY = "docs.async_retry_count";
+    static final String ASYNC_RETRY_COUNT_ENV = "DOCS_ASYNC_RETRY_COUNT";
+    static final int DEFAULT_ASYNC_RETRY_COUNT = 0;
+    static final String ASYNC_RETRY_BACKOFF_MS_PROPERTY = "docs.async_retry_backoff_ms";
+    static final String ASYNC_RETRY_BACKOFF_MS_ENV = "DOCS_ASYNC_RETRY_BACKOFF_MS";
+    static final int DEFAULT_ASYNC_RETRY_BACKOFF_MS = 200;
 
     /**
      * Singleton instance.
@@ -87,6 +111,11 @@ public class AppContext {
      * Asynchronous executors.
      */
     private List<ThreadPoolExecutor> asyncExecutorList;
+
+    /**
+     * Guard so the "retry enabled" idempotency warning is logged once per context start.
+     */
+    private boolean asyncRetryWarningLogged;
 
     /**
      * Start the application context.
@@ -201,17 +230,41 @@ public class AppContext {
      * @return Async event bus
      */
     private EventBus newAsyncEventBus() {
+        // Retry is default OFF: with retryCount 0 the handler logs-and-drops on the first exception,
+        // matching the historical production behaviour (no re-invocation, no duplicate side effects).
+        // Retry is an opt-in ONLY safe when every async listener is idempotent (see the constant's
+        // Javadoc — FileDeletedAsyncListener is NOT idempotent today).
+        int retryCount = EnvironmentUtil.getIntConfig(
+                ASYNC_RETRY_COUNT_PROPERTY, ASYNC_RETRY_COUNT_ENV, DEFAULT_ASYNC_RETRY_COUNT, 0);
+        long retryBackoffMs = EnvironmentUtil.getIntConfig(
+                ASYNC_RETRY_BACKOFF_MS_PROPERTY, ASYNC_RETRY_BACKOFF_MS_ENV, DEFAULT_ASYNC_RETRY_BACKOFF_MS, 0);
+        if (retryCount > 0 && !asyncRetryWarningLogged) {
+            asyncRetryWarningLogged = true;
+            log.warn("Async listener retry is ENABLED (docs.async_retry_count={}). This re-invokes " +
+                    "failed subscribers and is ONLY safe if every async listener is idempotent. " +
+                    "It is NOT today: FileDeletedAsyncListener commits the quota decrement before " +
+                    "FileUtil.delete(), so a retry double-subtracts storage quota. Disable (set 0) " +
+                    "unless all listeners have been verified idempotent.", retryCount);
+        }
+        RetryingSubscriberExceptionHandler exceptionHandler =
+                new RetryingSubscriberExceptionHandler(retryCount, retryBackoffMs);
+
         if (EnvironmentUtil.isUnitTest()) {
-            return new EventBus((exception, context) ->
-                    log.error("Error in event handler {}", context.getSubscriberMethod(), exception));
+            return new EventBus(exceptionHandler);
         } else {
             int threadCount = Math.max(Runtime.getRuntime().availableProcessors() / 2, 2);
+
+            // Bounded work queue so a burst of events cannot exhaust memory. When the queue is full,
+            // CallerRunsPolicy makes the producing thread run the task itself, applying backpressure
+            // instead of dropping events or growing the queue without limit.
+            int queueCapacity = EnvironmentUtil.getIntConfig(
+                    ASYNC_QUEUE_CAPACITY_PROPERTY, ASYNC_QUEUE_CAPACITY_ENV, DEFAULT_ASYNC_QUEUE_CAPACITY, 1);
             ThreadPoolExecutor executor = new ThreadPoolExecutor(threadCount, threadCount,
                     1L, TimeUnit.MINUTES,
-                    new LinkedBlockingQueue<>());
+                    new LinkedBlockingQueue<>(queueCapacity),
+                    new ThreadPoolExecutor.CallerRunsPolicy());
             asyncExecutorList.add(executor);
-            return new AsyncEventBus(executor, (exception, context) ->
-                    log.error("Error in async event handler {}", context.getSubscriberMethod(), exception));
+            return new AsyncEventBus(executor, exceptionHandler);
         }
     }
 
@@ -226,6 +279,21 @@ public class AppContext {
             queueSize += executor.getTaskCount() - executor.getCompletedTaskCount();
         }
         return queueSize;
+    }
+
+    /**
+     * Return the total remaining capacity of the bounded async work queues, i.e. the number of
+     * additional tasks that can be queued before the rejection policy kicks in. Returns 0 when no
+     * bounded executor is active (e.g. in the synchronous unit-test bus).
+     *
+     * @return Remaining async queue capacity
+     */
+    public int getQueuedTaskCapacity() {
+        int capacity = 0;
+        for (ThreadPoolExecutor executor : asyncExecutorList) {
+            capacity += executor.getQueue().remainingCapacity();
+        }
+        return capacity;
     }
 
     public EventBus getAsyncEventBus() {

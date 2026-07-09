@@ -95,6 +95,33 @@ public class EnvironmentUtil {
     }
 
     /**
+     * Returns an integer configuration value read from a system property, falling back to an
+     * environment variable, and finally to a default. Invalid or non-positive values fall back
+     * to the default so a misconfiguration can never disable the bound.
+     *
+     * @param systemProperty System property name (e.g. docs.async_queue_capacity)
+     * @param envVariable Environment variable name (e.g. DOCS_ASYNC_QUEUE_CAPACITY)
+     * @param defaultValue Default value
+     * @param minValue Minimum accepted value (values below this fall back to the default)
+     * @return Configured integer value
+     */
+    public static int getIntConfig(String systemProperty, String envVariable, int defaultValue, int minValue) {
+        String raw = System.getProperty(systemProperty);
+        if (raw == null || raw.isBlank()) {
+            raw = System.getenv(envVariable);
+        }
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value < minValue ? defaultValue : value;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
      * Getter of webappContext.
      *
      * @return webappContext

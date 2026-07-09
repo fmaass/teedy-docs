@@ -1,0 +1,99 @@
+package com.sismics.docs.core.util.async;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * Tests that the async executor uses a bounded queue with a CallerRuns rejection policy, mirroring
+ * the way {@code AppContext.newAsyncEventBus()} constructs it. Asserts real executor behaviour: at
+ * capacity the queue does not grow without bound and no task is dropped (the producer runs it).
+ *
+ * @author teedy
+ */
+public class TestBoundedAsyncQueue {
+
+    /**
+     * Builds an executor exactly as AppContext does for the async bus.
+     */
+    private ThreadPoolExecutor newBoundedExecutor(int threads, int capacity) {
+        return new ThreadPoolExecutor(threads, threads,
+                1L, TimeUnit.MINUTES,
+                new LinkedBlockingQueue<>(capacity),
+                new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    @Test
+    public void queueIsBoundedToConfiguredCapacity() {
+        ThreadPoolExecutor executor = newBoundedExecutor(1, 2);
+        try {
+            Assertions.assertEquals(2, executor.getQueue().remainingCapacity(),
+                    "Bounded queue must report its configured capacity");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void callerRunsAtCapacityAndNoTaskIsDropped() throws Exception {
+        // Single worker + capacity 1. We block the worker, fill the single queue slot, then submit
+        // more tasks: with an unbounded queue those would all be queued (queue grows without limit);
+        // with the bounded queue + CallerRuns the submitting thread runs the overflow itself, so
+        // every task still executes and none is dropped.
+        int threads = 1;
+        int capacity = 1;
+        ThreadPoolExecutor executor = newBoundedExecutor(threads, capacity);
+        AtomicInteger executed = new AtomicInteger();
+
+        CountDownLatch blockWorker = new CountDownLatch(1);
+        CountDownLatch workerStarted = new CountDownLatch(1);
+        try {
+            // Occupy the single worker thread.
+            executor.execute(() -> {
+                workerStarted.countDown();
+                try {
+                    blockWorker.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                executed.incrementAndGet();
+            });
+            Assertions.assertTrue(workerStarted.await(5, TimeUnit.SECONDS), "Worker should have started");
+
+            // Fill the single queue slot (this task will wait for the worker to free up).
+            executor.execute(executed::incrementAndGet);
+            Assertions.assertEquals(0, executor.getQueue().remainingCapacity(),
+                    "Queue should be full after one queued task");
+
+            // Overflow submissions: with CallerRuns these run on THIS thread immediately rather than
+            // growing the queue past its bound.
+            int overflow = 5;
+            for (int i = 0; i < overflow; i++) {
+                executor.execute(executed::incrementAndGet);
+            }
+            // The queue must never have grown beyond its bound.
+            Assertions.assertEquals(0, executor.getQueue().remainingCapacity(),
+                    "Bounded queue must not grow beyond capacity even under overflow");
+            // The overflow tasks ran on the caller (backpressure), none dropped.
+            Assertions.assertEquals(overflow, executed.get(),
+                    "Overflow tasks must run on the caller, not be dropped");
+
+            // Release the worker; the queued task then runs too.
+            blockWorker.countDown();
+            executor.shutdown();
+            Assertions.assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS), "Executor should terminate");
+
+            // 1 blocked worker task + 1 queued task + overflow overflow tasks all executed.
+            Assertions.assertEquals(overflow + 2, executed.get(),
+                    "Every submitted task must eventually execute; none dropped");
+        } finally {
+            blockWorker.countDown();
+            executor.shutdownNow();
+        }
+    }
+}
