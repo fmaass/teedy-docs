@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
-import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
+import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
 import ContextMenu from 'primevue/contextmenu'
@@ -26,6 +26,7 @@ import {
   type BulkResult,
 } from '../../utils/bulkOps'
 import { clampOffset } from '../../utils/pagination'
+import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -49,7 +50,7 @@ watch([() => tf.combinedSearch, () => tf.tagMode], () => {
 })
 
 const { data: documentsData, isLoading, isError, refetch } = useQuery({
-  queryKey: computed(() => ['documents', {
+  queryKey: computed(() => [...queryKeys.documents(), {
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
     offset: pageOffset.value,
@@ -124,7 +125,7 @@ const slideOverOpen = ref(false)
 const slideOverDocId = ref<string | null>(null)
 
 const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError } = useQuery({
-  queryKey: computed(() => ['document', slideOverDocId.value]),
+  queryKey: computed(() => queryKeys.document(slideOverDocId.value!)),
   queryFn: () => getDocument(slideOverDocId.value!).then((r) => r.data),
   enabled: computed(() => !!slideOverDocId.value && slideOverOpen.value),
 })
@@ -149,14 +150,14 @@ const availableTagsForSlideOver = computed(() => {
 
 async function addTagToSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const refreshed = await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
+  // addTag invalidates ['document', id]; the slide-over query refetches the
+  // authoritative doc — no manual setQueryData with a client-built copy.
+  await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
 }
 
 async function removeTagFromSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const refreshed = await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
+  await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
 }
 
 function buildFilterLabel(): string {
@@ -168,16 +169,11 @@ function buildFilterLabel(): string {
 
 function openFullView() {
   if (slideOverDoc.value) {
-    const returnQuery: Record<string, string> = {}
-    if (tf.selectedTagIds.size) returnQuery.tags = [...tf.selectedTagIds].join(',')
-    if (tf.tagMode === 'or') returnQuery.mode = 'or'
-    if (tf.debouncedText.trim()) returnQuery.search = tf.debouncedText.trim()
-
     router.push({
       name: 'document-view',
       params: { id: slideOverDoc.value.id },
       state: {
-        returnTo: router.resolve({ name: 'documents', query: returnQuery }).fullPath,
+        returnTo: router.resolve({ name: 'documents', query: tf.buildFilterQuery() }).fullPath,
         filterLabel: buildFilterLabel() || undefined,
       },
     })
@@ -267,7 +263,10 @@ async function runBulkOp(op: (doc: DocumentListItem) => Promise<unknown>) {
     })
     summariseBulk(result)
     clearSelection()
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
+    queryClient.invalidateQueries({ queryKey: queryKeys.documents() })
+    // Bulk tag/language/delete changes which tags sit on which docs — stale the
+    // sidebar/facet counts too.
+    for (const key of tagCountKeys) queryClient.invalidateQueries({ queryKey: key })
   } finally {
     bulkProgress.value = null
   }

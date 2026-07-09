@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 import { listTags, getTagStats, getTagFacets, getTagCoOccurrence, isMetaTag, type Tag, type CoOccurrencePair } from '../api/tag'
 import { useCoOccurrenceTree } from '../composables/useCoOccurrenceTree'
+import { queryKeys } from '../api/queryKeys'
 
 export const useTagFilterStore = defineStore('tagFilter', () => {
   const router = useRouter()
@@ -11,7 +12,6 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
 
   const selectedTagIds = ref(new Set<string>())
   const excludedTagIds = ref(new Set<string>())
-  const showUntagged = ref(false)
   const searchText = ref('')
   const debouncedText = ref('')
   const tagMode = ref<'and' | 'or'>('and')
@@ -24,8 +24,12 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
 
   // --- Tag data ---
 
-  const { data: tagsData } = useQuery({
-    queryKey: ['tags'],
+  // `tagsFetched` is the SETTLED signal: true once the tags query has returned
+  // at least once, INCLUDING a legitimately empty ([]) result. Load-state must
+  // be driven from this, never inferred from tagMap.size (which cannot tell
+  // "still loading" apart from "loaded but empty").
+  const { data: tagsData, isFetched: tagsFetched } = useQuery({
+    queryKey: queryKeys.tags(),
     queryFn: () => listTags().then((r) => r.data.tags),
     staleTime: 60_000,
   })
@@ -43,20 +47,20 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   const excludedTagIdArray = computed(() => [...excludedTagIds.value])
 
   const { data: statsData } = useQuery({
-    queryKey: ['tagStats'],
+    queryKey: queryKeys.tagStats(),
     queryFn: () => getTagStats().then((r) => r.data.stats),
     staleTime: 30_000,
   })
 
   const { data: facetData } = useQuery({
-    queryKey: computed(() => ['tagFacets', selectedTagIdArray.value, tagMode.value, excludedTagIdArray.value]),
+    queryKey: computed(() => [...queryKeys.tagFacets(), selectedTagIdArray.value, tagMode.value, excludedTagIdArray.value]),
     queryFn: () => getTagFacets(selectedTagIdArray.value, tagMode.value, excludedTagIdArray.value).then((r) => r.data),
     staleTime: 15_000,
     enabled: computed(() => selectedTagIds.value.size > 0),
   })
 
   const { data: coOccurrenceData } = useQuery({
-    queryKey: ['tagCoOccurrence'],
+    queryKey: queryKeys.tagCoOccurrence(),
     queryFn: () => getTagCoOccurrence().then((r) => r.data.pairs),
     staleTime: 60_000,
     enabled: computed(() => viewMode.value === 'facets'),
@@ -229,59 +233,145 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   function clearFilters() {
     selectedTagIds.value = new Set()
     excludedTagIds.value = new Set()
-    showUntagged.value = false
     searchText.value = ''
     debouncedText.value = ''
     tagMode.value = 'and'
   }
 
-  function navigateToDocuments() {
+  /**
+   * The single canonical filter → route-query serializer. Every site that
+   * navigates to (or returns to) the document list — `navigateToDocuments`,
+   * `syncUrl`, and DocumentList's full-view `returnTo` — must build the query
+   * from this one function so a filter dimension (notably `exclude`) can never
+   * be dropped in one site but preserved in another.
+   */
+  function buildFilterQuery(): Record<string, string> {
     const query: Record<string, string> = {}
     if (selectedTagIds.value.size) query.tags = [...selectedTagIds.value].join(',')
     if (excludedTagIds.value.size) query.exclude = [...excludedTagIds.value].join(',')
     if (tagMode.value === 'or') query.mode = 'or'
     if (debouncedText.value.trim()) query.search = debouncedText.value.trim()
-    router.push({ name: 'documents', query })
+    return query
+  }
+
+  function navigateToDocuments() {
+    router.push({ name: 'documents', query: buildFilterQuery() })
   }
 
   // --- URL sync ---
 
+  // True from the moment hydration begins until it fully completes (all ids
+  // resolved). While set, the URL is authoritative and syncUrl is suppressed —
+  // otherwise the PARTIAL state initFromUrl writes (search/mode applied before
+  // tags settle) would trigger syncUrl → router.replace with a query missing the
+  // not-yet-resolved tags/exclude, dropping them from the URL before they can
+  // hydrate. This closes the write-back feedback loop at its source.
+  let hydrating = false
+
   function syncUrl() {
+    if (hydrating) return
     if (!route.path.startsWith('/document') || route.path.startsWith('/document/')) return
-    const query: Record<string, string> = {}
-    if (selectedTagIds.value.size) query.tags = [...selectedTagIds.value].join(',')
-    if (excludedTagIds.value.size) query.exclude = [...excludedTagIds.value].join(',')
-    if (tagMode.value === 'or') query.mode = 'or'
-    if (debouncedText.value.trim()) query.search = debouncedText.value.trim()
-    router.replace({ name: 'documents', query: Object.keys(query).length ? query : {} })
+    router.replace({ name: 'documents', query: buildFilterQuery() })
   }
 
   watch([selectedTagIdArray, excludedTagIdArray, tagMode, debouncedText], syncUrl)
 
-  function initFromUrl() {
+  // Fully reflect the route query as the source of truth: EVERY filter dimension
+  // is set from the query, and a dimension ABSENT from the query is reset to its
+  // default (empty selection/exclusion, 'and' mode, empty search). Applying only
+  // present dimensions would leave stale state when navigating back from a
+  // filtered URL to a bare /document.
+  //
+  // Tag-INDEPENDENT dimensions (search, mode, and the clears) always apply.
+  // Tag/exclude id resolution needs the tags query to have SETTLED: while the
+  // query is still in flight AND the URL carries ids, we cannot know which ids
+  // are valid, so we return false to DEFER. Once the query has settled — even to
+  // an empty [] — we resolve whatever ids match (possibly none) and return true.
+  // Never infer load-state from tagMap.size (loaded-empty looks identical to
+  // still-loading).
+  function initFromUrl(): boolean {
     const raw = (route.query.tags as string) || ''
     const rawExcl = (route.query.exclude as string) || ''
     const mode = (route.query.mode as string) || 'and'
     const search = (route.query.search as string) || ''
 
-    if (raw) {
-      const ids = raw.split(',').filter(Boolean)
-      selectedTagIds.value = new Set(ids.filter((id) => tagMap.value.has(id)))
-    }
-    if (rawExcl) {
-      const ids = rawExcl.split(',').filter(Boolean)
-      excludedTagIds.value = new Set(ids.filter((id) => tagMap.value.has(id)))
-    }
-    if (mode === 'or') tagMode.value = 'or'
-    if (search) {
-      searchText.value = search
-      debouncedText.value = search
+    // Tag-INDEPENDENT dimensions apply IMMEDIATELY and unconditionally, ABOVE the
+    // defer point — a cold-load of /document?tags=a&search=invoice must run the
+    // document query WITH the known search right away, not wait for tags to
+    // settle. Only tag-id RESOLUTION below is gated on the settled signal.
+    tagMode.value = mode === 'or' ? 'or' : 'and'
+    searchText.value = search
+    debouncedText.value = search
+
+    // Defer only the id resolution: while the tags query is in flight and the URL
+    // carries ids, we cannot know which ids are valid. Return false so the
+    // signature stays pending and the settled-signal watch re-runs this (which
+    // re-applies the tag-independent dims idempotently and then resolves the ids).
+    const hasIdsToResolve = !!(raw || rawExcl)
+    if (hasIdsToResolve && !tagsFetched.value) return false
+
+    const selIds = raw ? raw.split(',').filter(Boolean) : []
+    selectedTagIds.value = new Set(selIds.filter((id) => tagMap.value.has(id)))
+
+    const exclIds = rawExcl ? rawExcl.split(',').filter(Boolean) : []
+    excludedTagIds.value = new Set(exclIds.filter((id) => tagMap.value.has(id)))
+
+    return true
+  }
+
+  // Hydration must be driven by the ROUTE QUERY, not by tag data. A ['tags']
+  // refetch (tag CRUD invalidates it; 60s stale) must NOT re-read the route and
+  // clobber the user's live selection. But a genuine route-query change
+  // (back-button, in-session nav to /document?tags=…&exclude=…) MUST re-hydrate.
+  //
+  // We key hydration on a signature of the route query and re-run initFromUrl
+  // only when that signature changes. The signature is committed ONLY once
+  // hydration actually applied — if ids are present but the tags query has not
+  // settled yet, it stays pending so the settled-signal watch retries.
+  function routeQuerySignature(): string {
+    const q = route.query
+    return JSON.stringify([q.tags ?? '', q.exclude ?? '', q.mode ?? '', q.search ?? ''])
+  }
+
+  let hydratedSignature: string | null = null
+  function hydrateFromRoute() {
+    const sig = routeQuerySignature()
+    if (sig === hydratedSignature) return
+    // The URL is authoritative for the whole hydration span. Suppress syncUrl
+    // (via `hydrating`) so the partial state initFromUrl writes before ids
+    // resolve is never written back to the URL — otherwise unresolved
+    // tags/exclude would be dropped from the query mid-hydration.
+    hydrating = true
+    // Commit the signature only if hydration COMPLETED. A false return means ids
+    // were present but the tags query had not settled — leave the signature
+    // pending AND `hydrating` true so the settled-signal retry finishes it.
+    // Because settle is keyed on isFetched (true even for []), initFromUrl always
+    // returns true once the query settles, so `hydrating` always clears — no
+    // stuck-true path.
+    if (initFromUrl()) {
+      hydratedSignature = sig
+      hydrating = false
     }
   }
 
-  watch(tagsData, (tags) => {
-    if (tags?.length) initFromUrl()
-  }, { immediate: true })
+  watch(
+    () => routeQuerySignature(),
+    () => hydrateFromRoute(),
+  )
+
+  // Drive hydration off the SETTLED signal, not `tags?.length`. `immediate: true`
+  // runs it at store creation: even while the tags query is still in flight, this
+  // applies the tag-INDEPENDENT dims (search/mode/clears) immediately and defers
+  // only id resolution (signature left pending). When the query later settles —
+  // even to an empty [] — the watch fires again and completes hydration (commits
+  // the signature). Called unconditionally: the signature guard in
+  // hydrateFromRoute makes an already-completed hydration a no-op, so a bare
+  // ['tags'] refetch never clobbers the live selection.
+  watch(
+    tagsFetched,
+    () => hydrateFromRoute(),
+    { immediate: true },
+  )
 
   // --- Debounce ---
 
@@ -320,5 +410,6 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     removeTag,
     clearFilters,
     navigateToDocuments,
+    buildFilterQuery,
   }
 })

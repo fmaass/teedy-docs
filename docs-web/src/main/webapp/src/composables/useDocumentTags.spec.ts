@@ -1,85 +1,133 @@
-import { describe, it, expect } from 'vitest'
-import { buildFullParams } from './useDocumentTags'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { DocumentDetail } from '../api/document'
 
-// Minimal DocumentDetail factory: only the fields buildFullParams reads matter.
-function makeDoc(
-  metadata: DocumentDetail['metadata'],
-  overrides: Partial<DocumentDetail> = {},
-): DocumentDetail {
+// --- Dependency mocks (NOT the unit under test) ---
+//
+// useDocumentTags pulls in vue-query (useQueryClient) and PrimeVue (useToast) at
+// call time, plus the document API. We mock those so the composable's OWN logic
+// — which param builder it calls, what it invalidates, that it never re-sends
+// every field — runs for real against controllable data.
+
+const invalidateQueries = vi.fn()
+vi.mock('@tanstack/vue-query', () => ({
+  useQueryClient: () => ({ invalidateQueries }),
+}))
+
+const toastAdd = vi.fn()
+vi.mock('primevue/usetoast', () => ({
+  useToast: () => ({ add: toastAdd }),
+}))
+
+const getDocumentMock = vi.fn<(id: string) => Promise<{ data: DocumentDetail }>>()
+const updateDocumentMock =
+  vi.fn<(id: string, params: URLSearchParams) => Promise<{ data: { id: string } }>>(() =>
+    Promise.resolve({ data: { id: 'doc1' } }),
+  )
+vi.mock('../api/document', () => ({
+  getDocument: (id: string) => getDocumentMock(id),
+  updateDocument: (id: string, params: URLSearchParams) => updateDocumentMock(id, params),
+}))
+
+import { useDocumentTags } from './useDocumentTags'
+
+function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
   return {
     id: 'doc1',
     title: 'A title',
-    description: '',
+    description: 'a long description that must NOT be re-sent on a tag toggle',
     create_date: 0,
     update_date: 0,
     language: 'eng',
     file_id: null,
     file_count: 0,
-    tags: [],
+    tags: [{ id: 't1', name: 'A', color: '#000' }],
     shared: false,
-    subject: '',
-    identifier: '',
-    publisher: '',
-    format: '',
-    source: '',
-    type: '',
-    coverage: '',
-    rights: '',
-    creator: '',
+    subject: 'subj',
+    identifier: 'id',
+    publisher: 'pub',
+    format: 'fmt',
+    source: 'src',
+    type: 'typ',
+    coverage: 'cov',
+    rights: 'rts',
+    creator: 'me',
     writable: true,
     contributors: [],
-    relations: [],
-    metadata,
+    relations: [{ id: 'rel1', title: 'R', source: true }],
+    metadata: [{ id: 'm1', name: 'Count', type: 'INTEGER', value: 5 }],
     ...overrides,
   }
 }
 
-// Extract the (metadata_id, metadata_value) pairs in submission order.
-function metadataPairs(p: URLSearchParams): Array<{ id: string; value: string }> {
-  const ids = p.getAll('metadata_id')
-  const values = p.getAll('metadata_value')
-  return ids.map((id, i) => ({ id, value: values[i] }))
+function sentParams(): URLSearchParams {
+  return updateDocumentMock.mock.calls[0][1]
 }
 
-describe('buildFullParams — metadata serialization (backend rejects blank numeric/date)', () => {
-  it('omits an unset INTEGER field (no metadata_id/metadata_value pair for it)', () => {
-    // Unset INTEGER would be validated as Integer.parseInt("") -> 400 on the whole save.
-    const doc = makeDoc([{ id: 'int', name: 'Count', type: 'INTEGER' }])
-    const params = buildFullParams(doc, [])
-    expect(params.getAll('metadata_id')).not.toContain('int')
-    expect(metadataPairs(params)).toEqual([])
+describe('useDocumentTags — partial-update contract (title+language+tags only)', () => {
+  beforeEach(() => {
+    invalidateQueries.mockClear()
+    toastAdd.mockClear()
+    getDocumentMock.mockReset()
+    updateDocumentMock.mockClear()
   })
 
-  it('omits an unset FLOAT field (no metadata_id/metadata_value pair for it)', () => {
-    const doc = makeDoc([{ id: 'flt', name: 'Amount', type: 'FLOAT' }])
-    const params = buildFullParams(doc, [])
-    expect(params.getAll('metadata_id')).not.toContain('flt')
-    expect(metadataPairs(params)).toEqual([])
+  it('addTag sends ONLY title, language and the new tag list — never description/subject/metadata/relations', async () => {
+    const { addTag } = useDocumentTags()
+    await addTag('doc1', 't2', makeDoc())
+
+    const p = sentParams()
+    expect(p.get('title')).toBe('A title')
+    expect(p.get('language')).toBe('eng')
+    expect(p.getAll('tags')).toEqual(['t1', 't2'])
+    // Partial update: none of these fields may be re-sent (would clobber a
+    // concurrent edit).
+    expect(p.has('description')).toBe(false)
+    expect(p.has('subject')).toBe(false)
+    expect(p.has('metadata_id')).toBe(false)
+    expect(p.has('relations')).toBe(false)
   })
 
-  it('omits an unset DATE field (no metadata_id/metadata_value pair for it)', () => {
-    const doc = makeDoc([{ id: 'dat', name: 'Due', type: 'DATE' }])
-    const params = buildFullParams(doc, [])
-    expect(params.getAll('metadata_id')).not.toContain('dat')
-    expect(metadataPairs(params)).toEqual([])
+  it('removeTag drops the target tag and preserves the rest, still partial-update', async () => {
+    const { removeTag } = useDocumentTags()
+    await removeTag('doc1', 't1', makeDoc({ tags: [
+      { id: 't1', name: 'A', color: '#000' },
+      { id: 't2', name: 'B', color: '#000' },
+    ] }))
+
+    const p = sentParams()
+    expect(p.getAll('tags')).toEqual(['t2'])
+    expect(p.has('description')).toBe(false)
+    expect(p.has('metadata_id')).toBe(false)
   })
 
-  it('serializes a set STRING field', () => {
-    const doc = makeDoc([{ id: 'str', name: 'Text', type: 'STRING', value: 'hello' }])
-    const params = buildFullParams(doc, [])
-    expect(metadataPairs(params)).toEqual([{ id: 'str', value: 'hello' }])
+  it('addTag is a no-op update when the doc already has the tag', async () => {
+    const { addTag } = useDocumentTags()
+    await addTag('doc1', 't1', makeDoc())
+    expect(updateDocumentMock).not.toHaveBeenCalled()
   })
 
-  it('serializes a set BOOLEAN false (false is meaningful, not unset)', () => {
-    const doc = makeDoc([{ id: 'bool', name: 'Flag', type: 'BOOLEAN', value: false }])
-    const params = buildFullParams(doc, [])
-    expect(metadataPairs(params)).toEqual([{ id: 'bool', value: 'false' }])
+  it('fetches the document itself only when no currentDoc is supplied (no redundant pre-fetch)', async () => {
+    getDocumentMock.mockResolvedValue({ data: makeDoc() })
+    const { addTag } = useDocumentTags()
+
+    // currentDoc supplied → no fetch.
+    await addTag('doc1', 't2', makeDoc())
+    expect(getDocumentMock).not.toHaveBeenCalled()
+
+    // no currentDoc → exactly one fetch, and NO trailing re-fetch after the update.
+    await addTag('doc1', 't3')
+    expect(getDocumentMock).toHaveBeenCalledTimes(1)
   })
 
-  it('always serializes tags', () => {
-    const doc = makeDoc([{ id: 'int', name: 'Count', type: 'INTEGER' }])
-    const params = buildFullParams(doc, ['tagA', 'tagB'])
-    expect(params.getAll('tags')).toEqual(['tagA', 'tagB'])
+  it('invalidates documents, the single document, and all tag-count queries', async () => {
+    const { addTag } = useDocumentTags()
+    await addTag('doc1', 't2', makeDoc())
+
+    const invalidated = invalidateQueries.mock.calls.map((c) => (c[0] as any).queryKey[0])
+    expect(invalidated).toContain('documents')
+    expect(invalidated).toContain('document')
+    expect(invalidated).toContain('tagStats')
+    expect(invalidated).toContain('tagFacets')
+    expect(invalidated).toContain('tagCoOccurrence')
   })
 })
