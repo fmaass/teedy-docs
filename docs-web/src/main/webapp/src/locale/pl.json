@@ -8,64 +8,19 @@
     "remember_me": "Zapamiętaj mnie",
     "submit": "Zarejestruj się",
     "login_as_guest": "Zaloguj jako gość",
-    "login_failed_title": "Logowanie nieudane",
-    "login_failed_message": "Nieprawidłowy użytkownik lub hasło",
-    "password_lost_btn": "Zgubułeś hasło?",
-    "password_lost_sent_title": "E-mail z instrukcją zmiany hasła został wysłany",
-    "password_lost_sent_message": "Na adres e-mail użytkownika <strong>{username}</strong> została wysłane instrukcja zmiany hasła",
-    "password_lost_error_title": "Błąd zmiany hasła",
-    "password_lost_error_message": "Nie można wysłać instrukcji zmiany hasła, proszę skontaktować się z administratorem, aby zmienić hasło ręcznie"
-  },
-  "passwordlost": {
-    "title": "Zapomniane hasło",
-    "message": "Proszę podać nazwę użytkownika aby otrzymać link zmiany hasła. Jesli nie pamiętasz nazwy swojego konta, skontaktuj się ze swoim administratorem",
-    "submit": "Zresetuj moje hasło"
-  },
-  "passwordreset": {
-    "message": "Proszę podać nowe hasło",
-    "submit": "Ustaw hasło",
-    "error_title": "Nie udało się zmienić twojego hasła",
-    "error_message": "Twoje żądanie odzyskania hasła wygasło, proszę ponownie wygenerować żądanie na stronie logowania"
+    "password_lost_btn": "Zgubułeś hasło?"
   },
   "index": {
-    "toggle_navigation": "Przełącz nawigację",
-    "nav_documents": "Dokumenty",
-    "nav_tags": "Etykiety",
-    "nav_users_groups": "Użytkownicy i Grupy",
-    "error_info": "{count} nowe błędy",
-    "logged_as": "Zalogowany jako {username}",
-    "nav_settings": "Ustawienia",
-    "logout": "Wyloguj",
-    "global_quota_warning": "<strong>Ostrzeżenie!</strong> Zajęta przestrzeń dyskowa osiągnęła {current}MB ({percent}%) z dostępnych {total}MB"
+    "logout": "Wyloguj"
   },
   "document": {
-    "navigation_up": "Skocz do wyższego poziomu",
-    "toggle_navigation": "Przełącz nawigację folderu",
-    "display_mode_list": "Wyświetl dokumenty jako listę",
-    "display_mode_grid": "Wyświetl dokumenty jako siatkę",
-    "search_simple": "Proste wyszukiwanie",
-    "search_fulltext": "Wyszukiwanie pełnotekstowe",
     "search_creator": "Twórca",
-    "search_language": "Język",
-    "search_before_date": "Utworzone przed datą",
-    "search_after_date": "Utworzone po dacie",
-    "search_before_update_date": "Zmienione przed datą",
-    "search_after_update_date": "Zmienione po dacie",
-    "search_tags": "Etykiety",
-    "search_shared": "Tylko udostępnione dokumenty",
     "search_clear": "Czyść",
-    "any_language": "Dowolny język",
-    "add_document": "Dodaj dokument",
-    "import_eml": "Importuj z wiadomości e-mail (format EML)",
     "tags": "Etykiety",
     "no_tags": "Brak etykiet",
-    "no_documents": "Brak dokumentów w bazie",
     "search": "Szukaj",
-    "search_empty": "Nie znaleziono wyników dla <strong>\"{search}\"</strong>",
-    "shared": "Udostępniony",
     "title": "Tytuł",
     "description": "Opis",
-    "contributors": "Współtwórcy",
     "language": "Język",
     "creation_date": "Data utworzenia",
     "subject": "Temat",
@@ -76,219 +31,29 @@
     "type": "Rodzaj",
     "coverage": "Okładka",
     "rights": "Prawa",
-    "relations": "Powiązania",
-    "page_size": "Rozmiar strony",
-    "page_size_10": "10 na stronę",
-    "page_size_20": "20 na stronę",
-    "page_size_30": "30 na stronę",
-    "upgrade_quota": "Aby zwiększyć twój limit, zapytaj swojego administratora",
-    "quota": "{current}MB ({percent}%) z dostępnych {total}MB",
     "count": "{count} dokument{count} znaleziony",
-    "last_updated": "Ostatnio zmieniony {date}",
     "view": {
       "delete_comment_title": "Usuń komentarz",
       "delete_comment_message": "Naprawdę chcesz usunąć ten komentarz?",
-      "delete_document_title": "Usuń dokument",
-      "delete_document_message": "Naprawdę chcesz usunąć ten dokument?",
-      "shared_document_title": "Udostępniony dokument",
-      "shared_document_message": "Możesz udostępnić ten dokument, podając ten link. Pamiętaj, że każdy, kto ma ten link, może zobaczyć dokument.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
-      "not_found": "Nie znaleziono dokumentu",
-      "forbidden": "Odmowa dostępu",
-      "download_files": "Pobierz pliki",
-      "export_pdf": "Eksportuj do PDF",
-      "by_creator": "przez",
       "comments": "Komentarze",
       "no_comments": "Brak komentarzy do tego dokumentu",
       "add_comment": "Dodaj komentarz",
       "error_loading_comments": "Błąd ładowania komentarzy",
       "content": {
-        "content": "Treść",
-        "delete_file_title": "Usuń plik",
-        "delete_file_message": "Naprawdę chcesz usunąć ten plik?",
-        "upload_pending": "Oczekuje...",
-        "upload_progress": "Przesyłam...",
-        "upload_error": "Błąd przesyłania",
-        "upload_error_quota": "Przekroczony limit",
-        "drop_zone": "Przeciągnij i upuść tutaj, aby przesłać",
-        "add_files": "Dodaj pliki",
-        "file_processing_indicator": "Ten plik jest właśnie przetwarzany. Wyszukiwanie nie jest dostępne zanim się nie zakończy.",
-        "reprocess_file": "Przetwórz plik ponownie",
-        "upload_new_version": "Prześlij nową wersję",
-        "open_versions": "Pokaż historię wersji",
-        "display_mode_list": "Wyświetl pliki jako listę",
-        "display_mode_grid": "Wyświetl pliki jako siatkę"
+        "content": "Treść"
       },
       "permissions": {
-        "permissions": "Uprawnienia",
-        "message": "Uprawnienia mogą być zastosowane do tego dokumentu lub z <a href=\"#/tag\">etykietą</a>.",
-        "title": "Uprawnienia do tego dokumentu",
-        "inherited_tags": "Uprawnienia dziedziczone z etykiet",
-        "acl_source": "Od",
-        "acl_target": "Do",
-        "acl_permission": "Uprawnienie"
+        "permissions": "Uprawnienia"
       },
       "activity": {
-        "activity": "Aktywność",
-        "message": "Każda akcja na tym dokumencie jest logowana tutaj."
+        "activity": "Aktywność"
       }
-    },
-    "edit": {
-      "document_edited_with_errors": "Dokument prawidłowo edytowany ale niektóre pliki nie zostały przesłane",
-      "document_added_with_errors": "Dokument prawidłowo dodany, ale niektóre pliki nie mogą zostać przesłane",
-      "quota_reached": "Przekroczony dostępny limit",
-      "primary_metadata": "Podstawowe metadane",
-      "title_placeholder": "Nazwa tego zasobu",
-      "description_placeholder": "Konto zasobu",
-      "new_files": "Nowe pliki",
-      "orphan_files": "+ {count} plik{count}",
-      "additional_metadata": "Dodatkowe metadane",
-      "subject_placeholder": "Temat zasobu",
-      "identifier_placeholder": "Niejednoznaczne odniesienie do zasobu w danym kontekście",
-      "publisher_placeholder": "Podmiot odpowiedzialny za udostępnienie zasobu",
-      "format_placeholder": "Format pliku, nośnik fizyczny lub wymiary zasobu",
-      "source_placeholder": "Powiązany zasób, z którego pochodzi opisany zasób",
-      "uploading_files": "Przesyłanie plików..."
-    },
-    "default": {
-      "upload_pending": "Oczekiwanie...",
-      "upload_progress": "Przesyłam...",
-      "upload_error": "Błąd przesyłania",
-      "upload_error_quota": "Przekroczony limit pojemności",
-      "quick_upload": "Szybkie przesyłanie",
-      "drop_zone": "Przeciągnij i upuść tutaj, aby przesłać",
-      "add_files": "Dodaj pliki",
-      "add_new_document": "Dodaj do nowego dokumentu",
-      "latest_activity": "Ostatnie aktywności",
-      "footer_sismics": "Wykonane z <span class=\"fas fa-heart\"></span> przez <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
-      "api_documentation": "Dokumentacja API",
-      "feedback": "Przeslij uwagi",
-      "select_all": "Zaznacz wszystko",
-      "select_none": "Odznacz wszystko"
-    },
-    "pdf": {
-      "export_title": "Eksportuj do PDF",
-      "export_metadata": "Eksport metadanych",
-      "export_comments": "Eksport komentarzy",
-      "fit_to_page": "Dostosuj obraz do strony",
-      "margin": "Margines",
-      "millimeter": "mm"
-    },
-    "share": {
-      "title": "Udostępnij dokument",
-      "message": "Nazwa udostępnienie, jeśli chcesz udostępnić wiele razy ten sam dokument.",
-      "submit": "Udostępnij"
-    }
-  },
-  "file": {
-    "view": {
-      "previous": "Poprzedni",
-      "next": "Nastepny",
-      "not_found": "Plik nie znaleziony"
-    },
-    "edit": {
-      "title": "Edytuj plik",
-      "name": "Nazwa pliku"
-    },
-    "versions": {
-      "title": "Historia wersji",
-      "filename": "Nazwa pliku",
-      "mimetype": "Rodzaj",
-      "create_date": "Data utworzenia",
-      "version": "Wersja"
-    }
-  },
-  "tag": {
-    "new_tag": "Nowa etykieta",
-    "search": "Znajdź",
-    "default": {
-      "title": "Etykiety",
-      "message_1": "<strong>Etykiety</strong> przypisane do dokumentów.",
-      "message_2": "Dokument może posiadać wiele etykiet oraz etykieta może być przypisana do wielu dokumentów.",
-      "message_3": "Użyj <span class=\"fas fa-pencil-alt\"></span> przycisku, aby edytować uprawnienia do etykiety.",
-      "message_4": "Jeśli etykieta może być odczytywana przez innego użytkownika lub grupę, powiązanie dokumenty mogą być również odczytywane przez tych użytkowników.",
-      "message_5": "Dla przykładu, oznacz dokumenty firmowe etykietów <span class=\"label label-info\">MojaOrganizacja</span> i dodaj uprawnienia <strong>Odczyt</strong> dla grupy <span class=\"btn btn-default\">pracownicy</span>"
-    },
-    "edit": {
-      "delete_tag_title": "Usuń etykietę",
-      "delete_tag_message": "Naprawdę chcesz usunąć tą etykietę?",
-      "name": "Nazwa",
-      "color": "Kolor",
-      "parent": "nadrzędny",
-      "info": "Uprawnienia do tej etykiety zostaną zastosowane do dokumentów oznaczonych <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span>",
-      "circular_reference_title": "Zapętlone odwołanie",
-      "circular_reference_message": "Hierarchia nadrzędnej etykiety tworzy pętlę, proszę wybrać innego rodzica."
-    }
-  },
-  "group": {
-    "profile": {
-      "members": "Członkowie",
-      "no_members": "Brak członków",
-      "related_links": "Powiązane linki",
-      "edit_group": "Edytuj grupę {name}"
-    }
-  },
-  "user": {
-    "profile": {
-      "groups": "Grupy",
-      "quota_used": "Wykorzystany limit",
-      "percent_used": "{percent}% w użyciu",
-      "related_links": "Powiązane linki",
-      "document_created": "Dokumenty utworzone przez {username}",
-      "edit_user": "Edytuj użytkownika {username}"
-    }
-  },
-  "usergroup": {
-    "search_groups": "Szukaj w grupach",
-    "search_users": "Szukaj w użytkownikach",
-    "you": "To ty!",
-    "default": {
-      "title": "Użytkownicy i grupy",
-      "message": "Tutaj dowiesz się o użytkownikach i grupach."
     }
   },
   "settings": {
-    "menu_personal_settings": "Ustawienia prywatności",
-    "menu_user_account": "Konto użytkownika",
     "menu_two_factor_auth": "Uwierzytelnienie dwuskładnikowe (M2F)",
     "menu_opened_sessions": "Otwarte sesje",
-    "menu_file_importer": "Wsadowy import plików",
-    "menu_general_settings": "Ustawienia główne",
-    "menu_users": "Użytkownicy",
-    "menu_groups": "Grupy",
-    "menu_configuration": "Konfiguracja",
     "menu_inbox": "Skanowanie skrzynki wejściowej",
-    "menu_metadata": "Niestandardowe metadane",
-    "menu_monitoring": "Monitorowanie",
-    "user": {
-      "title": "Zarządzanie użytkownikami",
-      "add_user": "Dodaj użytkownika",
-      "username": "Nazwa użytkownika",
-      "create_date": "Data utowrzenia",
-      "totp_enabled": "Uwierzytelnienie dwuskładnikowe jest włączone dla tego konta",
-      "edit": {
-        "delete_user_title": "Usuń użytkownika",
-        "delete_user_message": "Naprawdę chcesz usunąć tego użytkownika? Wszystkie powiązane dokumenty, pliki oraz etykiety zostaną usunięte",
-        "user_used_title": "Użytkownicy w użyciu",
-        "edit_user_failed_title": "Użytkownik już istnieje",
-        "edit_user_failed_message": "Nazwa użytkownika jest już używana",
-        "edit_user_title": "Edytuj \"{username}\"",
-        "add_user_title": "Dodaj użytkownika",
-        "username": "nazwa użytkownika",
-        "email": "E-mail",
-        "groups": "Grupy",
-        "storage_quota": "Limit rozmiaru magazynu",
-        "storage_quota_placeholder": "Limit rozmiaru (w MB)",
-        "password": "Hasło",
-        "password_confirm": "hasło (powtórzenie)",
-        "disabled": "Użytkownik wyłączony",
-        "password_reset_btn": "Wyśli wiadomość ze zmianą hasła do użytkownika",
-        "password_lost_sent_title": "Wiadomość ze zmianą hasła została wysłana",
-        "password_lost_sent_message": "Wiadomość z instrukcją zmiany hasła została wysłana do <strong>{username}</strong>",
-        "disable_totp_btn": "Wyłącz uwierzytelnienie dwuskładnikowe dla tego użytkownika",
-        "disable_totp_title": "Wyłącz uwierzytelnienie dwuskładnikowe",
-        "disable_totp_message": "Jesteś pewien, że chcesz wyłączyć uwierzytelnienie wduskładnikowe dla tego użytkownika?"
-      }
-    },
     "security": {
       "enable_totp": "Aktywuj uwierzytelnienie dwuskładnikowe",
       "enable_totp_message": "Upewnij się, że masz w telefonie aplikację kompatybilną z TOTP, gotową do dodania nowego konta",
@@ -311,67 +76,6 @@
       "test_code_success": "Kod weryfikacyjny jest poprawny",
       "test_code_fail": "Ten kod jest nieprawidłowy. Sprawdź dokładnie, czy Twój telefon jest poprawnie skonfigurowany lub wyłącz uwierzytelnianie dwuskładnikowe"
     },
-    "group": {
-      "title": "Zarządzanie grupami",
-      "add_group": "Dodaj grupę",
-      "name": "Nazwa",
-      "edit": {
-        "delete_group_title": "Usuń grupę",
-        "delete_group_message": "Czy na pewno chcesz usunąć tę grupę?",
-        "edit_group_failed_title": "Grupa już istnieje",
-        "edit_group_failed_message": "Ta nazwa grupy jest już zajęta przez inną grupę",
-        "group_used_title": "Grupa w użyciu",
-        "edit_group_title": "Edytuj \"{name}\"",
-        "add_group_title": "Dodaj grupę",
-        "name": "Nazwa",
-        "parent_group": "nadrzędna grupa",
-        "search_group": "Znajdź grupę",
-        "members": "Członkowie grupy",
-        "new_member": "Nowy członek",
-        "search_user": "Znajdź użytkownika"
-      }
-    },
-    "account": {
-      "title": "Konto użytkownika",
-      "password": "Hasło",
-      "password_confirm": "Hasło (powtórzenie)",
-      "updated": "Konto zostało zaktualizowane"
-    },
-    "config": {
-      "title_guest_access": "Dostęp gościa",
-      "message_guest_access": "Dostęp gościa jest trybem, kiedy każdy może uzyskać dostęp do {appName} bez hasła.<br/>Użyj normalnego użytkownika jeśli chesz, aby gość uzyskał dostęp do dokumentów zgodnie z przypisanymi uprawnieniami.<br/>",
-      "enable_guest_access": "Włącz dostęp gościa",
-      "disable_guest_access": "Wyłącz dostęp gościa",
-      "title_theme": "Zmiana szablonu",
-      "title_general": "Ustawienia podstawowe",
-      "default_language": "Domyślny język dla nowych dokumentów",
-      "application_name": "Nazwa aplikacji",
-      "main_color": "Podstawowy kolor",
-      "custom_css": "Niestandardowe CSS",
-      "custom_css_placeholder": "Niestandardowe CSS zostaną dodane do głównych ustawień styli",
-      "logo": "Logo (rozmiar kwadratowy)",
-      "background_image": "Obraz tła",
-      "uploading_image": "Przesyłanie obrazu...",
-      "title_smtp": "Ustawienia e-mail",
-      "smtp_hostname": "Host SMTP",
-      "smtp_port": "Port SMTP",
-      "smtp_from": "Nadawca e-mail (nazwa)",
-      "smtp_username": "Uzytkownik SMTP",
-      "smtp_password": "Hasło SMTP",
-      "smtp_updated": "Ustawienia SMTP zostały zaktualizowano",
-      "webhooks": "Webhook-i",
-      "webhooks_explain": "Webhook zostanie wywołany, gdy wystąpi określone zdarzenie. Podany adres URL zostanie wywołany ze strukturą JSON zawierającym nazwę zdarzenia i identyfikator danego zasobu.",
-      "webhook_event": "Zdarzenia",
-      "webhook_url": "URL",
-      "webhook_create_date": "Data utworzenia",
-      "webhook_add": "Dodaj webhook"
-    },
-    "metadata": {
-      "title": "Niestandardowa konfiguracja metadanych",
-      "message": "Tutaj możesz dodać niestandardowe metadane do swoich dokumentów, takie jak wewnętrzny identyfikator lub data ważności. Pamiętaj, że po utworzeniu nie można zmienić typu metadanych.",
-      "name": "Nazwa metadanych",
-      "type": "Typ metadanych"
-    },
     "inbox": {
       "title": "Skanowanie poczty przychodzącej",
       "message": "Po włączeniu tej funkcji system będzie skanować określoną skrzynkę odbiorczą co minutę w poszukiwaniu <strong>nieprzeczytanych</strong> wiadomości e-mail i automatycznie je importować. <br/> Po zaimportowaniu wiadomości e-mail zostanie oznaczona jako przeczytana. <br/> Konfiguracja ustawienia dla <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -390,19 +94,6 @@
       "autoTagsEnabled": "Automatycznie dodawaj etykiety z wiersza tematu oznaczonego #",
       "deleteImported": "Usuń wiadomość ze skrzynki pocztowej po zaimportowaniu"
     },
-    "monitoring": {
-      "background_tasks": "Zadania w tle",
-      "queued_tasks": "Obecnie w kolejce znajduje się {count} zadań.",
-      "queued_tasks_explain": "Przetwarzanie plików, tworzenie miniatur, aktualizacja indeksu, optyczne rozpoznawanie znaków to zadania w tle. Duża liczba nieprzetworzonych zadań spowoduje niekompletne wyniki wyszukiwania.",
-      "server_logs": "Dziennik serwera",
-      "log_date": "Data",
-      "log_tag": "Etykieta",
-      "log_message": "Wiadomość",
-      "indexing": "Indeksowanie",
-      "indexing_info": "Jeśli zauważysz rozbieżności w wynikach wyszukiwania, możesz spróbować wykonać pełne reindeksowanie. Wyniki wyszukiwania będą niekompletne, dopóki ta operacja nie zostanie wykonana.",
-      "start_reindexing": "Rozpocznij pełne reindeksowanie",
-      "reindexing_started": "Rozpoczęto ponowne indeksowanie. Poczekaj, aż nie będzie już żadnych zadań w tle."
-    },
     "session": {
       "title": "otwarte sesje",
       "created_date": "Utworzono dnia",
@@ -412,125 +103,11 @@
       "current_session": "To jest bieżąca sesja",
       "clear_message": "Wszystkie inne urządzenia podłączone do tego konta zostaną odłączone",
       "clear": "Wyczyść pozostałe sesje"
-    },
-    "fileimporter": {
-      "title": "Wsadowy importer plików",
-      "advanced_users": "Dla zaawansowanych użytkowników!",
-      "need_intro": "Jeśli potrzebujesz:",
-      "need_1": "Importuj katalog plików naraz",
-      "need_2": "Przeskanuj katalog w poszukiwaniu nowych plików i zaimportuj je",
-      "line_1": "Idź do <a href=\"https://github.com/sismics/docs/releases\">sismics/docs/releases</a> i pobierz narzedzie importu dla twojego systemu.",
-      "line_2": "Sprawdź <a href=\"https://github.com/sismics/docs/tree/master/docs-importer\">instrukcję</a> jak używać tego narzędzia.",
-      "line_3": "Twoje pliki zostaną zaimportowane w dokumentach zgodnie z konfiguracją importera plików.",
-      "download": "Pobierz",
-      "instructions": "Instrukcje"
-    }
-  },
-  "feedback": {
-    "title": "Przekaż nam swoją opinię",
-    "message": "Jakieś sugestie lub pytania dotyczące Teedy? Słuchamy cię!",
-    "sent_title": "Wysłano opinię`",
-    "sent_message": "Dziękujemy za twoją opinię! Pomoże nam to uczynić Teedy jeszcze lepszym."
-  },
-  "import": {
-    "title": "Importowanie",
-    "error_quota": "Osiągnięto limit, skontaktuj się z administratorem, aby zwiększyć limit",
-    "error_general": "Wystąpił błąd podczas próby zaimportowania pliku, upewnij się, że jest to prawidłowy plik EML"
-  },
-  "app_share": {
-    "main": "Poproś o łącze do udostępnionego dokumentu, aby uzyskać do niego dostęp",
-    "403": {
-      "title": "Brak dostępu",
-      "message": "Dokument, który próbujesz wyświetlić, nie jest już udostępniany"
     }
   },
   "directive": {
-    "acledit": {
-      "acl_target": "For",
-      "acl_permission": "Uprawnienia",
-      "add_permission": "Dodaj uprawnienie",
-      "search_user_group": "Wyszukaj użytkownika lub grupę"
-    },
     "auditlog": {
-      "log_created": "utworzony",
-      "log_updated": "zaktualizowany",
-      "log_deleted": "usunięty",
-      "Acl": "ACL",
-      "Comment": "Komentarz",
-      "Document": "Dokument",
-      "File": "Plik",
-      "Group": "Grupa",
-      "Tag": "Etykieta",
-      "User": "Użytkownik",
-      "Webhook": "Webhook"
-    },
-    "selectrelation": {
-      "typeahead": "Wpisz tytuł dokumentu"
-    },
-    "selecttag": {
-      "typeahead": "Wybierz etykietę"
-    },
-    "datepicker": {
-      "current": "Dzisiaj",
-      "clear": "Czyść",
-      "close": "Zakończ"
-    }
-  },
-  "filter": {
-    "filesize": {
-      "mb": "MB",
-      "kb": "kB"
-    }
-  },
-  "acl": {
-    "READ": "Do odczytu",
-    "READWRITE": "Do zapisu i odczytu",
-    "WRITE": "Do zapisu",
-    "USER": "Użytkownik",
-    "GROUP": "Grupa",
-    "SHARE": "Udostępnienienie"
-  },
-  "validation": {
-    "required": "Wymagany",
-    "too_short": "Za krótki",
-    "too_long": "Za długi",
-    "email": "Musi być prawidłowy adres e-mail",
-    "password_confirm": "Hasło i potwierdzenie hasła muszą być zgodne",
-    "number": "Wymagana liczba",
-    "no_space": "Spacje i dwukropki są niedozwolone",
-    "alphanumeric": "Dozwolone są tylko litery i cyfry"
-  },
-  "action_type": {
-    "ADD_TAG": "Dodaj etykietę",
-    "REMOVE_TAG": "Usuń etykietę",
-    "PROCESS_FILES": "Przetwarzane pliki"
-  },
-  "pagination": {
-    "previous": "Poprzedni",
-    "next": "Następny",
-    "first": "Pierwszy",
-    "last": "Ostatni"
-  },
-  "onboarding": {
-    "step1": {
-      "title": "Pierwszy raz?",
-      "description": "Jeśli to Twój pierwszy raz na Teedy, kliknij przycisk Dalej, w przeciwnym razie możesz mnie zamknąć."
-    },
-    "step2": {
-      "title": "Dokumenty",
-      "description": "Teedy jest zorganizowany w dokumentach, a każdy dokument zawiera wiele plików."
-    },
-    "step3": {
-      "title": "Pliki",
-      "description": "Możesz dodawać pliki po utworzeniu dokumentu lub przed skorzystaniem z tego obszaru szybkiego przesyłania."
-    },
-    "step4": {
-      "title": "Wyszukiwanie",
-      "description": "To jest główny sposób na odzyskanie dokumentów. Istnieje również zaawansowane wyszukiwanie za pomocą przycisku lupy."
-    },
-    "step5": {
-      "title": "Etykiety",
-      "description": "Dokumenty można organizować w znaczniki (przypominające superfoldery). Utwórz je tutaj."
+      "Document": "Dokument"
     }
   },
   "yes": "Tak",
@@ -538,19 +115,15 @@
   "ok": "OK",
   "cancel": "Anuluj",
   "share": "Udostępnij",
-  "unshare": "Udwołaj udostępnianie",
   "close": "Zamknij",
   "add": "Dodaj",
   "open": "Otwórz",
-  "see": "Zobacz",
   "save": "Zapisz",
-  "export": "Eksportuj",
   "edit": "Edytuj",
   "delete": "Usuń",
   "rename": "Zmień nazwę",
   "download": "Pobierz",
   "loading": "Ładowanie...",
-  "send": "Wyślij",
   "enabled": "Włączony",
   "disabled": "Wyłączony"
 }
