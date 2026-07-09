@@ -1,0 +1,201 @@
+import { test, expect } from '@playwright/test'
+import { unique, confirmDanger } from './helpers'
+
+// Tag management (create/edit/delete on the /tag page) and the left-panel tag
+// filter — including the tri-state include/exclude toggle and the URL round-trip
+// (the P6/F1 fix: navigating away and back must preserve tags + exclude).
+
+test.describe('tag management', () => {
+  test('creates, edits, and deletes a tag', async ({ page }) => {
+    const name = unique('e2e-tag')
+    const renamed = `${name}-r`
+
+    await page.goto('/#/tag')
+    await expect(page.getByRole('heading', { name: 'Tags' })).toBeVisible()
+
+    // Create: the create card's InputText carries the tag-name placeholder.
+    await page.getByPlaceholder('Tag name').fill(name)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.getByText('Tag created')).toBeVisible()
+
+    // The new tag appears in the tree; open its edit page by clicking it.
+    const node = page.locator('.tag-tree').getByText(name, { exact: true })
+    await expect(node).toBeVisible()
+    await node.click()
+
+    // Edit page: rename and save.
+    await expect(page).toHaveURL(/#\/tag\//)
+    const nameInput = page.locator('#tag-name')
+    await expect(nameInput).toHaveValue(name)
+    await nameInput.fill(renamed)
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText('Tag updated')).toBeVisible()
+
+    // Delete: the danger button opens the confirm dialog; accepting routes back
+    // to the tag list and the tag disappears.
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirmDanger(page)
+    await expect(page).toHaveURL(/#\/tag$/)
+    await expect(page.locator('.tag-tree').getByText(renamed, { exact: true })).toHaveCount(0)
+  })
+})
+
+test.describe('tag filter panel', () => {
+  // The left panel only renders in the documents context on a wide viewport
+  // (isMobile gates on max-width:1024px). The default Desktop Chrome viewport is
+  // 1280px wide, so the desktop aside is present.
+
+  // Small helper to read a query param out of a hash-router URL
+  // (#/document?tags=…&exclude=…): parse the part after the first '?'.
+  function hashQuery(url: string): URLSearchParams {
+    const q = url.slice(url.indexOf('?') + 1)
+    return new URLSearchParams(q)
+  }
+
+  async function createTag(page: import('@playwright/test').Page, name: string) {
+    await page.goto('/#/tag')
+    await page.getByPlaceholder('Tag name').fill(name)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.getByText('Tag created')).toBeVisible()
+    await expect(page.locator('.tag-tree').getByText(name, { exact: true })).toBeVisible()
+  }
+
+  async function deleteTag(page: import('@playwright/test').Page, name: string) {
+    await page.goto('/#/tag')
+    await page.locator('.tag-tree').getByText(name, { exact: true }).click()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirmDanger(page)
+    await expect(page).toHaveURL(/#\/tag$/)
+  }
+
+  test('URL round-trips BOTH an included tag and an excluded tag (P6/F1 regression)', async ({ page }) => {
+    // The regression this guards: an in-URL `tags=` was dropped while other filter
+    // dimensions (exclude/mode/search) survived. To catch that specifically we need
+    // a state carrying BOTH `tags=` AND `exclude=` at once, so seed TWO tags — one
+    // to include, one to exclude — and a document carrying both so they render with
+    // counts in the panel.
+    const includeTag = unique('flt-inc')
+    const excludeTag = unique('flt-exc')
+    await createTag(page, includeTag)
+    await createTag(page, excludeTag)
+
+    const docTitle = unique('flt-doc')
+    await page.goto('/#/document/add')
+    await page.locator('#edit-title').fill(docTitle)
+    await page.locator('#edit-tags').click()
+    await page.getByRole('option', { name: includeTag }).click()
+    await page.getByRole('option', { name: excludeTag }).click()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page).toHaveURL(/#\/document\/view\//)
+
+    await page.goto('/#/document')
+    const panel = page.locator('.left-panel')
+    const incNode = panel.getByRole('button', { name: new RegExp(includeTag) })
+    const excNode = panel.getByRole('button', { name: new RegExp(excludeTag) })
+    await expect(incNode).toBeVisible()
+    await expect(excNode).toBeVisible()
+
+    // INCLUDE the first tag (one click -> selected).
+    await incNode.click()
+    await expect(incNode).toHaveAttribute('aria-pressed', 'true')
+    // EXCLUDE the second tag (two clicks: select then toggle to excluded).
+    await excNode.click()
+    await expect(excNode).toHaveAttribute('aria-pressed', 'true')
+    await excNode.click()
+    await expect(excNode).toHaveClass(/tag-excluded/)
+
+    // The URL must now carry BOTH dimensions.
+    await expect(page).toHaveURL(/[?&]tags=/)
+    await expect(page).toHaveURL(/[?&]exclude=/)
+    const combinedUrl = page.url()
+    const params = hashQuery(combinedUrl)
+    const includedId = params.get('tags')
+    const excludedId = params.get('exclude')
+    expect(includedId, 'URL must carry tags=').toBeTruthy()
+    expect(excludedId, 'URL must carry exclude=').toBeTruthy()
+    expect(includedId).not.toEqual(excludedId)
+
+    // --- Round-trip: navigate AWAY, then back to the combined URL (deep-link /
+    // back-button). BOTH the include selection AND the exclusion must re-hydrate.
+    // This fails if EITHER dimension is dropped — the exact regression guarded. ---
+    await page.goto('/#/settings/account')
+    await expect(page).toHaveURL(/#\/settings\/account/)
+    await page.goto(combinedUrl.substring(combinedUrl.indexOf('#')))
+    await expect(page).toHaveURL(/#\/document/)
+
+    // Included tag: back to a selected (aria-pressed) chip in the panel.
+    await expect(panel.getByRole('button', { name: new RegExp(includeTag) }))
+      .toHaveAttribute('aria-pressed', 'true')
+    // Excluded tag: back to the struck-through excluded state.
+    await expect(panel.getByRole('button', { name: new RegExp(excludeTag) }))
+      .toHaveClass(/tag-excluded/)
+
+    // And the URL the store re-serialized after hydration still carries BOTH ids
+    // (a dropped `tags=` would leave only exclude= here).
+    await expect(page).toHaveURL(/[?&]tags=/)
+    await expect(page).toHaveURL(/[?&]exclude=/)
+    const afterParams = hashQuery(page.url())
+    expect(afterParams.get('tags')).toEqual(includedId)
+    expect(afterParams.get('exclude')).toEqual(excludedId)
+
+    // Cleanup.
+    await deleteTag(page, includeTag)
+    await deleteTag(page, excludeTag)
+  })
+
+  test('tri-state include -> exclude -> clear on a single tag', async ({ page }) => {
+    const tagName = unique('tri')
+    await createTag(page, tagName)
+
+    const docTitle = unique('tri-doc')
+    await page.goto('/#/document/add')
+    await page.locator('#edit-title').fill(docTitle)
+    await page.locator('#edit-tags').click()
+    await page.getByRole('option', { name: tagName }).click()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page).toHaveURL(/#\/document\/view\//)
+
+    await page.goto('/#/document')
+    const panel = page.locator('.left-panel')
+    const node = panel.getByRole('button', { name: new RegExp(tagName) })
+    await expect(node).toBeVisible()
+
+    // INCLUDE -> tags= in URL, aria-pressed.
+    await node.click()
+    await expect(page).toHaveURL(/[?&]tags=/)
+    await expect(node).toHaveAttribute('aria-pressed', 'true')
+
+    // EXCLUDE -> tags= drops, exclude= appears, struck through.
+    await node.click()
+    await expect(page).toHaveURL(/[?&]exclude=/)
+    await expect(page).not.toHaveURL(/[?&]tags=/)
+    await expect(node).toHaveClass(/tag-excluded/)
+
+    // CLEAR -> both drop.
+    await node.click()
+    await expect(page).not.toHaveURL(/[?&]exclude=/)
+    await expect(page).not.toHaveURL(/[?&]tags=/)
+    await expect(node).toHaveAttribute('aria-pressed', 'false')
+
+    await deleteTag(page, tagName)
+  })
+
+  test('toggles between Tree and Facets view modes', async ({ page }) => {
+    await page.goto('/#/document')
+    const panel = page.locator('.left-panel')
+
+    // The view-mode SelectButton exposes Tree and Facets options.
+    const treeBtn = panel.getByRole('button', { name: 'Tree' })
+    const facetsBtn = panel.getByRole('button', { name: 'Facets' })
+    await expect(treeBtn).toBeVisible()
+    await expect(facetsBtn).toBeVisible()
+
+    await facetsBtn.click()
+    await expect(facetsBtn).toHaveAttribute('aria-pressed', 'true')
+
+    await treeBtn.click()
+    await expect(treeBtn).toHaveAttribute('aria-pressed', 'true')
+  })
+})
