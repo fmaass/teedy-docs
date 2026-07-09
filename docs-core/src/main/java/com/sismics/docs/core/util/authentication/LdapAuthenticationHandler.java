@@ -39,6 +39,29 @@ public class LdapAuthenticationHandler implements AuthenticationHandler {
      */
     private static final Logger log = LoggerFactory.getLogger(LdapAuthenticationHandler.class);
 
+    // Conservative, bounded LDAP timeouts (BL-026). Without them, getConnection() used the
+    // client library's long/effectively-unbounded defaults, so every failed internal login
+    // fell through to a full bind+search against the directory; a slow or unreachable
+    // directory then stalled the calling Jetty worker, exhausting the pool. These are kept
+    // as constants (not env-configurable) deliberately: the README is owned by another
+    // phase, and a fail-fast bound of a few seconds is safe for an interactive login path.
+    // A slow directory should fail the login quickly, not hang a request thread.
+    static final long LDAP_CONNECT_TIMEOUT_MS = 5000L;   // TCP connect
+    static final long LDAP_RESPONSE_TIMEOUT_MS = 10000L; // overall/response, read and write ops
+
+    /**
+     * Apply the bounded connect/response timeouts to a connection config so a slow or
+     * unreachable directory fails fast instead of hanging a request thread (BL-026).
+     *
+     * @param config The LDAP connection config to harden
+     */
+    static void applyConnectionTimeouts(LdapConnectionConfig config) {
+        config.setConnectTimeout(LDAP_CONNECT_TIMEOUT_MS);
+        config.setTimeout(LDAP_RESPONSE_TIMEOUT_MS);
+        config.setReadOperationTimeout(LDAP_RESPONSE_TIMEOUT_MS);
+        config.setWriteOperationTimeout(LDAP_RESPONSE_TIMEOUT_MS);
+    }
+
     /**
      * Get a LDAP connection.
      * @return LdapConnection
@@ -56,6 +79,7 @@ public class LdapAuthenticationHandler implements AuthenticationHandler {
         config.setUseSsl(ConfigUtil.getConfigBooleanValue(ConfigType.LDAP_USESSL));
         config.setName(ConfigUtil.getConfigStringValue(ConfigType.LDAP_ADMIN_DN));
         config.setCredentials(ConfigUtil.getConfigStringValue(ConfigType.LDAP_ADMIN_PASSWORD));
+        applyConnectionTimeouts(config);
 
         return new LdapNetworkConnection(config);
     }
@@ -106,14 +130,17 @@ public class LdapAuthenticationHandler implements AuthenticationHandler {
             }
             ldapConnection.bind();
 
-            EntryCursor cursor = ldapConnection.search(ConfigUtil.getConfigStringValue(ConfigType.LDAP_BASE_DN),
-                    ConfigUtil.getConfigStringValue(ConfigType.LDAP_FILTER).replace("USERNAME", escapeLdapSearchFilter(username)), SearchScope.SUBTREE);
-            if (cursor.next()) {
-                userEntry = cursor.get();
-                ldapConnection.bind(userEntry.getDn(), password);
-            } else {
-                // User not found
-                return null;
+            // try-with-resources closes the EntryCursor even on the early-return / exception
+            // paths (BL-026): a leaked cursor holds server-side and client resources open.
+            try (EntryCursor cursor = ldapConnection.search(ConfigUtil.getConfigStringValue(ConfigType.LDAP_BASE_DN),
+                    ConfigUtil.getConfigStringValue(ConfigType.LDAP_FILTER).replace("USERNAME", escapeLdapSearchFilter(username)), SearchScope.SUBTREE)) {
+                if (cursor.next()) {
+                    userEntry = cursor.get();
+                    ldapConnection.bind(userEntry.getDn(), password);
+                } else {
+                    // User not found
+                    return null;
+                }
             }
         } catch (Exception e) {
             log.error("Error authenticating \"" + username + "\" using the LDAP", e);
@@ -121,7 +148,12 @@ public class LdapAuthenticationHandler implements AuthenticationHandler {
         }
 
         UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(username);
+        // Case-insensitive lookup (BL-020). An exact = match is case-sensitive on
+        // PostgreSQL, so a login as "ADMIN" would miss the local "admin" and provision a
+        // second, LDAP-origin shadow account. Folding case here makes the hijack guard
+        // below (and the first-time-provisioning branch) hold on every backend, matching
+        // H2's IGNORECASE behaviour.
+        User user = userDao.getActiveByUsernameIgnoreCase(username);
         if (user == null) {
             // The user is valid but never authenticated, create the user now
             log.info("\"" + username + "\" authenticated for the first time, creating the internal user");

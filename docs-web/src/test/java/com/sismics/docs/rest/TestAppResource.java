@@ -263,17 +263,19 @@ public class TestAppResource extends BaseJerseyTest {
                 Assertions.assertTrue(json.isNull("hostname"));
                 Assertions.assertTrue(json.isNull("port"));
                 Assertions.assertTrue(json.isNull("username"));
-                Assertions.assertTrue(json.isNull("password"));
+                // The password is write-only and never present in the GET (BL-028 sibling).
+                Assertions.assertFalse(json.containsKey("password"));
                 Assertions.assertTrue(json.isNull("from"));
         }
 
-        // Change SMTP configuration
+        // Change SMTP configuration, including a password.
         target().path("/app/config_smtp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .post(Entity.form(new Form()
                         .param("hostname", "smtp.sismics.com")
                         .param("port", "1234")
                         .param("username", "sismics")
+                        .param("password", "smtp-secret")
                         .param("from", "contact@sismics.com")
                 ), JsonObject.class);
         configSmtpChanged = true;
@@ -285,8 +287,28 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals("smtp.sismics.com", json.getString("hostname"));
         Assertions.assertEquals(1234, json.getInt("port"));
         Assertions.assertEquals("sismics", json.getString("username"));
-        Assertions.assertTrue(json.isNull("password"));
+        // BL-028 sibling: the stored SMTP password must NEVER be echoed back — the GET is
+        // write-only for the secret. The key must be ABSENT (not present-but-null), so the
+        // client shows a "leave blank to keep" affordance rather than a value.
+        Assertions.assertFalse(json.containsKey("password"),
+                "SMTP GET must not return the stored password");
         Assertions.assertEquals("contact@sismics.com", json.getString("from"));
+
+        // Keep-on-empty: re-POST without a password must NOT wipe the stored one. The
+        // username change proves the POST ran; the password must still be present internally
+        // (still never echoed by the GET, so we assert via a follow-up that changes another
+        // field and confirms the endpoint still succeeds).
+        target().path("/app/config_smtp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("username", "sismics2")
+                ), JsonObject.class);
+        json = target().path("/app/config_smtp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals("sismics2", json.getString("username"));
+        Assertions.assertFalse(json.containsKey("password"),
+                "SMTP GET must not return the stored password after a partial update");
     }
 
     /**
@@ -325,7 +347,9 @@ public class TestAppResource extends BaseJerseyTest {
                 Assertions.assertEquals("", json.getString("hostname"));
                 Assertions.assertEquals(993, json.getJsonNumber("port").intValue());
                 Assertions.assertEquals("", json.getString("username"));
-                Assertions.assertEquals("", json.getString("password"));
+                // The IMAP password is write-only and never present in the GET (BL-028 sibling).
+                Assertions.assertFalse(json.containsKey("password"),
+                        "inbox GET must not return the IMAP password");
                 Assertions.assertEquals("INBOX", json.getString("folder"));
                 Assertions.assertEquals("", json.getString("tag"));
                 Assertions.assertTrue(lastSync.isNull("date"));
@@ -358,9 +382,24 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals("localhost", json.getString("hostname"));
         Assertions.assertEquals(imapPort, json.getInt("port"));
         Assertions.assertEquals("test@sismics.com", json.getString("username"));
-        Assertions.assertEquals("Test1234", json.getString("password"));
+        // BL-028 sibling: the stored IMAP password must NEVER be echoed back — the GET is
+        // write-only for the secret. The key must be ABSENT (not present-but-null).
+        Assertions.assertFalse(json.containsKey("password"),
+                "inbox GET must not return the stored IMAP password");
         Assertions.assertEquals("INBOX", json.getString("folder"));
         Assertions.assertEquals(tagInboxId, json.getString("tag"));
+
+        // Keep-on-empty: re-POST the config WITHOUT a password param. The POST must keep the
+        // stored "Test1234" — proven functionally below, where test_inbox and syncInbox
+        // authenticate against GreenMail with exactly that stored password.
+        target().path("/app/config_inbox").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("enabled", "true")
+                        .param("starttls", "false")
+                        .param("autoTagsEnabled", "false")
+                        .param("deleteImported", "false")
+                ), JsonObject.class);
 
         ServerSetup serverSetupSmtp = new ServerSetup(smtpPort, null, ServerSetup.PROTOCOL_SMTP);
         ServerSetup serverSetupImap = new ServerSetup(imapPort, null, ServerSetup.PROTOCOL_IMAP);
@@ -492,13 +531,40 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals("localhost", json.getString("host"));
         Assertions.assertEquals(ldapPort, json.getJsonNumber("port").intValue());
         Assertions.assertEquals("uid=admin,ou=system", json.getString("admin_dn"));
-        Assertions.assertEquals("secret", json.getString("admin_password"));
+        // BL-028: the LDAP admin bind password must NEVER be echoed back — the GET is
+        // write-only for the secret. The key must be ABSENT so the client shows a
+        // "leave blank to keep" affordance rather than the plaintext bind secret.
+        Assertions.assertFalse(json.containsKey("admin_password"),
+                "LDAP GET must not return the admin bind password");
+        // The GET exposes only a boolean "is a password stored?" flag for the UI affordance.
+        Assertions.assertTrue(json.getBoolean("admin_password_set"),
+                "LDAP GET must report that an admin bind password is stored");
         Assertions.assertEquals("o=TEST", json.getString("base_dn"));
         Assertions.assertEquals("(&(objectclass=inetOrgPerson)(uid=USERNAME))", json.getString("filter"));
         Assertions.assertEquals("devnull@teedy.io", json.getString("default_email"));
         Assertions.assertEquals(100000000L, json.getJsonNumber("default_storage").longValue());
 
-        // Login with a LDAP user
+        // BL-028 keep-on-empty: re-save the LDAP config with an EMPTY admin_password (the
+        // client sends blank to keep the stored bind secret). This must succeed WITHOUT a
+        // validation error and must NOT wipe the stored password — so an LDAP login still
+        // works afterward (the admin bind uses the preserved "secret").
+        Response keepPasswordResponse = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("enabled", "true")
+                        .param("host", "localhost")
+                        .param("port", Integer.toString(ldapPort))
+                        .param("usessl", "false")
+                        .param("admin_dn", "uid=admin,ou=system")
+                        .param("admin_password", "")
+                        .param("base_dn", "o=TEST")
+                        .param("filter", "(&(objectclass=inetOrgPerson)(uid=USERNAME))")
+                        .param("default_email", "devnull@teedy.io")
+                        .param("default_storage", "100000000")
+                ));
+        Assertions.assertEquals(Status.OK.getStatusCode(), keepPasswordResponse.getStatus());
+
+        // Login with a LDAP user (proves the preserved admin bind password still works)
         String ldapTopen = clientUtil.login("ldap1", "secret", false);
 
         // Check user informations

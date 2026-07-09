@@ -518,6 +518,7 @@
       "port_required": "Port is required.",
       "admin_dn_required": "Bind DN is required.",
       "admin_password_required": "Bind password is required.",
+      "admin_password_keep": "A password is set — leave blank to keep it.",
       "base_dn_required": "Base DN is required.",
       "filter_required": "User search filter is required.",
       "default_email_required": "Default email domain is required.",

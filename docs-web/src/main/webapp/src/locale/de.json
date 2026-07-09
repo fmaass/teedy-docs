@@ -518,6 +518,7 @@
       "port_required": "Port ist erforderlich.",
       "admin_dn_required": "Bind-DN ist erforderlich.",
       "admin_password_required": "Bind-Passwort ist erforderlich.",
+      "admin_password_keep": "Ein Passwort ist gesetzt – leer lassen, um es beizubehalten.",
       "base_dn_required": "Basis-DN ist erforderlich.",
       "filter_required": "Benutzersuchfilter ist erforderlich.",
       "default_email_required": "Standard-E-Mail-Domain ist erforderlich.",

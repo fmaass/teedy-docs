@@ -22,6 +22,7 @@ const form = reactive<LdapConfig>({
   usessl: false,
   admin_dn: '',
   admin_password: '',
+  admin_password_set: false,
   base_dn: '',
   filter: '(&(objectClass=user)(sAMAccountName=USERNAME))',
   default_email: '',
@@ -44,7 +45,10 @@ watch(ldapConfig, (config) => {
     form.port = config.port ?? 389
     form.usessl = config.usessl ?? false
     form.admin_dn = config.admin_dn ?? ''
-    form.admin_password = config.admin_password ?? ''
+    // The admin bind password is write-only: the GET never returns it. Never populate the
+    // field from the server; keep it blank and let admin_password_set drive the affordance.
+    form.admin_password = ''
+    form.admin_password_set = config.admin_password_set ?? false
     form.base_dn = config.base_dn ?? ''
     form.filter = config.filter ?? form.filter
     form.default_email = config.default_email ?? ''
@@ -119,7 +123,8 @@ function onSave() {
 
         <div class="form-field">
           <label for="ldap-admin-password">{{ t('ui.ldap.admin_password') }}</label>
-          <Password inputId="ldap-admin-password" v-model="form.admin_password" :feedback="false" toggleMask :inputProps="{ autocomplete: 'off', name: 'ldap-admin-password' }" :invalid="fieldErrors.has('admin_password_required')" inputClass="w-full" class="w-full" />
+          <Password inputId="ldap-admin-password" v-model="form.admin_password" :feedback="false" toggleMask :inputProps="{ autocomplete: 'off', name: 'ldap-admin-password' }" :placeholder="form.admin_password_set ? t('ui.ldap.admin_password_keep') : ''" :invalid="fieldErrors.has('admin_password_required')" inputClass="w-full" class="w-full" />
+          <small v-if="form.admin_password_set" class="field-hint">{{ t('ui.ldap.admin_password_keep') }}</small>
           <small v-if="fieldErrors.has('admin_password_required')" class="field-error">{{ t('ui.ldap.admin_password_required') }}</small>
         </div>
 

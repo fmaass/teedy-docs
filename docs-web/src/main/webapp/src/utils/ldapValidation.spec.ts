@@ -53,8 +53,27 @@ describe('validateLdapConfig', () => {
     expect(validateLdapConfig({ ...validEnabled(), admin_dn: '' })).toContain('admin_dn_required')
   })
 
-  it('requires admin_password when enabled', () => {
+  it('requires admin_password when enabled and none is stored yet (first setup)', () => {
     expect(validateLdapConfig({ ...validEnabled(), admin_password: '' })).toContain('admin_password_required')
+  })
+
+  it('does NOT require admin_password when a password is already stored (leave blank to keep)', () => {
+    // BL-028: a blank password field with admin_password_set means "keep the stored secret".
+    expect(
+      validateLdapConfig({ ...validEnabled(), admin_password: '', admin_password_set: true }),
+    ).not.toContain('admin_password_required')
+  })
+
+  it('still requires admin_password when blank and admin_password_set is false', () => {
+    expect(
+      validateLdapConfig({ ...validEnabled(), admin_password: '', admin_password_set: false }),
+    ).toContain('admin_password_required')
+  })
+
+  it('rejects an over-long admin_password even when a password is already stored', () => {
+    expect(
+      validateLdapConfig({ ...validEnabled(), admin_password: 'x'.repeat(251), admin_password_set: true }),
+    ).toContain('admin_password_required')
   })
 
   it('requires base_dn when enabled', () => {
