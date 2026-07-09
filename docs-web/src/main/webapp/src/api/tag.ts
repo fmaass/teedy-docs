@@ -56,9 +56,14 @@ export function getTagCoOccurrence() {
   return api.get<{ pairs: CoOccurrencePair[] }>('/tag/co-occurrence')
 }
 
-export function getTagFacets(tagIds?: string[], mode?: 'and' | 'or') {
-  const params: Record<string, string> = {}
-  if (tagIds?.length) params.tags = tagIds.join(',')
-  if (mode === 'or') params.mode = 'or'
+export function getTagFacets(tagIds?: string[], mode?: 'and' | 'or', excludedTagIds?: string[]) {
+  const params = new URLSearchParams()
+  if (tagIds?.length) params.set('tags', tagIds.join(','))
+  if (mode === 'or') params.set('mode', 'or')
+  // The backend accepts a repeated `exclude` query param (one per excluded tag id);
+  // documents carrying any excluded tag are removed from the facet/total counts.
+  if (excludedTagIds?.length) {
+    for (const id of excludedTagIds) params.append('exclude', id)
+  }
   return api.get<{ facets: Record<string, number>; total: number }>('/tag/facets', { params })
 }

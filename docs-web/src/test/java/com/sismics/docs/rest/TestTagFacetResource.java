@@ -171,6 +171,294 @@ public class TestTagFacetResource extends BaseJerseyTest {
     }
 
     /**
+     * P6: facet counts must honour active tag EXCLUSIONS. Selecting tagA while
+     * excluding tagB removes documents carrying tagB from every facet/total.
+     * A no-exclude request stays byte-identical to today.
+     */
+    @Test
+    public void testTagFacetsExclusion() {
+        String adminToken = adminToken();
+
+        String tagAId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "ExclTagA").param("color", "#ff0000")), JsonObject.class)
+                .getString("id");
+        String tagBId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "ExclTagB").param("color", "#00ff00")), JsonObject.class)
+                .getString("id");
+        String tagCId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "ExclTagC").param("color", "#0000ff")), JsonObject.class)
+                .getString("id");
+
+        // doc1: A + B, doc2: A + C, doc3: A + B + C
+        String doc1Id = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Excl doc 1").param("language", "eng")
+                        .param("tags", tagAId).param("tags", tagBId)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class)
+                .getString("id");
+        String doc2Id = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Excl doc 2").param("language", "eng")
+                        .param("tags", tagAId).param("tags", tagCId)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class)
+                .getString("id");
+        String doc3Id = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Excl doc 3").param("language", "eng")
+                        .param("tags", tagAId).param("tags", tagBId).param("tags", tagCId)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class)
+                .getString("id");
+
+        // Baseline: tagA selected, no exclusion. AND path.
+        // Docs with A = doc1, doc2, doc3 => total 3. Co-occurring: B on doc1+doc3 (2), C on doc2+doc3 (2).
+        JsonObject json = target().path("/tag/facets")
+                .queryParam("tags", tagAId)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, json.getInt("total"));
+        Assertions.assertEquals(2, json.getJsonObject("facets").getInt(tagBId));
+        Assertions.assertEquals(2, json.getJsonObject("facets").getInt(tagCId));
+
+        // Exclude tagB: drops doc1 and doc3 (both carry B). Only doc2 (A,C) remains.
+        // total 1, C:1, B must be absent.
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagAId)
+                .queryParam("exclude", tagBId)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getInt("total"));
+        JsonObject exclFacets = json.getJsonObject("facets");
+        Assertions.assertEquals(1, exclFacets.getInt(tagCId));
+        Assertions.assertFalse(exclFacets.containsKey(tagBId));
+
+        // Exclude tagB in OR mode too: A OR (nothing else) minus B-docs => doc2 only.
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagAId)
+                .queryParam("mode", "or")
+                .queryParam("exclude", tagBId)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getInt("total"));
+        Assertions.assertEquals(1, json.getJsonObject("facets").getInt(tagCId));
+        Assertions.assertFalse(json.getJsonObject("facets").containsKey(tagBId));
+
+        // No-selection facets with exclude: stats-equivalent minus excluded docs.
+        // Exclude B removes doc1+doc3. Remaining doc2 has A,C. So A:1, C:1, B absent.
+        json = target().path("/tag/facets")
+                .queryParam("exclude", tagBId)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        JsonObject noSelFacets = json.getJsonObject("facets");
+        Assertions.assertEquals(1, noSelFacets.getInt(tagAId));
+        Assertions.assertEquals(1, noSelFacets.getInt(tagCId));
+        Assertions.assertFalse(noSelFacets.containsKey(tagBId));
+
+        // Backward compat: empty exclude param behaves like no exclude.
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagAId)
+                .queryParam("exclude", "")
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(3, json.getInt("total"));
+        Assertions.assertEquals(2, json.getJsonObject("facets").getInt(tagBId));
+
+        // Cleanup
+        for (String d : new String[]{doc1Id, doc2Id, doc3Id}) {
+            target().path("/document/" + d).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
+        }
+        for (String t : new String[]{tagAId, tagBId, tagCId}) {
+            target().path("/tag/" + t).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
+        }
+    }
+
+    /**
+     * P6 + SEC-03: exclusion must never let a user's counts include documents they
+     * cannot read. B excludes a tag on a document that only A can see — the
+     * exclusion cannot subtract (or leak) counts for documents outside B's ACL.
+     */
+    @Test
+    public void testTagFacetsExclusionAclScoped() {
+        // User A: private tag + doc that B can never see.
+        clientUtil.createUser("exclacl1");
+        String t1 = clientUtil.login("exclacl1");
+        String tagA1 = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form().param("name", "ExclAclA1").param("color", "#ff0000")), JsonObject.class)
+                .getString("id");
+        target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("title", "A private excl doc").param("language", "eng")
+                        .param("tags", tagA1)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+
+        // User B: two own tags on two own docs. doc B1 has tagB1+tagB2, doc B2 has tagB1 only.
+        clientUtil.createUser("exclacl2");
+        String t2 = clientUtil.login("exclacl2");
+        String tagB1 = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form().param("name", "ExclAclB1").param("color", "#00ff00")), JsonObject.class)
+                .getString("id");
+        String tagB2 = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form().param("name", "ExclAclB2").param("color", "#00ff01")), JsonObject.class)
+                .getString("id");
+        target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form()
+                        .param("title", "B doc 1").param("language", "eng")
+                        .param("tags", tagB1).param("tags", tagB2)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .put(Entity.form(new Form()
+                        .param("title", "B doc 2").param("language", "eng")
+                        .param("tags", tagB1)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+
+        // B selects its own tagB1 (on both B docs): total 2, tagB2 co-occurs on 1.
+        JsonObject json = target().path("/tag/facets")
+                .queryParam("tags", tagB1)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(2, json.getInt("total"));
+        Assertions.assertEquals(1, json.getJsonObject("facets").getInt(tagB2));
+
+        // B excludes tagB2: drops B doc1, leaves B doc2 => total 1, tagB2 absent.
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagB1)
+                .queryParam("exclude", tagB2)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getInt("total"));
+        Assertions.assertFalse(json.getJsonObject("facets").containsKey(tagB2));
+
+        // B excludes A's INVISIBLE tag while selecting tagB1: A's doc is outside B's
+        // ACL, so it never contributed; the exclusion changes nothing and leaks no
+        // A tag. total must stay 2 (B's own docs), never a leaked count.
+        json = target().path("/tag/facets")
+                .queryParam("tags", tagB1)
+                .queryParam("exclude", tagA1)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(2, json.getInt("total"));
+        JsonObject scopedFacets = json.getJsonObject("facets");
+        Assertions.assertEquals(1, scopedFacets.getInt(tagB2));
+        Assertions.assertFalse(scopedFacets.containsKey(tagA1));
+
+        // No-selection facets, B excludes A's invisible tag: B's own counts only.
+        json = target().path("/tag/facets")
+                .queryParam("exclude", tagA1)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        JsonObject noSel = json.getJsonObject("facets");
+        Assertions.assertEquals(2, noSel.getInt(tagB1));
+        Assertions.assertEquals(1, noSel.getInt(tagB2));
+        Assertions.assertFalse(noSel.containsKey(tagA1));
+    }
+
+    /**
+     * P6 security delta: excluding a tag the caller CANNOT READ must be a no-op,
+     * even when that invisible tag sits on a document the caller CAN see (via a
+     * shared tag). Otherwise the count delta discloses that the private tag is
+     * attached to documents in the caller's result set.
+     */
+    @Test
+    public void testTagFacetsExclusionInvisibleTagNoOp() {
+        // User A: one doc carrying a shared tag + a PRIVATE tag.
+        clientUtil.createUser("exclleak1");
+        String t1 = clientUtil.login("exclleak1");
+        String tagShared = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form().param("name", "ExclLeakShared").param("color", "#ff00ff")), JsonObject.class)
+                .getString("id");
+        String tagPrivate = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form().param("name", "ExclLeakPrivate").param("color", "#ff00fe")), JsonObject.class)
+                .getString("id");
+        target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("title", "Shared doc with private tag").param("language", "eng")
+                        .param("tags", tagShared)
+                        .param("tags", tagPrivate)
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+
+        // User B gets READ on the shared tag only; the doc is now visible to B,
+        // the private tag on it is not.
+        clientUtil.createUser("exclleak2");
+        String t2 = clientUtil.login("exclleak2");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .put(Entity.form(new Form()
+                        .param("source", tagShared)
+                        .param("perm", "READ")
+                        .param("target", "exclleak2")
+                        .param("type", "USER")), JsonObject.class);
+
+        // Baseline for B: shared tag selected, no exclusion -> the shared doc counts.
+        JsonObject baseline = target().path("/tag/facets")
+                .queryParam("tags", tagShared)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, baseline.getInt("total"));
+
+        // B excludes A's PRIVATE tag id: must be silently dropped, ALL counts
+        // identical to the no-exclude baseline (AND path).
+        JsonObject probed = target().path("/tag/facets")
+                .queryParam("tags", tagShared)
+                .queryParam("exclude", tagPrivate)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(baseline.getInt("total"), probed.getInt("total"),
+                "excluding an unreadable tag must not change the total (info disclosure)");
+        Assertions.assertEquals(baseline.getJsonObject("facets"), probed.getJsonObject("facets"),
+                "excluding an unreadable tag must not change any facet count");
+
+        // OR path likewise.
+        JsonObject baselineOr = target().path("/tag/facets")
+                .queryParam("tags", tagShared)
+                .queryParam("mode", "or")
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        JsonObject probedOr = target().path("/tag/facets")
+                .queryParam("tags", tagShared)
+                .queryParam("mode", "or")
+                .queryParam("exclude", tagPrivate)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(baselineOr.getInt("total"), probedOr.getInt("total"));
+        Assertions.assertEquals(baselineOr.getJsonObject("facets"), probedOr.getJsonObject("facets"));
+
+        // No-selection facets (stats-equivalent) likewise.
+        JsonObject baselineNoSel = target().path("/tag/facets")
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        JsonObject probedNoSel = target().path("/tag/facets")
+                .queryParam("exclude", tagPrivate)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t2)
+                .get(JsonObject.class);
+        Assertions.assertEquals(baselineNoSel.getJsonObject("facets"), probedNoSel.getJsonObject("facets"));
+
+        // Control: the owner A CAN read the private tag, so for A the exclusion
+        // must still take effect (drops the doc from the shared-tag counts).
+        JsonObject ownerProbed = target().path("/tag/facets")
+                .queryParam("tags", tagShared)
+                .queryParam("exclude", tagPrivate)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, t1)
+                .get(JsonObject.class);
+        Assertions.assertEquals(0, ownerProbed.getInt("total"));
+    }
+
+    /**
      * SEC-03: tag stats / facets / co-occurrence must be scoped to the caller's
      * ACL. A non-admin user must not see another user's tag IDs or document
      * counts. Admin (skipAclCheck) still sees everything.

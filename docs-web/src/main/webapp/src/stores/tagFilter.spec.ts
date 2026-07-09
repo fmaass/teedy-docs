@@ -27,6 +27,9 @@ const statsRef = ref<Record<string, number> | undefined>(undefined)
 const coOccurrenceRef = ref<Array<{ tagA: string; tagB: string; count: number }> | undefined>(
   undefined,
 )
+// Captured options of the `tagFacets` useQuery call so tests can inspect its
+// (reactive) query key and invoke its queryFn to observe the params it sends.
+let facetsQueryOpts: any = null
 vi.mock('@tanstack/vue-query', () => ({
   useQuery: (opts: any) => {
     const key = opts.queryKey
@@ -36,9 +39,20 @@ vi.mock('@tanstack/vue-query', () => ({
     if (name === 'tags') return { data: tagsRef }
     if (name === 'tagStats') return { data: statsRef }
     if (name === 'tagCoOccurrence') return { data: coOccurrenceRef }
+    if (name === 'tagFacets') {
+      facetsQueryOpts = opts
+      return { data: ref(undefined) }
+    }
     return { data: ref(undefined) }
   },
 }))
+
+// Capture the args getTagFacets is called with, without hitting the network.
+const getTagFacetsMock = vi.fn(() => Promise.resolve({ data: { facets: {}, total: 0 } }))
+vi.mock('../api/tag', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/tag')>()
+  return { ...actual, getTagFacets: (...args: any[]) => getTagFacetsMock(...(args as [])) }
+})
 
 import { useTagFilterStore } from './tagFilter'
 
@@ -58,11 +72,17 @@ const FLAT_TAGS: Tag[] = [
 
 describe('tagFilter store', () => {
   beforeEach(() => {
+    // The store persists viewMode to localStorage via a watcher; a shared
+    // MemoryStorage polyfill makes the suite execution-order-dependent unless
+    // reset between tests.
+    localStorage.clear()
     setActivePinia(createPinia())
     mockRoute.path = '/document'
     mockRoute.query = {}
     push.mockClear()
     replace.mockClear()
+    getTagFacetsMock.mockClear()
+    facetsQueryOpts = null
     tagsRef.value = TAGS
     statsRef.value = undefined
     coOccurrenceRef.value = undefined
@@ -276,6 +296,41 @@ describe('tagFilter store', () => {
       expect(store.selectedTags.map((t) => t.id)).toContain('m')
       // ...but it is NOT re-suggested to itself.
       expect(store.relatedTags.map((e) => e.tag.id)).not.toContain('m')
+    })
+  })
+
+  describe('tag exclusions (facet counts)', () => {
+    it('excluded tag disappears from the relatedTags suggestion pills', () => {
+      // alpha selected; beta and gamma both have co-occurring counts, but gamma
+      // is excluded and must not be suggested.
+      statsRef.value = { a: 5, b: 3, c: 2 }
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      store.excludedTagIds = new Set(['c']) // gamma excluded
+      const suggested = store.relatedTags.map((e) => e.tag.id)
+      expect(suggested).toContain('b')
+      expect(suggested).not.toContain('c')
+    })
+
+    it('includes the excluded ids in the tagFacets query key so a change refetches', () => {
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      store.excludedTagIds = new Set(['c'])
+      // facetsQueryOpts.queryKey is a computed ref of the reactive key.
+      const key = facetsQueryOpts.queryKey.value
+      expect(key[0]).toBe('tagFacets')
+      // selected array, mode, then the excluded array.
+      expect(key).toContainEqual(['c'])
+      expect(key).toContainEqual(['a'])
+    })
+
+    it('passes the excluded ids through to getTagFacets when the query runs', () => {
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      store.excludedTagIds = new Set(['c'])
+      // Invoke the captured queryFn (vue-query is mocked, so it never auto-runs).
+      facetsQueryOpts.queryFn()
+      expect(getTagFacetsMock).toHaveBeenCalledWith(['a'], 'and', ['c'])
     })
   })
 

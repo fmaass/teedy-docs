@@ -33,6 +33,55 @@ public class TagDao {
             "and a.ACL_PERM_C = 'READ' and a.ACL_DELETEDATE_D is null ";
 
     /**
+     * WHERE-clause predicate excluding any document that carries one of the excluded tags
+     * (bind {@code :excludeTagIds}). Correlates on the given document-alias column so it can
+     * be reused across the aggregate queries. Applied to the COUNTED documents only, leaving
+     * the surrounding ACL join/filter path untouched.
+     */
+    private static String excludeDocPredicate(String docIdColumn) {
+        return "and not exists (" +
+                "  select 1 from T_DOCUMENT_TAG dtx " +
+                "  where dtx.DOT_IDDOCUMENT_C = " + docIdColumn + " " +
+                "  and dtx.DOT_IDTAG_C in (:excludeTagIds) " +
+                "  and dtx.DOT_DELETEDATE_D is null" +
+                ") ";
+    }
+
+    /**
+     * Normalises a caller-supplied exclude list to the non-null, non-empty ids present, or
+     * null when there is nothing to exclude. Mirrors how the selected-tag list is sanitised
+     * upstream (blank ids dropped).
+     */
+    private static List<String> normalizeExcludeIds(List<String> excludeTagIds) {
+        if (excludeTagIds == null || excludeTagIds.isEmpty()) {
+            return null;
+        }
+        List<String> ids = new ArrayList<>();
+        for (String id : excludeTagIds) {
+            if (id != null && !id.isBlank()) {
+                ids.add(id.trim());
+            }
+        }
+        return ids.isEmpty() ? null : ids;
+    }
+
+    /**
+     * Normalises AND ACL-scopes a caller-supplied exclude list: only tags the caller can
+     * READ may act as exclusions (same visibility rule as selected tags, via
+     * {@link #filterVisibleTagIds}). Excluding an unreadable tag must be a silent no-op —
+     * otherwise the resulting count delta would disclose that an invisible tag is attached
+     * to documents in the caller's result set. Returns null when nothing survives.
+     */
+    private List<String> visibleExcludeIds(List<String> excludeTagIds, List<String> targetIdList) {
+        List<String> ids = normalizeExcludeIds(excludeTagIds);
+        if (ids == null) {
+            return null;
+        }
+        List<String> visible = filterVisibleTagIds(ids, targetIdList);
+        return visible == null || visible.isEmpty() ? null : visible;
+    }
+
+    /**
      * Gets a tag by its ID.
      * 
      * @param id Tag ID
@@ -288,10 +337,24 @@ public class TagDao {
      * @param targetIdList Caller ACL target list (null/admin = unscoped)
      * @return Map of tag ID to document count
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Long> getTagDocumentCounts(List<String> targetIdList) {
+        return getTagDocumentCounts(targetIdList, null);
+    }
+
+    /**
+     * Returns document counts per tag (only counting active documents),
+     * scoped to the tags the caller can READ, optionally excluding documents that
+     * carry any of the given excluded tag IDs.
+     *
+     * @param targetIdList Caller ACL target list (null/admin = unscoped)
+     * @param excludeTagIds Tag IDs whose documents are excluded from the counts (null/empty = none)
+     * @return Map of tag ID to document count
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getTagDocumentCounts(List<String> targetIdList, List<String> excludeTagIds) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         boolean acl = isAclScoped(targetIdList);
+        List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
                 "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
                 "from T_DOCUMENT_TAG dt " +
@@ -303,10 +366,16 @@ public class TagDao {
         if (acl) {
             sb.append("and a.ACL_ID_C is not null ");
         }
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
+        }
         sb.append("group by dt.DOT_IDTAG_C");
         Query q = em.createNativeQuery(sb.toString());
         if (acl) {
             q.setParameter("targetIdList", targetIdList);
+        }
+        if (excludeIds != null) {
+            q.setParameter("excludeTagIds", excludeIds);
         }
         List<Object[]> rows = q.getResultList();
         Map<String, Long> result = new HashMap<>();
@@ -323,10 +392,23 @@ public class TagDao {
      * @param selectedTagIds List of currently selected tag IDs
      * @return Map of tag ID to document count (excludes already-selected tags)
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Long> getCoOccurringTagCounts(List<String> selectedTagIds, List<String> targetIdList) {
+        return getCoOccurringTagCounts(selectedTagIds, targetIdList, null);
+    }
+
+    /**
+     * Returns tags that co-occur (AND logic) with the given selected tags, optionally
+     * excluding documents that carry any of the excluded tag IDs.
+     *
+     * @param selectedTagIds List of currently selected tag IDs
+     * @param targetIdList Caller ACL target list (null/admin = unscoped)
+     * @param excludeTagIds Tag IDs whose documents are excluded from the counts (null/empty = none)
+     * @return Map of tag ID to document count (excludes already-selected tags)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getCoOccurringTagCounts(List<String> selectedTagIds, List<String> targetIdList, List<String> excludeTagIds) {
         if (selectedTagIds == null || selectedTagIds.isEmpty()) {
-            return getTagDocumentCounts(targetIdList);
+            return getTagDocumentCounts(targetIdList, excludeTagIds);
         }
         // AND semantics: an invisible selected tag means the caller cannot match on it,
         // so no document qualifies and no co-occurring tag should be returned.
@@ -337,6 +419,7 @@ public class TagDao {
 
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         boolean acl = isAclScoped(targetIdList);
+        List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
                 "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
                 "from T_DOCUMENT_TAG dt " +
@@ -347,6 +430,9 @@ public class TagDao {
         sb.append("where dt.DOT_DELETEDATE_D is null ");
         if (acl) {
             sb.append("and a.ACL_ID_C is not null ");
+        }
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
         }
         sb.append("and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
                 "and dt.DOT_IDDOCUMENT_C in (" +
@@ -360,6 +446,9 @@ public class TagDao {
         Query q = em.createNativeQuery(sb.toString());
         if (acl) {
             q.setParameter("targetIdList", targetIdList);
+        }
+        if (excludeIds != null) {
+            q.setParameter("excludeTagIds", excludeIds);
         }
         q.setParameter("selectedTagIds", selectedTagIds);
         q.setParameter("selectedCount", (long) selectedTagIds.size());
@@ -378,6 +467,19 @@ public class TagDao {
      * @return Number of matching documents
      */
     public long countDocumentsWithAllTags(List<String> tagIds, List<String> targetIdList) {
+        return countDocumentsWithAllTags(tagIds, targetIdList, null);
+    }
+
+    /**
+     * Counts documents matching all the given tags (AND logic), optionally excluding
+     * documents that carry any of the excluded tag IDs.
+     *
+     * @param tagIds Tag IDs
+     * @param targetIdList Caller ACL target list (null/admin = unscoped)
+     * @param excludeTagIds Tag IDs whose documents are excluded from the count (null/empty = none)
+     * @return Number of matching documents
+     */
+    public long countDocumentsWithAllTags(List<String> tagIds, List<String> targetIdList, List<String> excludeTagIds) {
         if (tagIds == null || tagIds.isEmpty()) {
             return 0;
         }
@@ -386,16 +488,24 @@ public class TagDao {
             return 0;
         }
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery(
+        List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
+        StringBuilder sb = new StringBuilder(
                 "select count(*) from (" +
                 "  select dt.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt " +
                 "  join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
-                "  where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null " +
-                "  group by dt.DOT_IDDOCUMENT_C " +
+                "  where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null ");
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
+        }
+        sb.append("  group by dt.DOT_IDDOCUMENT_C " +
                 "  having count(distinct dt.DOT_IDTAG_C) = :tagCount" +
                 ") c");
+        Query q = em.createNativeQuery(sb.toString());
         q.setParameter("tagIds", tagIds);
         q.setParameter("tagCount", (long) tagIds.size());
+        if (excludeIds != null) {
+            q.setParameter("excludeTagIds", excludeIds);
+        }
         return ((Number) q.getSingleResult()).longValue();
     }
 
@@ -405,10 +515,23 @@ public class TagDao {
      * @param selectedTagIds List of currently selected tag IDs
      * @return Map of tag ID to document count (excludes already-selected tags)
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Long> getCoOccurringTagCountsOr(List<String> selectedTagIds, List<String> targetIdList) {
+        return getCoOccurringTagCountsOr(selectedTagIds, targetIdList, null);
+    }
+
+    /**
+     * Returns tags that co-occur (OR logic) with any of the given selected tags, optionally
+     * excluding documents that carry any of the excluded tag IDs.
+     *
+     * @param selectedTagIds List of currently selected tag IDs
+     * @param targetIdList Caller ACL target list (null/admin = unscoped)
+     * @param excludeTagIds Tag IDs whose documents are excluded from the counts (null/empty = none)
+     * @return Map of tag ID to document count (excludes already-selected tags)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Long> getCoOccurringTagCountsOr(List<String> selectedTagIds, List<String> targetIdList, List<String> excludeTagIds) {
         if (selectedTagIds == null || selectedTagIds.isEmpty()) {
-            return getTagDocumentCounts(targetIdList);
+            return getTagDocumentCounts(targetIdList, excludeTagIds);
         }
         // OR semantics: pivot only on selected tags the caller can see; invisible ones are dropped.
         List<String> visibleSelected = filterVisibleTagIds(selectedTagIds, targetIdList);
@@ -418,6 +541,7 @@ public class TagDao {
 
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         boolean acl = isAclScoped(targetIdList);
+        List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
         StringBuilder sb = new StringBuilder(
                 "select dt.DOT_IDTAG_C, count(distinct dt.DOT_IDDOCUMENT_C) " +
                 "from T_DOCUMENT_TAG dt " +
@@ -429,6 +553,9 @@ public class TagDao {
         if (acl) {
             sb.append("and a.ACL_ID_C is not null ");
         }
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
+        }
         sb.append("and dt.DOT_IDTAG_C not in (:selectedTagIds) " +
                 "and dt.DOT_IDDOCUMENT_C in (" +
                 "  select dt2.DOT_IDDOCUMENT_C from T_DOCUMENT_TAG dt2 " +
@@ -439,6 +566,9 @@ public class TagDao {
         Query q = em.createNativeQuery(sb.toString());
         if (acl) {
             q.setParameter("targetIdList", targetIdList);
+        }
+        if (excludeIds != null) {
+            q.setParameter("excludeTagIds", excludeIds);
         }
         q.setParameter("selectedTagIds", visibleSelected);
         List<Object[]> rows = q.getResultList();
@@ -490,6 +620,19 @@ public class TagDao {
      * @return Number of matching documents
      */
     public long countDocumentsWithAnyTag(List<String> tagIds, List<String> targetIdList) {
+        return countDocumentsWithAnyTag(tagIds, targetIdList, null);
+    }
+
+    /**
+     * Counts documents matching any of the given tags (OR logic), optionally excluding
+     * documents that carry any of the excluded tag IDs.
+     *
+     * @param tagIds Tag IDs
+     * @param targetIdList Caller ACL target list (null/admin = unscoped)
+     * @param excludeTagIds Tag IDs whose documents are excluded from the count (null/empty = none)
+     * @return Number of matching documents
+     */
+    public long countDocumentsWithAnyTag(List<String> tagIds, List<String> targetIdList, List<String> excludeTagIds) {
         if (tagIds == null || tagIds.isEmpty()) {
             return 0;
         }
@@ -499,11 +642,19 @@ public class TagDao {
             return 0;
         }
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery(
+        List<String> excludeIds = visibleExcludeIds(excludeTagIds, targetIdList);
+        StringBuilder sb = new StringBuilder(
                 "select count(distinct dt.DOT_IDDOCUMENT_C) from T_DOCUMENT_TAG dt " +
                 "join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C and d.DOC_DELETEDATE_D is null " +
-                "where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null");
+                "where dt.DOT_IDTAG_C in (:tagIds) and dt.DOT_DELETEDATE_D is null ");
+        if (excludeIds != null) {
+            sb.append(excludeDocPredicate("dt.DOT_IDDOCUMENT_C"));
+        }
+        Query q = em.createNativeQuery(sb.toString());
         q.setParameter("tagIds", visibleTagIds);
+        if (excludeIds != null) {
+            q.setParameter("excludeTagIds", excludeIds);
+        }
         return ((Number) q.getSingleResult()).longValue();
     }
 }

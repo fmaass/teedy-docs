@@ -49,8 +49,8 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   })
 
   const { data: facetData } = useQuery({
-    queryKey: computed(() => ['tagFacets', selectedTagIdArray.value, tagMode.value]),
-    queryFn: () => getTagFacets(selectedTagIdArray.value, tagMode.value).then((r) => r.data),
+    queryKey: computed(() => ['tagFacets', selectedTagIdArray.value, tagMode.value, excludedTagIdArray.value]),
+    queryFn: () => getTagFacets(selectedTagIdArray.value, tagMode.value, excludedTagIdArray.value).then((r) => r.data),
     staleTime: 15_000,
     enabled: computed(() => selectedTagIds.value.size > 0),
   })
@@ -103,13 +103,16 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   // Facet co-occurrence suggestion pills. Meta-tags (`__`-prefixed) are hidden
   // from suggestions; `tagCounts` itself is left intact so Tree-mode counts are
   // unaffected. Already-selected meta-tags still render via `selectedTags` (the
-  // removable active chips), so the user can always deselect them.
+  // removable active chips), so the user can always deselect them. Excluded tags
+  // are filtered client-side (belt-and-suspenders; the server already omits their
+  // documents from the counts) so a `!tag:` never appears as a suggestion.
   const relatedTags = computed(() => {
     if (selectedTagIds.value.size === 0) return []
     return Object.entries(tagCounts.value)
       .map(([id, count]) => ({ tag: tagMap.value.get(id), count }))
       .filter((e): e is { tag: Tag; count: number } =>
-        !!e.tag && e.count > 0 && !selectedTagIds.value.has(e.tag.id) && !isMetaTag(e.tag.name),
+        !!e.tag && e.count > 0 && !selectedTagIds.value.has(e.tag.id)
+        && !excludedTagIds.value.has(e.tag.id) && !isMetaTag(e.tag.name),
       )
       .sort((a, b) => b.count - a.count)
       .slice(0, 8)
