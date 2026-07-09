@@ -21,6 +21,7 @@ import MultiSelect from 'primevue/multiselect'
 import FileUpload, { type FileUploadSelectEvent, type FileUploadRemoveEvent } from 'primevue/fileupload'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
+import ProgressBar from 'primevue/progressbar'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 
@@ -60,7 +61,12 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+// Per-file upload progress (0..100), keyed by array index into pendingFiles,
+// populated only while an upload is in flight so the ProgressBar shows real bytes.
+const uploadProgress = ref<Record<number, number>>({})
+const uploadingFiles = ref(false)
 const loadedRelations = ref<Array<{ id: string }>>([])
+const cameraInputRef = ref<HTMLInputElement | null>(null)
 
 // Custom metadata: field definitions (admin-configured) and per-field values keyed
 // by definition id. Values are typed for their input; serialized on save.
@@ -171,6 +177,23 @@ function onFileClear() {
   pendingFiles.value = []
 }
 
+// Camera capture: a separate hidden <input capture> so mobile browsers open the
+// camera directly. Captured photos are appended to the same pendingFiles queue,
+// so they upload on save exactly like picked files.
+function openCamera() {
+  cameraInputRef.value?.click()
+}
+
+function onCameraCapture(event: Event) {
+  const input = event.target as HTMLInputElement
+  const captured = input.files ? Array.from(input.files) : []
+  if (captured.length) {
+    pendingFiles.value = [...pendingFiles.value, ...captured]
+  }
+  // Reset so re-capturing the same-named photo fires change again.
+  input.value = ''
+}
+
 function confirmDeleteExisting(file: AttachedFile) {
   confirm.require({
     message: t('ui.remove_file_confirm', { name: file.name }),
@@ -239,10 +262,21 @@ async function handleSubmit() {
       resultId = result.id
     }
 
-    for (const file of pendingFiles.value) {
-      await uploadFile(resultId, file)
+    if (pendingFiles.value.length) {
+      uploadingFiles.value = true
+      uploadProgress.value = {}
+      const files = pendingFiles.value
+      for (let i = 0; i < files.length; i++) {
+        uploadProgress.value[i] = 0
+        await uploadFile(resultId, files[i], (pct) => {
+          uploadProgress.value[i] = pct
+        })
+        uploadProgress.value[i] = 100
+      }
+      uploadingFiles.value = false
     }
     pendingFiles.value = []
+    uploadProgress.value = {}
     fileUploadRef.value?.clear()
 
     await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -253,6 +287,7 @@ async function handleSubmit() {
     toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
   } finally {
     loading.value = false
+    uploadingFiles.value = false
   }
 }
 </script>
@@ -452,7 +487,36 @@ async function handleSubmit() {
         </template>
       </FileUpload>
 
-      <p v-if="pendingFiles.length" class="upload-hint">
+      <!-- Camera capture: hidden input opens the device camera on mobile. -->
+      <div class="camera-capture">
+        <Button
+          type="button"
+          icon="pi pi-camera"
+          :label="t('ui.take_photo')"
+          severity="secondary"
+          outlined
+          class="camera-btn"
+          @click="openCamera"
+        />
+        <input
+          ref="cameraInputRef"
+          type="file"
+          accept="image/*"
+          capture="environment"
+          class="camera-input"
+          @change="onCameraCapture"
+        />
+      </div>
+
+      <!-- Real per-file upload progress while saving. -->
+      <div v-if="uploadingFiles" class="upload-progress-list">
+        <div v-for="(file, i) in pendingFiles" :key="i" class="upload-progress-item">
+          <span class="upload-progress-name">{{ file.name }}</span>
+          <ProgressBar :value="uploadProgress[i] ?? 0" class="upload-progress-bar" />
+        </div>
+      </div>
+
+      <p v-else-if="pendingFiles.length" class="upload-hint">
         {{ t('ui.files_upload_hint', { count: pendingFiles.length }) }}
       </p>
     </div></template></Card>
@@ -601,9 +665,59 @@ a.file-name:hover {
   color: var(--p-text-muted-color);
 }
 
+/* Camera capture: hide the native input; the styled Button triggers it. */
+.camera-capture {
+  margin-top: 0.75rem;
+}
+.camera-input {
+  display: none;
+}
+.camera-btn {
+  width: 100%;
+}
+
+.upload-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.upload-progress-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.upload-progress-name {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-progress-bar {
+  height: 0.75rem;
+}
+
 @media (max-width: 640px) {
   .form-row {
     grid-template-columns: 1fr;
+  }
+  .doc-edit {
+    padding: 1rem;
+  }
+  .doc-edit-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+  .doc-edit-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (min-width: 641px) {
+  .camera-btn {
+    width: auto;
   }
 }
 </style>

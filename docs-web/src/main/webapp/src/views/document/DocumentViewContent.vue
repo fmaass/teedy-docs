@@ -11,6 +11,7 @@ import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
+import ProgressBar from 'primevue/progressbar'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { formatFileSize } from '../../composables/useFormatters'
@@ -58,15 +59,23 @@ function showVersions(file: { id: string; name: string }) {
   versionsDialogVisible.value = true
 }
 const uploading = ref(false)
+const uploadProgress = ref<Record<number, number>>({})
+const uploadingNames = ref<string[]>([])
 const fileUploadRef = ref()
+const cameraInputRef = ref<HTMLInputElement | null>(null)
 
-async function handleUpload(event: FileUploadUploaderEvent) {
-  if (!doc.value) return
+async function uploadAll(files: File[]) {
+  if (!doc.value || !files.length) return
   uploading.value = true
+  uploadProgress.value = {}
+  uploadingNames.value = files.map((f) => f.name)
   try {
-    const files = Array.isArray(event.files) ? event.files : [event.files]
-    for (const file of files) {
-      await uploadFile(doc.value.id, file)
+    for (let i = 0; i < files.length; i++) {
+      uploadProgress.value[i] = 0
+      await uploadFile(doc.value.id, files[i], (pct) => {
+        uploadProgress.value[i] = pct
+      })
+      uploadProgress.value[i] = 100
     }
     queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
@@ -74,8 +83,28 @@ async function handleUpload(event: FileUploadUploaderEvent) {
     toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
   } finally {
     uploading.value = false
+    uploadProgress.value = {}
+    uploadingNames.value = []
     fileUploadRef.value?.clear()
   }
+}
+
+async function handleUpload(event: FileUploadUploaderEvent) {
+  const files = Array.isArray(event.files) ? event.files : [event.files]
+  await uploadAll(files as File[])
+}
+
+// Camera capture: a hidden <input capture> opens the device camera on mobile;
+// captured photos upload immediately via the same real PUT /api/file path.
+function openCamera() {
+  cameraInputRef.value?.click()
+}
+
+async function onCameraCapture(event: Event) {
+  const input = event.target as HTMLInputElement
+  const captured = input.files ? Array.from(input.files) : []
+  input.value = ''
+  await uploadAll(captured)
 }
 
 function isImage(mime: string) {
@@ -253,6 +282,36 @@ function confirmDelete(file: { id: string; name: string }) {
         </div>
       </template>
     </FileUpload>
+
+    <!-- Camera capture: hidden input opens the device camera on mobile. -->
+    <div class="camera-capture">
+      <Button
+        type="button"
+        icon="pi pi-camera"
+        :label="t('ui.take_photo')"
+        severity="secondary"
+        outlined
+        class="camera-btn"
+        :disabled="uploading"
+        @click="openCamera"
+      />
+      <input
+        ref="cameraInputRef"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        class="camera-input"
+        @change="onCameraCapture"
+      />
+    </div>
+
+    <!-- Real per-file upload progress. -->
+    <div v-if="uploading" class="upload-progress-list">
+      <div v-for="(name, i) in uploadingNames" :key="i" class="upload-progress-item">
+        <span class="upload-progress-name">{{ name }}</span>
+        <ProgressBar :value="uploadProgress[i] ?? 0" class="upload-progress-bar" />
+      </div>
+    </div>
 
     <EmptyState
       v-if="!doc.files?.length"
@@ -439,6 +498,44 @@ function confirmDelete(file: { id: string; name: string }) {
 }
 .file-upload-empty i {
   font-size: 1.25rem;
+}
+
+.camera-capture {
+  margin-top: 0.75rem;
+}
+.camera-input {
+  display: none;
+}
+.camera-btn {
+  width: 100%;
+}
+
+.upload-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.upload-progress-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.upload-progress-name {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-progress-bar {
+  height: 0.75rem;
+}
+
+@media (min-width: 601px) {
+  .camera-btn {
+    width: auto;
+  }
 }
 
 @media (max-width: 600px) {

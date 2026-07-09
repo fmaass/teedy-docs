@@ -14,12 +14,39 @@ export interface FileVersion {
   create_date: number
 }
 
-export function uploadFile(documentId: string, file: File) {
+/**
+ * Map an axios upload-progress event to an integer percentage 0..100.
+ * When the total size is unknown (some browsers/streams omit it) the fraction
+ * cannot be computed, so we report 0 and let the caller show an indeterminate
+ * state instead of a misleading number.
+ */
+export function toPercent(loaded: number, total?: number): number {
+  if (!total || total <= 0) return 0
+  const pct = Math.round((loaded / total) * 100)
+  if (pct < 0) return 0
+  if (pct > 100) return 100
+  return pct
+}
+
+/**
+ * Upload a file to a document via PUT /api/file (multipart/form-data).
+ * `onProgress` receives an integer 0..100 as the browser streams the body up,
+ * so callers can render a real per-file progress bar. The percentage is derived
+ * from axios's native onUploadProgress (loaded/total), not simulated.
+ */
+export function uploadFile(
+  documentId: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+) {
   const formData = new FormData()
   formData.append('id', documentId)
   formData.append('file', file)
   return api.put('/file', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress
+      ? (event) => onProgress(toPercent(event.loaded, event.total))
+      : undefined,
   })
 }
 

@@ -606,6 +606,7 @@
     "files_count": "Files ({count})",
     "drag_or_choose": "Drag files here or click Choose to add",
     "drag_or_choose_upload": "Drag files here or click Choose to upload",
+    "take_photo": "Take photo",
     "files_upload_hint": "{count} file(s) will be uploaded on save.",
     "uploading": "Uploading...",
     "upload_failed": "Upload failed",

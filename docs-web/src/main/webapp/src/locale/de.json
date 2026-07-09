@@ -606,6 +606,7 @@
     "files_count": "Dateien ({count})",
     "drag_or_choose": "Dateien hierher ziehen oder auf Auswählen klicken, um sie hinzuzufügen",
     "drag_or_choose_upload": "Dateien hierher ziehen oder auf Auswählen klicken, um sie hochzuladen",
+    "take_photo": "Foto aufnehmen",
     "files_upload_hint": "{count} Datei(en) werden beim Speichern hochgeladen.",
     "uploading": "Wird hochgeladen …",
     "upload_failed": "Hochladen fehlgeschlagen",
