@@ -104,7 +104,7 @@ configured:
 - New setting: `trusted_proxies` filter init-param, or the
   `docs.header_authentication_trusted_proxies` system property — a
   comma-separated list of exact IPs and/or CIDR ranges (IPv4 or IPv6, e.g.
-  `10.0.0.0/8,192.168.1.50`).
+  `10.0.0.0/8,192.0.2.10`).
 - The filter checks the allowlist against the **immediate TCP peer address**
   (`request.getRemoteAddr()`) — never the spoofable `X-Forwarded-For` header.
 - If `trusted_proxies` is unset (or empty) while header auth is enabled, a

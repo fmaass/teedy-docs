@@ -329,7 +329,13 @@ You will get your deployable WAR in the `docs-web/target` directory.
 
 # Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features, deferred items, and the release outlook.
+See the [GitHub releases and tags](https://github.com/fmaass/teedy-docs/releases) for shipped changes.
+
+# Backing up
+
+Back up both the PostgreSQL database with `pg_dump` and the document storage directory (`docs.home`, typically the `/data` volume) together. Stored files are encrypted and cannot be used without the database metadata, and the database cannot restore usable documents without the matching files.
+
+Verify the backup by restoring it into a scratch database and storage directory before relying on it.
 
 # Contributing
 

@@ -37,3 +37,4 @@ teedy-docs-specification.pdf
 
 # Per-worktree isolated Maven repo (orchestrated multi-agent builds)
 .m2-local/
+.teedy-design-audit/
