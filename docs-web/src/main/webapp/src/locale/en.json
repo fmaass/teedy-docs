@@ -102,7 +102,12 @@
       "comments": "Comments",
       "no_comments": "No comments on this document yet",
       "add_comment": "Add a comment",
+      "post_comment": "Post comment",
       "error_loading_comments": "Error loading comments",
+      "comment_added": "Comment added",
+      "comment_add_failed": "Failed to add comment",
+      "comment_deleted": "Comment deleted",
+      "comment_delete_failed": "Failed to delete comment",
       "content": {
         "content": "Content",
         "delete_file_title": "Delete file",

@@ -53,6 +53,7 @@ const tabs = computed(() => [
   { label: t('document.view.content.content'), icon: 'pi pi-align-left', route: 'document-view-text' },
   { label: t('document.view.permissions.permissions'), icon: 'pi pi-lock', route: 'document-view-permissions' },
   { label: t('document.view.activity.activity'), icon: 'pi pi-history', route: 'document-view-activity' },
+  { label: t('document.view.comments'), icon: 'pi pi-comments', route: 'document-view-comments' },
 ])
 
 const activeTab = computed(() => {

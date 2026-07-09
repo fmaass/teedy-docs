@@ -79,6 +79,11 @@ const router = createRouter({
               name: 'document-view-activity',
               component: () => import('../views/document/DocumentViewActivity.vue'),
             },
+            {
+              path: 'comments',
+              name: 'document-view-comments',
+              component: () => import('../views/document/DocumentViewComments.vue'),
+            },
           ],
         },
         // Tags
