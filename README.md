@@ -30,6 +30,7 @@ Teedy is an open source, lightweight document management system for individuals 
 
 - Responsive user interface
 - Optical character recognition
+- LDAP authentication
 - OpenID Connect (OIDC) / SSO authentication
 - Header-based proxy authentication
 - Support image, PDF, ODT, DOCX, PPTX files
@@ -61,7 +62,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.0.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.1.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -73,7 +74,12 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
 - General
   - `DOCS_BASE_URL`: The base url used by the application. Generated url's will be using this as base.
   - `DOCS_GLOBAL_QUOTA`: Defines the default quota applying to all users.
+  - `DOCS_MAX_UPLOAD_SIZE`: Maximum accepted upload size in bytes. Default: `524288000` (500 MB).
   - `DOCS_BCRYPT_WORK`: Defines the work factor which is used for password hashing. The default is `10`. This value may be `4...31` including `4` and `31`. The specified value will be used for all new users and users changing their password. Be aware that setting this factor to high can heavily impact login and user creation performance.
+  - `DOCS_SESSION_LIFETIME_DAYS`: Number of days before login sessions expire. Default: `90`. Missing, malformed, or non-positive values fall back to the default.
+  - `DOCS_LOGIN_MAX_ATTEMPTS`: Number of failed login attempts before temporary lockout starts. Default: `5`.
+  - `DOCS_LOGIN_LOCKOUT_SECONDS`: Base login lockout duration in seconds. Default: `60`. Repeated failures apply exponential backoff capped at 15 minutes.
+  - `APPDATA`: On Windows, the system AppData directory used to resolve the default data directory when `docs.home` is not set.
 
 - Admin
   - `DOCS_ADMIN_EMAIL_INIT`: Defines the e-mail-address the admin user should have upon initialization.
@@ -87,16 +93,30 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
 
 - Language
   - `DOCS_DEFAULT_LANGUAGE`: The language which will be used as default. Currently supported values are:
-    - `eng`, `fra`, `ita`, `deu`, `spa`, `por`, `pol`, `rus`, `ukr`, `ara`, `hin`, `chi_sim`, `chi_tra`, `jpn`, `tha`, `kor`, `nld`, `tur`, `heb`, `hun`, `fin`, `swe`, `lav`, `dan`
+    - `eng`, `fra`, `ita`, `deu`, `spa`, `por`, `pol`, `rus`, `ukr`, `ara`, `hin`, `chi_sim`, `chi_tra`, `jpn`, `tha`, `kor`, `nld`, `tur`, `heb`, `hun`, `fin`, `swe`, `lav`, `dan`, `nor`, `vie`, `ces`, `sqi`
 
 - E-Mail
   - `DOCS_SMTP_HOSTNAME`: Hostname of the SMTP-Server to be used by Teedy.
   - `DOCS_SMTP_PORT`: The port which should be used.
   - `DOCS_SMTP_USERNAME`: The username to be used.
   - `DOCS_SMTP_PASSWORD`: The password to be used.
+  - `DOCS_SMTP_FROM`: Sender address used for outbound e-mail. If unset, the value configured in the application is used.
 
 - Trash
   - `DOCS_TRASH_RETENTION_DAYS`: Number of days to keep deleted documents in the trash before auto-purging. Default: `30`. Set to `0` to disable auto-purge.
+
+- Export
+  - `DOCS_EXPORT_ENABLED`: Enables the full-account export endpoint. Default: `true`. Set to `false` to disable exports.
+  - `DOCS_EXPORT_MAX_DOCUMENTS`: Maximum number of documents allowed in a single export. Default: `10000`. Values below `1` fall back to the default.
+  - `DOCS_EXPORT_MAX_CONCURRENT`: Maximum number of simultaneous exports. Default: `2`. Values below `1` fall back to the default.
+
+- Async processing
+  - `DOCS_ASYNC_QUEUE_CAPACITY`: Maximum queued asynchronous events before the producing thread applies backpressure. Default: `1000`. Values below `1` fall back to the default.
+  - `DOCS_ASYNC_RETRY_COUNT`: Number of times failed async listeners are retried. Default: `0`.
+  - `DOCS_ASYNC_RETRY_BACKOFF_MS`: Backoff in milliseconds between async listener retries. Default: `200`.
+
+- Webhooks
+  - `DOCS_WEBHOOK_ALLOW_PRIVATE`: Allows webhook URLs targeting private, loopback, or link-local addresses when set to `true`. Default: `false`.
 
 ## API Key Authentication
 
@@ -214,7 +234,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.0.0
+    image: ghcr.io/fmaass/teedy-docs:v3.1.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -222,6 +242,18 @@ services:
       DOCS_BASE_URL: "https://docs.example.com"
       DOCS_ADMIN_EMAIL_INIT: "admin@example.com"
       DOCS_ADMIN_PASSWORD_INIT: "$$2a$$05$$PcMNUbJvsk7QHFSfEIDaIOjk1VI9/E7IPjTKx.jkjPxkx2EOKSoPS"
+      DOCS_MAX_UPLOAD_SIZE: "524288000"
+      DOCS_SESSION_LIFETIME_DAYS: "90"
+      DOCS_LOGIN_MAX_ATTEMPTS: "5"
+      DOCS_LOGIN_LOCKOUT_SECONDS: "60"
+      DOCS_SMTP_FROM: "teedy@example.com"
+      DOCS_EXPORT_ENABLED: "true"
+      DOCS_EXPORT_MAX_DOCUMENTS: "10000"
+      DOCS_EXPORT_MAX_CONCURRENT: "2"
+      DOCS_ASYNC_QUEUE_CAPACITY: "1000"
+      DOCS_ASYNC_RETRY_COUNT: "0"
+      DOCS_ASYNC_RETRY_BACKOFF_MS: "200"
+      DOCS_WEBHOOK_ALLOW_PRIVATE: "false"
       DATABASE_URL: "jdbc:postgresql://teedy-db:5432/teedy"
       DATABASE_USER: "teedy_db_user"
       DATABASE_PASSWORD: "teedy_db_password"
@@ -261,7 +293,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.0.0
+    image: ghcr.io/fmaass/teedy-docs:v3.1.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -269,6 +301,7 @@ services:
       DOCS_BASE_URL: "https://docs.example.com"
       DOCS_ADMIN_EMAIL_INIT: "admin@example.com"
       DOCS_ADMIN_PASSWORD_INIT: "$$2a$$05$$PcMNUbJvsk7QHFSfEIDaIOjk1VI9/E7IPjTKx.jkjPxkx2EOKSoPS"
+      DOCS_MAX_UPLOAD_SIZE: "524288000"
     volumes:
       - ./docs/data:/data
 ```
@@ -327,9 +360,45 @@ From the root directory:
 
 You will get your deployable WAR in the `docs-web/target` directory.
 
+### End-to-end tests
+
+End-to-end tests use [Playwright](https://playwright.dev/) to drive a **real
+running Teedy instance** — the production Docker image on port 8080 (embedded H2,
+default `admin`/`admin`). They log in through Teedy's **native form login**, not
+Authelia (Authelia only fronts the production deployment).
+
+Run them locally from the repository root:
+
+```console
+scripts/e2e-run.sh
+```
+
+The script builds the production WAR + Docker image (if not already built), boots
+the container, waits for `/api/user` to serve, runs the suite, and tears the
+container down. First run only: install the browser once with
+`cd docs-web/src/main/webapp && npx playwright install chromium`.
+
+To reuse an already-built image and skip the WAR/image build:
+
+```console
+E2E_IMAGE=teedy-e2e:local scripts/e2e-run.sh
+```
+
+The Playwright project lives in `docs-web/src/main/webapp` (`playwright.config.ts`,
+`e2e/`). `@playwright/test` is a dev dependency, so the browser is only downloaded
+in the e2e job — `npm ci` for the unit-test/build pipeline is unaffected. In CI the
+`e2e` job runs after `build`, reusing the WAR artifact, and the image publish gates
+on it.
+
 # Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features, deferred items, and the release outlook.
+See the [GitHub releases and tags](https://github.com/fmaass/teedy-docs/releases) for shipped changes.
+
+# Backing up
+
+Back up both the PostgreSQL database with `pg_dump` and the document storage directory (`docs.home`, typically the `/data` volume) together. Stored files are encrypted and cannot be used without the database metadata, and the database cannot restore usable documents without the matching files.
+
+Verify the backup by restoring it into a scratch database and storage directory before relying on it.
 
 # Contributing
 

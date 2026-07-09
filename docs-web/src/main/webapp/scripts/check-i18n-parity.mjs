@@ -13,13 +13,52 @@
 // Expand STRICT_LOCALES as a locale is brought to full parity with a human translator.
 // Run: npm run i18n:check
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-const localeDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'locale')
+const scriptDir = dirname(fileURLToPath(import.meta.url))
+const localeDir = join(scriptDir, '..', 'src', 'locale')
+const srcDir = join(scriptDir, '..', 'src')
 const REFERENCE = 'en'
 const STRICT_LOCALES = ['de']
+
+// UNUSED-KEY guard (FE-01 hardening). After parity, the reference locale is scanned
+// against the app source so dead keys can't silently re-accumulate (the ~46% dead
+// weight the F4 sweep removed forced hand-translation of never-shown strings forever).
+//
+// A reference key is "used" if its exact dotted form appears as a quoted string
+// anywhere in src/**/*.{vue,ts,js} — this covers t('x.y'), $t('x.y'), i18n.t('x.y'),
+// :label="t('x.y')", and literal keys stored in data (e.g. DocumentSearchBar's
+// `descKey: 'document.search_help.op_tag'`, AboutDialog's highlightKeys array).
+//
+// DYNAMIC_KEY_PREFIXES exempts namespaces indexed by a runtime-computed suffix — the
+// key literal never appears in source, so a plain scan would false-positive them.
+// Add a prefix here (with a source pointer) whenever you introduce a `t(`prefix_${x}`)`
+// pattern. Keep this list MINIMAL — each entry is a hole in the dead-key guard.
+const DYNAMIC_KEY_PREFIXES = [
+  // SettingsMetadata.vue: t(`ui.metadata.type_${type.toLowerCase()}`)
+  'ui.metadata.type_',
+]
+
+// AWAITING_PREFIXES: keys for features intentionally on the roadmap but not yet
+// ported to the Vue SPA (they have no consumer *yet*). They are legitimately
+// reference-only, so the unused scan must not flag them. Remove a prefix here when
+// the feature ships and its keys gain real consumers.
+const AWAITING_PREFIXES = [
+  'settings.security.',           // user self-enroll 2FA/TOTP (secret_key, QR, test) — not ported
+  'settings.session.',            // opened-sessions management — not ported
+  'settings.menu_opened_sessions',
+  'settings.menu_two_factor_auth',
+  'settings.inbox.',              // IMAP inbox import — not ported
+  'settings.menu_inbox',
+  'login.validation_code',        // 2FA login validation-code prompt — pairs with 2FA
+]
+
+// Fail the build on newly-unused keys, or only warn? Warning-first so the remaining
+// intentionally-awaiting keys don't block CI; flip to true once the awaiting features
+// ship (or their prefixes are curated) to make the guard enforcing.
+const UNUSED_FAILS = false
 
 function flatten(obj, prefix = '', out = {}) {
   for (const [k, v] of Object.entries(obj)) {
@@ -75,6 +114,52 @@ for (const locale of locales) {
     }
   }
   if (!stale.length && !missing.length) console.log(`✓ ${locale}: complete`)
+}
+
+// ── Unused-key report ────────────────────────────────────────────────────────
+function collectSource(dir, acc = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    const st = statSync(full)
+    if (st.isDirectory()) {
+      if (entry === 'node_modules' || entry === 'locale') continue
+      collectSource(full, acc)
+    } else if (/\.(vue|ts|js)$/.test(entry)) {
+      acc.push(full)
+    }
+  }
+  return acc
+}
+
+const sourceBlob = collectSource(srcDir)
+  .map((f) => readFileSync(f, 'utf8'))
+  .join('\n')
+
+const isExempt = (key) =>
+  DYNAMIC_KEY_PREFIXES.some((p) => key.startsWith(p)) ||
+  AWAITING_PREFIXES.some((p) => key === p || key.startsWith(p))
+
+// A key is "used" if its exact dotted form appears as a quoted literal in source.
+const usedInSource = (key) =>
+  sourceBlob.includes(`'${key}'`) ||
+  sourceBlob.includes(`"${key}"`) ||
+  sourceBlob.includes(`\`${key}\``)
+
+const unused = [...referenceKeys]
+  .filter((k) => !isExempt(k) && !usedInSource(k))
+  .sort()
+
+console.log(`\nunused-key scan — ${referenceKeys.size} reference keys, ${unused.length} with no source consumer`)
+if (unused.length) {
+  const level = UNUSED_FAILS ? 'error' : 'warn'
+  console[level](
+    `  ${unused.length} reference key(s) have no literal consumer in src ` +
+      `(add to DYNAMIC_KEY_PREFIXES/AWAITING_PREFIXES if intentional, else prune):`,
+  )
+  for (const k of unused) console[level](`    ${k}`)
+  if (UNUSED_FAILS) hasError = true
+} else {
+  console.log('✓ no unused reference keys')
 }
 
 if (hasError) {

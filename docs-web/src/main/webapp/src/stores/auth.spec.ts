@@ -111,6 +111,49 @@ describe('auth store', () => {
     })
   })
 
+  // R-042: the first-run default-password banner reads this getter to decide
+  // whether to warn the admin. Backend only sets is_default_password for admins,
+  // and the getter must also stay hidden for anonymous sessions.
+  describe('hasDefaultPassword getter', () => {
+    it('starts false before any user is loaded', () => {
+      const store = useAuthStore()
+      expect(store.hasDefaultPassword).toBe(false)
+    })
+
+    it('is true when a signed-in user carries is_default_password', async () => {
+      mockGetCurrentUser.mockResolvedValue({
+        data: userInfo({ is_default_password: true, base_functions: ['ADMIN'] }),
+      } as any)
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.hasDefaultPassword).toBe(true)
+    })
+
+    it('is false when is_default_password is not set', async () => {
+      mockGetCurrentUser.mockResolvedValue({
+        data: userInfo({ is_default_password: false, base_functions: ['ADMIN'] }),
+      } as any)
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.hasDefaultPassword).toBe(false)
+    })
+
+    it('is false for an anonymous session even if the flag were set', async () => {
+      mockGetCurrentUser.mockResolvedValue({
+        data: userInfo({ anonymous: true, is_default_password: true }),
+      } as any)
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.hasDefaultPassword).toBe(false)
+    })
+  })
+
   describe('login', () => {
     it('calls the login API then re-fetches the current user', async () => {
       mockApiLogin.mockResolvedValue({} as any)

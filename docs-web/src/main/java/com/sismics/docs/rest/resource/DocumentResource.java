@@ -22,28 +22,25 @@ import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.dao.dto.RelationDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
-import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
 import com.sismics.docs.core.event.DocumentRestoredAsyncEvent;
 import com.sismics.docs.core.event.DocumentTrashedAsyncEvent;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
-import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.AuditLog;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
-import com.google.common.io.ByteStreams;
 import com.sismics.docs.core.util.ConfigUtil;
-import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.ExportGuard;
+import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
-import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.MetadataUtil;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
 import com.sismics.docs.core.util.jpa.PaginatedLists;
 import com.sismics.docs.core.util.jpa.SortCriteria;
+import com.sismics.docs.rest.util.DocumentResourceHelper;
 import com.sismics.docs.rest.util.DocumentSearchCriteriaUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
@@ -87,11 +84,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -202,7 +196,7 @@ public class DocumentResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        JsonObjectBuilder document = createDocumentObjectBuilder(documentDto)
+        JsonObjectBuilder document = DocumentResourceHelper.createDocumentObjectBuilder(documentDto)
                 .add("creator", documentDto.getCreator())
                 .add("coverage", JsonUtil.nullable(documentDto.getCoverage()))
                 .add("file_count", documentDto.getFileCount())
@@ -226,7 +220,7 @@ public class DocumentResource extends BaseResource {
                             .setTargetIdList(getTargetIdList(null)) // No tags for shares
                             .setDocumentId(documentId),
                     new SortCriteria(1, true));
-            document.add("tags", createTagsArrayBuilder(tagDtoList));
+            document.add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
         }
 
         // Add ACL
@@ -524,10 +518,10 @@ public class DocumentResource extends BaseResource {
                 filesCount = filesCountByDocument.getOrDefault(documentDto.getId(), 0L);
             }
 
-            JsonObjectBuilder documentObjectBuilder = createDocumentObjectBuilder(documentDto)
+            JsonObjectBuilder documentObjectBuilder = DocumentResourceHelper.createDocumentObjectBuilder(documentDto)
                     .add("highlight", JsonUtil.nullable(documentDto.getHighlight()))
                     .add("file_count", filesCount)
-                    .add("tags", createTagsArrayBuilder(tagDtoList));
+                    .add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
 
             if (Boolean.TRUE == files) {
                 JsonArrayBuilder filesArrayBuilder = Json.createArrayBuilder();
@@ -583,8 +577,6 @@ public class DocumentResource extends BaseResource {
         final String userId = principal.getId();
         final String username = principal.getName();
         final DocumentDao documentDao = new DocumentDao();
-        final FileDao fileDao = new FileDao();
-        final UserDao userDao = new UserDao();
 
         // PREFLIGHT size cap: count the caller's exportable documents (a COUNT query, not
         // a full load) and reject BEFORE the eager load if it exceeds the configured cap.
@@ -603,7 +595,13 @@ public class DocumentResource extends BaseResource {
         // change can rebuild the semaphore, and release must target that SAME instance.
         final java.util.concurrent.Semaphore exportPermit = ExportGuard.tryAcquire();
         if (exportPermit == null) {
-            throw new ServerException("ExportBusy", "Too many concurrent exports, try again later");
+            // Expected, retryable throttle: answer 503 with a Retry-After hint rather than a 500.
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .header("Retry-After", 30)
+                    .entity(Json.createObjectBuilder()
+                            .add("type", "ExportBusy")
+                            .add("message", "Too many concurrent exports, try again later").build())
+                    .build();
         }
 
         // Audit the export. It is a read, but the spec requires it be recorded; write the
@@ -629,78 +627,9 @@ public class DocumentResource extends BaseResource {
             // whichever way it ends. This spans the heap-heavy window, not just the resource
             // method (which returns before the stream is serialized).
             try {
-            JsonArrayBuilder documentsJson = Json.createArrayBuilder();
-            try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
-                int docIndex = 0;
-                for (Document document : documentList) {
-                    String folder = docIndex + "-" + sanitizePathSegment(document.getTitle());
-                    JsonArrayBuilder filesJson = Json.createArrayBuilder();
-
-                    List<File> fileList = fileDao.getByDocumentId(userId, document.getId());
-                    int fileIndex = 0;
-                    for (File file : fileList) {
-                        // Sanitize both segments so a crafted document title or file name cannot
-                        // escape the archive layout (ZIP-slip) on the recipient's machine.
-                        String entryName = folder + "/" + fileIndex + "-"
-                                + sanitizeFileName(file.getFullName(Integer.toString(fileIndex)));
-                        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
-                        // Files are encrypted with their creator's key.
-                        User fileUser = userDao.getById(file.getUserId());
-                        // A single missing/undecryptable file must not corrupt the whole export:
-                        // skip it and record the failure in the manifest instead of aborting.
-                        boolean exported = true;
-                        try (InputStream fileInputStream = Files.newInputStream(storedFile);
-                             InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, fileUser.getPrivateKey())) {
-                            zipOutputStream.putNextEntry(new ZipEntry(entryName));
-                            ByteStreams.copy(decryptedStream, zipOutputStream);
-                            zipOutputStream.closeEntry();
-                        } catch (Exception e) {
-                            exported = false;
-                        }
-                        JsonObjectBuilder fileJson = Json.createObjectBuilder()
-                                .add("id", file.getId())
-                                .add("name", JsonUtil.nullable(file.getName()))
-                                .add("mimetype", JsonUtil.nullable(file.getMimeType()))
-                                .add("size", JsonUtil.nullable(file.getSize()))
-                                .add("exported", exported)
-                                .add("path", JsonUtil.nullable(exported ? entryName : null));
-                        filesJson.add(fileJson);
-                        fileIndex++;
-                    }
-
-                    documentsJson.add(Json.createObjectBuilder()
-                            .add("id", document.getId())
-                            .add("title", JsonUtil.nullable(document.getTitle()))
-                            .add("description", JsonUtil.nullable(document.getDescription()))
-                            .add("subject", JsonUtil.nullable(document.getSubject()))
-                            .add("identifier", JsonUtil.nullable(document.getIdentifier()))
-                            .add("publisher", JsonUtil.nullable(document.getPublisher()))
-                            .add("format", JsonUtil.nullable(document.getFormat()))
-                            .add("source", JsonUtil.nullable(document.getSource()))
-                            .add("type", JsonUtil.nullable(document.getType()))
-                            .add("coverage", JsonUtil.nullable(document.getCoverage()))
-                            .add("rights", JsonUtil.nullable(document.getRights()))
-                            .add("language", JsonUtil.nullable(document.getLanguage()))
-                            .add("create_date", document.getCreateDate().getTime())
-                            .add("update_date", document.getUpdateDate() != null
-                                    ? document.getUpdateDate().getTime() : document.getCreateDate().getTime())
-                            .add("files", filesJson));
-                    docIndex++;
-                }
-
-                // Manifest is written last, after every document has been enumerated.
-                String manifest = Json.createObjectBuilder()
-                        .add("generator", "Teedy")
-                        .add("username", username)
-                        .add("export_date", new Date().getTime())
-                        .add("document_count", documentList.size())
-                        .add("documents", documentsJson)
-                        .build().toString();
-                zipOutputStream.putNextEntry(new ZipEntry("manifest.json"));
-                zipOutputStream.write(manifest.getBytes(StandardCharsets.UTF_8));
-                zipOutputStream.closeEntry();
-            }
-            outputStream.close();
+                ExportUtil.writeExportZip(userId, username, documentList, outputStream);
+            } catch (Exception e) {
+                throw new IOException("Error writing export archive", e);
             } finally {
                 ExportGuard.release(exportPermit);
             }
@@ -719,42 +648,6 @@ public class DocumentResource extends BaseResource {
                 ExportGuard.release(exportPermit);
             }
         }
-    }
-
-    /**
-     * Sanitize a string for use as a single ZIP path segment.
-     *
-     * @param value Raw value
-     * @return Safe path segment
-     */
-    private static String sanitizePathSegment(String value) {
-        if (StringUtils.isBlank(value)) {
-            return "document";
-        }
-        return value.replaceAll("\\W+", "_");
-    }
-
-    /**
-     * Reduce a file name to a safe single archive entry segment: strip any path
-     * separators and traversal, keeping the base name (and its extension).
-     *
-     * @param value Raw file name
-     * @return Safe file name
-     */
-    private static String sanitizeFileName(String value) {
-        if (StringUtils.isBlank(value)) {
-            return "file";
-        }
-        String name = value.replace('\\', '/');
-        int slash = name.lastIndexOf('/');
-        if (slash >= 0) {
-            name = name.substring(slash + 1);
-        }
-        name = name.replaceAll("\\p{Cntrl}", "").trim();
-        if (name.isEmpty() || ".".equals(name) || "..".equals(name)) {
-            return "file";
-        }
-        return name;
     }
 
     /**
@@ -931,10 +824,10 @@ public class DocumentResource extends BaseResource {
         document = DocumentUtil.createDocument(document, principal.getId());
 
         // Update tags
-        updateTagList(document.getId(), tagList);
+        DocumentResourceHelper.updateTagList(document.getId(), tagList, getTargetIdList(null));
 
         // Update relations
-        updateRelationList(document.getId(), relationList);
+        DocumentResourceHelper.updateRelationList(document.getId(), relationList);
 
         // Update custom metadata
         try {
@@ -1082,12 +975,22 @@ public class DocumentResource extends BaseResource {
 
         documentDao.update(document, principal.getId());
 
-        // Update tags, relations, metadata only when their params are present in the form
-        if (form.containsKey("tags")) {
-            updateTagList(id, tagList);
+        // Update tags, relations, metadata only when their params are present in the form.
+        // Partial-update contract: omitting a param preserves the existing value. But when a
+        // client empties a previously-set collection, it sends ZERO of that param, which is
+        // indistinguishable from "omitted". A client that intends an explicit clear sends the
+        // matching *_reset=true sentinel; old clients that never send it keep the old
+        // preserve-on-omit semantics.
+        boolean tagsReset = Boolean.parseBoolean(form.getFirst("tags_reset"));
+        boolean metadataReset = Boolean.parseBoolean(form.getFirst("metadata_reset"));
+        if (form.containsKey("tags") || tagsReset) {
+            // updateTagList treats a null list as "no change"; a reset with no tags supplied
+            // must clear, so pass an empty (non-null) list.
+            List<String> effectiveTags = tagList != null ? tagList : new ArrayList<>();
+            DocumentResourceHelper.updateTagList(id, effectiveTags, getTargetIdList(null));
         }
         if (form.containsKey("relations")) {
-            updateRelationList(id, relationList);
+            DocumentResourceHelper.updateRelationList(id, relationList);
         }
         if (form.containsKey("metadata_id")) {
             try {
@@ -1095,6 +998,9 @@ public class DocumentResource extends BaseResource {
             } catch (Exception e) {
                 throw new ClientException("ValidationError", e.getMessage());
             }
+        } else if (metadataReset) {
+            // Explicit clear of the last remaining metadata value (zero metadata_id params).
+            MetadataUtil.clearMetadata(document.getId());
         }
 
         // Raise a document updated event
@@ -1417,7 +1323,7 @@ public class DocumentResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), id);
+        DocumentResourceHelper.fireFileAndDocumentDeletedEvents(documentDao, fileDao, principal.getId(), id);
         documentDao.permanentDelete(id);
 
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -1453,7 +1359,7 @@ public class DocumentResource extends BaseResource {
         // and keeps deletion/quota events attributed to the real owner (the caller).
         int count = 0;
         for (Document document : documentDao.findDeletedByUserId(principal.getId())) {
-            fireFileAndDocumentDeletedEvents(fileDao, principal.getId(), document.getId());
+            DocumentResourceHelper.fireFileAndDocumentDeletedEvents(documentDao, fileDao, principal.getId(), document.getId());
             documentDao.permanentDelete(document.getId());
             count++;
         }
@@ -1463,91 +1369,4 @@ public class DocumentResource extends BaseResource {
         return Response.ok().entity(response.build()).build();
     }
 
-    private void fireFileAndDocumentDeletedEvents(FileDao fileDao, String userId, String documentId) {
-        List<File> fileList = fileDao.getAllByDocumentId(documentId);
-        for (File file : fileList) {
-            FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
-            fileDeletedAsyncEvent.setUserId(userId);
-            fileDeletedAsyncEvent.setFileId(file.getId());
-            fileDeletedAsyncEvent.setFileSize(file.getSize());
-            ThreadLocalContext.get().addAsyncEvent(fileDeletedAsyncEvent);
-        }
-
-        DocumentDeletedAsyncEvent documentDeletedAsyncEvent = new DocumentDeletedAsyncEvent();
-        documentDeletedAsyncEvent.setUserId(userId);
-        documentDeletedAsyncEvent.setDocumentId(documentId);
-        ThreadLocalContext.get().addAsyncEvent(documentDeletedAsyncEvent);
-    }
-
-    /**
-     * Update tags list on a document.
-     *
-     * @param documentId Document ID
-     * @param tagList Tag ID list
-     */
-    private void updateTagList(String documentId, List<String> tagList) {
-        if (tagList != null) {
-            TagDao tagDao = new TagDao();
-            Set<String> tagSet = new HashSet<>();
-            Set<String> visibleTagIdSet = new HashSet<>();
-            List<TagDto> tagDtoList = tagDao.findByCriteria(new TagCriteria().setTargetIdList(getTargetIdList(null)), null);
-            for (TagDto tagDto : tagDtoList) {
-                visibleTagIdSet.add(tagDto.getId());
-            }
-            for (String tagId : tagList) {
-                if (!visibleTagIdSet.contains(tagId)) {
-                    throw new ClientException("TagNotFound", MessageFormat.format("Tag not found: {0}", tagId));
-                }
-                tagSet.add(tagId);
-            }
-            // Only remove links to tags the acting user can see; tags invisible to them (e.g. an owner's
-            // private tag on a shared document) must be preserved.
-            tagDao.updateTagList(documentId, tagSet, visibleTagIdSet);
-        }
-    }
-
-    /**
-     * Update relations list on a document.
-     *
-     * @param documentId Document ID
-     * @param relationList Relation ID list
-     */
-    private void updateRelationList(String documentId, List<String> relationList) {
-        if (relationList != null) {
-            DocumentDao documentDao = new DocumentDao();
-            RelationDao relationDao = new RelationDao();
-            Set<String> documentIdSet = new HashSet<>();
-            for (String targetDocId : relationList) {
-                // ACL are not checked, because the editing user is not forced to view the target document
-                Document document = documentDao.getById(targetDocId);
-                if (document != null && !documentId.equals(targetDocId)) {
-                    documentIdSet.add(targetDocId);
-                }
-            }
-            relationDao.updateRelationList(documentId, documentIdSet);
-        }
-    }
-
-    private JsonObjectBuilder createDocumentObjectBuilder(DocumentDto documentDto) {
-        return Json.createObjectBuilder()
-                .add("create_date", documentDto.getCreateTimestamp())
-                .add("description", JsonUtil.nullable(documentDto.getDescription()))
-                .add("file_id", JsonUtil.nullable(documentDto.getFileId()))
-                .add("id", documentDto.getId())
-                .add("language", documentDto.getLanguage())
-                .add("shared", documentDto.getShared())
-                .add("title", documentDto.getTitle())
-                .add("update_date", documentDto.getUpdateTimestamp());
-    }
-
-    private static JsonArrayBuilder createTagsArrayBuilder(List<TagDto> tagDtoList) {
-        JsonArrayBuilder tags = Json.createArrayBuilder();
-        for (TagDto tagDto : tagDtoList) {
-            tags.add(Json.createObjectBuilder()
-                    .add("id", tagDto.getId())
-                    .add("name", tagDto.getName())
-                    .add("color", tagDto.getColor()));
-        }
-        return tags;
-    }
 }

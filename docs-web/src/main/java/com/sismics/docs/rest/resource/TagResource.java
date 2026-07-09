@@ -6,6 +6,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
+import com.sismics.docs.core.dao.dto.TagCoOccurrence;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Tag;
@@ -375,12 +376,16 @@ public class TagResource extends BaseResource {
      *
      * @param tagsParam Comma-separated tag IDs (optional, empty = all tags)
      * @param modeParam Tag combination mode: "and" (default) or "or"
+     * @param excludeParams Excluded tag IDs (optional, repeated). Documents carrying any
+     *                      excluded tag are removed from the facet and total counts, mirroring
+     *                      the SPA's {@code !tag:} filter. Empty/blank ids are ignored.
      * @return Response with facet counts and total matching documents
      */
     @GET
     @Path("/facets")
     public Response facets(@QueryParam("tags") String tagsParam,
-                           @QueryParam("mode") String modeParam) {
+                           @QueryParam("mode") String modeParam,
+                           @QueryParam("exclude") List<String> excludeParams) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -398,13 +403,30 @@ public class TagResource extends BaseResource {
             }
         }
 
+        // Excluded tag ids arrive as repeated ?exclude=<id> params; each value may itself be a
+        // comma-separated list. Sanitise the same way as the selected ids (drop blanks, trim).
+        java.util.List<String> excludeTagIds = new java.util.ArrayList<>();
+        if (excludeParams != null) {
+            for (String param : excludeParams) {
+                if (param == null) {
+                    continue;
+                }
+                for (String id : param.split(",")) {
+                    String trimmed = id.trim();
+                    if (!trimmed.isEmpty()) {
+                        excludeTagIds.add(trimmed);
+                    }
+                }
+            }
+        }
+
         java.util.List<String> targetIdList = getTargetIdList(null);
         java.util.Map<String, Long> counts = orMode
-                ? tagDao.getCoOccurringTagCountsOr(selectedTagIds, targetIdList)
-                : tagDao.getCoOccurringTagCounts(selectedTagIds, targetIdList);
+                ? tagDao.getCoOccurringTagCountsOr(selectedTagIds, targetIdList, excludeTagIds)
+                : tagDao.getCoOccurringTagCounts(selectedTagIds, targetIdList, excludeTagIds);
         long total = selectedTagIds.isEmpty() ? 0
-                : orMode ? tagDao.countDocumentsWithAnyTag(selectedTagIds, targetIdList)
-                         : tagDao.countDocumentsWithAllTags(selectedTagIds, targetIdList);
+                : orMode ? tagDao.countDocumentsWithAnyTag(selectedTagIds, targetIdList, excludeTagIds)
+                         : tagDao.countDocumentsWithAllTags(selectedTagIds, targetIdList, excludeTagIds);
 
         JsonObjectBuilder facets = Json.createObjectBuilder();
         for (java.util.Map.Entry<String, Long> entry : counts.entrySet()) {
@@ -438,14 +460,14 @@ public class TagResource extends BaseResource {
         }
 
         TagDao tagDao = new TagDao();
-        List<Object[]> matrix = tagDao.getFullCoOccurrenceMatrix(getTargetIdList(null));
+        List<TagCoOccurrence> matrix = tagDao.getFullCoOccurrenceMatrix(getTargetIdList(null));
 
         JsonArrayBuilder pairs = Json.createArrayBuilder();
-        for (Object[] row : matrix) {
+        for (TagCoOccurrence pair : matrix) {
             pairs.add(Json.createObjectBuilder()
-                    .add("tagA", (String) row[0])
-                    .add("tagB", (String) row[1])
-                    .add("count", ((Number) row[2]).longValue()));
+                    .add("tagA", pair.tagIdA())
+                    .add("tagB", pair.tagIdB())
+                    .add("count", pair.count()));
         }
 
         return Response.ok().entity(Json.createObjectBuilder()

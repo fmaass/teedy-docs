@@ -14,6 +14,7 @@ import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.PdfUtil;
+import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.util.ClasspathScanner;
 import com.sismics.util.EnvironmentUtil;
@@ -37,6 +38,27 @@ public class AppContext {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(AppContext.class);
+
+    /**
+     * Configuration for the bounded async work queue and listener retry.
+     */
+    static final String ASYNC_QUEUE_CAPACITY_PROPERTY = "docs.async_queue_capacity";
+    static final String ASYNC_QUEUE_CAPACITY_ENV = "DOCS_ASYNC_QUEUE_CAPACITY";
+    static final int DEFAULT_ASYNC_QUEUE_CAPACITY = 1000;
+    /**
+     * Async listener retry count. Default OFF (0) as the conservative posture, though the registered
+     * listeners are idempotent so retry is safe to enable. Enabling retry (count &gt; 0) makes
+     * {@link RetryingSubscriberExceptionHandler} re-invoke a failed async subscriber; that is safe
+     * because every listener is idempotent (quota reclamation now happens synchronously in the delete
+     * transaction, not in the async listener). See that class's Javadoc for the authoritative
+     * requirement and the per-listener state.
+     */
+    static final String ASYNC_RETRY_COUNT_PROPERTY = "docs.async_retry_count";
+    static final String ASYNC_RETRY_COUNT_ENV = "DOCS_ASYNC_RETRY_COUNT";
+    static final int DEFAULT_ASYNC_RETRY_COUNT = 0;
+    static final String ASYNC_RETRY_BACKOFF_MS_PROPERTY = "docs.async_retry_backoff_ms";
+    static final String ASYNC_RETRY_BACKOFF_MS_ENV = "DOCS_ASYNC_RETRY_BACKOFF_MS";
+    static final int DEFAULT_ASYNC_RETRY_BACKOFF_MS = 200;
 
     /**
      * Singleton instance.
@@ -87,6 +109,11 @@ public class AppContext {
      * Asynchronous executors.
      */
     private List<ThreadPoolExecutor> asyncExecutorList;
+
+    /**
+     * Guard so the "retry enabled" idempotency warning is logged once per context start.
+     */
+    private boolean asyncRetryWarningLogged;
 
     /**
      * Start the application context.
@@ -201,18 +228,59 @@ public class AppContext {
      * @return Async event bus
      */
     private EventBus newAsyncEventBus() {
+        // Retry is default OFF: with retryCount 0 the handler logs-and-drops on the first exception,
+        // matching the historical production behaviour (no re-invocation). Enabling it re-invokes
+        // failed subscribers; this is safe because the registered listeners are idempotent — quota
+        // reclamation happens synchronously in the delete transaction, not here (see
+        // RetryingSubscriberExceptionHandler's Javadoc for the per-listener state).
+        int retryCount = EnvironmentUtil.getIntConfig(
+                ASYNC_RETRY_COUNT_PROPERTY, ASYNC_RETRY_COUNT_ENV, DEFAULT_ASYNC_RETRY_COUNT, 0);
+        long retryBackoffMs = EnvironmentUtil.getIntConfig(
+                ASYNC_RETRY_BACKOFF_MS_PROPERTY, ASYNC_RETRY_BACKOFF_MS_ENV, DEFAULT_ASYNC_RETRY_BACKOFF_MS, 0);
+        if (retryCount > 0 && !asyncRetryWarningLogged) {
+            asyncRetryWarningLogged = true;
+            log.info("Async listener retry is enabled (docs.async_retry_count={}). Failed subscribers " +
+                    "are re-invoked; the registered listeners are idempotent, so re-delivery does not " +
+                    "double-apply side effects. Keep any newly added listener idempotent.", retryCount);
+        }
+        RetryingSubscriberExceptionHandler exceptionHandler =
+                new RetryingSubscriberExceptionHandler(retryCount, retryBackoffMs);
+
         if (EnvironmentUtil.isUnitTest()) {
-            return new EventBus((exception, context) ->
-                    log.error("Error in event handler {}", context.getSubscriberMethod(), exception));
+            return new EventBus(exceptionHandler);
         } else {
             int threadCount = Math.max(Runtime.getRuntime().availableProcessors() / 2, 2);
-            ThreadPoolExecutor executor = new ThreadPoolExecutor(threadCount, threadCount,
-                    1L, TimeUnit.MINUTES,
-                    new LinkedBlockingQueue<>());
+
+            // Bounded work queue so a burst of events cannot exhaust memory. When the queue is full,
+            // CallerRunsPolicy makes the producing thread run the task itself, applying backpressure
+            // instead of dropping events or growing the queue without limit.
+            int queueCapacity = EnvironmentUtil.getIntConfig(
+                    ASYNC_QUEUE_CAPACITY_PROPERTY, ASYNC_QUEUE_CAPACITY_ENV, DEFAULT_ASYNC_QUEUE_CAPACITY, 1);
+            ThreadPoolExecutor executor = newBoundedAsyncExecutor(threadCount, queueCapacity);
             asyncExecutorList.add(executor);
-            return new AsyncEventBus(executor, (exception, context) ->
-                    log.error("Error in async event handler {}", context.getSubscriberMethod(), exception));
+            return new AsyncEventBus(executor, exceptionHandler);
         }
+    }
+
+    /**
+     * Construct the {@link ThreadPoolExecutor} backing an async event bus: a fixed pool with a
+     * bounded {@link LinkedBlockingQueue} work queue and a {@link ThreadPoolExecutor.CallerRunsPolicy}
+     * rejection policy. When the queue is full, the producing thread runs the task itself, applying
+     * backpressure instead of dropping events or growing the queue without limit.
+     *
+     * <p>Package-private and static so the bounded-queue behaviour can be exercised directly by a
+     * unit test — the production async path uses a synchronous {@link EventBus} under unit tests
+     * (see {@link EnvironmentUtil#isUnitTest()}), so this factory is otherwise unreachable in tests.
+     *
+     * @param threadCount   Core and maximum pool size
+     * @param queueCapacity Bounded work-queue capacity
+     * @return A configured bounded thread pool executor
+     */
+    static ThreadPoolExecutor newBoundedAsyncExecutor(int threadCount, int queueCapacity) {
+        return new ThreadPoolExecutor(threadCount, threadCount,
+                1L, TimeUnit.MINUTES,
+                new LinkedBlockingQueue<>(queueCapacity),
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 
     /**
@@ -226,6 +294,21 @@ public class AppContext {
             queueSize += executor.getTaskCount() - executor.getCompletedTaskCount();
         }
         return queueSize;
+    }
+
+    /**
+     * Return the total remaining capacity of the bounded async work queues, i.e. the number of
+     * additional tasks that can be queued before the rejection policy kicks in. Returns 0 when no
+     * bounded executor is active (e.g. in the synchronous unit-test bus).
+     *
+     * @return Remaining async queue capacity
+     */
+    public int getQueuedTaskCapacity() {
+        int capacity = 0;
+        for (ThreadPoolExecutor executor : asyncExecutorList) {
+            capacity += executor.getQueue().remainingCapacity();
+        }
+        return capacity;
     }
 
     public EventBus getAsyncEventBus() {

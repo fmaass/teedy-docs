@@ -1,29 +1,58 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryClient, useMutation } from '@tanstack/vue-query'
+import { useQuery, useQueryClient, useMutation, keepPreviousData } from '@tanstack/vue-query'
+import { useClampedOffset } from '../../composables/useClampedOffset'
 import { listTrash, restoreDocument, permanentDeleteDocument, emptyTrash, type TrashItem } from '../../api/document'
-import DataTable from 'primevue/datatable'
+import { useAppInfo } from '../../composables/useAppInfo'
+import DataTable, { type DataTablePageEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
+import Tag from 'primevue/tag'
 import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
+import { daysUntilPurge, DEFAULT_RETENTION_DAYS } from '../../utils/trashRetention'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
+// --- Pagination (mirrors DocumentList: lazy PrimeVue paginator, server limit/offset) ---
+const PAGE_SIZE = 20
+const pageOffset = ref(0)
+
 const { data: trashData, isLoading, isError, refetch } = useQuery({
-  queryKey: ['trash'],
-  queryFn: () => listTrash({ limit: 200 }).then((r) => r.data),
+  queryKey: computed(() => ['trash', { offset: pageOffset.value }]),
+  queryFn: () => listTrash({ limit: PAGE_SIZE, offset: pageOffset.value }).then((r) => r.data),
+  placeholderData: keepPreviousData,
 })
 
 const documents = computed(() => trashData.value?.documents ?? [])
 const totalCount = computed(() => trashData.value?.total ?? 0)
+
+// Deleting/emptying the last item of a page > 1 refetches with a now-stale offset
+// and the server returns zero rows while total is still positive — a false-empty
+// page with no paginator to escape. Clamp back to the last valid page when that happens.
+useClampedOffset(trashData, isLoading, pageOffset, PAGE_SIZE)
+
+function onPage(event: DataTablePageEvent) {
+  pageOffset.value = event.first
+}
+
+// Retention window comes from /api/app (trash_retention_days, single source of truth
+// with the backend TrashPurgeService); fall back to the default if an older server
+// omits the field.
+const { data: appInfo } = useAppInfo()
+
+const retentionDays = computed(() => appInfo.value?.trash_retention_days ?? DEFAULT_RETENTION_DAYS)
+
+function purgeCountdown(deleteDate: number): number | null {
+  return daysUntilPurge(deleteDate, retentionDays.value)
+}
 
 const restoreMutation = useMutation({
   mutationFn: (id: string) => restoreDocument(id),
@@ -64,23 +93,17 @@ function doRestore(doc: TrashItem) {
 }
 
 function confirmPermanentDelete(doc: TrashItem) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.permanently_delete_confirm', { title: doc.title }),
     header: t('ui.permanently_delete'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => permanentDeleteMutation.mutate(doc.id),
   })
 }
 
 function confirmEmptyTrash() {
-  confirm.require({
+  confirmDanger({
     message: t('ui.empty_trash_confirm'),
     header: t('ui.empty_trash'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => emptyTrashMutation.mutate(),
   })
 }
@@ -124,18 +147,41 @@ function formatDeletedAt(ts: number) {
     <DataTable
       v-else-if="documents.length"
       :value="documents"
+      :totalRecords="totalCount"
+      :rows="PAGE_SIZE"
+      :first="pageOffset"
+      lazy
+      paginator
       stripedRows
       :rowHover="true"
+      dataKey="id"
       class="trash-table"
+      @page="onPage"
     >
-      <Column field="title" :header="t('document.title')" sortable>
+      <Column field="title" :header="t('document.title')">
         <template #body="{ data }">
           <span class="doc-title">{{ data.title }}</span>
         </template>
       </Column>
-      <Column :header="t('ui.trash_deleted')" style="width: 180px" sortable sortField="delete_date">
+      <Column :header="t('ui.trash_deleted')" style="width: 180px">
         <template #body="{ data }">
           <span class="doc-meta">{{ formatDeletedAt(data.delete_date) }}</span>
+        </template>
+      </Column>
+      <Column :header="t('ui.trash_purges_in')" style="width: 160px">
+        <template #body="{ data }">
+          <Tag
+            v-if="purgeCountdown(data.delete_date) === null"
+            severity="secondary"
+            :value="t('ui.trash_purges_disabled')"
+          />
+          <Tag
+            v-else
+            :severity="(purgeCountdown(data.delete_date) as number) <= 3 ? 'warn' : 'secondary'"
+            :value="purgeCountdown(data.delete_date) === 0
+              ? t('ui.trash_purges_soon')
+              : t('ui.trash_purges_in_days', purgeCountdown(data.delete_date) as number)"
+          />
         </template>
       </Column>
       <Column :header="t('ui.actions')" style="width: 200px">

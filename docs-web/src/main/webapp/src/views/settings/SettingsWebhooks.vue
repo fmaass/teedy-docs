@@ -10,13 +10,13 @@ import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const { data: webhooksData, isLoading, isError, refetch } = useQuery({
@@ -79,12 +79,9 @@ function doAdd() {
 }
 
 function confirmDelete(webhook: WebhookItem) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.webhooks.delete_confirm', { event: formatEvent(webhook.event), url: webhook.url }),
     header: t('ui.webhooks.delete_title'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => deleteMutation.mutate(webhook.id),
   })
 }

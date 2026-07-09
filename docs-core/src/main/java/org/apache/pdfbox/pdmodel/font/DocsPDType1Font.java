@@ -7,6 +7,7 @@ import org.apache.fontbox.FontBoxFont;
 import org.apache.fontbox.util.BoundingBox;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName;
 import org.apache.pdfbox.pdmodel.font.encoding.*;
 import org.apache.pdfbox.util.Matrix;
 
@@ -46,8 +47,8 @@ public class DocsPDType1Font extends PDSimpleFont {
         ALT_NAMES.put("ellipsis", "elipsis"); // misspelled in ArialMT
     }
 
-    public static final DocsPDType1Font HELVETICA = new DocsPDType1Font("Helvetica");
-    public static final DocsPDType1Font HELVETICA_BOLD = new DocsPDType1Font("Helvetica-Bold");
+    public static final DocsPDType1Font HELVETICA = new DocsPDType1Font(FontName.HELVETICA);
+    public static final DocsPDType1Font HELVETICA_BOLD = new DocsPDType1Font(FontName.HELVETICA_BOLD);
 
     /**
      * embedded or system font for rendering.
@@ -68,20 +69,24 @@ public class DocsPDType1Font extends PDSimpleFont {
     /**
      * Creates a Type 1 standard 14 font for embedding.
      *
-     * @param baseFont One of the standard 14 PostScript names
+     * @param baseFont One of the standard 14 fonts
      */
-    private DocsPDType1Font(String baseFont) {
+    private DocsPDType1Font(FontName baseFont) {
         super(baseFont);
 
         dict.setItem(COSName.SUBTYPE, COSName.TYPE1);
-        dict.setName(COSName.BASE_FONT, baseFont);
-        if ("ZapfDingbats".equals(baseFont)) {
-            encoding = ZapfDingbatsEncoding.INSTANCE;
-        } else if ("Symbol".equals(baseFont)) {
-            encoding = SymbolEncoding.INSTANCE;
-        } else {
-            encoding = WinAnsiEncoding.INSTANCE;
-            dict.setItem(COSName.ENCODING, COSName.WIN_ANSI_ENCODING);
+        dict.setName(COSName.BASE_FONT, baseFont.getName());
+        switch (baseFont) {
+            case ZAPF_DINGBATS:
+                encoding = ZapfDingbatsEncoding.INSTANCE;
+                break;
+            case SYMBOL:
+                encoding = SymbolEncoding.INSTANCE;
+                break;
+            default:
+                encoding = WinAnsiEncoding.INSTANCE;
+                dict.setItem(COSName.ENCODING, COSName.WIN_ANSI_ENCODING);
+                break;
         }
 
         // standard 14 fonts may be accessed concurrently, as they are singletons

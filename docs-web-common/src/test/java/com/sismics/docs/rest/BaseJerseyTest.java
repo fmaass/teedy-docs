@@ -25,6 +25,8 @@ import jakarta.ws.rs.core.Application;
 import jakarta.ws.rs.core.UriBuilder;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,6 +68,42 @@ public abstract class BaseJerseyTest extends JerseyTest {
      */
     private Wiser wiser;
 
+    /**
+     * HTTP port for the Grizzly server, assigned by the OS (ephemeral) so parallel
+     * test suites on the same host do not collide on a fixed port.
+     */
+    private final int httpPort = findFreePort();
+
+    /**
+     * SMTP port for the Wiser mail server, assigned by the OS (ephemeral) for the same reason.
+     * Exposed to subclasses so mail tests can point the app's SMTP config at the running Wiser.
+     */
+    private final int smtpPort = findFreePort();
+
+    /**
+     * Find a free TCP port by binding to port 0 and letting the OS assign one.
+     *
+     * @return An available port number
+     */
+    private static int findFreePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Unable to allocate a free port for the test server", e);
+        }
+    }
+
+    /**
+     * Returns the SMTP port the embedded Wiser mail server is listening on. Mail-sending tests
+     * must propagate this into the app's SMTP configuration so the app connects to the test server.
+     *
+     * @return The Wiser SMTP port
+     */
+    protected int getSmtpPort() {
+        return smtpPort;
+    }
+
     public String adminToken() {
         return clientUtil.login("admin", "admin", false);
     }
@@ -74,7 +112,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
     protected TestContainerFactory getTestContainerFactory() throws TestContainerException {
         return new ExternalTestContainerFactory();
     }
-    
+
     @Override
     protected Application configure() {
         String travisEnv = System.getenv("TRAVIS");
@@ -88,7 +126,9 @@ public abstract class BaseJerseyTest extends JerseyTest {
     
     @Override
     protected URI getBaseUri() {
-        return UriBuilder.fromUri(super.getBaseUri()).path("docs").build();
+        // Build the base URI directly from the ephemeral port we reserved, rather than delegating
+        // to super.getBaseUri() whose port resolution (property vs. external container) is fragile.
+        return UriBuilder.fromUri("http://localhost/").port(httpPort).path("docs").build();
     }
     
     @Override
@@ -101,7 +141,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
 
         clientUtil = new ClientUtil(target());
 
-        httpServer = HttpServer.createSimpleServer(getClass().getResource("/").getFile(), "localhost", getPort());
+        httpServer = HttpServer.createSimpleServer(getClass().getResource("/").getFile(), "localhost", httpPort);
         WebappContext context = new WebappContext("GrizzlyContext", "/docs");
         context.addListener("com.sismics.util.listener.IIOProviderContextListener");
         context.addFilter("requestContextFilter", RequestContextFilter.class)
@@ -123,7 +163,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
         httpServer.start();
 
         wiser = new Wiser();
-        wiser.setPort(2500);
+        wiser.setPort(smtpPort);
         wiser.start();
     }
 

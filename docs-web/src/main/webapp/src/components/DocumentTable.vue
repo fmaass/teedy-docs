@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { getFileUrl } from '../api/file'
 import { type DocumentListItem } from '../api/document'
 import { languageLabel } from '../constants/languages'
-import { formatDate } from '../composables/useFormatters'
+import { formatDate } from '../utils/formatters'
 import DataTable from 'primevue/datatable'
 import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, DataTableRowSelectEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -25,6 +25,8 @@ defineProps<{
   loading?: boolean
   sortField?: string
   sortOrder?: number
+  /** When true, show a checkbox column for multi-selection (bound via v-model:selection). */
+  selectable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +35,9 @@ const emit = defineEmits<{
   page: [event: DataTablePageEvent]
   sort: [event: DataTableSortEvent]
 }>()
+
+/** Multi-selection model, only active when `selectable` is set. */
+const selection = defineModel<DocumentListItem[]>('selection', { default: () => [] })
 
 const selectedRow = ref<DocumentListItem | null>(null)
 
@@ -43,6 +48,74 @@ function onRowSelect(event: DataTableRowSelectEvent) {
 
 <template>
   <DataTable
+    v-if="selectable"
+    :value="documents"
+    :totalRecords="totalRecords"
+    :rows="rows"
+    :first="first"
+    :loading="loading"
+    :sortField="sortField"
+    :sortOrder="sortOrder"
+    v-model:selection="selection"
+    :metaKeySelection="false"
+    lazy
+    paginator
+    stripedRows
+    :rowHover="true"
+    dataKey="id"
+    class="doc-table"
+    @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
+    @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
+    @page="(e: DataTablePageEvent) => emit('page', e)"
+    @sort="(e: DataTableSortEvent) => emit('sort', e)"
+  >
+    <Column selectionMode="multiple" style="width: 44px" :exportable="false" />
+    <Column header="" style="width: 44px">
+      <template #body="{ data }">
+        <div class="doc-thumb">
+          <img
+            v-if="data.file_id"
+            :src="getFileUrl(data.file_id, 'thumb')"
+            alt=""
+            loading="lazy"
+            @error="($event.target as HTMLImageElement).style.display = 'none'"
+          />
+          <i v-else class="pi pi-file" />
+        </div>
+      </template>
+    </Column>
+    <Column field="title" :header="t('document.title')" sortable>
+      <template #body="{ data }">
+        <span class="doc-title">{{ data.title }}</span>
+      </template>
+    </Column>
+    <Column :header="t('document.tags')" style="width: 200px">
+      <template #body="{ data }">
+        <div class="doc-tags" v-if="data.tags?.length">
+          <TagBadge v-for="tag in data.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
+          <span v-if="data.tags.length > 3" class="tag-overflow">+{{ data.tags.length - 3 }}</span>
+        </div>
+      </template>
+    </Column>
+    <Column :header="t('document.language')" style="width: 100px">
+      <template #body="{ data }">
+        <span class="doc-lang">{{ languageLabel(data.language) }}</span>
+      </template>
+    </Column>
+    <Column :header="t('ui.files')" style="width: 60px">
+      <template #body="{ data }">
+        <span class="doc-meta">{{ data.file_count }}</span>
+      </template>
+    </Column>
+    <Column field="create_date" :header="t('document.creation_date')" style="width: 120px" sortable>
+      <template #body="{ data }">
+        <span class="doc-meta">{{ formatDate(data.create_date) }}</span>
+      </template>
+    </Column>
+  </DataTable>
+
+  <DataTable
+    v-else
     :value="documents"
     :totalRecords="totalRecords"
     :rows="rows"

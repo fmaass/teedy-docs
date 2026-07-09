@@ -107,6 +107,14 @@ public class User implements Loggable {
     @Column(name = "USE_OIDC_SUBJECT_C", length = 500)
     private String oidcSubject;
 
+    /**
+     * True if this account was provisioned by LDAP authentication. Used so the LDAP
+     * handler never adopts a pre-existing INTERNAL account that happens to share a
+     * username with an LDAP directory entry (account-hijack guard).
+     */
+    @Column(name = "USE_LDAP_B", nullable = false)
+    private boolean ldap;
+
     public String getId() {
         return id;
     }
@@ -240,6 +248,15 @@ public class User implements Loggable {
 
     public User setOidcSubject(String oidcSubject) {
         this.oidcSubject = oidcSubject;
+        return this;
+    }
+
+    public boolean isLdap() {
+        return ldap;
+    }
+
+    public User setLdap(boolean ldap) {
+        this.ldap = ldap;
         return this;
     }
 

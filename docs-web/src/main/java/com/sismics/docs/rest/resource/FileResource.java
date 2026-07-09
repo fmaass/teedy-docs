@@ -39,6 +39,7 @@ import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.HttpUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -396,11 +397,7 @@ public class FileResource extends BaseResource {
      * @return Max upload size in bytes
      */
     static long resolveMaxUploadSize() {
-        String prop = System.getProperty("docs.max_upload_size");
-        if (prop != null) {
-            return Long.parseLong(prop.trim());
-        }
-        return Long.parseLong(System.getenv().getOrDefault("DOCS_MAX_UPLOAD_SIZE", String.valueOf(500L * 1024 * 1024)));
+        return EnvironmentUtil.getLongConfig("docs.max_upload_size", "DOCS_MAX_UPLOAD_SIZE", 500L * 1024 * 1024);
     }
 
     /**
@@ -619,8 +616,17 @@ public class FileResource extends BaseResource {
         // Delete the file
         FileDao fileDao = new FileDao();
         fileDao.delete(file.getId(), principal.getId());
-        
-        // Raise a new file deleted event
+
+        // Reclaim the owner's storage quota synchronously, atomically with the delete: the file row
+        // and its size are known here and the file still exists on disk (needed to size legacy
+        // UNKNOWN_SIZE rows). Doing it in the delete transaction — instead of in the async
+        // FileDeletedAsyncEvent listener — means it commits or rolls back with the delete and a
+        // retried async event can never double-subtract.
+        User fileOwner = new UserDao().getById(file.getUserId());
+        long reclaimed = FileUtil.resolveReclaimableSize(file.getId(), file.getSize(), fileOwner);
+        FileUtil.reclaimUserQuota(file.getUserId(), reclaimed);
+
+        // Raise a new file deleted event (index + storage cleanup only; quota already reclaimed above)
         FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
         fileDeletedAsyncEvent.setUserId(principal.getId());
         fileDeletedAsyncEvent.setFileId(file.getId());

@@ -9,13 +9,13 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const { data: keysData, isLoading, isError, refetch } = useQuery({
@@ -63,12 +63,9 @@ function doCreate() {
 }
 
 function confirmDelete(key: ApiKeyItem) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.apikeys.delete_confirm', { name: key.name }),
     header: t('ui.apikeys.delete_title'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => deleteMutation.mutate(key.id),
   })
 }

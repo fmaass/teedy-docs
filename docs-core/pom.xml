@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>3.0.0</version>
+    <version>3.1.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -112,6 +112,16 @@
       <artifactId>okhttp</artifactId>
     </dependency>
 
+    <dependency>
+      <groupId>org.apache.directory.api</groupId>
+      <artifactId>api-ldap-client-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.directory.api</groupId>
+      <artifactId>api-ldap-codec-standalone</artifactId>
+    </dependency>
+
     <!-- Only there to read old index and rebuild them -->
     <dependency>
       <groupId>org.apache.lucene</groupId>
@@ -199,6 +209,14 @@
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
       <version>${org.testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- JSON-P implementation, needed at test runtime for code that builds JSON (e.g. ExportUtil);
+         production runtime gets it transitively via the web modules. -->
+    <dependency>
+      <groupId>org.eclipse.parsson</groupId>
+      <artifactId>parsson</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

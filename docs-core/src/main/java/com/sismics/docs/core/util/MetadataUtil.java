@@ -84,6 +84,21 @@ public class MetadataUtil {
     }
 
     /**
+     * Clear every custom metadata value on a document (set each existing value to null).
+     * Used by the update endpoint when the caller explicitly signals that the last set value
+     * was removed — sending zero {@code metadata_id} params, which {@link #updateMetadata}
+     * would otherwise treat as "leave unchanged".
+     *
+     * @param documentId Document ID
+     */
+    public static void clearMetadata(String documentId) {
+        DocumentMetadataDao documentMetadataDao = new DocumentMetadataDao();
+        for (DocumentMetadataDto documentMetadataDto : documentMetadataDao.getByDocumentId(documentId)) {
+            updateValue(documentMetadataDto.getId(), null);
+        }
+    }
+
+    /**
      * Validate a custom metadata value.
      *
      * @param type Metadata type

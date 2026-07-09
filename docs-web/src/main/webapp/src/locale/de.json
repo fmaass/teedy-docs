@@ -8,66 +8,21 @@
     "remember_me": "Angemeldet bleiben",
     "submit": "Anmelden",
     "login_as_guest": "Als Gast anmelden",
-    "login_failed_title": "Login fehlgeschlagen",
-    "login_failed_message": "Benutzername oder Passwort ungültig",
     "password_lost_btn": "Passwort vergessen?",
-    "password_lost_sent_title": "Passwort zurücksetzen Email gesendet",
-    "password_lost_sent_message": "Eine E-Mail wurde an <strong>{username}</strong> gesendet, um dessen Passwort zurückzusetzen.",
-    "password_lost_error_title": "Fehler beim Zurücksetzen des Passworts",
-    "password_lost_error_message": "Wenn Sie keine E-Mail zum Zurücksetzen des Passworts senden können, wenden Sie sich bitte an Ihren Administrator, um einen manuellen Reset durchzuführen.",
     "login_with_sso": "Mit SSO anmelden",
     "use_local_account": "Lokales Konto verwenden"
   },
-  "passwordlost": {
-    "title": "Passwort vergessen",
-    "message": "Bitte geben Sie Ihren Benutzernamen ein, um einen Link zum Zurücksetzen des Passworts zu erhalten. Wenn Sie Ihren Benutzernamen vergessen haben, wenden Sie sich bitte an Ihren Administrator.",
-    "submit": "Passwort zurücksetzen"
-  },
-  "passwordreset": {
-    "message": "Bitte geben Sie ein neues Passwort ein.",
-    "submit": "Mein Passwort ändern",
-    "error_title": "Fehler beim Ändern des Passworts.",
-    "error_message": "Ihre Anfrage zur Passwort-Wiederherstellung ist abgelaufen, bitte wiederholen Sie die Anfrage."
-  },
   "index": {
-    "toggle_navigation": "Navigation ein-/ausblenden",
-    "nav_documents": "Dokumente",
-    "nav_tags": "Tags",
-    "nav_users_groups": "Benutzer & Gruppen",
-    "error_info": "{count} {count} Fehler",
-    "logged_as": "Eingeloggt als {username}",
-    "nav_settings": "Einstellungen",
-    "logout": "Logout",
-    "global_quota_warning": "<strong>Warnung!</strong> Der verfügbare Speicherplatz beträgt {total} MB, davon sind {current} MB ({percent} %) bereits verwendet"
+    "logout": "Logout"
   },
   "document": {
-    "navigation_up": "Eine Ebene höher",
-    "toggle_navigation": "Navigation ein-/ausblenden",
-    "display_mode_list": "Dokumente in Liste anzeigen",
-    "display_mode_grid": "Dokumente im Raster anzeigen",
-    "search_simple": "Einfache Suche",
-    "search_fulltext": "Volltextsuche",
     "search_creator": "Urheber",
-    "search_language": "Sprache",
-    "search_before_date": "Vor diesem Datum",
-    "search_after_date": "Nach diesem Datum",
-    "search_before_update_date": "Bearbeitet vor diesem Datum",
-    "search_after_update_date": "Bearbeitet nach diesem Datum",
-    "search_tags": "Tags",
-    "search_shared": "Nur freigegebene Dokumente",
     "search_clear": "Leeren",
-    "any_language": "Jede Sprache",
-    "add_document": "Dokument hinzufügen",
-    "import_eml": "Import aus einer E-Mail (EML-Format)",
     "tags": "Tags",
     "no_tags": "Keine Tags",
-    "no_documents": "Kein Dokument in der Datenbank",
     "search": "Suche",
-    "search_empty": "Kein Treffer für <strong>\"{search}\"</strong>",
-    "shared": "Geteilt",
     "title": "Titel",
     "description": "Beschreibung",
-    "contributors": "Mitwirkende",
     "language": "Sprache",
     "creation_date": "Erstellungsdatum",
     "subject": "Thema",
@@ -78,220 +33,55 @@
     "type": "Typ",
     "coverage": "Geltungsbereich",
     "rights": "Rechte",
-    "relations": "Beziehungen",
-    "page_size": "Seitengröße",
-    "page_size_10": "10 pro Seite",
-    "page_size_20": "20 pro Seite",
-    "page_size_30": "30 pro Seite",
-    "upgrade_quota": "Fragen Sie Ihren Administrator, um Ihren Speicherplatz zu erweitern.",
-    "quota": "{current} MB ({percent} %) verwendet von {total} MB",
     "count": "{count} {count} gefunden",
-    "last_updated": "Zuletzt bearbeitet {date}",
+    "search_help": {
+      "title": "Suchhilfe",
+      "contents_hint": "Die Suche durchsucht den gesamten Inhalt Ihrer Dokumente – einschließlich des per OCR aus PDFs und Bildern extrahierten Textes – nicht nur die Titel.",
+      "operators_intro": "Geben Sie ein Wort ein, um überall zu suchen, oder grenzen Sie die Suche mit diesen Operatoren ein:",
+      "op_tag": "Dokumente mit diesem Tag (und seinen Unter-Tags)",
+      "op_nottag": "Dokumente mit diesem Tag ausschließen",
+      "op_after": "Erstellt am oder nach diesem Datum (Jahr, Jahr-Monat oder vollständiges Datum)",
+      "op_before": "Erstellt am oder vor diesem Datum",
+      "op_uafter": "Bearbeitet am oder nach diesem Datum",
+      "op_ubefore": "Bearbeitet am oder vor diesem Datum",
+      "op_at": "Genau an diesem Datum, Monat oder Jahr erstellt",
+      "op_uat": "Genau an diesem Datum, Monat oder Jahr bearbeitet",
+      "op_by": "Erstellt von diesem Benutzernamen",
+      "op_lang": "In dieser Sprache (dreibuchstabiger Code)",
+      "op_mime": "Mit diesem Dateityp (MIME-Typ)",
+      "op_title": "Mit diesem Wort im Titel",
+      "op_shared": "Nur freigegebene Dokumente"
+    },
     "view": {
       "delete_comment_title": "Kommentar löschen",
       "delete_comment_message": "Möchten Sie diesen Kommentar wirklich löschen?",
-      "delete_document_title": "Dokument löschen",
-      "delete_document_message": "Möchten Sie dieses Dokument wirklich löschen?",
-      "shared_document_title": "Geteiltes Dokument",
-      "shared_document_message": "Sie können dieses Dokument mit diesem Link freigeben. Beachten Sie, dass jeder, der diesen Link hat, das Dokument sehen kann.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
-      "not_found": "Dokument nicht gefunden",
-      "forbidden": "Zugriff verweigert",
-      "download_files": "Dateien herunterladen",
-      "export_pdf": "in PDF exportieren",
-      "by_creator": "von",
-      "comments": "Kommentar",
+      "comments": "Kommentare",
       "no_comments": "Noch keine Kommentare zu diesem Dokument vorhanden",
-      "add_comment": "Fügen sie einen Kommentar hinzu",
-      "error_loading_comments": "Fehler beim Laden eines Kommentars",
+      "add_comment": "Fügen Sie einen Kommentar hinzu",
+      "post_comment": "Kommentar absenden",
+      "error_loading_comments": "Fehler beim Laden der Kommentare",
+      "comment_added": "Kommentar hinzugefügt",
+      "comment_add_failed": "Kommentar konnte nicht hinzugefügt werden",
+      "comment_deleted": "Kommentar gelöscht",
+      "comment_delete_failed": "Kommentar konnte nicht gelöscht werden",
       "content": {
-        "content": "Inhalt",
-        "delete_file_title": "Datei löschen",
-        "delete_file_message": "Wollen Sie diese Datei wirklich löschen?",
-        "upload_pending": "Ausstehend…",
-        "upload_progress": "Hochladen…",
-        "upload_error": "Fehler beim Hochladen",
-        "upload_error_quota": "Maximaler Speicherplatz erreicht",
-        "drop_zone": "Legen Sie Dateien hier ab, um sie hochzuladen",
-        "add_files": "Dateien hinzufügen",
-        "file_processing_indicator": "Diese Datei wird gerade verarbeitet. Die Suche ist erst verfügbar, wenn diese Verarbeitung abgeschlossen ist.",
-        "reprocess_file": "Diese Datei erneut verarbeiten",
-        "upload_new_version": "Neue Version hochladen",
-        "open_versions": "Versionshistorie anzeigen",
-        "display_mode_list": "Dateien als Liste anzeigen",
-        "display_mode_grid": "Dateien als Raster anzeigen"
+        "content": "Inhalt"
       },
       "permissions": {
-        "permissions": "Berechtigungen",
-        "message": "Die Berechtigungen können direkt auf dieses Dokument angewendet werden, oder können von <a href=\"#/tag\">tags</a> vorgegeben werden.",
-        "title": "Berechtigungen auf diesem Dokument",
-        "inherited_tags": "Von Tags geerbte Berechtigungen",
-        "acl_source": "Von",
-        "acl_target": "Für",
-        "acl_permission": "Berechtigungen"
+        "permissions": "Berechtigungen"
       },
       "activity": {
-        "activity": "Aktivitäten",
-        "message": "Alle Aktionen dieses Dokuments werden hier protokolliert."
+        "activity": "Aktivitäten"
       }
-    },
-    "edit": {
-      "document_edited_with_errors": "Dokument erfolgreich bearbeitet, aber einige Dateien konnten nicht hochgeladen werden",
-      "document_added_with_errors": "Dokument erfolgreich erstellt, aber einige Dateien konnten nicht hochgeladen werden",
-      "quota_reached": "Maximaler Speicherplatz erreicht",
-      "primary_metadata": "Primäre Metadaten",
-      "title_placeholder": "Titel des Dokuments",
-      "description_placeholder": "Zusammenfassung, Inhaltsverzeichnis oder Freitext",
-      "new_files": "neue Dateien",
-      "orphan_files": "+ {count} {count}",
-      "additional_metadata": "Weitere Metadaten",
-      "subject_placeholder": "Schlüsselwörter, abstrakte Sätze oder Klassifizierungscodes",
-      "identifier_placeholder": "Eindeutiger Identifikator",
-      "publisher_placeholder": "Name der Person, Organisation oder Abteilung, von der aus das Dokument veröffentlicht wurde.",
-      "format_placeholder": "MIME-Typ oder physisches Format des Dokuments",
-      "source_placeholder": "Ressource, aus der das Dokument stammt",
-      "uploading_files": "Dateien hochladen…"
-    },
-    "default": {
-      "upload_pending": "Ausstehend…",
-      "upload_progress": "Lädt hoch…",
-      "upload_error": "Fehler beim Hochladen",
-      "upload_error_quota": "Maximaler Speicherplatz erreicht",
-      "quick_upload": "Schnelles Hochladen",
-      "drop_zone": "Legen Sie Dateien hier ab, um sie hochzuladen",
-      "add_files": "Dateien hinzufügen",
-      "add_new_document": "Neues Dokument hinzufügen",
-      "latest_activity": "Letzte Aktivitäten",
-      "footer_sismics": "Programmiert mit <span class=\"fas fa-heart\"></span> von <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
-      "api_documentation": "API-Dokumentation",
-      "feedback": "Geben Sie uns Ihr Feedback",
-      "select_all": "Alle auswählen",
-      "select_none": "Nichts auswählen"
-    },
-    "pdf": {
-      "export_title": "Export als PDF",
-      "export_metadata": "Metadaten exportieren",
-      "export_comments": "Kommentare exportieren",
-      "fit_to_page": "Bild an Seite anpassen",
-      "margin": "Rand",
-      "millimeter": "mm"
-    },
-    "share": {
-      "title": "Dokument teilen",
-      "message": "Benennen Sie die Freigabe, wenn Sie dasselbe Dokument mehrfach freigeben möchten.",
-      "submit": "Freigeben"
-    }
-  },
-  "file": {
-    "view": {
-      "previous": "Vorherige",
-      "next": "Nächste",
-      "not_found": "Datei nicht gefunden"
-    },
-    "edit": {
-      "title": "Datei bearbeiten",
-      "name": "Dateiname"
-    },
-    "versions": {
-      "title": "Versionshistorie",
-      "filename": "Dateiname",
-      "mimetype": "Typ",
-      "create_date": "Erstellungsdatum",
-      "version": "Version"
     }
   },
   "tag": {
-    "new_tag": "Neuer Tag",
-    "search": "Suche",
-    "default": {
-      "title": "Tags",
-      "message_1": "<strong>Tags</strong> sind Kategorien, die den Dokumenten zugeordnet sind.",
-      "message_2": "Ein Dokument kann mit mehreren Tags versehen werden und ein Tag kann auf mehrere Dokumente angewendet werden.",
-      "message_3": "Mit der <span class=\"glyphicon glyphicon-pencil\"></span>-Schaltfläche können Sie die Berechtigungen für ein Tag bearbeiten.",
-      "message_4": "Wenn ein Tag von einem anderen Benutzer oder einer anderen Gruppe gelesen werden kann, können die zugehörigen Dokumente auch von diesen Personen gelesen werden.",
-      "message_5": "Kennzeichnen Sie z. B. Ihre Firmendokumente mit einem Tag <span class=\"label label-info\">MyCompany</span> und fügen Sie die Berechtigung <strong>Kann lesen</strong> zu einer Gruppe <span class=\"btn btn-default\">Mitarbeiter</span> hinzu"
-    },
-    "edit": {
-      "delete_tag_title": "Tag löschen",
-      "delete_tag_message": "Wollen Sie dieses Tag wirklich löschen?",
-      "name": "Name",
-      "color": "Farbe",
-      "parent": "Übergeordnet",
-      "info": "Berechtigungen für dieses Tag werden auch auf Dokumente angewendet, die mit einem Tag <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span> versehen sind",
-      "circular_reference_title": "Zirkuläre Referenz",
-      "circular_reference_message": "Die Hierarchie der übergeordneten Tags bildet eine Schleife. Bitte wählen Sie ein anderes übergeordnetes Tag."
-    },
     "remove_tag": "Tag {name} entfernen"
   },
-  "group": {
-    "profile": {
-      "members": "Mitglieder",
-      "no_members": "Keine Mitglieder",
-      "related_links": "Weiterführende Links",
-      "edit_group": "Gruppe {name} bearbeiten"
-    }
-  },
-  "user": {
-    "profile": {
-      "groups": "Gruppen",
-      "quota_used": "Benutzter Speicherplatz",
-      "percent_used": "{percent} % genutzt",
-      "related_links": "Weiterführende Links",
-      "document_created": "Dokumente erstellt von {username}",
-      "edit_user": "Benutzer {username} bearbeiten"
-    }
-  },
-  "usergroup": {
-    "search_groups": "In Gruppen suchen",
-    "search_users": "In Benutzern suchen",
-    "you": "Das sind Sie!",
-    "default": {
-      "title": "Benutzer und Gruppen",
-      "message": "Hier können Sie Informationen über Benutzer und Gruppen einsehen."
-    }
-  },
   "settings": {
-    "menu_personal_settings": "Persönliche Einstellungen",
-    "menu_user_account": "Benutzerkonto",
     "menu_two_factor_auth": "Zwei-Faktor-Authentifizierung",
     "menu_opened_sessions": "Geöffnete Sitzungen",
-    "menu_file_importer": "Massen-Datei-Importer",
-    "menu_general_settings": "Allgemeine Einstellungen",
-    "menu_users": "Benutzerverwaltung",
-    "menu_groups": "Gruppenverwaltung",
-    "menu_configuration": "Einstellungen",
     "menu_inbox": "Posteingang durchsuchen",
-    "menu_metadata": "Benutzerdefinierte Metadaten",
-    "menu_monitoring": "Überwachung",
-    "user": {
-      "title": "Benutzerverwaltung",
-      "add_user": "Benutzer hinzufügen",
-      "username": "Benutzername",
-      "create_date": "Erstellungsdatum",
-      "totp_enabled": "Zwei-Faktor-Authentifizierung für dieses Konto aktiviert",
-      "edit": {
-        "delete_user_title": "Benutzer löschen",
-        "delete_user_message": "Möchten Sie diesen Benutzer wirklich löschen? Alle zugehörigen Dokumente, Dateien und Tags werden gelöscht",
-        "user_used_title": "Benutzer in Verwendung",
-        "edit_user_failed_title": "Dieser Benutzer existiert bereits",
-        "edit_user_failed_message": "Dieser Benutzername wurde bereits von einem anderen Benutzer gewählt",
-        "edit_user_title": "Benutzer \"{username}\" bearbeiten",
-        "add_user_title": "Neuen Benutzer hinzufügen",
-        "username": "Benutzername",
-        "email": "E-Mail",
-        "groups": "Gruppen",
-        "storage_quota": "Speicherkontingent",
-        "storage_quota_placeholder": "Speicherkontingent (in MB)",
-        "password": "Passwort",
-        "password_confirm": "Passwort (bestätigen)",
-        "disabled": "Deaktivierter Benutzer",
-        "password_reset_btn": "Senden Sie eine E-Mail zum Zurücksetzen des Kennworts an diesen Benutzer",
-        "password_lost_sent_title": "Passwort-zurücksetzen-E-Mail gesendet",
-        "password_lost_sent_message": "Passwort-zurücksetzen-E-Mail an <strong>{username}</strong> gesendet.",
-        "disable_totp_btn": "Zwei-Faktor-Authentifizierung für diesen Benutzer deaktivieren",
-        "disable_totp_title": "Zwei-Faktor-Authentifizierung deaktivieren",
-        "disable_totp_message": "Sind Sie sicher, dass sie die Zwei-Faktor-Authentifizierung für den Benutzer deaktivieren möchten?"
-      }
-    },
     "security": {
       "enable_totp": "Zwei-Faktor-Authentifizierung aktivieren",
       "enable_totp_message": "Stellen Sie sicher, dass Sie eine TOTP-kompatible Anwendung auf Ihrem Telefon haben, die bereit ist, ein neues Konto hinzuzufügen.",
@@ -314,71 +104,6 @@
       "test_code_success": "Validierungscode OK",
       "test_code_fail": "Dieser Code ist nicht gültig. Überprüfen Sie, ob Ihr Telefon ordnungsgemäß konfiguriert ist, oder deaktivieren Sie die Zwei-Faktor-Authentifizierung"
     },
-    "group": {
-      "title": "Gruppenverwaltung",
-      "add_group": "Gruppe hinzufügen",
-      "name": "Name",
-      "edit": {
-        "delete_group_title": "Gruppe löschen",
-        "delete_group_message": "Wollen Sie diese Gruppe wirklich löschen?",
-        "edit_group_failed_title": "Gruppe existiert bereits",
-        "edit_group_failed_message": "Dieser Gruppenname wird bereits von einer anderen Gruppe verwendet",
-        "group_used_title": "Gruppe in Verwendung",
-        "edit_group_title": "Gruppe \"{name}\" bearbeiten",
-        "add_group_title": "Neue Gruppe hinzufügen",
-        "name": "Name",
-        "parent_group": "Übergeordnete Gruppe",
-        "search_group": "Gruppe suchen",
-        "members": "Mitglieder",
-        "new_member": "Neue Mitglieder",
-        "search_user": "Benutzer suchen"
-      }
-    },
-    "account": {
-      "title": "Benutzerkonto",
-      "password": "Passwort",
-      "password_confirm": "Passwort (bestätigen)",
-      "updated": "Benutzerkonto erfolgreich aktualisiert"
-    },
-    "config": {
-      "title_guest_access": "Gastzugang",
-      "message_guest_access": "Der Gastzugang ist ein Modus, in dem jeder auf {appName} ohne Kennwort zugreifen kann.<br/>Wie ein normaler Benutzer kann der Gastbenutzer nur auf seine Dokumente und diejenigen zugreifen, auf die er über Berechtigungen zugreifen kann.<br/>",
-      "enable_guest_access": "Gastzugang aktivieren",
-      "disable_guest_access": "Gastzugang deaktivieren",
-      "title_theme": "Aussehen anpassen",
-      "title_general": "Allgemeine Konfiguration",
-      "default_language": "Standardsprache für neue Dokumente",
-      "application_name": "Anwendungsname",
-      "main_color": "Hauptfarbe",
-      "custom_css": "Benutzerdefiniertes CSS",
-      "custom_css_placeholder": "Benutzerdefiniertes CSS, das nach dem Haupt-Stylesheet hinzugefügt werden soll",
-      "logo": "Logo (quadratische Größe)",
-      "background_image": "Hintergrundbild",
-      "uploading_image": "Bild hochladen...",
-      "title_smtp": "SMTP-E-Mail-Einstellungen <small>für das Zurücksetzen des Passworts</small>",
-      "smtp_hostname": "SMTP-Server",
-      "smtp_port": "SMTP-Port",
-      "smtp_from": "Absender-E-Mail",
-      "smtp_username": "SMTP-Benutzername",
-      "smtp_password": "SMTP-Passwort",
-      "smtp_updated": "SMTP-Konfiguration erfolgreich aktualisiert",
-      "title_ocr": "Texterkennung (OCR)",
-      "message_ocr": "OCR ist eine Technologie, die es ermöglicht, Text aus Bildern zu extrahieren. Es wird verwendet, um den Inhalt von Bildern zu durchsuchen und zu indizieren. Diese Funktionalität setzt voraus, dass die Tesseract auf Ihrem Server installiert ist.",
-      "enable_ocr": "OCR aktivieren",
-      "disable_ocr": "OCR deaktivieren",
-      "webhooks": "Webhooks",
-      "webhooks_explain": "Webhooks werden aufgerufen, wenn das angegebene Ereignis eintritt. Die angegebene URL wird mit einer JSON-Payload gepostet, die den Ereignisnamen und die ID der betreffenden Ressource enthält.",
-      "webhook_event": "Ereignisse",
-      "webhook_url": "URL",
-      "webhook_create_date": "Erstelldatum",
-      "webhook_add": "Webhook hinzufügen"
-    },
-    "metadata": {
-      "title": "Konfiguration benutzerdefinierter Metadaten",
-      "message": "Hier können Sie Ihren Dokumenten benutzerdefinierte Metadaten wie eine interne Kennung oder ein Ablaufdatum hinzufügen. Bitte beachten Sie, dass der Metadatentyp nach der Erstellung nicht mehr geändert werden kann.",
-      "name": "Metadatensatz-Name",
-      "type": "Metadatensatz-Typ"
-    },
     "inbox": {
       "title": "Posteingang durchsuchen",
       "message": "Wenn Sie diese Funktion aktivieren, durchsucht das System den angegebenen Posteingang jede Minute nach <strong>ungelesenen</strong> E-Mails und importiert diese automatisch.<br/>Nach dem Import einer E-Mail wird diese als gelesen markiert.<br/>Folgen Sie den Links zu Konfigurationseinstellungen für <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -398,19 +123,6 @@
       "autoTagsEnabled": "Automatisches Hinzufügen von Tags aus der mit # markierten Betreffzeile",
       "deleteImported": "Importierte Nachrichten aus Mailbox löschen"
     },
-    "monitoring": {
-      "background_tasks": "Hintergrundaufgaben",
-      "queued_tasks": "Es gibt derzeit {count} {count}.",
-      "queued_tasks_explain": "Dateiverarbeitung, Thumbnail-Erstellung, Index-Update, optische Zeichenerkennung sind Hintergrundaufgaben. Eine große Anzahl unbearbeiteter Aufgaben führt zu unvollständigen Suchergebnissen.",
-      "server_logs": "Server-Logs",
-      "log_date": "Datum",
-      "log_tag": "Tag",
-      "log_message": "Nachricht",
-      "indexing": "Indexierung",
-      "indexing_info": "Wenn Sie Unstimmigkeiten in den Suchergebnissen feststellen, können Sie versuchen, eine vollständige Neuindizierung durchzuführen. Die Suchergebnisse sind bis zum Abschluss dieser Aufgabe unvollständig.",
-      "start_reindexing": "Vollständige Neuindizierung starten",
-      "reindexing_started": "Neuindizierung wurde gestartet, bitte warten Sie, bis es keine Hintergrundaufgaben mehr gibt."
-    },
     "session": {
       "title": "Geöffnete Sitzungen",
       "created_date": "Erstellungsdatum",
@@ -420,125 +132,11 @@
       "current_session": "Dies ist die aktuelle Sitzung",
       "clear_message": "Alle anderen mit diesem Konto verbundenen Geräte werden getrennt",
       "clear": "Alle anderen Sitzungen löschen"
-    },
-    "fileimporter": {
-      "title": "Massen-Datei-Importer",
-      "advanced_users": "Für fortgeschrittene Benutzer!",
-      "need_intro": "Wenn Sie:",
-      "need_1": "Ganze Verzeichnisse von Dateien auf einmal importieren möchten",
-      "need_2": "Ein Verzeichnis nach neuen Dateien durchsuchen lassen und gefunden Dateien importieren lassen möchten",
-      "line_1": "Gehen Sie zu <a href=\"https://github.com/sismics/docs/releases\">sismics/docs/releases</a> und laden Sie das Datei-Importer-Tool für Ihr System herunter.",
-      "line_2": "Folgen Sie den <a href=\"https://github.com/sismics/docs/tree/master/docs-importer\">Anweisungen</a>, um das Import-Tool zu nutzen.",
-      "line_3": "Ihre Dateien werden im <a href=\"#/document\">Modus 'Schnelles Hochladen'</a> importiert. Danach können Sie die Dateien weiterbearbeiten und Dokumenten zuordnen oder Dokumente erstellen.",
-      "download": "Herunterladen",
-      "instructions": "Anweisungen"
-    }
-  },
-  "feedback": {
-    "title": "Geben Sie uns Feedback",
-    "message": "Irgendwelche Vorschläge oder Fragen zu Teedy? Wir hören Ihnen gerne zu!",
-    "sent_title": "Feedback gesendet",
-    "sent_message": "Vielen Dank für Ihr Feedback! Es wird uns helfen, Teedy noch besser zu machen."
-  },
-  "import": {
-    "title": "Wird importiert",
-    "error_quota": "Speicherlimit erreicht. Kontaktieren Sie Ihren Administrator, um den Ihnen zur Verfügung gestellten Speicherplatz zu erhöhen.",
-    "error_general": "Beim Versuch, Ihre Datei zu importieren, ist ein Fehler aufgetreten. Bitte stellen Sie sicher, dass es sich um eine gültige EML-Datei handelt."
-  },
-  "app_share": {
-    "main": "Fragen Sie nach einem Link zu einem gemeinsam genutzten Dokument, um darauf zuzugreifen.",
-    "403": {
-      "title": "Nicht erlaubt",
-      "message": "Das Dokument, das Sie anzeigen möchten, ist nicht mehr freigegeben."
     }
   },
   "directive": {
-    "acledit": {
-      "acl_target": "Für",
-      "acl_permission": "Zugriffsberechtigung",
-      "add_permission": "Zugriffsberechtigung hinzufügen",
-      "search_user_group": "Suchen nach einem Benutzer oder einer Gruppe"
-    },
     "auditlog": {
-      "log_created": "erstellt",
-      "log_updated": "aktualisiert",
-      "log_deleted": "gelöscht",
-      "Acl": "ACL",
-      "Comment": "Kommentar",
-      "Document": "Dokument",
-      "File": "Datei",
-      "Group": "Gruppe",
-      "Tag": "Tag",
-      "User": "Benutzer",
-      "Webhook": "Webhook"
-    },
-    "selectrelation": {
-      "typeahead": "Geben Sie einen Dokumentnamen ein"
-    },
-    "selecttag": {
-      "typeahead": "Geben Sie einen Tagnamen ein"
-    },
-    "datepicker": {
-      "current": "Heute",
-      "clear": "Leeren",
-      "close": "Erledigt"
-    }
-  },
-  "filter": {
-    "filesize": {
-      "mb": "MB",
-      "kb": "kB"
-    }
-  },
-  "acl": {
-    "READ": "Kann lesen",
-    "READWRITE": "Kann lesen und schreiben",
-    "WRITE": "Kann schreiben",
-    "USER": "Benutzer",
-    "GROUP": "Gruppe",
-    "SHARE": "Geteilt"
-  },
-  "validation": {
-    "required": "Erforderlich",
-    "too_short": "Zu kurz",
-    "too_long": "Zu lang",
-    "email": "Muss eine gültige E-Mailadresse sein",
-    "password_confirm": "Passwort und Passwortbestätigung müssen übereinstimmen",
-    "number": "Nummer erforderlich",
-    "no_space": "Leerzeichen sind nicht erlaubt",
-    "alphanumeric": "Nur Buchstaben und Zahlen sind erlaubt"
-  },
-  "action_type": {
-    "ADD_TAG": "Tag hinzufügen",
-    "REMOVE_TAG": "Tag entfernen",
-    "PROCESS_FILES": "Dateien verarbeiten"
-  },
-  "pagination": {
-    "previous": "Vorherige",
-    "next": "Nächste",
-    "first": "Erste",
-    "last": "Letzte"
-  },
-  "onboarding": {
-    "step1": {
-      "title": "Das erste Mal?",
-      "description": "Wenn Sie Teedy zum ersten Mal nutzen, klicken Sie auf die Schaltfläche \"Weiter\". Andernfalls können Sie diese Box schließen."
-    },
-    "step2": {
-      "title": "Dokumente",
-      "description": "Teedy ist in Dokumenten organisiert und jedes Dokument enthält mehrere Dateien."
-    },
-    "step3": {
-      "title": "Dateien",
-      "description": "Sie können Dateien hinzufügen, nachdem Sie ein Dokument erstellt haben oder vorher, indem Sie diesen Schnell-Hochlade-Bereich verwenden."
-    },
-    "step4": {
-      "title": "Suche",
-      "description": "Dies ist die Hauptmethode, um Ihre Dokumente wiederzufinden. Es gibt auch eine erweiterte Suche mit dem Suchbutton."
-    },
-    "step5": {
-      "title": "Tags",
-      "description": "Dokumente können in Tags organisiert werden (ähnlich wie Oberordner). Erstellen Sie sie hier."
+      "Document": "Dokument"
     }
   },
   "yes": "Ja",
@@ -546,19 +144,15 @@
   "ok": "OK",
   "cancel": "Abbrechen",
   "share": "Teilen",
-  "unshare": "Nicht mehr teilen",
   "close": "Schließen",
   "add": "Hinzufügen",
   "open": "Öffnen",
-  "see": "Ansehen",
   "save": "Speichern",
-  "export": "Exportieren",
   "edit": "Bearbeiten",
   "delete": "Löschen",
   "rename": "Umbenennen",
   "download": "Herunterladen",
   "loading": "Lädt…",
-  "send": "Absenden",
   "enabled": "Aktiviert",
   "disabled": "Deaktiviert",
   "create": "Erstellen",
@@ -569,8 +163,12 @@
     "add_first_document": "Fügen Sie Ihr erstes Dokument hinzu",
     "add_document": "Dokument hinzufügen",
     "manage_tags": "Tags verwalten",
+    "resize_panel": "Tag-Leiste anpassen",
     "back_to_tags": "Zurück zu den Tags",
     "failed_to_load": "{item} konnte nicht geladen werden",
+    "item_document": "Dokument",
+    "context_add_tag": "Tag hinzufügen",
+    "context_remove_tag": "Tag entfernen",
     "new_document": "Neues Dokument",
     "edit_document": "Dokument bearbeiten",
     "title_required": "Titel ist erforderlich",
@@ -583,14 +181,28 @@
     "files_count": "Dateien ({count})",
     "drag_or_choose": "Dateien hierher ziehen oder auf Auswählen klicken, um sie hinzuzufügen",
     "drag_or_choose_upload": "Dateien hierher ziehen oder auf Auswählen klicken, um sie hochzuladen",
+    "take_photo": "Foto aufnehmen",
     "files_upload_hint": "{count} Datei(en) werden beim Speichern hochgeladen.",
     "uploading": "Wird hochgeladen …",
     "upload_failed": "Hochladen fehlgeschlagen",
     "files_uploaded": "Dateien hochgeladen",
     "no_files": "Diesem Dokument sind keine Dateien angehängt",
+    "versions": {
+      "title": "Versionsverlauf",
+      "title_named": "Versionsverlauf — {name}",
+      "read_only_hint": "Frühere Versionen werden automatisch aufbewahrt. Das Hochladen einer Ersetzung erstellt eine neue Version; der Verlauf ist schreibgeschützt.",
+      "version": "Version",
+      "version_number": "v{n}",
+      "date": "Datum",
+      "type": "Typ",
+      "view": "Diese Version öffnen",
+      "empty": "Diese Datei hat keine früheren Versionen.",
+      "load_failed": "Versionsverlauf konnte nicht geladen werden"
+    },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
     "failed_remove_file": "Datei konnte nicht entfernt werden",
+    "failed_update_tags": "Tags konnten nicht aktualisiert werden",
     "remove_file": "Datei entfernen",
     "remove_file_confirm": "\"{name}\" aus diesem Dokument entfernen?",
     "file_renamed": "Datei umbenannt",
@@ -607,6 +219,7 @@
     "document_created": "Dokument erstellt",
     "document_updated": "Dokument aktualisiert",
     "failed_save_document": "Dokument konnte nicht gespeichert werden",
+    "document_saved_files_failed": "Dokument gespeichert, aber einige Dateien konnten nicht hochgeladen werden. Erneut speichern, um die verbleibenden Dateien hochzuladen.",
     "trash": "Papierkorb",
     "trash_count": "{count} Dokument(e) im Papierkorb",
     "trash_empty": "Der Papierkorb ist leer",
@@ -619,6 +232,10 @@
     "documents_deleted": "{count} Dokument(e) endgültig gelöscht",
     "failed_empty_trash": "Papierkorb konnte nicht geleert werden",
     "failed_delete_permanently": "Dokument konnte nicht gelöscht werden",
+    "trash_purges_in": "Automatisch gelöscht",
+    "trash_purges_in_days": "in {count} Tag | in {count} Tagen",
+    "trash_purges_soon": "Wird gelöscht",
+    "trash_purges_disabled": "Automatische Löschung deaktiviert",
     "restore": "Wiederherstellen",
     "permissions": {
       "direct": "Direkte Berechtigungen",
@@ -636,6 +253,28 @@
       "removed": "Berechtigung entfernt",
       "failed_add": "Berechtigung konnte nicht hinzugefügt werden",
       "failed_remove": "Berechtigung konnte nicht entfernt werden"
+    },
+    "share": {
+      "title": "Freigabe-Links",
+      "hint": "Jeder mit einem Freigabe-Link kann dieses Dokument ohne Anmeldung ansehen.",
+      "none": "Keine aktiven Freigabe-Links.",
+      "unnamed": "Unbenannter Link",
+      "create": "Freigabe-Link erstellen",
+      "name_placeholder": "Link-Name (optional)",
+      "create_button": "Link erstellen",
+      "copy": "Link kopieren",
+      "copied": "Link in die Zwischenablage kopiert",
+      "copy_failed": "Link konnte nicht kopiert werden",
+      "created": "Freigabe-Link erstellt",
+      "failed_create": "Freigabe-Link konnte nicht erstellt werden",
+      "revoke": "Link widerrufen",
+      "revoke_confirm": "Freigabe-Link \"{name}\" widerrufen? Wer ihn verwendet, verliert den Zugriff.",
+      "revoked": "Freigabe-Link widerrufen",
+      "failed_revoke": "Freigabe-Link konnte nicht widerrufen werden",
+      "view": {
+        "not_found": "Dieses freigegebene Dokument ist nicht mehr verfügbar.",
+        "footer": "Freigegeben über Teedy"
+      }
     },
     "tags_page": {
       "title": "Tags",
@@ -681,6 +320,11 @@
       "language_updated": "Sprache aktualisiert",
       "theme_switched": "Design geändert zu {name}"
     },
+    "default_password_banner": {
+      "title": "Standard-Administratorpasswort in Verwendung",
+      "message": "Dieses Administratorkonto verwendet noch das voreingestellte Standardpasswort. Ändern Sie es jetzt, um Ihre Instanz abzusichern.",
+      "cta": "Passwort ändern"
+    },
     "password_reset": {
       "set_new_password": "Neues Passwort festlegen",
       "new_password": "Neues Passwort",
@@ -713,7 +357,6 @@
       "user_created": "Benutzer erstellt",
       "user_updated": "Benutzer aktualisiert",
       "user_deleted": "Benutzer gelöscht",
-      "failed_load": "Benutzer konnten nicht geladen werden",
       "failed_create": "Benutzer konnte nicht erstellt werden",
       "failed_update": "Benutzer konnte nicht aktualisiert werden",
       "failed_delete": "Benutzer konnte nicht gelöscht werden",
@@ -730,6 +373,38 @@
       "disable_totp_title": "Zwei-Faktor-Authentifizierung deaktivieren",
       "failed_disable_totp": "Zwei-Faktor-Authentifizierung konnte nicht deaktiviert werden",
       "totp_disabled": "Zwei-Faktor-Authentifizierung deaktiviert"
+    },
+    "groups": {
+      "title": "Gruppen",
+      "add_group": "Gruppe hinzufügen",
+      "name": "Name",
+      "name_hint": "Nur Buchstaben, Zahlen und Unterstriche",
+      "parent": "Übergeordnete Gruppe",
+      "no_parent": "Keine übergeordnete Gruppe",
+      "no_groups": "Keine Gruppen gefunden.",
+      "name_required": "Name ist erforderlich",
+      "group_created": "Gruppe erstellt",
+      "group_updated": "Gruppe aktualisiert",
+      "group_deleted": "Gruppe gelöscht",
+      "failed_create": "Gruppe konnte nicht erstellt werden",
+      "failed_update": "Gruppe konnte nicht aktualisiert werden",
+      "failed_delete": "Gruppe konnte nicht gelöscht werden",
+      "name_taken": "Eine Gruppe mit diesem Namen existiert bereits",
+      "parent_not_found": "Übergeordnete Gruppe nicht gefunden",
+      "delete_confirm": "Gruppe \"{name}\" löschen? Dies kann nicht rückgängig gemacht werden.",
+      "delete_group": "Gruppe löschen",
+      "edit_group": "{name} bearbeiten",
+      "manage_members": "Mitglieder verwalten",
+      "members_of": "Mitglieder von {name}",
+      "add_member": "Hinzufügen",
+      "remove_member": "Mitglied entfernen",
+      "select_user": "Benutzer auswählen",
+      "no_members": "Diese Gruppe hat keine Mitglieder.",
+      "member_added": "Mitglied hinzugefügt",
+      "member_removed": "Mitglied entfernt",
+      "failed_load_members": "Mitglieder konnten nicht geladen werden",
+      "failed_add_member": "Mitglied konnte nicht hinzugefügt werden",
+      "failed_remove_member": "Mitglied konnte nicht entfernt werden"
     },
     "apikeys": {
       "title": "API-Schlüssel",
@@ -772,6 +447,31 @@
       "delete_confirm": "Webhook für \"{event}\" an {url} löschen?",
       "payload_hint": "Die Nutzlast ist"
     },
+    "metadata": {
+      "title": "Benutzerdefinierte Metadaten",
+      "description": "Definiere benutzerdefinierte Felder, um strukturierte Daten an Dokumente anzuhängen.",
+      "custom_fields": "Benutzerdefinierte Felder",
+      "add_field": "Feld hinzufügen",
+      "add_title": "Metadatenfeld hinzufügen",
+      "name": "Name",
+      "name_placeholder": "z. B. Rechnungsnummer",
+      "type": "Typ",
+      "type_string": "Text",
+      "type_integer": "Ganzzahl",
+      "type_float": "Dezimalzahl",
+      "type_date": "Datum",
+      "type_boolean": "Ja / Nein",
+      "type_immutable_hint": "Der Typ kann nach dem Erstellen des Feldes nicht mehr geändert werden.",
+      "no_fields": "Keine benutzerdefinierten Metadatenfelder definiert",
+      "field_added": "Feld hinzugefügt",
+      "field_updated": "Feld aktualisiert",
+      "field_deleted": "Feld gelöscht",
+      "failed_add": "Feld konnte nicht hinzugefügt werden",
+      "failed_update": "Feld konnte nicht aktualisiert werden",
+      "failed_delete": "Feld konnte nicht gelöscht werden",
+      "delete_title": "Metadatenfeld löschen",
+      "delete_confirm": "Das Feld \"{name}\" löschen? Seine Werte auf allen Dokumenten werden entfernt."
+    },
     "config": {
       "title": "Konfiguration",
       "general": "Allgemein",
@@ -795,6 +495,37 @@
       "rebuild_header": "Suchindex neu aufbauen",
       "rebuild_started": "Neuaufbau des Suchindex gestartet",
       "rebuild_failed": "Neuindizierung konnte nicht gestartet werden"
+    },
+    "ldap": {
+      "title": "LDAP-Authentifizierung",
+      "description": "Wenn aktiviert, können sich Benutzer mit ihren LDAP-Verzeichnisanmeldedaten anmelden. Beim ersten Anmelden wird automatisch ein Konto erstellt. Lokale Konten funktionieren weiterhin.",
+      "enabled": "LDAP-Authentifizierung ist aktiviert",
+      "disabled": "LDAP-Authentifizierung ist deaktiviert",
+      "host": "Host",
+      "port": "Port",
+      "usessl": "SSL verwenden (LDAPS)",
+      "admin_dn": "Bind-DN",
+      "admin_password": "Bind-Passwort",
+      "base_dn": "Basis-DN",
+      "filter": "Benutzersuchfilter",
+      "filter_hint": "Muss den Platzhalter USERNAME enthalten, der bei der Anmeldung durch den Anmeldenamen ersetzt wird.",
+      "filter_username_error": "Der Filter muss USERNAME enthalten.",
+      "default_email": "Standard-E-Mail-Domain",
+      "default_email_hint": "Wird an den Benutzernamen angehängt, wenn das Verzeichnis keine E-Mail-Adresse enthält.",
+      "default_storage": "Standard-Speicherkontingent (Bytes)",
+      "default_storage_hint": "Speicherkontingent für automatisch erstellte Konten (ca. {mb} MB).",
+      "host_required": "Host ist erforderlich.",
+      "port_required": "Port ist erforderlich.",
+      "admin_dn_required": "Bind-DN ist erforderlich.",
+      "admin_password_required": "Bind-Passwort ist erforderlich.",
+      "admin_password_keep": "Ein Passwort ist gesetzt – leer lassen, um es beizubehalten.",
+      "base_dn_required": "Basis-DN ist erforderlich.",
+      "filter_required": "Benutzersuchfilter ist erforderlich.",
+      "default_email_required": "Standard-E-Mail-Domain ist erforderlich.",
+      "default_storage_required": "Standard-Speicherkontingent ist erforderlich.",
+      "config_saved": "LDAP-Konfiguration gespeichert",
+      "failed_save": "LDAP-Konfiguration konnte nicht gespeichert werden",
+      "validation_failed": "Bitte korrigieren Sie die markierten Felder."
     },
     "tag_rules": {
       "title": "Automatische Tagging-Regeln",
@@ -822,8 +553,6 @@
     },
     "nav": {
       "settings": "Einstellungen",
-      "documents": "Dokumente",
-      "manage_tags": "Tags verwalten",
       "administration": "Administration"
     },
     "date": "Datum",
@@ -834,14 +563,27 @@
     "no_text": "Kein Text",
     "reprocess": "Erneut verarbeiten",
     "reprocess_tooltip": "OCR / Textextraktion erneut ausführen",
-    "reprocess_queued": "\"{name}\" zur erneuten Verarbeitung eingereiht. Aktualisieren Sie in wenigen Sekunden.",
+    "reprocess_queued": "\"{name}\" zur erneuten Verarbeitung eingereiht.",
     "reprocess_failed": "Datei konnte nicht erneut verarbeitet werden",
+    "processing": "Wird verarbeitet …",
+    "processing_tooltip": "OCR / Textextraktion läuft für diese Datei",
     "text_hint": "Aus jeder Datei per OCR oder direkter Textanalyse extrahierter Text. Dieser speist die Volltextsuche.",
     "no_text_hint": "Aus dieser Datei wurde kein Text extrahiert. Prüfen Sie, ob die Dokumentsprache zum Dateiinhalt passt, und versuchen Sie es erneut.",
     "dark_mode": "Dunkelmodus",
     "menu": "Menü",
+    "about": {
+      "title": "Über",
+      "whats_new_title": "Neu in {version}",
+      "view_releases": "Alle Versionen anzeigen",
+      "highlights": {
+        "retirements": "Die veralteten Funktionen Workflow/Routen und Vokabular wurden entfernt, um die Anwendung zu verschlanken.",
+        "ldap": "Die LDAP-Anmeldung ist zurück — wieder aktiviert und abgesichert, mit einer eigenen Einstellungsseite für Administratoren.",
+        "bulk_ops": "Sammelaktionen für Dokumente: mehrere Dokumente gleichzeitig verschlagworten, löschen oder exportieren.",
+        "capture": "Dokumente direkt mit der Gerätekamera aufnehmen.",
+        "new_ui": "Neue Oberflächen: Kommentare, Gruppen, Freigaben, benutzerdefinierte Metadaten und Dateiversionsverlauf."
+      }
+    },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",
-    "app_name": "teedy",
     "document_management": "Dokumentenverwaltung",
     "actions": "Aktionen",
     "trash_deleted": "Gelöscht",
@@ -853,6 +595,22 @@
     "confirm_rename": "Umbenennen bestätigen",
     "cancel_rename": "Umbenennen abbrechen",
     "load_error": "Beim Laden ist ein Fehler aufgetreten",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "bulk": {
+      "toolbar": "Sammelaktionen",
+      "selected_count": "{count} ausgewählt",
+      "add_tag": "Schlagwort hinzufügen",
+      "set_language": "Sprache festlegen",
+      "delete": "Löschen",
+      "clear": "Auswahl aufheben",
+      "choose_tag": "Schlagwort auswählen",
+      "choose_language": "Sprache auswählen",
+      "apply": "Anwenden",
+      "applying": "Wird angewendet… {done}/{total}",
+      "done": "Sammelaktion abgeschlossen",
+      "summary_ok": "{count} Dokument(e) aktualisiert",
+      "summary_partial": "{ok} erfolgreich, {failed} fehlgeschlagen",
+      "delete_confirm": "{count} Dokument(e) löschen? Sie werden in den Papierkorb verschoben."
+    }
   }
 }

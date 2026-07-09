@@ -12,6 +12,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.service.InboxService;
+import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -74,6 +75,7 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} active_user_count Number of active users
      * @apiSuccess {String} global_storage_current Global storage currently used (in bytes)
      * @apiSuccess {String} global_storage_quota Maximum global storage (in bytes)
+     * @apiSuccess {Number} trash_retention_days Trash retention window in days before automatic purge
      * @apiPermission none
      * @apiVersion 1.5.0
      *
@@ -124,6 +126,10 @@ public class AppResource extends BaseResource {
         String maxUploadStr = System.getenv("DOCS_MAX_UPLOAD_SIZE");
         long maxUploadSize = maxUploadStr != null ? Long.parseLong(maxUploadStr) : 524288000L;
         response.add("max_upload_size", maxUploadSize);
+
+        // Trash retention window in days (single source of truth: TrashPurgeService),
+        // surfaced so the SPA trash countdown reflects the configured window.
+        response.add("trash_retention_days", TrashPurgeService.getRetentionDays());
 
         if (globalQuota > 0) {
             response.add("global_storage_quota", globalQuota);
@@ -238,7 +244,6 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} hostname SMTP hostname
      * @apiSuccess {String} port SMTP port
      * @apiSuccess {String} username SMTP username
-     * @apiSuccess {String} password SMTP password
      * @apiSuccess {String} from From address
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission admin
@@ -258,7 +263,6 @@ public class AppResource extends BaseResource {
         Config hostnameConfig = configDao.getById(ConfigType.SMTP_HOSTNAME);
         Config portConfig = configDao.getById(ConfigType.SMTP_PORT);
         Config usernameConfig = configDao.getById(ConfigType.SMTP_USERNAME);
-        Config passwordConfig = configDao.getById(ConfigType.SMTP_PASSWORD);
         Config fromConfig = configDao.getById(ConfigType.SMTP_FROM);
         JsonObjectBuilder response = Json.createObjectBuilder();
         if (Strings.isNullOrEmpty(System.getenv(Constants.SMTP_HOSTNAME_ENV))) {
@@ -282,13 +286,9 @@ public class AppResource extends BaseResource {
                 response.add("username", usernameConfig.getValue());
             }
         }
-        if (Strings.isNullOrEmpty(System.getenv(Constants.SMTP_PASSWORD_ENV))) {
-            if (passwordConfig == null) {
-                response.addNull("password");
-            } else {
-                response.add("password", passwordConfig.getValue());
-            }
-        }
+        // The SMTP password is write-only: it is NEVER echoed back (BL-028 sibling). The
+        // POST keeps the stored value when the password field is absent/empty, so the UI
+        // shows a "leave blank to keep" affordance instead of the secret.
         if (fromConfig == null) {
             response.addNull("from");
         } else {
@@ -367,7 +367,6 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} hostname IMAP hostname
      * @apiSuccess {String} port IMAP port
      * @apiSuccess {String} username IMAP username
-     * @apiSuccess {String} password IMAP password
      * @apiSuccess {String} folder IMAP folder
      * @apiSuccess {String} tag Tag for created documents
      * @apiError (client) ForbiddenError Access denied
@@ -392,7 +391,6 @@ public class AppResource extends BaseResource {
         Config portConfig = configDao.getById(ConfigType.INBOX_PORT);
         Boolean starttls = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_STARTTLS);
         Config usernameConfig = configDao.getById(ConfigType.INBOX_USERNAME);
-        Config passwordConfig = configDao.getById(ConfigType.INBOX_PASSWORD);
         Config folderConfig = configDao.getById(ConfigType.INBOX_FOLDER);
         Config tagConfig = configDao.getById(ConfigType.INBOX_TAG);
         JsonObjectBuilder response = Json.createObjectBuilder();
@@ -416,11 +414,8 @@ public class AppResource extends BaseResource {
         } else {
             response.add("username", usernameConfig.getValue());
         }
-        if (passwordConfig == null) {
-            response.addNull("password");
-        } else {
-            response.add("password", passwordConfig.getValue());
-        }
+        // The IMAP password is write-only: it is NEVER echoed back (BL-028 sibling). The
+        // POST keeps the stored value when the password field is absent/empty.
         if (folderConfig == null) {
             response.addNull("folder");
         } else {
@@ -775,6 +770,164 @@ public class AppResource extends BaseResource {
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Get the LDAP authentication configuration.
+     *
+     * @api {get} /app/config_ldap Get the LDAP authentication configuration
+     * @apiName GetAppConfigLdap
+     * @apiGroup App
+     * @apiSuccess {Boolean} enabled LDAP authentication enabled
+     * @apiSuccess {String} host LDAP server host
+     * @apiSuccess {Integer} port LDAP server port
+     * @apiSuccess {String} admin_dn Admin DN
+     * @apiSuccess {Boolean} admin_password_set True if an admin bind password is stored (the password itself is write-only and never returned)
+     * @apiSuccess {String} base_dn Base DN
+     * @apiSuccess {String} filter LDAP filter
+     * @apiSuccess {String} default_email LDAP default email
+     * @apiSuccess {Integer} default_storage LDAP default storage
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission admin
+     * @apiVersion 1.9.0
+     *
+     * @return Response
+     */
+    @GET
+    @Path("config_ldap")
+    public Response getConfigLdap() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        ConfigDao configDao = new ConfigDao();
+        Config enabled = configDao.getById(ConfigType.LDAP_ENABLED);
+
+        JsonObjectBuilder response = Json.createObjectBuilder();
+        if (enabled != null && Boolean.parseBoolean(enabled.getValue())) {
+            // LDAP enabled
+            Config adminPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
+            boolean adminPasswordSet = adminPassword != null && !Strings.isNullOrEmpty(adminPassword.getValue());
+            response.add("enabled", true)
+                    .add("host", ConfigUtil.getConfigStringValue(ConfigType.LDAP_HOST))
+                    .add("port", ConfigUtil.getConfigIntegerValue(ConfigType.LDAP_PORT))
+                    .add("usessl", ConfigUtil.getConfigBooleanValue(ConfigType.LDAP_USESSL))
+                    .add("admin_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_ADMIN_DN))
+                    // The admin bind password is write-only: it is NEVER echoed back (BL-028).
+                    // Only a boolean "is a password stored?" flag is exposed, so the UI shows a
+                    // "leave blank to keep" affordance instead of the secret. The POST keeps the
+                    // stored value when admin_password is absent/empty.
+                    .add("admin_password_set", adminPasswordSet)
+                    .add("base_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_BASE_DN))
+                    .add("filter", ConfigUtil.getConfigStringValue(ConfigType.LDAP_FILTER))
+                    .add("default_email", ConfigUtil.getConfigStringValue(ConfigType.LDAP_DEFAULT_EMAIL))
+                    .add("default_storage", ConfigUtil.getConfigLongValue(ConfigType.LDAP_DEFAULT_STORAGE));
+        } else {
+            // LDAP disabled
+            response.add("enabled", false);
+        }
+
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Configure the LDAP authentication.
+     *
+     * @api {post} /app/config_ldap Configure the LDAP authentication
+     * @apiName PostAppConfigLdap
+     * @apiGroup App
+     * @apiParam {Boolean} enabled LDAP authentication enabled
+     * @apiParam {String} host LDAP server host
+     * @apiParam {Integer} port LDAP server port
+     * @apiParam {Boolean} usessl Use SSL (ldaps)
+     * @apiParam {String} admin_dn Admin DN
+     * @apiParam {String} admin_password Admin password
+     * @apiParam {String} base_dn Base DN
+     * @apiParam {String} filter LDAP filter
+     * @apiParam {String} default_email LDAP default email
+     * @apiParam {Integer} default_storage LDAP default storage
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Validation error
+     * @apiPermission admin
+     * @apiVersion 1.9.0
+     *
+     * @param enabled LDAP authentication enabled
+     * @param host LDAP server host
+     * @param portStr LDAP server port
+     * @param usessl LDAP use SSL (ldaps)
+     * @param adminDn Admin DN
+     * @param adminPassword Admin password
+     * @param baseDn Base DN
+     * @param filter LDAP filter
+     * @param defaultEmail LDAP default email
+     * @param defaultStorageStr LDAP default storage
+     * @return Response
+     */
+    @POST
+    @Path("config_ldap")
+    public Response configLdap(@FormParam("enabled") Boolean enabled,
+                               @FormParam("host") String host,
+                               @FormParam("port") String portStr,
+                               @FormParam("usessl") Boolean usessl,
+                               @FormParam("admin_dn") String adminDn,
+                               @FormParam("admin_password") String adminPassword,
+                               @FormParam("base_dn") String baseDn,
+                               @FormParam("filter") String filter,
+                               @FormParam("default_email") String defaultEmail,
+                               @FormParam("default_storage") String defaultStorageStr) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        ConfigDao configDao = new ConfigDao();
+
+        if (enabled != null && enabled) {
+            // LDAP enabled, validate everything
+            ValidationUtil.validateLength(host, "host", 1, 250);
+            ValidationUtil.validateInteger(portStr, "port");
+            ValidationUtil.validateLength(adminDn, "admin_dn", 1, 250);
+            ValidationUtil.validateLength(baseDn, "base_dn", 1, 250);
+            ValidationUtil.validateLength(filter, "filter", 1, 250);
+            if (!filter.contains("USERNAME")) {
+                throw new ClientException("ValidationError", "'filter' must contains 'USERNAME'");
+            }
+            ValidationUtil.validateLength(defaultEmail, "default_email", 1, 250);
+            ValidationUtil.validateLong(defaultStorageStr, "default_storage");
+
+            // The admin bind password is write-only (BL-028): the GET never echoes it, so the
+            // client sends it blank to KEEP the stored value. An empty submission therefore
+            // preserves the existing password rather than wiping it. On first-time setup (no
+            // stored password) a non-empty password is required.
+            Config storedPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
+            boolean hasStoredPassword = storedPassword != null && !Strings.isNullOrEmpty(storedPassword.getValue());
+            if (Strings.isNullOrEmpty(adminPassword)) {
+                if (!hasStoredPassword) {
+                    throw new ClientException("ValidationError", "admin_password must be set");
+                }
+            } else {
+                ValidationUtil.validateLength(adminPassword, "admin_password", 1, 250);
+            }
+
+            configDao.update(ConfigType.LDAP_ENABLED, Boolean.TRUE.toString());
+            configDao.update(ConfigType.LDAP_HOST, host);
+            configDao.update(ConfigType.LDAP_PORT, portStr);
+            configDao.update(ConfigType.LDAP_USESSL, usessl.toString());
+            configDao.update(ConfigType.LDAP_ADMIN_DN, adminDn);
+            if (!Strings.isNullOrEmpty(adminPassword)) {
+                configDao.update(ConfigType.LDAP_ADMIN_PASSWORD, adminPassword);
+            }
+            configDao.update(ConfigType.LDAP_BASE_DN, baseDn);
+            configDao.update(ConfigType.LDAP_FILTER, filter);
+            configDao.update(ConfigType.LDAP_DEFAULT_EMAIL, defaultEmail);
+            configDao.update(ConfigType.LDAP_DEFAULT_STORAGE, defaultStorageStr);
+        } else {
+            // LDAP disabled
+            configDao.update(ConfigType.LDAP_ENABLED, Boolean.FALSE.toString());
+        }
+
+        return Response.ok().build();
     }
 
 }

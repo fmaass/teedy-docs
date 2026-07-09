@@ -1,0 +1,2 @@
+Second version of the Teedy e2e fixture.
+Updated content.

@@ -78,9 +78,12 @@ public class UserDao {
         // Create the user UUID
         user.setId(UUID.randomUUID().toString());
         
-        // Checks for user unicity
+        // Checks for user unicity, case-insensitively (BL-020). An exact = match is
+        // case-sensitive on PostgreSQL, which would let a case-variant of an existing
+        // username (e.g. an LDAP "ADMIN" alongside a local "admin") create a shadow
+        // account. Folding case here makes the guard hold on every backend.
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createQuery("select u from User u where u.username = :username and u.deleteDate is null");
+        Query q = em.createQuery("select u from User u where lower(u.username) = lower(:username) and u.deleteDate is null");
         q.setParameter("username", user.getUsername());
         List<?> l = q.getResultList();
         if (l.size() > 0) {
@@ -242,8 +245,33 @@ public class UserDao {
     }
 
     /**
+     * Gets an active user by its username, matching case-insensitively.
+     *
+     * <p>Unlike {@link #getActiveByUsername(String)} (an exact {@code =} match, which is
+     * case-sensitive on PostgreSQL), this folds case on both sides. It exists for the
+     * LDAP-provisioning hijack guard (BL-020): before creating a shadow account for an
+     * LDAP uid, the handler must detect ANY existing user under a case-variant username
+     * — otherwise on PostgreSQL a local {@code admin} and an LDAP {@code ADMIN} coexist.
+     * If multiple case-variants somehow exist, the first row is returned.
+     *
+     * @param username User's username (matched case-insensitively)
+     * @return User, or null if none exists under any case-variant
+     */
+    public User getActiveByUsernameIgnoreCase(String username) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u from User u where lower(u.username) = lower(:username) and u.deleteDate is null");
+        q.setParameter("username", username);
+        @SuppressWarnings("unchecked")
+        List<User> users = q.getResultList();
+        if (users.isEmpty()) {
+            return null;
+        }
+        return users.get(0);
+    }
+
+    /**
      * Gets an active user by its email.
-     * 
+     *
      * @param email User's email
      * @return User
      */

@@ -27,30 +27,44 @@ public class TextPlainFormatHandler implements FormatHandler {
 
     @Override
     public BufferedImage generateThumbnail(Path file) throws Exception {
-        Document output = new Document(PageSize.A4, 40, 40, 40, 40);
-        Path tempFile = AppContext.getInstance().getFileService().createTemporaryFile();
-        OutputStream pdfOutputStream = Files.newOutputStream(tempFile);
-        PdfWriter.getInstance(output, pdfOutputStream);
-
-        output.open();
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        Font font = FontFactory.getFont("LiberationMono-Regular");
-        Paragraph paragraph = new Paragraph(content, font);
-        paragraph.setAlignment(Element.ALIGN_LEFT);
-        output.add(paragraph);
-        output.close();
+        Path tempFile = generatePdf(file);
 
         // Use the PDF format handler
         return new PdfFormatHandler().generateThumbnail(tempFile);
     }
 
-    @Override
-    public String extractContent(String language, Path file) throws Exception {
-        return Files.readString(file, StandardCharsets.UTF_8);
+    /**
+     * Generate a PDF from this text file.
+     *
+     * @param file Text file
+     * @return PDF file
+     * @throws Exception e
+     */
+    private Path generatePdf(Path file) throws Exception {
+        Document output = new Document(PageSize.A4, 40, 40, 40, 40);
+        Path tempFile = AppContext.getInstance().getFileService().createTemporaryFile();
+        try (OutputStream pdfOutputStream = Files.newOutputStream(tempFile)) {
+            PdfWriter.getInstance(output, pdfOutputStream);
+
+            output.open();
+            String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            Font font = FontFactory.getFont("LiberationMono-Regular");
+            Paragraph paragraph = new Paragraph(content, font);
+            paragraph.setAlignment(Element.ALIGN_LEFT);
+            output.add(paragraph);
+            output.close();
+        }
+
+        return tempFile;
     }
 
     @Override
-    public void appendToPdf(Path file, PDDocument doc, boolean fitImageToPage, int margin, MemoryUsageSetting memUsageSettings, Closer closer) {
-        // TODO Append the text file to the PDF
+    public String extractContent(String language, Path file) throws Exception {
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public void appendToPdf(Path file, PDDocument doc, boolean fitImageToPage, int margin, MemoryUsageSetting memUsageSettings, Closer closer) throws Exception {
+        new PdfFormatHandler().appendToPdf(generatePdf(file), doc, fitImageToPage, margin, memUsageSettings, closer);
     }
 }

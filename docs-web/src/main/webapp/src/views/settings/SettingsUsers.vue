@@ -10,14 +10,14 @@ import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
-import { formatDate, formatStorage } from '../../composables/useFormatters'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { formatDate, formatStorage } from '../../utils/formatters'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const { data: usersData, isLoading: loading, isError, refetch } = useQuery({
@@ -86,12 +86,9 @@ async function handleEdit() {
 }
 
 function confirmDelete(user: UserListItem) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.users.delete_confirm', { username: user.username }),
     header: t('ui.users.delete_user'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteUser(user.username)
@@ -105,12 +102,10 @@ function confirmDelete(user: UserListItem) {
 }
 
 function confirmDisableTotp(user: UserListItem) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.users.disable_totp_message'),
     header: t('ui.users.disable_totp_title'),
     icon: 'pi pi-shield',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await disableUserTotp(user.username)

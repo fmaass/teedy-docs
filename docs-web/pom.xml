@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>3.0.0</version>
+    <version>3.1.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   
@@ -126,6 +126,12 @@
     <dependency>
       <groupId>com.icegreen</groupId>
       <artifactId>greenmail</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.directory.server</groupId>
+      <artifactId>apacheds-all</artifactId>
       <scope>test</scope>
     </dependency>
 

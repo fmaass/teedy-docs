@@ -44,10 +44,19 @@ public class TestTrashPurgeService extends BaseTransactionalTest {
         userDao.updateQuota(seeded);
 
         // Trash the document and backdate its deletion far beyond any plausible retention window.
+        // Trashing (DocumentDao.delete) soft-deletes the document AND its files at the same instant;
+        // backdate BOTH consistently so the setup matches production (where the purge quota reclaim
+        // keys on file.deleteDate == document.deleteDate to identify cascade-trashed files).
         documentDao.delete(documentId, owner.getId());
+        Date past = new Date(System.currentTimeMillis() - 3650L * 24 * 60 * 60 * 1000);
         ThreadLocalContext.get().getEntityManager().createNativeQuery(
                         "update T_DOCUMENT set DOC_DELETEDATE_D = :past where DOC_ID_C = :id")
-                .setParameter("past", new Date(System.currentTimeMillis() - 3650L * 24 * 60 * 60 * 1000))
+                .setParameter("past", past)
+                .setParameter("id", documentId)
+                .executeUpdate();
+        ThreadLocalContext.get().getEntityManager().createNativeQuery(
+                        "update T_FILE set FIL_DELETEDATE_D = :past where FIL_IDDOC_C = :id")
+                .setParameter("past", past)
                 .setParameter("id", documentId)
                 .executeUpdate();
 

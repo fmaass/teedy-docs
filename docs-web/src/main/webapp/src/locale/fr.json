@@ -8,64 +8,19 @@
     "remember_me": "Se souvenir de moi",
     "submit": "Connexion",
     "login_as_guest": "Connexion en invité",
-    "login_failed_title": "Echec de connexion",
-    "login_failed_message": "Nom d'utilisateur ou mot de passe invalide",
-    "password_lost_btn": "Mot de passe perdu ?",
-    "password_lost_sent_title": "Email de réinitialisation de mot de passe envoyé",
-    "password_lost_sent_message": "Un email a été envoyé à <strong>{username}</strong> pour réinitialiser votre mot de passe",
-    "password_lost_error_title": "Erreur lors de la réinitialisation du mot de passe",
-    "password_lost_error_message": "Impossible d'envoyer un email de changement de mot de passe, veuillez contacter votre administrateur pour une réinitialisation manuelle"
-  },
-  "passwordlost": {
-    "title": "Mot de passe perdu",
-    "message": "Veuillez entrer votre nom d'utilisateur pour recevoir un lien de réinitialisation de mot de passe. Si vous ne vous souvenez pas de votre nom d'utilisateur, veuillez contacter votre administrateur",
-    "submit": "Réinitialiser mon mot de passe"
-  },
-  "passwordreset": {
-    "message": "Veuillez entrer un nouveau mot de passe",
-    "submit": "Changer mon mot de passe",
-    "error_title": "Erreur lors du changement de mot de passe",
-    "error_message": "Votre demande de changement de mot de passe a expiré, veuillez recommencer depuis la page de connexion"
+    "password_lost_btn": "Mot de passe perdu ?"
   },
   "index": {
-    "toggle_navigation": "Afficher/cacher la navigation",
-    "nav_documents": "Documents",
-    "nav_tags": "Tags",
-    "nav_users_groups": "Utilisateurs & Groupes",
-    "error_info": "{count} nouvelle{count} erreur{count}",
-    "logged_as": "Connecté en tant que {username}",
-    "nav_settings": "Paramètres",
-    "logout": "Déconnexion",
-    "global_quota_warning": "<strong>Attention !</strong> Quota global presque atteint à {current}Mo ({percent}%) utilisé sur {total}Mo"
+    "logout": "Déconnexion"
   },
   "document": {
-    "navigation_up": "Monter d'un niveau",
-    "toggle_navigation": "Activer la navigation par dossier",
-    "display_mode_list": "Afficher les documents en liste",
-    "display_mode_grid": "Afficher les documents en grille",
-    "search_simple": "Recherche simple",
-    "search_fulltext": "Recherche texte intégral",
     "search_creator": "Créateur",
-    "search_language": "Langue",
-    "search_before_date": "Créé avant cette date",
-    "search_after_date": "Créé après cette date",
-    "search_before_update_date": "Mis à jour avant cette date",
-    "search_after_update_date": "Mis à jour après cette date",
-    "search_tags": "Tags",
-    "search_shared": "Seulement les documents partagés",
     "search_clear": "Vider",
-    "any_language": "Toutes les langues",
-    "add_document": "Ajouter un document",
-    "import_eml": "Importer depuis un email (format EML)",
     "tags": "Tags",
     "no_tags": "Aucun tag",
-    "no_documents": "Aucun document dans la base de données",
     "search": "Rechercher",
-    "search_empty": "Aucun résultat pour <strong>\"{search}\"</strong>",
-    "shared": "Partagé",
     "title": "Titre",
     "description": "Description",
-    "contributors": "Contributeurs",
     "language": "Langue",
     "creation_date": "Date de création",
     "subject": "Sujet",
@@ -76,219 +31,29 @@
     "type": "Type",
     "coverage": "Couverture",
     "rights": "Droits",
-    "relations": "Relations",
-    "page_size": "Taille de page",
-    "page_size_10": "10 par page",
-    "page_size_20": "20 par page",
-    "page_size_30": "30 par page",
-    "upgrade_quota": "Pour augmenter votre quota, veuillez contacter votre administrateur",
-    "quota": "{current}Mo ({percent}%) utilisé sur {total}MB",
     "count": "{count} document{count} trouvé{count}",
-    "last_updated": "Dernière mise à jour {date}",
     "view": {
       "delete_comment_title": "Supprimer un commentaire",
       "delete_comment_message": "Etes-vous sûr de vouloir supprimer ce commentaire ?",
-      "delete_document_title": "Supprimer un document",
-      "delete_document_message": "Etes-vous sûr de vouloir supprimer ce document ?",
-      "shared_document_title": "Document partagé",
-      "shared_document_message": "Vous pouvez partager ce document avec ce lien. Veuillez noter que toute personne ayant ce lien peut accéder au document.<br/><input class=\"form-control share-link\" type=\"text\" readonly=\"readonly\" value=\"{link}\" onclick=\"this.select(); document.execCommand('copy');\" />",
-      "not_found": "Document introuvable",
-      "forbidden": "Accès non autorisé",
-      "download_files": "Télécharger les fichiers",
-      "export_pdf": "Exporter en PDF",
-      "by_creator": "par",
       "comments": "Commentaires",
       "no_comments": "Aucun commentaire sur ce document",
       "add_comment": "Ajouter un commentaire",
       "error_loading_comments": "Erreur au chargement des commentaires",
       "content": {
-        "content": "Contenu",
-        "delete_file_title": "Supprimer un fichier",
-        "delete_file_message": "Etes-vous sûr de vouloir supprimer ce fichier ?",
-        "upload_pending": "En attente...",
-        "upload_progress": "Envoi...",
-        "upload_error": "Erreur d'envoi",
-        "upload_error_quota": "Quota atteint",
-        "drop_zone": "Glisser & déposer des fichiers ici pour les envoyer",
-        "add_files": "Ajouter des fichiers",
-        "file_processing_indicator": "Ce fichier est en cours de traitement. La recherche ne sera pas disponible avant la fin du traitement.",
-        "reprocess_file": "Retraiter ce fichier",
-        "upload_new_version": "Envoyer une nouvelle version",
-        "open_versions": "Afficher l'historique de versions",
-        "display_mode_list": "Afficher les fichiers en liste",
-        "display_mode_grid": "Afficher les fichiers en grille"
+        "content": "Contenu"
       },
       "permissions": {
-        "permissions": "Permissions",
-        "message": "Les permissions peuvent être appliquées directement sur ce document, ou provenir de <a href=\"#/tag\">tags</a>.",
-        "title": "Permissions sur ce document",
-        "inherited_tags": "Permissions héritées par tags",
-        "acl_source": "De",
-        "acl_target": "Pour",
-        "acl_permission": "Permission"
+        "permissions": "Permissions"
       },
       "activity": {
-        "activity": "Activité",
-        "message": "Toutes les actions sur ce document sont consignées ici."
+        "activity": "Activité"
       }
-    },
-    "edit": {
-      "document_edited_with_errors": "Document modifié avec succès, mais certains fichiers n'ont pu être envoyés",
-      "document_added_with_errors": "Document ajouté avec succès, mais certains fichiers n'ont pu être envoyés",
-      "quota_reached": "Quota atteint",
-      "primary_metadata": "Métadonnées principales",
-      "title_placeholder": "Titre principal du document",
-      "description_placeholder": "Résumé, table des matières, ou texte libre",
-      "new_files": "Nouveaux fichiers",
-      "orphan_files": "+ {count} fichier{count}",
-      "additional_metadata": "Métadonnées secondaires",
-      "subject_placeholder": "Mots-clefs, phrases de résumé, ou codes de classement",
-      "identifier_placeholder": "Identificateur non ambigu",
-      "publisher_placeholder": "Nom de la personne, de l'organisation ou du service à l'origine de la publication du document",
-      "format_placeholder": "Type MIME, ou format physique du document",
-      "source_placeholder": "Ressource dont dérive le document",
-      "uploading_files": "Envoi des fichiers..."
-    },
-    "default": {
-      "upload_pending": "En attente...",
-      "upload_progress": "Envoi...",
-      "upload_error": "Erreur d'envoi",
-      "upload_error_quota": "Quota atteint",
-      "quick_upload": "Envoi rapide",
-      "drop_zone": "Glisser & déposer des fichiers ici pour les envoyer",
-      "add_files": "Ajouter des fichiers",
-      "add_new_document": "Ajouter à un nouveau document",
-      "latest_activity": "Activité récente",
-      "footer_sismics": "Conçu avec <span class=\"fas fa-heart\"></span> par <a href=\"https://www.sismics.com\" target=\"_blank\">Sismics</a>",
-      "api_documentation": "Documentation API",
-      "feedback": "Donnez-nous votre avis",
-      "select_all": "Tout sélectionner",
-      "select_none": "Tout déselectionner"
-    },
-    "pdf": {
-      "export_title": "Exporter en PDF",
-      "export_metadata": "Exporter les métadonnées",
-      "export_comments": "Exporter les commentaires",
-      "fit_to_page": "Ajuster les images à la page",
-      "margin": "Marge",
-      "millimeter": "mm"
-    },
-    "share": {
-      "title": "Partager un document",
-      "message": "Nommez le partage si vous souhaitez partager plusieurs fois le même document.",
-      "submit": "Partager"
-    }
-  },
-  "file": {
-    "view": {
-      "previous": "Précédent",
-      "next": "Suivant",
-      "not_found": "Fichier introuvable"
-    },
-    "edit": {
-      "title": "Modifier le fichier",
-      "name": "Nom de fichier"
-    },
-    "versions": {
-      "title": "Historique des versions",
-      "filename": "Nom de fichier",
-      "mimetype": "Type",
-      "create_date": "Date de création",
-      "version": "Version"
-    }
-  },
-  "tag": {
-    "new_tag": "Nouveau tag",
-    "search": "Rechercher",
-    "default": {
-      "title": "Tags",
-      "message_1": "Les <strong>Tags</strong> sont des libellés associés aux documents.",
-      "message_2": "Un document peut être taggé par plusieurs tags, et un tag peut être appliqué à plusieurs documents.",
-      "message_3": "En utilisant le bouton <span class=\"fas fa-pencil-alt\"></span>, vous pouvez modifier les permissions sur un tag.",
-      "message_4": "Si un tag peut être lu par un autre utilisateur ou groupe, les documents associés peuvent également être lus par ces personnes.",
-      "message_5": "Par exemple, taggez les documents de votre entreprise avec un tag <span class=\"label label-info\">MonEntreprise</span> et ajoutez la permission <strong>Lecture</strong> à un groupe <span class=\"btn btn-default\">employés</span>"
-    },
-    "edit": {
-      "delete_tag_title": "Supprimer un tag",
-      "delete_tag_message": "Etes-vous sûr de vouloir supprimer ce tag ?",
-      "name": "Nom",
-      "color": "Couleur",
-      "parent": "Parent",
-      "info": "Les permissions sur ce tag seront également appliquées aux documents taggés avec <span class=\"label label-info\" ng-style=\"{ 'background': color }\">{name}</span>",
-      "circular_reference_title": "Référence circulaire",
-      "circular_reference_message": "La hiérarchie des tags parents forment une boucle, veuillez choisir un autre parent."
-    }
-  },
-  "group": {
-    "profile": {
-      "members": "Membres",
-      "no_members": "Aucun membre",
-      "related_links": "Liens relatifs",
-      "edit_group": "Modifer le groupe {name}"
-    }
-  },
-  "user": {
-    "profile": {
-      "groups": "Groupes",
-      "quota_used": "Quota utilisé",
-      "percent_used": "{percent}% utilisé",
-      "related_links": "Liens relatifs",
-      "document_created": "Documents créés par {username}",
-      "edit_user": "Modifier l'utilisateur {username}"
-    }
-  },
-  "usergroup": {
-    "search_groups": "Rechercher dans les groupes",
-    "search_users": "Rechercher dans les utilisateurs",
-    "you": "C'est vous !",
-    "default": {
-      "title": "Utilisateurs & Groupes",
-      "message": "Vous pouvez consulter ici les informations sur les utilisateurs et les groupes."
     }
   },
   "settings": {
-    "menu_personal_settings": "Paramètres personnels",
-    "menu_user_account": "Compte utilisateur",
     "menu_two_factor_auth": "Authentification en deux étapes",
     "menu_opened_sessions": "Sessions ouvertes",
-    "menu_file_importer": "Importateur de fichiers en masse",
-    "menu_general_settings": "Paramètres généraux",
-    "menu_users": "Utilisateurs",
-    "menu_groups": "Groupes",
-    "menu_configuration": "Configuration",
     "menu_inbox": "Scanning de boîte de réception",
-    "menu_metadata": "Métadonnées spécifiques",
-    "menu_monitoring": "Monitoring",
-    "user": {
-      "title": "Gestion des utilisateurs",
-      "add_user": "Ajouter un utilisateur",
-      "username": "Nom d'utilisateur",
-      "create_date": "Date de création",
-      "totp_enabled": "Authentification en deux étapes activée sur ce compte",
-      "edit": {
-        "delete_user_title": "Supprimer un utilisateur",
-        "delete_user_message": "Etes-vous sûr de vouloir supprimer cet utilisateur ? Tous les documents, fichiers et tags associés seront supprimés",
-        "user_used_title": "Utilisateur utilisé",
-        "edit_user_failed_title": "Cet utilisateur existe déjà",
-        "edit_user_failed_message": "Ce nom d'utilisateur est déjà pris par un autre utilisateur",
-        "edit_user_title": "Modifier \"{username}\"",
-        "add_user_title": "Ajouter un utilisateur",
-        "username": "Nom d'utilisateur",
-        "email": "E-mail",
-        "groups": "Groupes",
-        "storage_quota": "Quota de stockage",
-        "storage_quota_placeholder": "Quota de stockage (en Mo)",
-        "password": "Mot de passe",
-        "password_confirm": "Mot de passe (confirmation)",
-        "disabled": "Utilisateur désactivé",
-        "password_reset_btn": "Envoyer un email de réinitialisation de mot de passe à cet utilisateur",
-        "password_lost_sent_title": "Email de réinitialisation de mot de passe envoyé",
-        "password_lost_sent_message": "Un email de réinitalisation de mot de passe a été envoyé à <strong>{username}</strong>",
-        "disable_totp_btn": "Désactiver l'authentification en deux étapes pour cet utilisateur",
-        "disable_totp_title": "Désactiver l'authentification en deux étapes",
-        "disable_totp_message": "Etes-vous sûr de vouloir désactiver l'authentification en deux étapes pour cet utilisateur ?"
-      }
-    },
     "security": {
       "enable_totp": "Activer l'authentification en deux étapes",
       "enable_totp_message": "Assurez-vous d'avoir une application compatible TOTP sur votre téléphone prête à être configurée",
@@ -311,67 +76,6 @@
       "test_code_success": "Code de validation OK",
       "test_code_fail": "Ce code n'est pas valide. Vérifiez que votre téléphone est correctement configuré ou désactivez l'authentification en deux étapes."
     },
-    "group": {
-      "title": "Gestion des groupes",
-      "add_group": "Ajouter un groupe",
-      "name": "Nom",
-      "edit": {
-        "delete_group_title": "Supprimer un groupe",
-        "delete_group_message": "Etes-vous sûr de vouloir supprimer ce groupe ?",
-        "edit_group_failed_title": "Ce groupe existe déjà",
-        "edit_group_failed_message": "Ce nom de groupe est déjà pris par un autre groupe",
-        "group_used_title": "Groupe utilisé",
-        "edit_group_title": "Modifier \"{name}\"",
-        "add_group_title": "Ajouter un groupe",
-        "name": "Nom",
-        "parent_group": "Groupe parent",
-        "search_group": "Rechercher un groupe",
-        "members": "Membres",
-        "new_member": "Nouveau membre",
-        "search_user": "Rechercher un utilisateur"
-      }
-    },
-    "account": {
-      "title": "Compte utilisateur",
-      "password": "Mot de passe",
-      "password_confirm": "Mot de passe (confirmation)",
-      "updated": "Compte mis à jour avec succès"
-    },
-    "config": {
-      "title_guest_access": "Accès invité",
-      "message_guest_access": "L'accès invité est un mode dans lequel quiconque peut accéder à {appName} sans mot de passe.<br/>Comme un utilisateur normal, l'invité ne pourra accéder qu'aux documents auquel il a accès via les permissions.<br/>",
-      "enable_guest_access": "Activer l'accès invité",
-      "disable_guest_access": "Désactiver l'accès invité",
-      "title_theme": "Personnalisation de l'interface",
-      "title_general": "Configuration générale",
-      "default_language": "Langage par défaut pour les nouveaux documents",
-      "application_name": "Nom de l'application",
-      "main_color": "Couleur principale",
-      "custom_css": "CSS personnalisée",
-      "custom_css_placeholder": "CSS personnalisée ajoutée après la feuille de style principale",
-      "logo": "Logo (Taille carrée)",
-      "background_image": "Image de fond",
-      "uploading_image": "Envoi de l'image...",
-      "title_smtp": "Configuration email",
-      "smtp_hostname": "Hôte SMTP",
-      "smtp_port": "Port SMTP",
-      "smtp_from": "Email d'envoi",
-      "smtp_username": "Nom d'utilisateur SMTP",
-      "smtp_password": "Mot de passe SMTP",
-      "smtp_updated": "Configuration SMTP mise à jour avec succès",
-      "webhooks": "Webhooks",
-      "webhooks_explain": "Les webhooks seront appelés lorsque l'évènement spécifié surgira. L'URL donné sera POST-ée avec un JSON contenant le nom de l'évènement et l'identifiant de la ressource concernée.",
-      "webhook_event": "Evènement",
-      "webhook_url": "URL",
-      "webhook_create_date": "Date de création",
-      "webhook_add": "Ajouter un webhook"
-    },
-    "metadata": {
-      "title": "Configuration des métadonnées spécifiques",
-      "message": "Vous pouvez ajouter ici des métadonnées spécifiques à vos documents, comme un identifiant interne ou une date d'expiration. Veuillez notez que le type d'une métadonnée ne peut être modifié après sa création.",
-      "name": "Nom de métadonnée",
-      "type": "Type de métadonnée"
-    },
     "inbox": {
       "title": "Scanning de boîte de réception",
       "message": "En activant cette fonctionnalité, le système scanne périodiquement la boîte de réception spécifiée pour rechercher de nouveaux messages et les importer automatiquement.<br/>Après l'importation d'un email, celui-ci sera marqué comme lu.<br/>Paramétrage pour <a href=\"https://support.google.com/mail/answer/7126229?hl=fr\" target=\"_blank\">Gmail</a>, <a href = \"https: // support. office.com/fr-fr/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040 \"target =\" _ blank \">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -391,19 +95,6 @@
       "autoTagsEnabled": "Ajouter automatiquement les tags des titres marqués par #",
       "deleteImported": "Supprimer les messages de la boîte de réception après leur importation"
     },
-    "monitoring": {
-      "background_tasks": "Tâches d'arrière-plan",
-      "queued_tasks": "Il y a actuellement {count} tâches en file d'attente.",
-      "queued_tasks_explain": "Le traitement de fichiers, la création de vignettes, la mise à jour d'index, la reconnaissance optique de caractères sont des tâches d'arrière-plan. Une grande quantité de tâches non traitées entraînera des résultats de recherche incomplets.",
-      "server_logs": "Logs serveur",
-      "log_date": "Date",
-      "log_tag": "Tag",
-      "log_message": "Message",
-      "indexing": "Indexation",
-      "indexing_info": "Si nous notez des incohérences dans les résultats de recherche, vous pouvez essayer une réindexation complète. Les résultats de recherche seront incomplets pendant l'opération.",
-      "start_reindexing": "Démarrer une réindexation complète",
-      "reindexing_started": "Réindexation démarrée, veuillez patienter jusqu'à ce qu'il ne reste aucune tâche en arrière plan."
-    },
     "session": {
       "title": "Sessions ouvertes",
       "created_date": "Date de création",
@@ -413,125 +104,11 @@
       "current_session": "Ceci est la session courante",
       "clear_message": "Tous les autres appareils connectés à ce compte seront déconnectés",
       "clear": "Fermeture des autres sessions"
-    },
-    "fileimporter": {
-      "title": "Importateur de fichiers en masse",
-      "advanced_users": "Pour les utilisateurs avancés !",
-      "need_intro": "Si vous avez besoin de :",
-      "need_1": "Importer un répertoire en une fois",
-      "need_2": "Analyser un répertoire à la recherche de nouveaux fichiers et les importer",
-      "line_1": "Allez sur <a href=\"https://github.com/sismics/docs/releases\">sismics/docs/releases</a> et téléchargez l'outil d'importation de fichiers pour votre système.",
-      "line_2": "Suivez les <a href=\"https://github.com/sismics/docs/tree/master/docs-importer\">instructions ici</a> pour utiliser cet outil.",
-      "line_3": "Vos fichiers seront importés dans des documents conformément à la configuration de l'importeur.",
-      "download": "Télécharger",
-      "instructions": "Instructions"
-    }
-  },
-  "feedback": {
-    "title": "Donnez-nous votre avis",
-    "message": "Vous avez des suggestions ou des questions à propos de Teedy ? Nous vous écoutons !",
-    "sent_title": "Avis envoyé",
-    "sent_message": "Merci pour votre avis ! Cela nous aidera à améliorer Teedy."
-  },
-  "import": {
-    "title": "Import en cours",
-    "error_quota": "Limite de quota atteinte, contactez votre administrateur pour augmenter votre quota",
-    "error_general": "Une erreur est survenue lors de la tentative d'importation de votre fichier, assurez-vous qu'il s'agit bien d'un fichier EML valide"
-  },
-  "app_share": {
-    "main": "Demandez un lien de partage d'un document pour y accéder",
-    "403": {
-      "title": "Non autorisé",
-      "message": "Le document que vous tentez de consulter n'est plus disponible"
     }
   },
   "directive": {
-    "acledit": {
-      "acl_target": "Pour",
-      "acl_permission": "Permission",
-      "add_permission": "Ajouter une permission",
-      "search_user_group": "Rechercher un utilisateur ou un groupe"
-    },
     "auditlog": {
-      "log_created": "créé",
-      "log_updated": "mis à jour",
-      "log_deleted": "supprimé",
-      "Acl": "ACL",
-      "Comment": "Commentaire",
-      "Document": "Document",
-      "File": "Fichier",
-      "Group": "Groupe",
-      "Tag": "Tag",
-      "User": "Utilisateur",
-      "Webhook": "Webhook"
-    },
-    "selectrelation": {
-      "typeahead": "Entrez un titre de document"
-    },
-    "selecttag": {
-      "typeahead": "Entrez un tag"
-    },
-    "datepicker": {
-      "current": "Aujourd'hui",
-      "clear": "Vider",
-      "close": "Fermer"
-    }
-  },
-  "filter": {
-    "filesize": {
-      "mb": "Mo",
-      "kb": "ko"
-    }
-  },
-  "acl": {
-    "READ": "Lecture",
-    "READWRITE": "Ecriture",
-    "WRITE": "Ecriture",
-    "USER": "Utilisateur",
-    "GROUP": "Groupe",
-    "SHARE": "Partage"
-  },
-  "validation": {
-    "required": "Requis",
-    "too_short": "Trop court",
-    "too_long": "Trop long",
-    "email": "Doit être une adresse e-mail valide",
-    "password_confirm": "Le mot de passe et sa confirmation doivent être identiques",
-    "number": "Nombre requis",
-    "no_space": "Les espaces ne sont pas autorisés",
-    "alphanumeric": "Seuls les lettres et les chiffres sont autorisés"
-  },
-  "action_type": {
-    "ADD_TAG": "Ajouter un tag",
-    "REMOVE_TAG": "Supprimer un tag",
-    "PROCESS_FILES": "Traiter les fichiers"
-  },
-  "pagination": {
-    "previous": "Précédent",
-    "next": "Suivant",
-    "first": "Première",
-    "last": "Dernière"
-  },
-  "onboarding": {
-    "step1": {
-      "title": "Première fois ici ?",
-      "description": "Si vous utilisez Teedy pour la première fois, cliquez sur le bouton Suivant. Sinon, n'hésitez pas à me fermer."
-    },
-    "step2": {
-      "title": "Documents",
-      "description": "Teedy est organisé en documents et chaque document contient plusieurs fichiers."
-    },
-    "step3": {
-      "title": "Fichiers",
-      "description": "Vous pouvez ajouter des fichiers après la création d'un document ou avant en utilisant cette zone d'envoi rapide."
-    },
-    "step4": {
-      "title": "Rechercher",
-      "description": "C'est le moyen principal de retrouver vos documents. Il existe également une recherche avancée avec le bouton loupe."
-    },
-    "step5": {
-      "title": "Tags",
-      "description": "Les documents peuvent être organisés en tags (qui sont comme des super-dossiers). Créez-les ici."
+      "Document": "Document"
     }
   },
   "yes": "Oui",
@@ -539,19 +116,15 @@
   "ok": "OK",
   "cancel": "Annuler",
   "share": "Partager",
-  "unshare": "Départager",
   "close": "Fermer",
   "add": "Ajouter",
   "open": "Ouvrir",
-  "see": "Voir",
   "save": "Enregistrer",
-  "export": "Exporter",
   "edit": "Modifier",
   "delete": "Supprimer",
   "rename": "Renommer",
   "download": "Télécharger",
   "loading": "Chargement...",
-  "send": "Envoyer",
   "enabled": "Activé",
   "disabled": "Désactivé"
 }

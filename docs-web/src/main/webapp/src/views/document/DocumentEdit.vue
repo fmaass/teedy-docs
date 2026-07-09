@@ -1,49 +1,61 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
+import { listMetadata, type MetadataDefinition } from '../../api/metadata'
+import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
+import { shouldResetTags } from '../../utils/tagsReset'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
-import api from '../../api/client'
-import { formatFileSize } from '../../composables/useFormatters'
+import { getAppInfo } from '../../api/app'
+import { queryKeys } from '../../api/queryKeys'
+import { formatFileSize } from '../../utils/formatters'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
+import InputNumber from 'primevue/inputnumber'
+import ToggleSwitch from 'primevue/toggleswitch'
 import MultiSelect from 'primevue/multiselect'
 import FileUpload, { type FileUploadSelectEvent, type FileUploadRemoveEvent } from 'primevue/fileupload'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
+import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
+import UploadProgressList from '../../components/UploadProgressList.vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
 const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const tagFilter = useTagFilterStore()
 const queryClient = useQueryClient()
 const { t } = useI18n()
 const isEdit = computed(() => !!props.id)
 
-const form = ref({
-  title: '',
-  description: '',
-  subject: '',
-  identifier: '',
-  publisher: '',
-  format: '',
-  source: '',
-  type: '',
-  coverage: '',
-  rights: '',
-  language: 'eng',
-  create_date: new Date(),
-  tags: [] as string[],
-})
+function defaultForm() {
+  return {
+    title: '',
+    description: '',
+    subject: '',
+    identifier: '',
+    publisher: '',
+    format: '',
+    source: '',
+    type: '',
+    coverage: '',
+    rights: '',
+    language: 'eng',
+    create_date: new Date(),
+    tags: [] as string[],
+  }
+}
+
+const form = ref(defaultForm())
 
 interface AttachedFile {
   id: string
@@ -56,8 +68,33 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+// CREATE-mode retry guard: once createDocument() succeeds we remember the new id, so
+// a subsequent Save (after a file-upload failure) updates that document instead of
+// creating a second one. uploadedCount tracks how many of the CURRENT pendingFiles
+// queue already uploaded, so a retry resumes at the first file that failed rather
+// than re-uploading the ones that already landed. Both reset once a save fully
+// succeeds (navigation away) or the file queue is replaced.
+const createdId = ref<string | null>(null)
+const uploadedCount = ref(0)
+// Per-file upload progress (0..100), keyed by array index into pendingFiles,
+// populated only while an upload is in flight so the ProgressBar shows real bytes.
+const uploadProgress = ref<Record<number, number>>({})
+const uploadingFiles = ref(false)
 const loadedRelations = ref<Array<{ id: string }>>([])
-const loadedMetadata = ref<Array<{ id: string; value?: unknown }>>([])
+
+// Custom metadata: field definitions (admin-configured) and per-field values keyed
+// by definition id. Values are typed for their input; serialized on save.
+const metadataDefinitions = ref<MetadataDefinition[]>([])
+const metadataValues = ref<Record<string, MetadataValue>>({})
+// Ids of BOOLEAN fields that carry an explicit value — either already set on the
+// document or toggled by the user. Unset booleans stay out of this set so they are
+// omitted from the save rather than coerced to an explicit "false".
+const metadataSetIds = ref<Set<string>>(new Set())
+// Snapshot at load: did this document have ANY set custom-metadata value? Captured
+// once at hydration (edit mode) and NOT mutated by later user edits, so a save that
+// emits zero metadata params can tell a genuine clear-the-last-value ("send
+// metadata_reset=true") apart from a document that simply never had metadata.
+const metadataHadValuesAtLoad = ref(false)
 
 const fileUploadRef = ref()
 
@@ -67,10 +104,24 @@ const tagOptions = computed(() =>
   tagFilter.allTags.map((t) => ({ label: t.name, value: t.id })),
 )
 
-onMounted(async () => {
+// Generation counter guarding initFromRoute against out-of-order async completion:
+// on rapid add -> edit / edit -> edit navigation, a stale getDocument(oldId) (or
+// /app, listMetadata) response can resolve AFTER the reset for the new target and
+// repopulate the form for the wrong document. Each init run captures its generation
+// at entry and re-checks after every await; a mismatch means a newer reset/init has
+// superseded it, so it stops without mutating state.
+let initGen = 0
+
+// Load (edit) or seed (create) the form for the current route target. Extracted from
+// onMounted because vue-router REUSES this component instance across document-add and
+// document-edit routes (same component, no keep-alive) — onMounted alone would leave
+// the previous target's state in place.
+async function initFromRoute() {
+  const gen = ++initGen
   if (isEdit.value && props.id) {
     try {
       const { data } = await getDocument(props.id, true)
+      if (gen !== initGen) return
       form.value.title = data.title || ''
       form.value.description = data.description || ''
       form.value.subject = data.subject || ''
@@ -85,43 +136,137 @@ onMounted(async () => {
       form.value.create_date = data.create_date ? new Date(data.create_date) : new Date()
       form.value.tags = data.tags?.map((t) => t.id) || []
       loadedRelations.value = data.relations ?? []
-      loadedMetadata.value = data.metadata ?? []
+      // The document detail returns every defined field merged with this document's
+      // value (value omitted when unset), so it doubles as the definition list.
+      metadataDefinitions.value = (data.metadata ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        type: m.type as MetadataDefinition['type'],
+      }))
+      hydrateMetadataValues(data.metadata ?? [])
       existingFiles.value = data.files || []
     } catch {
+      // A stale run's failure must not toast or navigate away from the NEW target.
+      if (gen !== initGen) return
       toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
       router.back()
     }
   } else {
     try {
-      const { data: appConfig } = await api.get('/app')
+      const appConfig = await queryClient.fetchQuery({ queryKey: queryKeys.app(), queryFn: () => getAppInfo() })
+      if (gen !== initGen) return
       if (appConfig.default_language) {
         form.value.language = appConfig.default_language
       }
     } catch { /* fall back to 'eng' */ }
+    if (gen !== initGen) return
+
+    // New document: load field definitions so the user can fill them in.
+    try {
+      const { data } = await listMetadata()
+      if (gen !== initGen) return
+      metadataDefinitions.value = data.metadata
+      hydrateMetadataValues(data.metadata)
+    } catch { /* no custom fields available */ }
+    if (gen !== initGen) return
 
     form.value.tags = [...tagFilter.selectedTagIds]
   }
+}
+
+// Drop everything tied to the PREVIOUS route target. Critically this clears the
+// create-retry state (createdId / uploadedCount): a half-created document from an
+// earlier document-add visit must never be silently updated when this reused
+// instance serves a fresh create (or inherited into an edit). The pending file
+// queue and loaded document state belong to the old target too.
+function resetForRouteChange() {
+  // Invalidate any in-flight initFromRoute immediately — even before the next init
+  // run bumps the generation again.
+  initGen++
+  form.value = defaultForm()
+  createdId.value = null
+  uploadedCount.value = 0
+  pendingFiles.value = []
+  uploadProgress.value = {}
+  uploadingFiles.value = false
+  fileUploadRef.value?.clear()
+  existingFiles.value = []
+  loadedRelations.value = []
+  metadataDefinitions.value = []
+  metadataValues.value = {}
+  metadataSetIds.value = new Set()
+  metadataHadValuesAtLoad.value = false
+}
+
+onMounted(initFromRoute)
+
+// Same component instance, different target (add -> edit, edit -> add, or another
+// document id): reset, then re-initialize for the new target.
+watch(() => props.id, () => {
+  resetForRouteChange()
+  initFromRoute()
 })
+
+// Seed the value map from a definition/value list, coercing each backend value to
+// the shape its input expects (DATE epoch ms -> Date, BOOLEAN -> bool, else raw).
+// A field with a value on the document is recorded as "set"; an unset boolean is
+// left null (and NOT recorded) so it stays out of the save until the user toggles it.
+function hydrateMetadataValues(list: Array<{ id: string; type: string; value?: unknown }>) {
+  const values: Record<string, MetadataValue> = {}
+  const setIds = new Set<string>()
+  for (const m of list) {
+    if (m.value == null) {
+      values[m.id] = null
+    } else {
+      setIds.add(m.id)
+      if (m.type === 'DATE') {
+        values[m.id] = new Date(Number(m.value))
+      } else if (m.type === 'BOOLEAN') {
+        values[m.id] = Boolean(m.value)
+      } else {
+        values[m.id] = m.value as MetadataValue
+      }
+    }
+  }
+  metadataValues.value = values
+  metadataSetIds.value = setIds
+  metadataHadValuesAtLoad.value = setIds.size > 0
+}
+
+// A user toggling a boolean makes it explicitly set (so false is submitted, not omitted).
+function onBooleanToggle(id: string) {
+  metadataSetIds.value.add(id)
+}
 
 function onFileSelect(event: FileUploadSelectEvent) {
   pendingFiles.value = [...event.files]
+  // The queue changed — any prior partial-upload progress no longer maps to it.
+  uploadedCount.value = 0
 }
 
 function onFileRemove(event: FileUploadRemoveEvent) {
   pendingFiles.value = pendingFiles.value.filter((f) => f !== event.file)
+  uploadedCount.value = 0
 }
 
 function onFileClear() {
   pendingFiles.value = []
+  uploadedCount.value = 0
+}
+
+// Camera capture: photos from CameraCaptureButton are appended to the same
+// pendingFiles queue, so they upload on save exactly like picked files.
+function onCameraCapture(captured: File[]) {
+  if (captured.length) {
+    pendingFiles.value = [...pendingFiles.value, ...captured]
+    uploadedCount.value = 0
+  }
 }
 
 function confirmDeleteExisting(file: AttachedFile) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.remove_file_confirm', { name: file.name }),
     header: t('ui.remove_file'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)
@@ -153,10 +298,26 @@ function buildDocParams() {
   if (form.value.rights) fields.rights = form.value.rights
   Object.entries(fields).forEach(([k, v]) => params.append(k, v))
   form.value.tags.forEach((tagId) => params.append('tags', tagId))
+  // The backend preserves tags on an omitted `tags` param, so clearing the last
+  // tag on an edit is otherwise a silent no-op. Send the clear-all sentinel on a
+  // genuine clear (mirrors the metadata_reset path below and bulkOps — BL-025).
+  if (shouldResetTags(isEdit.value, form.value.tags.length)) {
+    params.append('tags_reset', 'true')
+  }
   for (const r of loadedRelations.value) params.append('relations', r.id)
-  for (const m of loadedMetadata.value) {
-    params.append('metadata_id', m.id)
-    params.append('metadata_value', m.value != null ? String(m.value) : '')
+  // Only submit fields the user actually set — an unset numeric/date field sent as a
+  // blank pair makes the backend reject the whole save; an unset boolean must not
+  // silently become "false".
+  const metaParams = buildMetadataParams(metadataDefinitions.value, metadataValues.value, metadataSetIds.value)
+  for (const meta of metaParams) {
+    params.append('metadata_id', meta.id)
+    params.append('metadata_value', meta.value)
+  }
+  // The backend preserves metadata on an omitted set, so clearing the last set value
+  // is otherwise a silent no-op. Send the clear-all sentinel ONLY on a genuine clear
+  // (the document HAD values at load and now emits zero params).
+  if (shouldResetMetadata(metadataHadValuesAtLoad.value, metaParams)) {
+    params.append('metadata_reset', 'true')
   }
   return params
 }
@@ -168,6 +329,10 @@ async function handleSubmit() {
   }
 
   loading.value = true
+  // True once the document itself is persisted this attempt (created or updated), so
+  // a later file-upload failure reports "saved, files failed" rather than "not saved"
+  // — and never re-creates the document on retry.
+  let documentPersisted = false
   try {
     const params = buildDocParams()
     let resultId: string
@@ -175,15 +340,38 @@ async function handleSubmit() {
     if (isEdit.value && props.id) {
       await updateDocument(props.id, params)
       resultId = props.id
+    } else if (createdId.value) {
+      // A prior attempt already created this document (then a file upload failed):
+      // update it instead of creating a duplicate.
+      await updateDocument(createdId.value, params)
+      resultId = createdId.value
     } else {
       const { data: result } = await createDocument(params)
       resultId = result.id
+      createdId.value = resultId
     }
+    documentPersisted = true
 
-    for (const file of pendingFiles.value) {
-      await uploadFile(resultId, file)
+    if (pendingFiles.value.length) {
+      uploadingFiles.value = true
+      uploadProgress.value = {}
+      const files = pendingFiles.value
+      // Resume at the first file that has not yet uploaded — files that succeeded on
+      // a previous attempt are not sent again.
+      for (let i = uploadedCount.value; i < files.length; i++) {
+        uploadProgress.value[i] = 0
+        await uploadFile(resultId, files[i], (pct) => {
+          uploadProgress.value[i] = pct
+        })
+        uploadProgress.value[i] = 100
+        uploadedCount.value = i + 1
+      }
+      uploadingFiles.value = false
     }
     pendingFiles.value = []
+    uploadProgress.value = {}
+    uploadedCount.value = 0
+    createdId.value = null
     fileUploadRef.value?.clear()
 
     await queryClient.invalidateQueries({ queryKey: ['documents'] })
@@ -191,9 +379,17 @@ async function handleSubmit() {
     toast.add({ severity: 'success', summary: isEdit.value ? t('ui.document_updated') : t('ui.document_created'), life: 2000 })
     router.push({ name: 'document-view', params: { id: resultId } })
   } catch {
-    toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
+    // Distinguish the two failure modes: the document was saved but a file upload
+    // failed (retry uploads only the remaining files — no duplicate document), versus
+    // the save itself failed (nothing persisted). Stay on the form either way.
+    toast.add({
+      severity: 'error',
+      summary: documentPersisted ? t('ui.document_saved_files_failed') : t('ui.failed_save_document'),
+      life: 4000,
+    })
   } finally {
     loading.value = false
+    uploadingFiles.value = false
   }
 }
 </script>
@@ -305,6 +501,50 @@ async function handleSubmit() {
           </div>
         </div>
       </div>
+
+      <!-- Custom metadata fields (admin-defined) -->
+      <div v-if="metadataDefinitions.length" class="custom-metadata">
+        <h3 class="custom-metadata-heading">{{ t('ui.metadata.custom_fields') }}</h3>
+        <div v-for="def in metadataDefinitions" :key="def.id" class="form-field">
+          <label :for="`meta-${def.id}`">{{ def.name }}</label>
+          <ToggleSwitch
+            v-if="def.type === 'BOOLEAN'"
+            :inputId="`meta-${def.id}`"
+            :modelValue="metadataValues[def.id] === true"
+            @update:modelValue="(v: boolean) => { metadataValues[def.id] = v; onBooleanToggle(def.id) }"
+          />
+          <DatePicker
+            v-else-if="def.type === 'DATE'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as Date)"
+            dateFormat="yy-mm-dd"
+            showButtonBar
+            class="w-full"
+          />
+          <InputNumber
+            v-else-if="def.type === 'INTEGER'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as number)"
+            :useGrouping="false"
+            class="w-full"
+          />
+          <InputNumber
+            v-else-if="def.type === 'FLOAT'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as number)"
+            :useGrouping="false"
+            :minFractionDigits="1"
+            :maxFractionDigits="6"
+            class="w-full"
+          />
+          <InputText
+            v-else
+            :id="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as string)"
+            class="w-full"
+          />
+        </div>
+      </div>
     </form></template></Card>
 
     <!-- Files section -->
@@ -349,7 +589,17 @@ async function handleSubmit() {
         </template>
       </FileUpload>
 
-      <p v-if="pendingFiles.length" class="upload-hint">
+      <!-- Camera capture: opens the device camera on mobile; photos queue for save. -->
+      <CameraCaptureButton @capture="onCameraCapture" />
+
+      <!-- Real per-file upload progress while saving. -->
+      <UploadProgressList
+        v-if="uploadingFiles"
+        :names="pendingFiles.map((f) => f.name)"
+        :progress="uploadProgress"
+      />
+
+      <p v-else-if="pendingFiles.length" class="upload-hint">
         {{ t('ui.files_upload_hint', { count: pendingFiles.length }) }}
       </p>
     </div></template></Card>
@@ -413,6 +663,17 @@ async function handleSubmit() {
 .advanced-fields {
   border-top: 1px solid var(--p-content-border-color);
   padding-top: 1rem;
+}
+
+.custom-metadata {
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 1rem;
+  margin-top: 0.25rem;
+}
+.custom-metadata-heading {
+  margin: 0 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
 }
 
 /* Files section */
@@ -487,9 +748,21 @@ a.file-name:hover {
   color: var(--p-text-muted-color);
 }
 
+/* Camera capture: hide the native input; the styled Button triggers it. */
 @media (max-width: 640px) {
   .form-row {
     grid-template-columns: 1fr;
+  }
+  .doc-edit {
+    padding: 1rem;
+  }
+  .doc-edit-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+  .doc-edit-actions {
+    justify-content: flex-end;
   }
 }
 </style>

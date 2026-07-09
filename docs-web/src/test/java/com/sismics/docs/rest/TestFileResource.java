@@ -481,6 +481,147 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE * 2, getUserQuota(fileQuotaToken));
     }
 
+    /**
+     * Permanently deleting a document with multiple files reclaims the sum of their sizes exactly
+     * once (Option B: synchronous per-producer decrement, atomic with the delete transaction).
+     */
+    @Test
+    public void testQuotaMultiFileDocument() throws Exception {
+        clientUtil.createUser("file_quota_multi");
+        String token = clientUtil.login("file_quota_multi");
+
+        // Create a document and attach two files to it.
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Multi-file quota doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        clientUtil.addFileToDocument(FILE_PIA_00452_JPG, token, documentId);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, documentId);
+
+        long expected = FILE_PIA_00452_JPG_SIZE + FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE;
+        Assertions.assertEquals(expected, getUserQuota(token));
+
+        // Trash then permanently delete the document.
+        target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+        // Trashing preserves the files, so quota is unchanged.
+        Assertions.assertEquals(expected, getUserQuota(token));
+
+        target().path("/document/" + documentId + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+
+        // Both files' sizes reclaimed exactly once -> back to zero.
+        Assertions.assertEquals(0L, getUserQuota(token));
+    }
+
+    /**
+     * A document with files uploaded by TWO different owners (a WRITE collaborator uploads to the
+     * document owner's document): permanently deleting the document must reclaim each owner's bytes
+     * from THEIR OWN quota, exactly once — never charge the document owner for the collaborator's file.
+     */
+    @Test
+    public void testQuotaMultiOwnerDocument() throws Exception {
+        clientUtil.createUser("quota_owner");
+        clientUtil.createUser("quota_collab");
+        String ownerToken = clientUtil.login("quota_owner");
+        String collabToken = clientUtil.login("quota_collab");
+
+        // Owner creates a document and uploads one file to it.
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Two-owner quota doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+        clientUtil.addFileToDocument(FILE_PIA_00452_JPG, ownerToken, documentId);
+
+        // Grant the collaborator WRITE on the document, then the collaborator uploads a file to it.
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "WRITE")
+                        .param("target", "quota_collab")
+                        .param("type", "USER")), JsonObject.class);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, collabToken, documentId);
+
+        // Each file is charged to ITS uploader.
+        Assertions.assertEquals(FILE_PIA_00452_JPG_SIZE, getUserQuota(ownerToken));
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(collabToken));
+
+        // Trash then permanently delete the document (as the owner).
+        target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .delete(JsonObject.class);
+        target().path("/document/" + documentId + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .delete(JsonObject.class);
+
+        // Each owner's quota reclaimed by their own file's size, exactly once.
+        Assertions.assertEquals(0L, getUserQuota(ownerToken),
+                "the document owner must be reclaimed only their own file's bytes");
+        Assertions.assertEquals(0L, getUserQuota(collabToken),
+                "the collaborator's uploaded file must be reclaimed from the collaborator, not the doc owner");
+    }
+
+    /**
+     * Individually deleting a file reclaims it immediately; permanently deleting its document later
+     * must NOT reclaim that already-deleted file again (no double count), while still reclaiming a
+     * sibling file that was only ever cascade-trashed with the document.
+     */
+    @Test
+    public void testNoDoubleReclaimAfterIndividualFileDelete() throws Exception {
+        clientUtil.createUser("quota_nodouble");
+        String token = clientUtil.login("quota_nodouble");
+
+        // A separate, untouched document with a file: it provides a non-zero baseline so a
+        // double-reclaim produces a WRONG value instead of being hidden by the floor-to-zero clamp.
+        String keepDocId = clientUtil.createDocument(token);
+        clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, keepDocId);
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "No-double-reclaim doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Two files on the document under test.
+        String file1Id = clientUtil.addFileToDocument(FILE_PIA_00452_JPG, token, documentId);
+        clientUtil.addFileToDocument(FILE_PIA_00452_JPG, token, documentId);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE + FILE_PIA_00452_JPG_SIZE * 2,
+                getUserQuota(token));
+
+        // Individually delete file1 -> reclaimed now.
+        target().path("/file/" + file1Id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE + FILE_PIA_00452_JPG_SIZE,
+                getUserQuota(token));
+
+        // Trash then permanently delete the document. file1 must NOT be reclaimed again; only the
+        // still-linked, never-individually-deleted second file is reclaimed now. A double-reclaim of
+        // file1 would drop the quota below the untouched keep-document baseline.
+        target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+        target().path("/document/" + documentId + "/permanent").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+
+        // Only the untouched keep-document's file remains counted.
+        Assertions.assertEquals(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG_SIZE, getUserQuota(token),
+                "the already-deleted file must not be reclaimed a second time");
+    }
+
     private long getUserQuota(String userToken) {
         return target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)

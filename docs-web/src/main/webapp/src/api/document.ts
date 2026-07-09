@@ -71,8 +71,10 @@ export function listDocuments(params: DocumentListParams) {
   return api.get<DocumentListResponse>('/document/list', { params })
 }
 
-export function getDocument(id: string, files = true) {
-  return api.get<DocumentDetail>(`/document/${id}`, { params: { files } })
+export function getDocument(id: string, files = true, shareId?: string) {
+  const params: Record<string, unknown> = { files }
+  if (shareId) params.share = shareId
+  return api.get<DocumentDetail>(`/document/${id}`, { params })
 }
 
 export function createDocument(params: URLSearchParams) {

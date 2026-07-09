@@ -1,7 +1,6 @@
 package com.sismics.docs.core.util;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.sismics.util.EnvironmentUtil;
 
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,15 +23,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * </ul>
  *
  * <p>All three are configured with the same "system property first, then environment
- * variable" convention used elsewhere (see {@code WebhookUtil}, {@code TrashPurgeService}).
- * Values are read at call time so tests can set them via a system property seam.</p>
+ * variable, then default" convention used elsewhere (see {@link EnvironmentUtil}), via the
+ * shared config helpers. Values are read at call time so tests can set them via a system
+ * property seam.</p>
  */
 public final class ExportGuard {
-    /**
-     * Logger.
-     */
-    private static final Logger log = LoggerFactory.getLogger(ExportGuard.class);
-
     /**
      * System property / env var (DOCS_EXPORT_ENABLED) controlling whether the export
      * endpoint is enabled at all. Defaults to true.
@@ -71,25 +66,21 @@ public final class ExportGuard {
      * @return true if the export endpoint is enabled (default true).
      */
     public static boolean isEnabled() {
-        String value = readSetting(ENABLED_PROPERTY, ENABLED_ENV);
-        if (value == null || value.isBlank()) {
-            return true;
-        }
-        return Boolean.parseBoolean(value.trim());
+        return EnvironmentUtil.getBooleanConfig(ENABLED_PROPERTY, ENABLED_ENV, true);
     }
 
     /**
      * @return the maximum number of documents a single export may contain.
      */
     public static int getMaxDocuments() {
-        return readInt(MAX_DOCUMENTS_PROPERTY, MAX_DOCUMENTS_ENV, DEFAULT_MAX_DOCUMENTS);
+        return EnvironmentUtil.getIntConfig(MAX_DOCUMENTS_PROPERTY, MAX_DOCUMENTS_ENV, DEFAULT_MAX_DOCUMENTS, 1);
     }
 
     /**
      * @return the maximum number of simultaneous exports.
      */
     public static int getMaxConcurrent() {
-        return readInt(MAX_CONCURRENT_PROPERTY, MAX_CONCURRENT_ENV, DEFAULT_MAX_CONCURRENT);
+        return EnvironmentUtil.getIntConfig(MAX_CONCURRENT_PROPERTY, MAX_CONCURRENT_ENV, DEFAULT_MAX_CONCURRENT, 1);
     }
 
     /**
@@ -133,37 +124,5 @@ public final class ExportGuard {
             semaphorePermits = permits;
         }
         return current;
-    }
-
-    /**
-     * Read a positive-int setting from the system property, falling back to the env var,
-     * then to the default. A missing or malformed value falls back to the default.
-     */
-    private static int readInt(String property, String env, int defaultValue) {
-        String value = readSetting(property, env);
-        if (value != null && !value.isBlank()) {
-            try {
-                int parsed = Integer.parseInt(value.trim());
-                if (parsed > 0) {
-                    return parsed;
-                }
-                log.warn("Non-positive value for {} ({}), using default {}", property, value, defaultValue);
-            } catch (NumberFormatException e) {
-                log.warn("Invalid value for {} ({}), using default {}", property, value, defaultValue);
-            }
-        }
-        return defaultValue;
-    }
-
-    /**
-     * Read a setting from the system property first, falling back to the environment
-     * variable form. Returns null if neither is set.
-     */
-    private static String readSetting(String property, String env) {
-        String value = System.getProperty(property);
-        if (value == null) {
-            value = System.getenv(env);
-        }
-        return value;
     }
 }

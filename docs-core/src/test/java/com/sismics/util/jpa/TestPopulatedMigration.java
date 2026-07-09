@@ -37,8 +37,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the retirement migrations run. */
-    private static final int TARGET_VERSION = 39;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041). */
+    private static final int TARGET_VERSION = 41;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -100,7 +100,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 39).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 41).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -117,11 +117,15 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-039 must run cleanly on a populated database");
+                "migrations 037-041 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 39 after the retirement migrations");
+                "DB_VERSION must be 41 after the full upgrade path");
+
+        // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
+        Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
+                "040 must create the IDX_DOT_TAG index on T_DOCUMENT_TAG");
 
         // 5b. Retired tables are gone (dropped).
         Assertions.assertFalse(tableExists(connection, "T_ROUTE_STEP"), "T_ROUTE_STEP must be dropped by 037");
@@ -283,5 +287,24 @@ public class TestPopulatedMigration {
     private static boolean tableExists(Connection connection, String table) throws Exception {
         return scalarCount(connection,
                 "select count(*) from information_schema.tables where upper(table_name) = upper('" + table + "')") > 0;
+    }
+
+    /**
+     * Dialect-agnostic index existence probe via JDBC {@link java.sql.DatabaseMetaData#getIndexInfo},
+     * which normalises the H2 (uppercase) / PostgreSQL (lowercase) identifier-case difference for us.
+     * getIndexInfo requires the table name in the driver's stored case, so probe both.
+     */
+    private static boolean indexExists(Connection connection, String indexName) throws Exception {
+        for (String table : new String[]{"T_DOCUMENT_TAG", "t_document_tag"}) {
+            try (ResultSet rs = connection.getMetaData().getIndexInfo(null, null, table, false, false)) {
+                while (rs.next()) {
+                    String name = rs.getString("INDEX_NAME");
+                    if (name != null && name.equalsIgnoreCase(indexName)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }

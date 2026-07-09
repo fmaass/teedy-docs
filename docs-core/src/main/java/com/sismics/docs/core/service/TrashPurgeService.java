@@ -14,7 +14,9 @@ import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.TransactionUtil;
+import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
 /**
@@ -23,6 +25,7 @@ import com.sismics.util.context.ThreadLocalContext;
 public class TrashPurgeService extends AbstractScheduledService {
     private static final Logger log = LoggerFactory.getLogger(TrashPurgeService.class);
 
+    private static final String RETENTION_DAYS_PROPERTY = "docs.trash_retention_days";
     private static final String ENV_RETENTION_DAYS = "DOCS_TRASH_RETENTION_DAYS";
     private static final int DEFAULT_RETENTION_DAYS = 30;
 
@@ -91,6 +94,15 @@ public class TrashPurgeService extends AbstractScheduledService {
                 }
                 String ownerId = document.getUserId();
                 List<File> fileList = fileDao.getAllByDocumentId(documentId);
+
+                // Reclaim quota synchronously, atomically with the permanent delete below (same
+                // transaction). The async FileDeletedAsyncEvent listener no longer touches the quota,
+                // so a retried event cannot double-subtract. reclaimQuotaForDeletedDocumentFiles
+                // reclaims only the files cascade-trashed with this document (matching document
+                // deleteDate — not files individually deleted earlier and already reclaimed) and
+                // charges each file to its own uploader.
+                FileUtil.reclaimQuotaForDeletedDocumentFiles(fileList, document.getDeleteDate());
+
                 for (File file : fileList) {
                     FileDeletedAsyncEvent event = new FileDeletedAsyncEvent();
                     event.setUserId(ownerId);
@@ -112,15 +124,18 @@ public class TrashPurgeService extends AbstractScheduledService {
         log.info("Purged {} expired trashed documents", purged);
     }
 
-    private static int getRetentionDays() {
-        String envValue = System.getenv(ENV_RETENTION_DAYS);
-        if (envValue != null) {
-            try {
-                return Integer.parseInt(envValue);
-            } catch (NumberFormatException e) {
-                log.warn("Invalid value for {}: {}, using default {}", ENV_RETENTION_DAYS, envValue, DEFAULT_RETENTION_DAYS);
-            }
-        }
-        return DEFAULT_RETENTION_DAYS;
+    /**
+     * Returns the configured trash retention window in days.
+     * Reads the {@code docs.trash_retention_days} system property, falling back to the
+     * {@code DOCS_TRASH_RETENTION_DAYS} environment variable, then to
+     * {@link #DEFAULT_RETENTION_DAYS}. A malformed value falls back to the default; a
+     * valid value &lt;= 0 is returned as-is and disables purging (see {@link #purgeExpiredTrash(int)}).
+     * Single source of truth for the retention window: the purge scheduler and the
+     * /app REST endpoint (which surfaces it to the SPA countdown) both call this.
+     *
+     * @return Retention window in days
+     */
+    public static int getRetentionDays() {
+        return EnvironmentUtil.getIntConfig(RETENTION_DAYS_PROPERTY, ENV_RETENTION_DAYS, DEFAULT_RETENTION_DAYS);
     }
 }

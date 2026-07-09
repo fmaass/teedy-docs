@@ -2,6 +2,7 @@ package com.sismics.util;
 
 import com.sismics.docs.core.util.authentication.AuthenticationHandler;
 import com.sismics.docs.core.util.authentication.InternalAuthenticationHandler;
+import com.sismics.docs.core.util.authentication.LdapAuthenticationHandler;
 import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.docs.core.util.indexing.LuceneIndexingHandler;
@@ -16,10 +17,13 @@ public class TestClasspathScanner {
     public void authenticationHandlerDiscovery() {
         List<Class<AuthenticationHandler>> handlers = new ClasspathScanner<AuthenticationHandler>()
                 .findClasses(AuthenticationHandler.class, "com.sismics.docs.core.util.authentication");
-        // After LDAP retirement the internal handler must still be resolved by the ServiceLoader,
-        // otherwise username/password login would break.
-        Assertions.assertFalse(handlers.isEmpty(), "Expected at least 1 auth handler, got " + handlers.size());
+        // Both auth handlers must be resolved by the ServiceLoader: the internal handler
+        // (username/password login) and the LDAP handler. A missing entry — or a stale
+        // descriptor line for a class that no longer exists — throws ServiceConfigurationError
+        // at auth init and breaks ALL login, so this guards the whole login chain.
+        Assertions.assertFalse(handlers.isEmpty(), "Expected at least 2 auth handlers, got " + handlers.size());
         Assertions.assertTrue(handlers.contains(InternalAuthenticationHandler.class));
+        Assertions.assertTrue(handlers.contains(LdapAuthenticationHandler.class));
     }
 
     @Test

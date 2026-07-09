@@ -1,39 +1,47 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import api from '../../api/client'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
-import { formatFileSize } from '../../composables/useFormatters'
+import { formatFileSize } from '../../utils/formatters'
+import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
-const queryClient = useQueryClient()
+const { confirmDanger } = useConfirmDanger()
+const invalidateAppInfo = useInvalidateAppInfo()
 
 const defaultLanguage = ref('eng')
 const tagSearchMode = ref('PREFIX')
 const ocrEnabled = ref(true)
 const maxUploadSize = ref(0)
 
-const { data: appConfig } = useQuery({
-  queryKey: ['app-config'],
-  queryFn: () => api.get('/app').then((r) => r.data),
-})
+const { data: appConfig } = useAppInfo()
 
+// The user-editable text/select fields are SEEDED ONCE on first load. Reseeding on
+// every query emission would clobber unsaved edits, because toggleOcr's onSuccess
+// invalidates the app-info key and the ensuing refetch re-fires this watcher. Only the
+// OCR toggle deliberately reconciles from the server on every emission — it has no
+// Save button and relies on the refetch to confirm the persisted state (and the
+// error path restores it). maxUploadSize is read-only (env-driven), so it can seed
+// with the text fields on first load.
+let seeded = false
 watch(appConfig, (config) => {
-  if (config) {
+  if (!config) return
+  if (!seeded) {
     defaultLanguage.value = config.default_language || 'eng'
     tagSearchMode.value = config.tag_search_mode || 'PREFIX'
-    ocrEnabled.value = config.ocr_enabled !== false
     maxUploadSize.value = config.max_upload_size || 524288000
+    seeded = true
   }
+  ocrEnabled.value = config.ocr_enabled !== false
 }, { immediate: true })
 
 const searchModes = computed(() => [
@@ -49,7 +57,7 @@ const { mutate: saveConfig, isPending: saving } = useMutation({
     return api.post('/app/config', params)
   },
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['app-config'] })
+    invalidateAppInfo()
     toast.add({ severity: 'success', summary: t('ui.config.config_saved'), life: 2000 })
   },
   onError: () => {
@@ -64,7 +72,7 @@ const { mutate: toggleOcr, isPending: togglingOcr } = useMutation({
     return api.post('/app/ocr', params)
   },
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['app-config'] })
+    invalidateAppInfo()
     toast.add({ severity: 'success', summary: ocrEnabled.value ? t('ui.config.ocr_enabled') : t('ui.config.ocr_disabled'), life: 2000 })
   },
   onError: () => {
@@ -81,12 +89,10 @@ function handleOcrToggle(val: boolean) {
 const reindexing = ref(false)
 
 function handleReindex() {
-  confirm.require({
+  confirmDanger({
     message: t('ui.config.rebuild_confirm'),
     header: t('ui.config.rebuild_header'),
     icon: 'pi pi-exclamation-triangle',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       reindexing.value = true
       try {

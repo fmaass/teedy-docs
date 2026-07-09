@@ -34,3 +34,11 @@ docs/session-reviews/
 # Generated project specification exports (ARCHIMEDES)
 teedy-docs-specification.md
 teedy-docs-specification.pdf
+
+# Per-worktree isolated Maven repo (orchestrated multi-agent builds)
+.m2-local/
+.teedy-design-audit/
+
+# Browser-harness e2e artifacts (scripts/e2e-browser-harness.sh)
+/e2e-artifacts/
+docs/plans/

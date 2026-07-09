@@ -90,9 +90,95 @@ jobs:
       - name: Run docs-core tests on PostgreSQL
         run: ./mvnw --batch-mode test -pl docs-core
 
+  test-web-postgres:
+    # Run the docs-web REST integration suite (real Grizzly HTTP server + Jersey,
+    # every request COMMITS) against a real PostgreSQL 17 (R-032 / RR-12). H2-only
+    # coverage cannot catch native-SQL/dialect bugs that only surface on Postgres in
+    # the full request path. Seed-preserving per-class reset is handled by
+    # PostgresSchemaResetExtension (ADR-0009): it DROP/CREATEs the public schema
+    # before each test class so the migrations re-seed a fresh, fully-seeded DB with
+    # no cross-class leakage. The fixed Jersey port (9998) is fine for this single
+    # sequential run.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: docs
+          POSTGRES_PASSWORD: docs
+          POSTGRES_DB: docs
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U docs"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get -y -q --no-install-recommends install ffmpeg mediainfo tesseract-ocr tesseract-ocr-deu
+
+      - name: Point docs-web tests at PostgreSQL
+        run: |
+          cat > docs-web/src/test/resources/hibernate.properties <<'PROPS'
+          hibernate.connection.driver_class=org.postgresql.Driver
+          hibernate.connection.url=jdbc:postgresql://localhost:5432/docs
+          hibernate.connection.username=docs
+          hibernate.connection.password=docs
+          hibernate.hbm2ddl.auto=
+          hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+          hibernate.show_sql=false
+          hibernate.format_sql=false
+          hibernate.max_fetch_depth=5
+          hibernate.cache.use_second_level_cache=false
+          hibernate.connection.initial_pool_size=1
+          hibernate.connection.pool_size=10
+          hibernate.connection.pool_validation_interval=5
+          PROPS
+
+      # Install the upstream modules the docs-web tests depend on, then run only the
+      # docs-web suite against Postgres (the -pl docs-web reactor build needs the
+      # docs-core / docs-web-common artifacts present).
+      - name: Install docs-core and docs-web-common
+        run: ./mvnw --batch-mode install -DskipTests -pl docs-core,docs-web-common -am
+
+      - name: Run docs-web REST tests on PostgreSQL
+        run: ./mvnw --batch-mode test -pl docs-web
+
+  docs-importer:
+    # Smoke-check the standalone Node.js bulk importer: install from the
+    # lockfile and verify the entry parses and its dependencies still resolve
+    # after the request -> fetch migration (ADR-0007 / RR-56).
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Install importer dependencies
+        run: cd docs-importer && npm ci
+
+      - name: Smoke-test importer
+        run: cd docs-importer && npm test
+
   build:
     runs-on: ubuntu-latest
-    needs: [test, test-postgres]
+    needs: [test, test-postgres, test-web-postgres, docs-importer]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -134,9 +220,60 @@ jobs:
           name: docs-web.war
           path: docs-web/target/docs*.war
 
-  docker:
+  e2e:
+    # End-to-end tests against the REAL production Docker image (embedded H2,
+    # default admin/admin) driven by Playwright/Chromium via Teedy's NATIVE form
+    # login — NOT Authelia (Authelia only fronts production). Reuses the war
+    # artifact produced by `build` so the image is not rebuilt from Maven; the
+    # image PUBLISH (docker job) gates on this passing.
     runs-on: ubuntu-latest
     needs: [build]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Build e2e Docker image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-e2e:local
+
+      - name: Install e2e dependencies
+        run: cd docs-web/src/main/webapp && npm ci
+
+      - name: Install Playwright browser
+        run: cd docs-web/src/main/webapp && npx playwright install --with-deps chromium
+
+      - name: Run e2e suite (boots container, tears down)
+        env:
+          E2E_IMAGE: teedy-e2e:local
+        run: bash scripts/e2e-run.sh
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: docs-web/src/main/webapp/playwright-report
+          retention-days: 7
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [build, e2e]
     # Publish images only from publishable refs; never build/push on PRs or fix/** branches.
     if: >-
       github.event_name != 'pull_request' &&
@@ -150,19 +287,57 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
+      # Publish policy (standard branch/tag split):
+      #   - tag  v* : PUBLISH, multi-arch (amd64+arm64) — the distributable release image.
+      #   - main    : PUBLISH, multi-arch — the rolling `latest`.
+      #   - release/*: smoke-boot ONLY (single-arch amd64), never published — the RC image is
+      #                gated behind a version tag, and cross-arch emulation is skipped on every
+      #                RC push (slow arm64 QEMU builds run only where the image is actually shipped).
+      - name: Resolve publish policy
+        id: cfg
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/heads/main ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "platforms=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download war artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: docs-web.war
           path: docs-web/target
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # Runtime smoke test on EVERY publishable ref (incl. release/* RC pushes): build a
+      # single-arch amd64 image, load it, boot the container standalone (embedded H2 — no
+      # DATABASE_URL), and assert a real API route serves. Catches a green build that produces
+      # an image that cannot actually start (broken WAR, bad Jetty wiring, dangling
+      # ServiceLoader descriptor, missing runtime dep). No registry access needed.
+      - name: Build smoke-test image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-smoke-test:local
+
+      - name: Smoke-test the container
+        run: bash scripts/docker-smoke-test.sh teedy-smoke-test:local
+
+      # --- Publish (tags + main only) --------------------------------------------------
+      # QEMU/binfmt is only needed to cross-compile arm64, i.e. only when we publish.
+      - name: Set up QEMU
+        if: steps.cfg.outputs.publish == 'true'
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
       - name: Log in to GHCR
+        if: steps.cfg.outputs.publish == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -171,6 +346,7 @@ jobs:
 
       - name: Docker metadata
         id: metadata
+        if: steps.cfg.outputs.publish == 'true'
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -179,13 +355,13 @@ jobs:
           tags: |
             type=ref,event=tag
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value={{branch}}-rc-{{sha}},enable=${{ startsWith(github.ref, 'refs/heads/release/') }}
 
-      - name: Build and push
+      - name: Build and push (multi-arch)
+        if: steps.cfg.outputs.publish == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: ${{ steps.cfg.outputs.platforms }}
+          push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}

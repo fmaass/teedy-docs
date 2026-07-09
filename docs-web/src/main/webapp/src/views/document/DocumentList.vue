@@ -3,25 +3,37 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
-import { listDocuments, getDocument, type DocumentListItem, type DocumentDetail } from '../../api/document'
+import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
 import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
 import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
+import BulkActionBar from '../../components/BulkActionBar.vue'
+import { updateDocument, deleteDocument } from '../../api/document'
+import {
+  runBulk,
+  buildAddTagParams,
+  buildLanguageParams,
+  type BulkResult,
+} from '../../utils/bulkOps'
+import { useClampedOffset } from '../../composables/useClampedOffset'
+import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
 const router = useRouter()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
+const { confirmDanger } = useConfirmDanger()
 const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
@@ -38,7 +50,7 @@ watch([() => tf.combinedSearch, () => tf.tagMode], () => {
 })
 
 const { data: documentsData, isLoading, isError, refetch } = useQuery({
-  queryKey: computed(() => ['documents', {
+  queryKey: computed(() => [...queryKeys.documents(), {
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
     offset: pageOffset.value,
@@ -59,6 +71,11 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
 
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
+
+// Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
+// the server returns zero rows while total is still positive — a false-empty page
+// with no paginator to escape. Clamp back to the last valid page when that happens.
+useClampedOffset(documentsData, isLoading, pageOffset, PAGE_SIZE)
 
 function onPage(event: DataTablePageEvent) {
   pageOffset.value = event.first
@@ -102,7 +119,7 @@ const slideOverOpen = ref(false)
 const slideOverDocId = ref<string | null>(null)
 
 const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError } = useQuery({
-  queryKey: computed(() => ['document', slideOverDocId.value]),
+  queryKey: computed(() => queryKeys.document(slideOverDocId.value!)),
   queryFn: () => getDocument(slideOverDocId.value!).then((r) => r.data),
   enabled: computed(() => !!slideOverDocId.value && slideOverOpen.value),
 })
@@ -110,7 +127,7 @@ const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError }
 watch(slideOverError, (err) => {
   if (err) {
     slideOverOpen.value = false
-    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: 'document' }), life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: t('ui.item_document') }), life: 3000 })
   }
 })
 
@@ -127,14 +144,14 @@ const availableTagsForSlideOver = computed(() => {
 
 async function addTagToSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const refreshed = await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
+  // addTag invalidates ['document', id]; the slide-over query refetches the
+  // authoritative doc — no manual setQueryData with a client-built copy.
+  await addTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
 }
 
 async function removeTagFromSlideOver(tagId: string) {
   if (!slideOverDoc.value || !tagId) return
-  const refreshed = await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
-  if (refreshed) queryClient.setQueryData(['document', refreshed.id], refreshed)
+  await removeTag(slideOverDoc.value.id, tagId, slideOverDoc.value)
 }
 
 function buildFilterLabel(): string {
@@ -146,16 +163,11 @@ function buildFilterLabel(): string {
 
 function openFullView() {
   if (slideOverDoc.value) {
-    const returnQuery: Record<string, string> = {}
-    if (tf.selectedTagIds.size) returnQuery.tags = [...tf.selectedTagIds].join(',')
-    if (tf.tagMode === 'or') returnQuery.mode = 'or'
-    if (tf.debouncedText.trim()) returnQuery.search = tf.debouncedText.trim()
-
     router.push({
       name: 'document-view',
       params: { id: slideOverDoc.value.id },
       state: {
-        returnTo: router.resolve({ name: 'documents', query: returnQuery }).fullPath,
+        returnTo: router.resolve({ name: 'documents', query: tf.buildFilterQuery() }).fullPath,
         filterLabel: buildFilterLabel() || undefined,
       },
     })
@@ -184,13 +196,93 @@ const contextMenuItems = computed(() => {
   }))
 
   const items: MenuItem[] = []
-  if (addItems.length) items.push({ label: 'Add tag', items: addItems })
+  if (addItems.length) items.push({ label: t('ui.context_add_tag'), items: addItems })
   if (removeItems.length) {
     if (items.length) items.push({ separator: true })
-    items.push({ label: 'Remove tag', items: removeItems })
+    items.push({ label: t('ui.context_remove_tag'), items: removeItems })
   }
   return items
 })
+
+// --- Bulk operations ---
+//
+// Teedy exposes no bulk document endpoint, so each bulk action fans out over the
+// existing single-document endpoints (see src/utils/bulkOps.ts). We run the
+// operation over the current selection, drive a progress bar, and report a
+// per-document success/failure summary — ACL/permission failures surface as
+// individual failures rather than aborting the batch.
+
+const selectedDocs = ref<DocumentListItem[]>([])
+const bulkProgress = ref<[number, number] | null>(null)
+
+// Documents dropping out of the current page (paging, refetch) must not linger in
+// the selection — reconcile against what is actually rendered.
+watch(documents, (docs) => {
+  if (!selectedDocs.value.length) return
+  const visibleIds = new Set(docs.map((d) => d.id))
+  selectedDocs.value = selectedDocs.value.filter((d) => visibleIds.has(d.id))
+})
+
+function clearSelection() {
+  selectedDocs.value = []
+}
+
+function summariseBulk(result: BulkResult) {
+  const succeeded = result.succeeded.length
+  const failed = result.failed.length
+  if (failed === 0) {
+    toast.add({
+      severity: 'success',
+      summary: t('ui.bulk.done'),
+      detail: t('ui.bulk.summary_ok', { count: succeeded }),
+      life: 3000,
+    })
+  } else {
+    toast.add({
+      severity: succeeded ? 'warn' : 'error',
+      summary: t('ui.bulk.done'),
+      detail: t('ui.bulk.summary_partial', { ok: succeeded, failed }),
+      life: 6000,
+    })
+  }
+}
+
+async function runBulkOp(op: (doc: DocumentListItem) => Promise<unknown>) {
+  const docs = [...selectedDocs.value]
+  if (!docs.length || bulkProgress.value) return
+  bulkProgress.value = [0, docs.length]
+  try {
+    const result = await runBulk(docs, op, (done, total) => {
+      bulkProgress.value = [done, total]
+    })
+    summariseBulk(result)
+    clearSelection()
+    queryClient.invalidateQueries({ queryKey: queryKeys.documents() })
+    // Bulk tag/language/delete changes which tags sit on which docs — stale the
+    // sidebar/facet counts too.
+    for (const key of tagCountKeys) queryClient.invalidateQueries({ queryKey: key })
+  } finally {
+    bulkProgress.value = null
+  }
+}
+
+function bulkAddTag(tagId: string) {
+  runBulkOp((doc) => updateDocument(doc.id, buildAddTagParams(doc, tagId)))
+}
+
+function bulkSetLanguage(language: string) {
+  runBulkOp((doc) => updateDocument(doc.id, buildLanguageParams(doc, language)))
+}
+
+function bulkDelete() {
+  const count = selectedDocs.value.length
+  if (!count) return
+  confirmDanger({
+    message: t('ui.bulk.delete_confirm', { count }),
+    header: t('ui.bulk.delete'),
+    accept: () => runBulkOp((doc) => deleteDocument(doc.id)),
+  })
+}
 </script>
 
 <template>
@@ -213,10 +305,25 @@ const contextMenuItems = computed(() => {
       />
     </div>
 
+    <!-- Bulk action toolbar -->
+    <div v-if="selectedDocs.length" class="bulk-bar-wrap">
+      <BulkActionBar
+        :count="selectedDocs.length"
+        :tags="tf.allTags"
+        :progress="bulkProgress"
+        @add-tag="bulkAddTag"
+        @set-language="bulkSetLanguage"
+        @delete="bulkDelete"
+        @clear="clearSelection"
+      />
+    </div>
+
     <!-- Document list -->
     <div class="doc-area">
       <DocumentTable
         v-if="documents.length || isLoading"
+        v-model:selection="selectedDocs"
+        selectable
         :documents="documents"
         :totalRecords="totalCount"
         :rows="PAGE_SIZE"
@@ -273,6 +380,13 @@ const contextMenuItems = computed(() => {
   flex-shrink: 0;
 }
 
+/* --- Bulk action toolbar --- */
+
+.bulk-bar-wrap {
+  padding: 0 1.5rem;
+  flex-shrink: 0;
+}
+
 /* --- Document area --- */
 
 .doc-area {
@@ -283,6 +397,7 @@ const contextMenuItems = computed(() => {
 
 @media (max-width: 1024px) {
   .address-bar { padding: 0.75rem 1rem 0; }
+  .bulk-bar-wrap { padding: 0 1rem; }
   .doc-area { padding: 0.75rem 1rem 1rem; }
 }
 </style>

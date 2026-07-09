@@ -1,0 +1,2 @@
+Teedy e2e fixture text file.
+Hello world.

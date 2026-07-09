@@ -1,23 +1,26 @@
 <script setup lang="ts">
-import { inject, computed, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
-import { type DocumentDetail } from '../../api/document'
 import { getFileUrl, deleteFile, renameFile, uploadFile } from '../../api/file'
 import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
+import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
+import UploadProgressList from '../../components/UploadProgressList.vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
-import { formatFileSize } from '../../composables/useFormatters'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { formatDate, formatFileSize } from '../../utils/formatters'
+import { injectDocument } from './documentKey'
 
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const sanitizedDescription = computed(() => {
@@ -25,27 +28,77 @@ const sanitizedDescription = computed(() => {
   return DOMPurify.sanitize(doc.value.description)
 })
 
+// Custom metadata fields that actually carry a value on this document.
+const metadataFields = computed(() =>
+  (doc.value?.metadata ?? []).filter((m) => m.value != null && m.value !== ''),
+)
+
+function formatMetadataValue(field: { type: string; value?: unknown }) {
+  if (field.type === 'BOOLEAN') {
+    return field.value ? t('yes') : t('no')
+  }
+  if (field.type === 'DATE') {
+    return formatDate(Number(field.value))
+  }
+  return String(field.value)
+}
+
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
+
+const versionsDialogVisible = ref(false)
+const versionsFileId = ref<string | null>(null)
+const versionsFileName = ref('')
+
+function showVersions(file: { id: string; name: string }) {
+  versionsFileId.value = file.id
+  versionsFileName.value = file.name
+  versionsDialogVisible.value = true
+}
 const uploading = ref(false)
+const uploadProgress = ref<Record<number, number>>({})
+const uploadingNames = ref<string[]>([])
 const fileUploadRef = ref()
 
-async function handleUpload(event: FileUploadUploaderEvent) {
-  if (!doc.value) return
+async function uploadAll(files: File[]) {
+  if (!doc.value || !files.length) return
+  // Snapshot the id: the injected ref can be cleared/replaced while a batch is
+  // in flight, and the finally block must still target the original document.
+  const documentId = doc.value.id
   uploading.value = true
+  uploadProgress.value = {}
+  uploadingNames.value = files.map((f) => f.name)
   try {
-    const files = Array.isArray(event.files) ? event.files : [event.files]
-    for (const file of files) {
-      await uploadFile(doc.value.id, file)
+    for (let i = 0; i < files.length; i++) {
+      uploadProgress.value[i] = 0
+      await uploadFile(documentId, files[i], (pct) => {
+        uploadProgress.value[i] = pct
+      })
+      uploadProgress.value[i] = 100
     }
-    queryClient.invalidateQueries({ queryKey: ['document', doc.value.id] })
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
   } catch {
     toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
   } finally {
+    // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
+    // and skipping the refetch would leave them invisible (users re-upload dupes).
+    queryClient.invalidateQueries({ queryKey: ['document', documentId] })
     uploading.value = false
+    uploadProgress.value = {}
+    uploadingNames.value = []
     fileUploadRef.value?.clear()
   }
+}
+
+async function handleUpload(event: FileUploadUploaderEvent) {
+  const files = Array.isArray(event.files) ? event.files : [event.files]
+  await uploadAll(files as File[])
+}
+
+// Camera capture: photos from CameraCaptureButton upload immediately via the same
+// real PUT /api/file path.
+async function onCameraCapture(captured: File[]) {
+  await uploadAll(captured)
 }
 
 function isImage(mime: string) {
@@ -83,12 +136,9 @@ async function commitRename(fileId: string) {
 }
 
 function confirmDelete(file: { id: string; name: string }) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.remove_file_confirm', { name: file.name }),
     header: t('ui.remove_file'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)
@@ -107,6 +157,17 @@ function confirmDelete(file: { id: string; name: string }) {
   <div v-if="doc">
     <!-- Description -->
     <div v-if="doc.description" class="doc-description" v-html="sanitizedDescription" />
+
+    <!-- Custom metadata -->
+    <div v-if="metadataFields.length" class="doc-metadata">
+      <h3 class="doc-metadata-heading">{{ t('ui.metadata.custom_fields') }}</h3>
+      <dl class="metadata-list">
+        <template v-for="field in metadataFields" :key="field.id">
+          <dt class="metadata-name">{{ field.name }}</dt>
+          <dd class="metadata-value">{{ formatMetadataValue(field) }}</dd>
+        </template>
+      </dl>
+    </div>
 
     <!-- File previews -->
     <div v-if="doc.files?.length" class="file-preview-grid">
@@ -156,6 +217,16 @@ function confirmDelete(file: { id: string; name: string }) {
             </template>
             <template v-else>
               <Button
+                icon="pi pi-history"
+                text
+                rounded
+                size="small"
+                severity="secondary"
+                @click="showVersions(file)"
+                v-tooltip="t('ui.versions.title')"
+                :aria-label="t('ui.versions.title')"
+              />
+              <Button
                 icon="pi pi-pencil"
                 text
                 rounded
@@ -203,12 +274,24 @@ function confirmDelete(file: { id: string; name: string }) {
       </template>
     </FileUpload>
 
+    <!-- Camera capture: opens the device camera on mobile; photos upload at once. -->
+    <CameraCaptureButton :disabled="uploading" @capture="onCameraCapture" />
+
+    <!-- Real per-file upload progress. -->
+    <UploadProgressList v-if="uploading" :names="uploadingNames" :progress="uploadProgress" />
+
     <EmptyState
       v-if="!doc.files?.length"
       icon="pi pi-file"
       :message="t('ui.no_files')"
       :action-label="t('ui.edit_to_add_files')"
       @action="$router.push({ name: 'document-edit', params: { id: doc.id } })"
+    />
+
+    <FileVersionsDialog
+      v-model:visible="versionsDialogVisible"
+      :file-id="versionsFileId"
+      :file-name="versionsFileName"
     />
   </div>
 </template>
@@ -218,6 +301,32 @@ function confirmDelete(file: { id: string; name: string }) {
   margin: 0 0 1.5rem;
   color: var(--p-text-color);
   line-height: 1.6;
+}
+
+.doc-metadata {
+  margin: 0 0 1.5rem;
+}
+.doc-metadata-heading {
+  margin: 0 0 0.625rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.metadata-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 0.375rem 1rem;
+  margin: 0;
+}
+.metadata-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+}
+.metadata-value {
+  font-size: 0.875rem;
+  color: var(--p-text-color);
+  margin: 0;
+  word-break: break-word;
 }
 
 .file-preview-grid {

@@ -1,5 +1,23 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteLocationRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+
+// Pure navigation-guard decision, extracted so it can be unit-tested without a
+// router harness. Returns the redirect target, or null to allow navigation.
+export function resolveNavGuard(
+  meta: { public?: boolean; requiresAdmin?: boolean },
+  auth: { isAnonymous: boolean; isAdmin: boolean },
+): RouteLocationRaw | null {
+  if (!meta.public && auth.isAnonymous) {
+    return { name: 'login' }
+  }
+  // A non-admin reaching an admin-only route by direct URL is bounced to the
+  // documents list rather than mounting the view (and firing its admin-gated
+  // API call). Nav-hiding alone does not stop deep links.
+  if (meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'documents' }
+  }
+  return null
+}
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -15,6 +33,14 @@ const router = createRouter({
       name: 'password-reset',
       component: () => import('../views/PasswordReset.vue'),
       props: (route) => ({ resetKey: route.params.key }),
+      meta: { public: true },
+    },
+    {
+      // Public share-by-URL view — reachable by logged-out visitors.
+      path: '/share/:documentId/:shareId',
+      name: 'share-view',
+      component: () => import('../views/ShareView.vue'),
+      props: true,
       meta: { public: true },
     },
     {
@@ -79,6 +105,11 @@ const router = createRouter({
               name: 'document-view-activity',
               component: () => import('../views/document/DocumentViewActivity.vue'),
             },
+            {
+              path: 'comments',
+              name: 'document-view-comments',
+              component: () => import('../views/document/DocumentViewComments.vue'),
+            },
           ],
         },
         // Tags
@@ -118,21 +149,46 @@ const router = createRouter({
               path: 'config',
               name: 'settings-config',
               component: () => import('../views/settings/SettingsConfig.vue'),
+              meta: { requiresAdmin: true },
             },
             {
               path: 'users',
               name: 'settings-users',
               component: () => import('../views/settings/SettingsUsers.vue'),
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'groups',
+              name: 'settings-groups',
+              component: () => import('../views/settings/SettingsGroups.vue'),
+              meta: { requiresAdmin: true },
             },
             {
               path: 'tag-rules',
               name: 'settings-tag-rules',
               component: () => import('../views/settings/SettingsTagRules.vue'),
+              meta: { requiresAdmin: true },
             },
             {
               path: 'webhooks',
               name: 'settings-webhooks',
               component: () => import('../views/settings/SettingsWebhooks.vue'),
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'ldap',
+              name: 'settings-ldap',
+              component: () => import('../views/settings/SettingsLdap.vue'),
+              // Admin-only: SettingsLdap fires the admin-gated GET /app/config_ldap
+              // on mount. The nav item is already admin-hidden, but a direct URL
+              // hit would otherwise mount it (the backend 403 the only defence).
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'metadata',
+              name: 'settings-metadata',
+              component: () => import('../views/settings/SettingsMetadata.vue'),
+              meta: { requiresAdmin: true },
             },
           ],
         },
@@ -146,9 +202,7 @@ router.beforeEach(async (to) => {
   if (!auth.initialized) {
     await auth.fetchCurrentUser()
   }
-  if (!to.meta.public && auth.isAnonymous) {
-    return { name: 'login' }
-  }
+  return resolveNavGuard(to.meta, auth) ?? undefined
 })
 
 export default router

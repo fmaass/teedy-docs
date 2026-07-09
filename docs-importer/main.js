@@ -8,10 +8,77 @@ const preferences = require('preferences');
 const fs = require('fs');
 const argv = require('minimist')(process.argv);
 const _ = require('underscore');
-const request = require('request').defaults({
-  jar: true
-});
 const qs = require('querystring');
+
+// Minimal cookie jar: captures Set-Cookie from responses (e.g. the auth_token
+// session cookie returned by /api/user/login) and replays them on later
+// requests, replacing the previous behaviour of request.defaults({ jar: true }).
+const cookies = {};
+const storeCookies = (response) => {
+  // Node's fetch exposes multiple Set-Cookie headers via getSetCookie().
+  const setCookies = typeof response.headers.getSetCookie === 'function'
+    ? response.headers.getSetCookie()
+    : (response.headers.get('set-cookie') ? [response.headers.get('set-cookie')] : []);
+  for (const raw of setCookies) {
+    const pair = raw.split(';')[0];
+    const eq = pair.indexOf('=');
+    if (eq > 0) {
+      cookies[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    }
+  }
+};
+const cookieHeader = () => Object.keys(cookies)
+  .map(name => name + '=' + cookies[name])
+  .join('; ');
+
+// Perform an HTTP request against the Teedy API using Node's built-in fetch,
+// preserving the callback signature (error, response, body) used throughout
+// this file. `options.form` (object or pre-encoded string) is sent as
+// application/x-www-form-urlencoded; `options.formData` is sent as
+// multipart/form-data (used for streaming file uploads). The session cookie is
+// stored and replayed automatically.
+const request = (options, callback) => {
+  const opts = typeof options === 'string' ? { url: options } : options;
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = Object.assign({}, opts.headers);
+
+  const cookie = cookieHeader();
+  if (cookie) {
+    headers['Cookie'] = cookie;
+  }
+
+  let body;
+  if (opts.form !== undefined) {
+    // request() accepts either an object (to be urlencoded) or an already
+    // encoded string; mirror both so the wire format is unchanged.
+    body = typeof opts.form === 'string' ? opts.form : qs.stringify(opts.form);
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  } else if (opts.formData !== undefined) {
+    // Build multipart/form-data. fetch sets the Content-Type (with boundary).
+    const fd = new FormData();
+    for (const key of Object.keys(opts.formData)) {
+      fd.append(key, opts.formData[key]);
+    }
+    body = fd;
+  }
+
+  fetch(opts.url, { method, headers, body })
+    .then(async (res) => {
+      storeCookies(res);
+      const text = await res.text();
+      // Shape a minimal response object compatible with the old request API.
+      callback(null, { statusCode: res.status }, text);
+    })
+    .catch((error) => callback(error));
+};
+
+// Convenience wrappers mirroring request.get / request.post / request.put.
+request.get = (options, callback) =>
+  request(Object.assign({}, typeof options === 'string' ? { url: options } : options, { method: 'GET' }), callback);
+request.post = (options, callback) =>
+  request(Object.assign({}, options, { method: 'POST' }), callback);
+request.put = (options, callback) =>
+  request(Object.assign({}, options, { method: 'PUT' }), callback);
 
 // Load preferences
 const prefs = new preferences('com.sismics.docs.importer',{
@@ -456,27 +523,35 @@ const importFile = (file, remove, resolve) => {
         return;
       }
       
-      // Upload file
-      request.put({
-        url: prefs.importer.baseUrl + '/api/file',
-        formData: {
-          id: JSON.parse(body).id,
-          file: fs.createReadStream(file)
-        }
-      }, function (error, response) {
-        if (error || !response || response.statusCode !== 200) {
-          spinner.fail('Upload failed for ' + file + ': ' + error);
-          resolve();
-          return;
-        }
-        spinner.succeed('Upload successful for ' + file);
-        if (remove) {
-          if (prefs.importer.copyFolder) {
-            fs.copyFileSync(file, prefs.importer.copyFolder + file.replace(/^.*[\\\/]/, ''));
-            fs.unlinkSync(file);
+      // Upload file. fs.openAsBlob() yields a lazy, file-backed Blob so large
+      // files are streamed from disk rather than buffered fully in memory,
+      // preserving the streaming behaviour of the previous createReadStream.
+      const documentId = JSON.parse(body).id;
+      fs.openAsBlob(file).then((blob) => {
+        request.put({
+          url: prefs.importer.baseUrl + '/api/file',
+          formData: {
+            id: documentId,
+            file: new File([blob], file.replace(/^.*[\\\/]/, ''))
           }
-          else {fs.unlinkSync(file);}
-        }
+        }, function (error, response) {
+          if (error || !response || response.statusCode !== 200) {
+            spinner.fail('Upload failed for ' + file + ': ' + error);
+            resolve();
+            return;
+          }
+          spinner.succeed('Upload successful for ' + file);
+          if (remove) {
+            if (prefs.importer.copyFolder) {
+              fs.copyFileSync(file, prefs.importer.copyFolder + file.replace(/^.*[\\\/]/, ''));
+              fs.unlinkSync(file);
+            }
+            else {fs.unlinkSync(file);}
+          }
+          resolve();
+        });
+      }).catch((error) => {
+        spinner.fail('Upload failed for ' + file + ': ' + error);
         resolve();
       });
     });
