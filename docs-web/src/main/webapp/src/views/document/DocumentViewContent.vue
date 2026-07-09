@@ -25,6 +25,25 @@ const sanitizedDescription = computed(() => {
   return DOMPurify.sanitize(doc.value.description)
 })
 
+// Custom metadata fields that actually carry a value on this document.
+const metadataFields = computed(() =>
+  (doc.value?.metadata ?? []).filter((m) => m.value != null && m.value !== ''),
+)
+
+function formatMetadataValue(field: { type: string; value?: unknown }) {
+  if (field.type === 'BOOLEAN') {
+    return field.value ? t('yes') : t('no')
+  }
+  if (field.type === 'DATE') {
+    return new Date(Number(field.value)).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+  }
+  return String(field.value)
+}
+
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
 const uploading = ref(false)
@@ -107,6 +126,17 @@ function confirmDelete(file: { id: string; name: string }) {
   <div v-if="doc">
     <!-- Description -->
     <div v-if="doc.description" class="doc-description" v-html="sanitizedDescription" />
+
+    <!-- Custom metadata -->
+    <div v-if="metadataFields.length" class="doc-metadata">
+      <h3 class="doc-metadata-heading">{{ t('ui.metadata.custom_fields') }}</h3>
+      <dl class="metadata-list">
+        <template v-for="field in metadataFields" :key="field.id">
+          <dt class="metadata-name">{{ field.name }}</dt>
+          <dd class="metadata-value">{{ formatMetadataValue(field) }}</dd>
+        </template>
+      </dl>
+    </div>
 
     <!-- File previews -->
     <div v-if="doc.files?.length" class="file-preview-grid">
@@ -218,6 +248,32 @@ function confirmDelete(file: { id: string; name: string }) {
   margin: 0 0 1.5rem;
   color: var(--p-text-color);
   line-height: 1.6;
+}
+
+.doc-metadata {
+  margin: 0 0 1.5rem;
+}
+.doc-metadata-heading {
+  margin: 0 0 0.625rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.metadata-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 0.375rem 1rem;
+  margin: 0;
+}
+.metadata-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+}
+.metadata-value {
+  font-size: 0.875rem;
+  color: var(--p-text-color);
+  margin: 0;
+  word-break: break-word;
 }
 
 .file-preview-grid {

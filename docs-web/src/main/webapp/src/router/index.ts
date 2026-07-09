@@ -144,6 +144,11 @@ const router = createRouter({
               name: 'settings-webhooks',
               component: () => import('../views/settings/SettingsWebhooks.vue'),
             },
+            {
+              path: 'metadata',
+              name: 'settings-metadata',
+              component: () => import('../views/settings/SettingsMetadata.vue'),
+            },
           ],
         },
       ],

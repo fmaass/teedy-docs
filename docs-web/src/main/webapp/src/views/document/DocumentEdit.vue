@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
+import { listMetadata, type MetadataDefinition } from '../../api/metadata'
+import { buildMetadataParams, type MetadataValue } from '../../composables/metadataSerialize'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import api from '../../api/client'
@@ -13,6 +15,8 @@ import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
+import InputNumber from 'primevue/inputnumber'
+import ToggleSwitch from 'primevue/toggleswitch'
 import MultiSelect from 'primevue/multiselect'
 import FileUpload, { type FileUploadSelectEvent, type FileUploadRemoveEvent } from 'primevue/fileupload'
 import Button from 'primevue/button'
@@ -57,7 +61,15 @@ const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
 const loadedRelations = ref<Array<{ id: string }>>([])
-const loadedMetadata = ref<Array<{ id: string; value?: unknown }>>([])
+
+// Custom metadata: field definitions (admin-configured) and per-field values keyed
+// by definition id. Values are typed for their input; serialized on save.
+const metadataDefinitions = ref<MetadataDefinition[]>([])
+const metadataValues = ref<Record<string, MetadataValue>>({})
+// Ids of BOOLEAN fields that carry an explicit value — either already set on the
+// document or toggled by the user. Unset booleans stay out of this set so they are
+// omitted from the save rather than coerced to an explicit "false".
+const metadataSetIds = ref<Set<string>>(new Set())
 
 const fileUploadRef = ref()
 
@@ -85,7 +97,14 @@ onMounted(async () => {
       form.value.create_date = data.create_date ? new Date(data.create_date) : new Date()
       form.value.tags = data.tags?.map((t) => t.id) || []
       loadedRelations.value = data.relations ?? []
-      loadedMetadata.value = data.metadata ?? []
+      // The document detail returns every defined field merged with this document's
+      // value (value omitted when unset), so it doubles as the definition list.
+      metadataDefinitions.value = (data.metadata ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        type: m.type as MetadataDefinition['type'],
+      }))
+      hydrateMetadataValues(data.metadata ?? [])
       existingFiles.value = data.files || []
     } catch {
       toast.add({ severity: 'error', summary: t('ui.failed_save_document'), life: 3000 })
@@ -99,9 +118,46 @@ onMounted(async () => {
       }
     } catch { /* fall back to 'eng' */ }
 
+    // New document: load field definitions so the user can fill them in.
+    try {
+      const { data } = await listMetadata()
+      metadataDefinitions.value = data.metadata
+      hydrateMetadataValues(data.metadata)
+    } catch { /* no custom fields available */ }
+
     form.value.tags = [...tagFilter.selectedTagIds]
   }
 })
+
+// Seed the value map from a definition/value list, coercing each backend value to
+// the shape its input expects (DATE epoch ms -> Date, BOOLEAN -> bool, else raw).
+// A field with a value on the document is recorded as "set"; an unset boolean is
+// left null (and NOT recorded) so it stays out of the save until the user toggles it.
+function hydrateMetadataValues(list: Array<{ id: string; type: string; value?: unknown }>) {
+  const values: Record<string, MetadataValue> = {}
+  const setIds = new Set<string>()
+  for (const m of list) {
+    if (m.value == null) {
+      values[m.id] = null
+    } else {
+      setIds.add(m.id)
+      if (m.type === 'DATE') {
+        values[m.id] = new Date(Number(m.value))
+      } else if (m.type === 'BOOLEAN') {
+        values[m.id] = Boolean(m.value)
+      } else {
+        values[m.id] = m.value as MetadataValue
+      }
+    }
+  }
+  metadataValues.value = values
+  metadataSetIds.value = setIds
+}
+
+// A user toggling a boolean makes it explicitly set (so false is submitted, not omitted).
+function onBooleanToggle(id: string) {
+  metadataSetIds.value.add(id)
+}
 
 function onFileSelect(event: FileUploadSelectEvent) {
   pendingFiles.value = [...event.files]
@@ -154,9 +210,12 @@ function buildDocParams() {
   Object.entries(fields).forEach(([k, v]) => params.append(k, v))
   form.value.tags.forEach((tagId) => params.append('tags', tagId))
   for (const r of loadedRelations.value) params.append('relations', r.id)
-  for (const m of loadedMetadata.value) {
-    params.append('metadata_id', m.id)
-    params.append('metadata_value', m.value != null ? String(m.value) : '')
+  // Only submit fields the user actually set — an unset numeric/date field sent as a
+  // blank pair makes the backend reject the whole save; an unset boolean must not
+  // silently become "false".
+  for (const meta of buildMetadataParams(metadataDefinitions.value, metadataValues.value, metadataSetIds.value)) {
+    params.append('metadata_id', meta.id)
+    params.append('metadata_value', meta.value)
   }
   return params
 }
@@ -305,6 +364,50 @@ async function handleSubmit() {
           </div>
         </div>
       </div>
+
+      <!-- Custom metadata fields (admin-defined) -->
+      <div v-if="metadataDefinitions.length" class="custom-metadata">
+        <h3 class="custom-metadata-heading">{{ t('ui.metadata.custom_fields') }}</h3>
+        <div v-for="def in metadataDefinitions" :key="def.id" class="form-field">
+          <label :for="`meta-${def.id}`">{{ def.name }}</label>
+          <ToggleSwitch
+            v-if="def.type === 'BOOLEAN'"
+            :inputId="`meta-${def.id}`"
+            :modelValue="metadataValues[def.id] === true"
+            @update:modelValue="(v: boolean) => { metadataValues[def.id] = v; onBooleanToggle(def.id) }"
+          />
+          <DatePicker
+            v-else-if="def.type === 'DATE'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as Date)"
+            dateFormat="yy-mm-dd"
+            showButtonBar
+            class="w-full"
+          />
+          <InputNumber
+            v-else-if="def.type === 'INTEGER'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as number)"
+            :useGrouping="false"
+            class="w-full"
+          />
+          <InputNumber
+            v-else-if="def.type === 'FLOAT'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as number)"
+            :useGrouping="false"
+            :minFractionDigits="1"
+            :maxFractionDigits="6"
+            class="w-full"
+          />
+          <InputText
+            v-else
+            :id="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as string)"
+            class="w-full"
+          />
+        </div>
+      </div>
     </form></template></Card>
 
     <!-- Files section -->
@@ -413,6 +516,17 @@ async function handleSubmit() {
 .advanced-fields {
   border-top: 1px solid var(--p-content-border-color);
   padding-top: 1rem;
+}
+
+.custom-metadata {
+  border-top: 1px solid var(--p-content-border-color);
+  padding-top: 1rem;
+  margin-top: 0.25rem;
+}
+.custom-metadata-heading {
+  margin: 0 0 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
 }
 
 /* Files section */
