@@ -3,6 +3,8 @@ package com.sismics.util;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.Function;
+
 /**
  * Environment properties utilities.
  *
@@ -26,6 +28,32 @@ public class EnvironmentUtil {
      * In a web application context.
      */
     private static boolean webappContext;
+
+    /**
+     * Source of environment-variable values. Defaults to the real process environment
+     * ({@link System#getenv(String)}). Package-private so unit tests can inject a controlled
+     * env source to exercise the property-over-env precedence deterministically, instead of
+     * depending on whatever variables happen to exist on the host (which lets an env-precedence
+     * assertion pass vacuously). Production always uses the real environment.
+     */
+    private static Function<String, String> envSource = System::getenv;
+
+    /**
+     * Override the environment-variable source (tests only). Restore with
+     * {@link #resetEnvSource()} in a finally block so no state leaks across tests.
+     *
+     * @param source Env-var lookup function (name -&gt; value, null when absent)
+     */
+    static void setEnvSource(Function<String, String> source) {
+        envSource = source;
+    }
+
+    /**
+     * Restore the default (real process) environment source.
+     */
+    static void resetEnvSource() {
+        envSource = System::getenv;
+    }
 
     /**
      * Returns true if running under Microsoft Windows.
@@ -214,7 +242,7 @@ public class EnvironmentUtil {
         if (prop != null) {
             return prop;
         }
-        return System.getenv(envVariable);
+        return envSource.apply(envVariable);
     }
 
     /**

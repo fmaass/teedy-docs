@@ -293,7 +293,17 @@ public class TestAppResource extends BaseJerseyTest {
      * Test inbox scanning.
      */
     @Test
-    public void testInbox() {
+    public void testInbox() throws Exception {
+        // Reserve OS-assigned ports for the embedded GreenMail SMTP + IMAP servers (no fixed
+        // 9754/9755, so parallel test runs on one host don't collide with BindException).
+        int smtpPort;
+        int imapPort;
+        try (java.net.ServerSocket smtpSocket = new java.net.ServerSocket(0);
+             java.net.ServerSocket imapSocket = new java.net.ServerSocket(0)) {
+            smtpPort = smtpSocket.getLocalPort();
+            imapPort = imapSocket.getLocalPort();
+        }
+
         // Login admin
         String adminToken = adminToken();
 
@@ -332,7 +342,7 @@ public class TestAppResource extends BaseJerseyTest {
                         .param("autoTagsEnabled", "false")
                         .param("deleteImported", "false")
                         .param("hostname", "localhost")
-                        .param("port", "9755")
+                        .param("port", Integer.toString(imapPort))
                         .param("username", "test@sismics.com")
                         .param("password", "Test1234")
                         .param("folder", "INBOX")
@@ -346,14 +356,14 @@ public class TestAppResource extends BaseJerseyTest {
                 .get(JsonObject.class);
         Assertions.assertTrue(json.getBoolean("enabled"));
         Assertions.assertEquals("localhost", json.getString("hostname"));
-        Assertions.assertEquals(9755, json.getInt("port"));
+        Assertions.assertEquals(imapPort, json.getInt("port"));
         Assertions.assertEquals("test@sismics.com", json.getString("username"));
         Assertions.assertEquals("Test1234", json.getString("password"));
         Assertions.assertEquals("INBOX", json.getString("folder"));
         Assertions.assertEquals(tagInboxId, json.getString("tag"));
 
-        ServerSetup serverSetupSmtp = new ServerSetup(9754, null, ServerSetup.PROTOCOL_SMTP);
-        ServerSetup serverSetupImap = new ServerSetup(9755, null, ServerSetup.PROTOCOL_IMAP);
+        ServerSetup serverSetupSmtp = new ServerSetup(smtpPort, null, ServerSetup.PROTOCOL_SMTP);
+        ServerSetup serverSetupImap = new ServerSetup(imapPort, null, ServerSetup.PROTOCOL_IMAP);
         GreenMail greenMail = new GreenMail(new ServerSetup[] { serverSetupSmtp, serverSetupImap });
         greenMail.setUser("test@sismics.com", "Test1234");
         greenMail.start();

@@ -1,9 +1,7 @@
 package com.sismics.util;
 
-import java.util.Map;
-
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -13,27 +11,32 @@ import org.junit.jupiter.api.Test;
  * across tests (no module-scope mutation). The property-first precedence and the
  * malformed-value fallback are the invariants exercised here.</p>
  *
- * <p>Env-var precedence is exercised against a REAL env var discovered at runtime (JUnit
- * cannot mutate the process environment portably), so the property-wins-over-env branch is
- * proven with an actually-populated env variable.</p>
+ * <p>Env-var precedence is exercised against a CONTROLLED env source injected via
+ * {@link EnvironmentUtil#setEnvSource} (JUnit cannot mutate the real process environment
+ * portably). This makes the property-wins-over-env branch deterministic: a specific env
+ * value is present, so an assertion that the property still wins (or that the env is
+ * consulted when the property is unset) is falsifiable rather than passing vacuously on a
+ * host that merely happens to lack the variable.</p>
  */
 public class TestEnvironmentUtil {
 
     private static final String PROP = "docs.test_env_util";
     private static final String ENV = "DOCS_TEST_ENV_UTIL_NONEXISTENT";
 
+    /** A distinct env var name used only by the controlled-env precedence tests. */
+    private static final String CONTROLLED_ENV = "DOCS_TEST_ENV_UTIL_CONTROLLED";
+
+    @AfterEach
+    public void restoreEnvSource() {
+        EnvironmentUtil.resetEnvSource();
+    }
+
     /**
-     * Find a real, non-blank environment variable present in this JVM, or skip the test if
-     * (implausibly) none exists. Returns the {name, value} of a populated env var.
+     * Install a controlled env source returning {@code value} for {@link #CONTROLLED_ENV}
+     * and null for anything else, so the tests never depend on the host environment.
      */
-    private static Map.Entry<String, String> realEnvVar() {
-        for (Map.Entry<String, String> e : System.getenv().entrySet()) {
-            if (e.getValue() != null && !e.getValue().isBlank()) {
-                return e;
-            }
-        }
-        Assumptions.abort("no populated environment variable available to test env precedence");
-        return null; // unreachable
+    private static void withControlledEnv(String value) {
+        EnvironmentUtil.setEnvSource(name -> CONTROLLED_ENV.equals(name) ? value : null);
     }
 
     @Test
@@ -145,22 +148,24 @@ public class TestEnvironmentUtil {
     }
 
     // ---- Property-wins-over-env precedence (SSRF-relevant; RR/cross-model finding) ----
+    // These use an INJECTED env source (setEnvSource) with a known value, so each assertion
+    // is falsifiable: the env var is definitely present, so "property still wins" or "env is
+    // consulted" is a real claim rather than one that passes because the host lacks the var.
 
     /**
      * (a) A blank system property beats a "true" environment variable: getBooleanConfig
      * returns false, NOT the env's true. This is the SSRF-relevant invariant — a blank
      * docs.webhook_allow_private must not let DOCS_WEBHOOK_ALLOW_PRIVATE=true take effect.
-     * Uses a real env var whose value is not "true" is insufficient, so we assert on the
-     * property-wins semantics: with the property present (blank), the env is never consulted.
+     * The controlled env is explicitly "true", so if precedence regressed to env-wins this
+     * assertion goes RED.
      */
     @Test
     public void blankPropertyBeatsTrueEnv() {
-        // Point the helper at a real, populated env var; the property (blank) must still win.
-        String realEnvName = realEnvVar().getKey();
+        withControlledEnv("true");
         try {
             System.setProperty(PROP, "   ");
-            // Property present-but-blank wins over ANY env value -> parses to false.
-            Assertions.assertFalse(EnvironmentUtil.getBooleanConfig(PROP, realEnvName, true),
+            // Property present-but-blank wins over the "true" env value -> parses to false.
+            Assertions.assertFalse(EnvironmentUtil.getBooleanConfig(PROP, CONTROLLED_ENV, true),
                     "a present-but-blank property must win over the env var and parse to false");
         } finally {
             System.clearProperty(PROP);
@@ -169,56 +174,56 @@ public class TestEnvironmentUtil {
 
     /**
      * (b) With the property unset, the environment variable IS consulted: getStringConfig
-     * returns the env var's real value.
+     * returns the (trimmed) controlled env value.
      */
     @Test
     public void unsetPropertyConsultsEnv() {
-        Map.Entry<String, String> env = realEnvVar();
+        withControlledEnv("  env-string-value  ");
         System.clearProperty(PROP); // ensure truly unset
-        Assertions.assertEquals(env.getValue().trim(),
-                EnvironmentUtil.getStringConfig(PROP, env.getKey(), "fallback"),
+        Assertions.assertEquals("env-string-value",
+                EnvironmentUtil.getStringConfig(PROP, CONTROLLED_ENV, "fallback"),
                 "with the property unset, the env var value must be used");
     }
 
     /**
-     * (b') Boolean: unset property + a real env var whose value happens to be "true" returns
-     * true; otherwise this asserts the env is at least consulted (value-driven).
+     * (b') Boolean: unset property + a controlled env var of "true" returns true (not the
+     * opposite default). The default is deliberately false so only reading the env can pass.
      */
     @Test
     public void unsetPropertyConsultsEnvForBoolean() {
-        Map.Entry<String, String> env = realEnvVar();
+        withControlledEnv("true");
         System.clearProperty(PROP);
-        boolean expected = Boolean.parseBoolean(env.getValue().trim());
-        Assertions.assertEquals(expected,
-                EnvironmentUtil.getBooleanConfig(PROP, env.getKey(), !expected),
+        Assertions.assertTrue(
+                EnvironmentUtil.getBooleanConfig(PROP, CONTROLLED_ENV, false),
                 "with the property unset, the boolean must be driven by the env var, not the default");
     }
 
     /**
      * (c) A blank property beats a numeric env var: getIntConfig returns the DEFAULT, not the
-     * env value (the blank property is present, so the env is never consulted).
+     * env value. The controlled env is a real number distinct from both default and expected,
+     * so an env-wins regression would return 777 and fail this assertion.
      */
     @Test
     public void blankPropertyBeatsNumericEnvForInt() {
-        // Find a real env var with a purely-numeric value if one exists; otherwise any env var
-        // works because a blank present property short-circuits before the env is read.
-        String numericEnvName = null;
-        for (Map.Entry<String, String> e : System.getenv().entrySet()) {
-            String v = e.getValue();
-            if (v != null && v.trim().matches("\\d{1,9}") && Integer.parseInt(v.trim()) != 12345) {
-                numericEnvName = e.getKey();
-                break;
-            }
-        }
-        if (numericEnvName == null) {
-            numericEnvName = realEnvVar().getKey();
-        }
+        withControlledEnv("777");
         try {
             System.setProperty(PROP, "   ");
-            Assertions.assertEquals(12345, EnvironmentUtil.getIntConfig(PROP, numericEnvName, 12345),
+            Assertions.assertEquals(12345, EnvironmentUtil.getIntConfig(PROP, CONTROLLED_ENV, 12345),
                     "a blank present property must yield the default, not the numeric env value");
         } finally {
             System.clearProperty(PROP);
         }
+    }
+
+    /**
+     * (d) With the property unset, a numeric env var IS consulted by getIntConfig: it returns
+     * the parsed env number, not the default. RED if the env source were ignored.
+     */
+    @Test
+    public void unsetPropertyConsultsNumericEnvForInt() {
+        withControlledEnv("777");
+        System.clearProperty(PROP);
+        Assertions.assertEquals(777, EnvironmentUtil.getIntConfig(PROP, CONTROLLED_ENV, 12345),
+                "with the property unset, the numeric env var value must be used");
     }
 }
