@@ -593,6 +593,18 @@
     "upload_failed": "Upload failed",
     "files_uploaded": "Files uploaded",
     "no_files": "No files attached to this document",
+    "versions": {
+      "title": "Version history",
+      "title_named": "Version history — {name}",
+      "read_only_hint": "Previous versions are kept automatically. Uploading a replacement creates a new version; history is read-only.",
+      "version": "Version",
+      "version_number": "v{n}",
+      "date": "Date",
+      "type": "Type",
+      "view": "Open this version",
+      "empty": "This file has no previous versions.",
+      "load_failed": "Failed to load version history"
+    },
     "edit_to_add_files": "Edit document to add files",
     "file_removed": "File removed",
     "failed_remove_file": "Failed to remove file",

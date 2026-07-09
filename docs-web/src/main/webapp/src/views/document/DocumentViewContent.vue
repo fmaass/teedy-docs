@@ -7,6 +7,7 @@ import { type DocumentDetail } from '../../api/document'
 import { getFileUrl, deleteFile, renameFile, uploadFile } from '../../api/file'
 import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
+import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
@@ -46,6 +47,16 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
 
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
+
+const versionsDialogVisible = ref(false)
+const versionsFileId = ref<string | null>(null)
+const versionsFileName = ref('')
+
+function showVersions(file: { id: string; name: string }) {
+  versionsFileId.value = file.id
+  versionsFileName.value = file.name
+  versionsDialogVisible.value = true
+}
 const uploading = ref(false)
 const fileUploadRef = ref()
 
@@ -186,6 +197,16 @@ function confirmDelete(file: { id: string; name: string }) {
             </template>
             <template v-else>
               <Button
+                icon="pi pi-history"
+                text
+                rounded
+                size="small"
+                severity="secondary"
+                @click="showVersions(file)"
+                v-tooltip="t('ui.versions.title')"
+                :aria-label="t('ui.versions.title')"
+              />
+              <Button
                 icon="pi pi-pencil"
                 text
                 rounded
@@ -239,6 +260,12 @@ function confirmDelete(file: { id: string; name: string }) {
       :message="t('ui.no_files')"
       :action-label="t('ui.edit_to_add_files')"
       @action="$router.push({ name: 'document-edit', params: { id: doc.id } })"
+    />
+
+    <FileVersionsDialog
+      v-model:visible="versionsDialogVisible"
+      :file-id="versionsFileId"
+      :file-name="versionsFileName"
     />
   </div>
 </template>

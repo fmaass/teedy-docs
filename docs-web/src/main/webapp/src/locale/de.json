@@ -593,6 +593,18 @@
     "upload_failed": "Hochladen fehlgeschlagen",
     "files_uploaded": "Dateien hochgeladen",
     "no_files": "Diesem Dokument sind keine Dateien angehängt",
+    "versions": {
+      "title": "Versionsverlauf",
+      "title_named": "Versionsverlauf — {name}",
+      "read_only_hint": "Frühere Versionen werden automatisch aufbewahrt. Das Hochladen einer Ersetzung erstellt eine neue Version; der Verlauf ist schreibgeschützt.",
+      "version": "Version",
+      "version_number": "v{n}",
+      "date": "Datum",
+      "type": "Typ",
+      "view": "Diese Version öffnen",
+      "empty": "Diese Datei hat keine früheren Versionen.",
+      "load_failed": "Versionsverlauf konnte nicht geladen werden"
+    },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
     "failed_remove_file": "Datei konnte nicht entfernt werden",

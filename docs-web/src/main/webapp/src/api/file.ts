@@ -1,5 +1,19 @@
 import api from './client'
 
+/**
+ * One historical revision of a file, as returned by GET /file/:id/versions.
+ * The backend returns every row sharing the file's version_id (or the single
+ * current row when the file has no version_id). Note: unlike /file/list, this
+ * endpoint does NOT include a size field.
+ */
+export interface FileVersion {
+  id: string
+  name: string | null
+  version: number
+  mimetype: string
+  create_date: number
+}
+
 export function uploadFile(documentId: string, file: File) {
   const formData = new FormData()
   formData.append('id', documentId)
@@ -29,6 +43,16 @@ export function renameFile(fileId: string, name: string) {
 
 export function reprocessFile(fileId: string) {
   return api.post(`/file/${fileId}/process`)
+}
+
+/**
+ * List all versions of a file, newest revisions and the original included.
+ * Backed by GET /file/:id/versions. There is no restore endpoint on the
+ * backend, so this is read-only history.
+ */
+export async function getFileVersions(fileId: string): Promise<FileVersion[]> {
+  const res = await api.get(`/file/${fileId}/versions`)
+  return (res.data?.files ?? []) as FileVersion[]
 }
 
 export async function getFileContent(fileId: string): Promise<string> {
