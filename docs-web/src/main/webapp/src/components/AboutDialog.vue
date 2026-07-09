@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useAppInfo } from '../composables/useAppInfo'
+import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS } from './aboutHighlights'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
@@ -13,20 +14,9 @@ const { t } = useI18n()
 const { data: appInfo } = useAppInfo()
 const version = computed(() => appInfo.value?.current_version ?? null)
 
-// Curated "What's new in 3.0.0" highlights. Each entry is an i18n key so the
-// bullets translate; the list is intentionally short and accurate to
-// RELEASE-NOTES-3.0.0.md (retirements, security hardening, new UIs).
-const highlightKeys = [
-  'ui.about.highlights.retirements',
-  'ui.about.highlights.security',
-  'ui.about.highlights.header_auth',
-  'ui.about.highlights.new_ui',
-] as const
-
-// The What's-New bullets are hand-curated for a specific release, so the heading
-// is pinned to that release — NOT the live server version, which drifts ahead of
-// the bullets on every patch. The v{version} brand badge keeps the live version.
-const HIGHLIGHTS_VERSION = '3.0.0'
+// Curated "What's new" highlights and the pinned heading version live in a
+// shared module (single source of truth, unit-tested — BL-019).
+const highlightKeys = HIGHLIGHT_KEYS
 
 const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
 </script>

@@ -7,6 +7,7 @@ import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
 import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
+import { shouldResetTags } from '../../utils/tagsReset'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { getAppInfo } from '../../api/app'
@@ -297,6 +298,12 @@ function buildDocParams() {
   if (form.value.rights) fields.rights = form.value.rights
   Object.entries(fields).forEach(([k, v]) => params.append(k, v))
   form.value.tags.forEach((tagId) => params.append('tags', tagId))
+  // The backend preserves tags on an omitted `tags` param, so clearing the last
+  // tag on an edit is otherwise a silent no-op. Send the clear-all sentinel on a
+  // genuine clear (mirrors the metadata_reset path below and bulkOps — BL-025).
+  if (shouldResetTags(isEdit.value, form.value.tags.length)) {
+    params.append('tags_reset', 'true')
+  }
   for (const r of loadedRelations.value) params.append('relations', r.id)
   // Only submit fields the user actually set — an unset numeric/date field sent as a
   // blank pair makes the backend reject the whole save; an unset boolean must not

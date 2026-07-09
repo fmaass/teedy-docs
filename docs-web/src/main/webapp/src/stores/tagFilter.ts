@@ -24,11 +24,19 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
 
   // --- Tag data ---
 
-  // `tagsFetched` is the SETTLED signal: true once the tags query has returned
-  // at least once, INCLUDING a legitimately empty ([]) result. Load-state must
-  // be driven from this, never inferred from tagMap.size (which cannot tell
-  // "still loading" apart from "loaded but empty").
-  const { data: tagsData, isFetched: tagsFetched } = useQuery({
+  // `tagsSettled` is the SETTLED-SUCCESS signal: true once the tags query has
+  // SUCCESSFULLY returned at least once, INCLUDING a legitimately empty ([])
+  // result. Load-state must be driven from this, never inferred from tagMap.size
+  // (which cannot tell "still loading" apart from "loaded but empty").
+  //
+  // BL-024: it is gated on isSuccess, NOT isFetched. isFetched is true after an
+  // ERROR too — so a transient /api/tag/list 500 on a cold deep-link would look
+  // "settled", resolve the URL ids against an empty tagMap (dropping them all),
+  // and let syncUrl rewrite the URL to a bare ?search=. Gating on isSuccess keeps
+  // hydration DEFERRED on error (hydrating stays true → syncUrl suppressed → the
+  // raw ids round-trip in the URL untouched), and a later successful refetch
+  // completes hydration. A failed fetch must NEVER trigger a URL rewrite.
+  const { data: tagsData, isSuccess: tagsSettled } = useQuery({
     queryKey: queryKeys.tags(),
     queryFn: () => listTags().then((r) => r.data.tags),
     staleTime: 60_000,
@@ -308,7 +316,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     // signature stays pending and the settled-signal watch re-runs this (which
     // re-applies the tag-independent dims idempotently and then resolves the ids).
     const hasIdsToResolve = !!(raw || rawExcl)
-    if (hasIdsToResolve && !tagsFetched.value) return false
+    if (hasIdsToResolve && !tagsSettled.value) return false
 
     const selIds = raw ? raw.split(',').filter(Boolean) : []
     selectedTagIds.value = new Set(selIds.filter((id) => tagMap.value.has(id)))
@@ -335,6 +343,14 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
 
   let hydratedSignature: string | null = null
   function hydrateFromRoute() {
+    // BL-023: hydration is SCOPED to the documents list. The route query is the
+    // source of truth ONLY for that view; on any other route (Settings, Tags,
+    // doc-add) vue-router carries an empty query, and hydrating from it would wipe
+    // the store — killing the "Back to documents" filter-preserving affordance
+    // (AppLayout) and the new-doc active-filter pre-seed (DocumentEdit). Preserve
+    // the store state elsewhere; re-hydrate on entry back to the documents route
+    // (this fires again via the route-signature and settled-signal watches).
+    if (route.name !== 'documents') return
     const sig = routeQuerySignature()
     if (sig === hydratedSignature) return
     // The URL is authoritative for the whole hydration span. Suppress syncUrl
@@ -345,9 +361,10 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     // Commit the signature only if hydration COMPLETED. A false return means ids
     // were present but the tags query had not settled — leave the signature
     // pending AND `hydrating` true so the settled-signal retry finishes it.
-    // Because settle is keyed on isFetched (true even for []), initFromUrl always
-    // returns true once the query settles, so `hydrating` always clears — no
-    // stuck-true path.
+    // Because settle is keyed on isSuccess (true even for [], but NOT on error),
+    // initFromUrl returns true once the query SUCCESSFULLY settles, so `hydrating`
+    // clears then. On error it stays true (URL preserved) until a later success —
+    // that is the BL-024 no-rewrite-on-failure guarantee, not a stuck-true bug.
     if (initFromUrl()) {
       hydratedSignature = sig
       hydrating = false
@@ -368,7 +385,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
   // hydrateFromRoute makes an already-completed hydration a no-op, so a bare
   // ['tags'] refetch never clobbers the live selection.
   watch(
-    tagsFetched,
+    tagsSettled,
     () => hydrateFromRoute(),
     { immediate: true },
   )

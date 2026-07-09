@@ -575,10 +575,11 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "retirements": "Removed the legacy workflow/routes, vocabulary, and LDAP features to slim down the app.",
-        "security": "Security hardening: webhook SSRF protection, guarded document export, stricter OIDC token validation, and SecureRandom recovery tokens.",
-        "header_auth": "Proxy header authentication now fails closed unless an explicit trusted-proxy allowlist is configured.",
-        "new_ui": "New UI surfaces: trash retention countdown, file version history, and a default-password warning banner."
+        "retirements": "Retired the legacy workflow/routes and vocabulary features to slim down the app.",
+        "ldap": "LDAP authentication is back — reinstated and hardened, with a dedicated admin settings page.",
+        "bulk_ops": "Bulk document actions: tag, delete, and export multiple documents at once.",
+        "capture": "Capture documents straight from your device camera.",
+        "new_ui": "New surfaces: comments, groups, sharing, custom metadata, and file version history."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",

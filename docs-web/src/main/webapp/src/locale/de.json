@@ -575,10 +575,11 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "retirements": "Die veralteten Funktionen Workflow/Routen, Vokabular und LDAP wurden entfernt, um die Anwendung zu verschlanken.",
-        "security": "Sicherheitsverbesserungen: SSRF-Schutz für Webhooks, abgesicherter Dokumentexport, strengere OIDC-Token-Prüfung und SecureRandom für Wiederherstellungstokens.",
-        "header_auth": "Die Proxy-Header-Authentifizierung verweigert nun standardmäßig den Zugriff, sofern keine ausdrückliche Positivliste vertrauenswürdiger Proxys konfiguriert ist.",
-        "new_ui": "Neue Oberflächen: Countdown zur Papierkorb-Aufbewahrung, Dateiversionsverlauf und ein Warnhinweis bei Standardpasswort."
+        "retirements": "Die veralteten Funktionen Workflow/Routen und Vokabular wurden entfernt, um die Anwendung zu verschlanken.",
+        "ldap": "Die LDAP-Anmeldung ist zurück — wieder aktiviert und abgesichert, mit einer eigenen Einstellungsseite für Administratoren.",
+        "bulk_ops": "Sammelaktionen für Dokumente: mehrere Dokumente gleichzeitig verschlagworten, löschen oder exportieren.",
+        "capture": "Dokumente direkt mit der Gerätekamera aufnehmen.",
+        "new_ui": "Neue Oberflächen: Kommentare, Gruppen, Freigaben, benutzerdefinierte Metadaten und Dateiversionsverlauf."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",

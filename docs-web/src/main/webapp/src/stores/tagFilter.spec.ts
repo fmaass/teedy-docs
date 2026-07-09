@@ -13,7 +13,11 @@ import type { Tag } from '../api/tag'
 // when a test reassigns `mockRoute.query` — modelling a real back-button /
 // in-session navigation to a filtered URL.
 
-const mockRoute = reactive({ path: '/document', query: {} as Record<string, string> })
+const mockRoute = reactive({
+  path: '/document',
+  name: 'documents' as string,
+  query: {} as Record<string, string>,
+})
 const push = vi.fn()
 const replace = vi.fn()
 
@@ -27,9 +31,11 @@ vi.mock('vue-router', () => ({
 // data. `tags` -> the tag list, `tagStats` -> per-tag doc counts, and
 // `tagCoOccurrence` -> the co-occurrence pairs that drive the facet children.
 const tagsRef = ref<Tag[]>([])
-// The tags query's SETTLED signal (TanStack isFetched): true once the query has
-// returned at least once, including an empty [] result. Defaults to settled;
-// tests exercising the pre-settle / loaded-empty paths drive it explicitly.
+// The tags query's SETTLED-SUCCESS signal (TanStack isSuccess): true once the
+// query has SUCCESSFULLY returned at least once, including an empty [] result. An
+// ERROR does NOT set it (unlike isFetched) — that is the BL-024 gate. Defaults to
+// settled; tests exercising the pre-settle / loaded-empty / error paths drive it
+// explicitly.
 const tagsFetchedRef = ref(true)
 const statsRef = ref<Record<string, number> | undefined>(undefined)
 const coOccurrenceRef = ref<Array<{ tagA: string; tagB: string; count: number }> | undefined>(
@@ -44,7 +50,7 @@ vi.mock('@tanstack/vue-query', () => ({
     // queryKey may be an array or a computed ref of an array.
     const resolved = typeof key === 'object' && 'value' in key ? key.value : key
     const name = Array.isArray(resolved) ? resolved[0] : resolved
-    if (name === 'tags') return { data: tagsRef, isFetched: tagsFetchedRef }
+    if (name === 'tags') return { data: tagsRef, isSuccess: tagsFetchedRef }
     if (name === 'tagStats') return { data: statsRef }
     if (name === 'tagCoOccurrence') return { data: coOccurrenceRef }
     if (name === 'tagFacets') {
@@ -86,6 +92,7 @@ describe('tagFilter store', () => {
     localStorage.clear()
     setActivePinia(createPinia())
     mockRoute.path = '/document'
+    mockRoute.name = 'documents'
     mockRoute.query = {}
     push.mockClear()
     replace.mockClear()
@@ -558,6 +565,84 @@ describe('tagFilter store', () => {
       expect(replace).toHaveBeenCalled()
       const lastQuery = replace.mock.calls.at(-1)![0].query
       expect(lastQuery.tags).toBe('a,c')
+    })
+
+    // --- BL-024: a transient /api/tag/list failure must NOT rewrite the URL ---
+    it('cold deep-link while the tags query ERRORS keeps the raw ids and never rewrites the URL', async () => {
+      // Cold deep-link with ids + search. The tags query FAILS (500): isSuccess
+      // stays false (an error is NOT a successful settle). Gating on isSuccess must
+      // DEFER id resolution — the empty tagMap must not resolve the ids to nothing
+      // and let syncUrl rewrite the URL to a bare ?search=.
+      tagsFetchedRef.value = false // isSuccess=false models the error (never succeeded)
+      tagsRef.value = []
+      mockRoute.query = { tags: 'a', exclude: 'c', search: 'invoice' }
+      const store = useTagFilterStore()
+      await nextTick()
+
+      // Tag-independent search still applies, but the URL must NOT be rewritten to
+      // the bare "?search=invoice" that drops the not-yet-resolvable tags/exclude
+      // (the exact BL-024 symptom — a rewrite carrying THIS store's search but
+      // missing its tag ids, which a later refetch could never restore). We match
+      // that specific shape so unrelated bare-{} replaces from other test stores'
+      // lingering watchers (the harness does not tear stores down) don't mask it.
+      const rewroteBareSearch = replace.mock.calls.some((c) => {
+        const q = (c[0]?.query ?? {}) as Record<string, string>
+        return q.search === 'invoice' && (!q.tags || !q.exclude)
+      })
+      expect(rewroteBareSearch).toBe(false)
+
+      // A later SUCCESSFUL refetch settles → the ids finally resolve, unchanged URL.
+      tagsRef.value = [...TAGS]
+      tagsFetchedRef.value = true
+      await nextTick()
+      expect([...store.selectedTagIds]).toEqual(['a'])
+      expect([...store.excludedTagIds]).toEqual(['c'])
+      expect(store.buildFilterQuery()).toEqual({ tags: 'a', exclude: 'c', search: 'invoice' })
+    })
+  })
+
+  // --- BL-023: the filter store must survive navigation to non-document routes ---
+  describe('route-scoped hydration (BL-023)', () => {
+    it('does NOT hydrate (wipe) the store when the route is NOT the documents list', async () => {
+      // Seed a live filter on the documents list.
+      mockRoute.query = { tags: 'a', exclude: 'c' }
+      const store = useTagFilterStore()
+      expect([...store.selectedTagIds]).toEqual(['a'])
+      expect([...store.excludedTagIds]).toEqual(['c'])
+
+      // Navigate to Settings/Tags/doc-add: vue-router replaces the query with the
+      // new route's (empty) query. Hydration must NOT run here, or it would clear
+      // the selection and kill the "Back to documents" filter-preserving affordance.
+      mockRoute.name = 'settings-account'
+      mockRoute.path = '/settings/account'
+      mockRoute.query = {}
+      await nextTick()
+
+      expect([...store.selectedTagIds]).toEqual(['a'])
+      expect([...store.excludedTagIds]).toEqual(['c'])
+    })
+
+    it('re-hydrates on ENTRY back to the documents route', async () => {
+      // On the documents list with a filter.
+      mockRoute.query = { tags: 'a' }
+      const store = useTagFilterStore()
+      expect([...store.selectedTagIds]).toEqual(['a'])
+
+      // Leave to a non-document route (store preserved, per the test above).
+      mockRoute.name = 'document-add'
+      mockRoute.path = '/document/add'
+      mockRoute.query = {}
+      await nextTick()
+      expect([...store.selectedTagIds]).toEqual(['a'])
+
+      // Return to the documents list carrying a DIFFERENT filter query — entry to
+      // the documents route must re-hydrate from that query.
+      mockRoute.name = 'documents'
+      mockRoute.path = '/document'
+      mockRoute.query = { tags: 'c', exclude: 'a' }
+      await nextTick()
+      expect([...store.selectedTagIds]).toEqual(['c'])
+      expect([...store.excludedTagIds]).toEqual(['a'])
     })
   })
 
