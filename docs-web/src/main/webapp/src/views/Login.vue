@@ -2,9 +2,11 @@
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
-import api from '../api/client'
+import { getAppInfo } from '../api/app'
+import { queryKeys } from '../api/queryKeys'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
@@ -18,6 +20,7 @@ const route = useRoute()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const username = ref('')
 const password = ref('')
@@ -44,7 +47,8 @@ function extractLoginErrorMessage(error: unknown, fallback: string): string {
 
 onMounted(async () => {
   try {
-    const { data } = await api.get('/app')
+    // Shared app-info cache/key so a later authed screen reuses this fetch.
+    const data = await queryClient.fetchQuery({ queryKey: queryKeys.app(), queryFn: () => getAppInfo() })
     oidcEnabled.value = !!data.oidc_enabled
     guestLogin.value = !!data.guest_login
   } catch { /* non-critical — buttons just stay hidden */ }

@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { type DocumentDetail } from '../../api/document'
 import {
   listComments,
   addComment,
@@ -16,17 +15,18 @@ import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
 import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
+import { injectDocument } from './documentKey'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const auth = useAuthStore()
 const queryClient = useQueryClient()
 
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 const docId = computed(() => doc.value?.id)
 
 const {
@@ -66,12 +66,9 @@ async function submit() {
 }
 
 function confirmDelete(comment: Comment) {
-  confirm.require({
+  confirmDanger({
     message: t('document.view.delete_comment_message'),
     header: t('document.view.delete_comment_title'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteComment(comment.id)

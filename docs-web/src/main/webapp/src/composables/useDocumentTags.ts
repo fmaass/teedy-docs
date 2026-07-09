@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/vue-query'
+import { useI18n } from 'vue-i18n'
 import { getDocument, updateDocument, type DocumentDetail } from '../api/document'
 import { buildAddTagParams, buildRemoveTagParams } from '../utils/bulkOps'
 import { queryKeys, tagCountKeys } from '../api/queryKeys'
@@ -17,9 +18,10 @@ import { useToast } from 'primevue/usetoast'
 export function useDocumentTags() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const { t } = useI18n()
 
   function showError() {
-    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to update tags', life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_update_tags'), life: 3000 })
   }
 
   function invalidate(docId: string) {

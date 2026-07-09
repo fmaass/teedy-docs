@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { inject, computed, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
-import { type DocumentDetail, type Acl, type InheritedAcl } from '../../api/document'
+import { type Acl, type InheritedAcl } from '../../api/document'
 import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../../api/acl'
 import { createShare, deleteShare, buildShareUrl } from '../../api/share'
 import Button from 'primevue/button'
@@ -11,12 +11,13 @@ import Select from 'primevue/select'
 import InputText from 'primevue/inputtext'
 import TagBadge from '../../components/TagBadge.vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { injectDocument } from './documentKey'
 
 const { t } = useI18n()
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const acls = computed<Acl[]>(() => doc.value?.acls ?? [])
@@ -81,12 +82,10 @@ async function handleAdd() {
 }
 
 function confirmRemove(acl: Acl) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.permissions.remove_confirm', { perm: acl.perm.toLowerCase(), name: acl.name }),
     header: t('ui.permissions.remove'),
     icon: 'pi pi-lock',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       if (!doc.value) return
       try {
@@ -146,12 +145,10 @@ async function copyShareUrl(url: string) {
 }
 
 function confirmRevokeShare(share: { id: string; name: string }) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.share.revoke_confirm', { name: share.name || t('ui.share.unnamed') }),
     header: t('ui.share.revoke'),
     icon: 'pi pi-link',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       if (!doc.value) return
       try {

@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { inject, computed, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
-import { type DocumentDetail } from '../../api/document'
 import { getFileUrl, deleteFile, renameFile, uploadFile } from '../../api/file'
 import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
@@ -11,15 +10,17 @@ import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
-import ProgressBar from 'primevue/progressbar'
+import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
+import UploadProgressList from '../../components/UploadProgressList.vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
-import { formatFileSize } from '../../composables/useFormatters'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { formatDate, formatFileSize } from '../../utils/formatters'
+import { injectDocument } from './documentKey'
 
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const sanitizedDescription = computed(() => {
@@ -37,11 +38,7 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
     return field.value ? t('yes') : t('no')
   }
   if (field.type === 'DATE') {
-    return new Date(Number(field.value)).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    })
+    return formatDate(Number(field.value))
   }
   return String(field.value)
 }
@@ -62,7 +59,6 @@ const uploading = ref(false)
 const uploadProgress = ref<Record<number, number>>({})
 const uploadingNames = ref<string[]>([])
 const fileUploadRef = ref()
-const cameraInputRef = ref<HTMLInputElement | null>(null)
 
 async function uploadAll(files: File[]) {
   if (!doc.value || !files.length) return
@@ -99,16 +95,9 @@ async function handleUpload(event: FileUploadUploaderEvent) {
   await uploadAll(files as File[])
 }
 
-// Camera capture: a hidden <input capture> opens the device camera on mobile;
-// captured photos upload immediately via the same real PUT /api/file path.
-function openCamera() {
-  cameraInputRef.value?.click()
-}
-
-async function onCameraCapture(event: Event) {
-  const input = event.target as HTMLInputElement
-  const captured = input.files ? Array.from(input.files) : []
-  input.value = ''
+// Camera capture: photos from CameraCaptureButton upload immediately via the same
+// real PUT /api/file path.
+async function onCameraCapture(captured: File[]) {
   await uploadAll(captured)
 }
 
@@ -147,12 +136,9 @@ async function commitRename(fileId: string) {
 }
 
 function confirmDelete(file: { id: string; name: string }) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.remove_file_confirm', { name: file.name }),
     header: t('ui.remove_file'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)
@@ -288,35 +274,11 @@ function confirmDelete(file: { id: string; name: string }) {
       </template>
     </FileUpload>
 
-    <!-- Camera capture: hidden input opens the device camera on mobile. -->
-    <div class="camera-capture">
-      <Button
-        type="button"
-        icon="pi pi-camera"
-        :label="t('ui.take_photo')"
-        severity="secondary"
-        outlined
-        class="camera-btn"
-        :disabled="uploading"
-        @click="openCamera"
-      />
-      <input
-        ref="cameraInputRef"
-        type="file"
-        accept="image/*"
-        capture="environment"
-        class="camera-input"
-        @change="onCameraCapture"
-      />
-    </div>
+    <!-- Camera capture: opens the device camera on mobile; photos upload at once. -->
+    <CameraCaptureButton :disabled="uploading" @capture="onCameraCapture" />
 
     <!-- Real per-file upload progress. -->
-    <div v-if="uploading" class="upload-progress-list">
-      <div v-for="(name, i) in uploadingNames" :key="i" class="upload-progress-item">
-        <span class="upload-progress-name">{{ name }}</span>
-        <ProgressBar :value="uploadProgress[i] ?? 0" class="upload-progress-bar" />
-      </div>
-    </div>
+    <UploadProgressList v-if="uploading" :names="uploadingNames" :progress="uploadProgress" />
 
     <EmptyState
       v-if="!doc.files?.length"
@@ -503,44 +465,6 @@ function confirmDelete(file: { id: string; name: string }) {
 }
 .file-upload-empty i {
   font-size: 1.25rem;
-}
-
-.camera-capture {
-  margin-top: 0.75rem;
-}
-.camera-input {
-  display: none;
-}
-.camera-btn {
-  width: 100%;
-}
-
-.upload-progress-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-.upload-progress-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.upload-progress-name {
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.upload-progress-bar {
-  height: 0.75rem;
-}
-
-@media (min-width: 601px) {
-  .camera-btn {
-    width: auto;
-  }
 }
 
 @media (max-width: 600px) {

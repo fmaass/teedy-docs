@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
-import { getAppInfo } from '../api/app'
+import { useAppInfo } from '../composables/useAppInfo'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
 const { t } = useI18n()
 
-const version = ref<string | null>(null)
+// Live running version from the shared app-info query (v{version} brand badge).
+const { data: appInfo } = useAppInfo()
+const version = computed(() => appInfo.value?.current_version ?? null)
 
 // Curated "What's new in 3.0.0" highlights. Each entry is an i18n key so the
 // bullets translate; the list is intentionally short and accurate to
@@ -27,21 +29,6 @@ const highlightKeys = [
 const HIGHLIGHTS_VERSION = '3.0.0'
 
 const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
-
-async function loadVersion() {
-  try {
-    const info = await getAppInfo()
-    version.value = info.current_version
-  } catch {
-    // Non-critical: the dialog still renders its What's-new content without a version.
-    version.value = null
-  }
-}
-
-// Fetch the running version the first time the dialog is opened.
-watch(visible, (open) => {
-  if (open && version.value === null) loadVersion()
-})
 </script>
 
 <template>

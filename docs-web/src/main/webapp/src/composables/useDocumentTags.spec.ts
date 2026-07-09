@@ -18,6 +18,10 @@ vi.mock('primevue/usetoast', () => ({
   useToast: () => ({ add: toastAdd }),
 }))
 
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string) => key }),
+}))
+
 const getDocumentMock = vi.fn<(id: string) => Promise<{ data: DocumentDetail }>>()
 const updateDocumentMock =
   vi.fn<(id: string, params: URLSearchParams) => Promise<{ data: { id: string } }>>(() =>

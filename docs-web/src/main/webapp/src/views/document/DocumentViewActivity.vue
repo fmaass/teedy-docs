@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { computed, inject, type Ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@tanstack/vue-query'
-import { type DocumentDetail } from '../../api/document'
 import api from '../../api/client'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
+import { injectDocument } from './documentKey'
 
 const { t } = useI18n()
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 
 interface AuditEntry {
   create_date: number

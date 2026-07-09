@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { getDocument } from '../api/document'
 import { getFileUrl } from '../api/file'
-import { formatFileSize } from '../composables/useFormatters'
+import { formatFileSize } from '../utils/formatters'
 import Skeleton from 'primevue/skeleton'
 import ErrorState from '../components/ErrorState.vue'
 

@@ -12,14 +12,15 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import TagBadge from '../../components/TagBadge.vue'
+import { DocumentKey } from './documentKey'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 const { t } = useI18n()
 
@@ -39,7 +40,7 @@ const { data: doc, isLoading: loading, error } = useQuery({
   queryFn: () => getDocument(props.id).then((r) => r.data),
 })
 
-provide('document', doc)
+provide(DocumentKey, doc)
 
 watch(error, (err) => {
   if (err) {
@@ -75,12 +76,9 @@ function formatDate(ts: number) {
 }
 
 function handleDelete() {
-  confirm.require({
+  confirmDanger({
     message: t('ui.delete_document_confirm'),
     header: t('ui.delete_document'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteDocument(props.id)

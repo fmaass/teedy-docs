@@ -6,11 +6,12 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
-import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../composables/metadataSerialize'
+import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
-import api from '../../api/client'
-import { formatFileSize } from '../../composables/useFormatters'
+import { getAppInfo } from '../../api/app'
+import { queryKeys } from '../../api/queryKeys'
+import { formatFileSize } from '../../utils/formatters'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
@@ -21,14 +22,15 @@ import MultiSelect from 'primevue/multiselect'
 import FileUpload, { type FileUploadSelectEvent, type FileUploadRemoveEvent } from 'primevue/fileupload'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
-import ProgressBar from 'primevue/progressbar'
+import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
+import UploadProgressList from '../../components/UploadProgressList.vue'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
 const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const tagFilter = useTagFilterStore()
 const queryClient = useQueryClient()
 const { t } = useI18n()
@@ -78,7 +80,6 @@ const uploadedCount = ref(0)
 const uploadProgress = ref<Record<number, number>>({})
 const uploadingFiles = ref(false)
 const loadedRelations = ref<Array<{ id: string }>>([])
-const cameraInputRef = ref<HTMLInputElement | null>(null)
 
 // Custom metadata: field definitions (admin-configured) and per-field values keyed
 // by definition id. Values are typed for their input; serialized on save.
@@ -151,7 +152,7 @@ async function initFromRoute() {
     }
   } else {
     try {
-      const { data: appConfig } = await api.get('/app')
+      const appConfig = await queryClient.fetchQuery({ queryKey: queryKeys.app(), queryFn: () => getAppInfo() })
       if (gen !== initGen) return
       if (appConfig.default_language) {
         form.value.language = appConfig.default_language
@@ -252,31 +253,19 @@ function onFileClear() {
   uploadedCount.value = 0
 }
 
-// Camera capture: a separate hidden <input capture> so mobile browsers open the
-// camera directly. Captured photos are appended to the same pendingFiles queue,
-// so they upload on save exactly like picked files.
-function openCamera() {
-  cameraInputRef.value?.click()
-}
-
-function onCameraCapture(event: Event) {
-  const input = event.target as HTMLInputElement
-  const captured = input.files ? Array.from(input.files) : []
+// Camera capture: photos from CameraCaptureButton are appended to the same
+// pendingFiles queue, so they upload on save exactly like picked files.
+function onCameraCapture(captured: File[]) {
   if (captured.length) {
     pendingFiles.value = [...pendingFiles.value, ...captured]
     uploadedCount.value = 0
   }
-  // Reset so re-capturing the same-named photo fires change again.
-  input.value = ''
 }
 
 function confirmDeleteExisting(file: AttachedFile) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.remove_file_confirm', { name: file.name }),
     header: t('ui.remove_file'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: async () => {
       try {
         await deleteFile(file.id)
@@ -593,34 +582,15 @@ async function handleSubmit() {
         </template>
       </FileUpload>
 
-      <!-- Camera capture: hidden input opens the device camera on mobile. -->
-      <div class="camera-capture">
-        <Button
-          type="button"
-          icon="pi pi-camera"
-          :label="t('ui.take_photo')"
-          severity="secondary"
-          outlined
-          class="camera-btn"
-          @click="openCamera"
-        />
-        <input
-          ref="cameraInputRef"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          class="camera-input"
-          @change="onCameraCapture"
-        />
-      </div>
+      <!-- Camera capture: opens the device camera on mobile; photos queue for save. -->
+      <CameraCaptureButton @capture="onCameraCapture" />
 
       <!-- Real per-file upload progress while saving. -->
-      <div v-if="uploadingFiles" class="upload-progress-list">
-        <div v-for="(file, i) in pendingFiles" :key="i" class="upload-progress-item">
-          <span class="upload-progress-name">{{ file.name }}</span>
-          <ProgressBar :value="uploadProgress[i] ?? 0" class="upload-progress-bar" />
-        </div>
-      </div>
+      <UploadProgressList
+        v-if="uploadingFiles"
+        :names="pendingFiles.map((f) => f.name)"
+        :progress="uploadProgress"
+      />
 
       <p v-else-if="pendingFiles.length" class="upload-hint">
         {{ t('ui.files_upload_hint', { count: pendingFiles.length }) }}
@@ -772,38 +742,6 @@ a.file-name:hover {
 }
 
 /* Camera capture: hide the native input; the styled Button triggers it. */
-.camera-capture {
-  margin-top: 0.75rem;
-}
-.camera-input {
-  display: none;
-}
-.camera-btn {
-  width: 100%;
-}
-
-.upload-progress-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-.upload-progress-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.upload-progress-name {
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.upload-progress-bar {
-  height: 0.75rem;
-}
-
 @media (max-width: 640px) {
   .form-row {
     grid-template-columns: 1fr;
@@ -818,12 +756,6 @@ a.file-name:hover {
   }
   .doc-edit-actions {
     justify-content: flex-end;
-  }
-}
-
-@media (min-width: 641px) {
-  .camera-btn {
-    width: auto;
   }
 }
 </style>

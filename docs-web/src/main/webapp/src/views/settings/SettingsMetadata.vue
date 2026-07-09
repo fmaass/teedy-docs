@@ -19,13 +19,13 @@ import Select from 'primevue/select'
 import Dialog from 'primevue/dialog'
 import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const { data: metadataData, isLoading, isError, refetch } = useQuery({
@@ -113,12 +113,9 @@ const deleteMutation = useMutation({
 })
 
 function confirmDelete(field: MetadataDefinition) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.metadata.delete_confirm', { name: field.name }),
     header: t('ui.metadata.delete_title'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => deleteMutation.mutate(field.id),
   })
 }

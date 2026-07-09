@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { inject, ref, watch, onUnmounted, type Ref } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { type DocumentDetail } from '../../api/document'
 import { getFileContent, getFileList, reprocessFile } from '../../api/file'
 import { shouldPoll } from '../../utils/fileProcessing'
 import Button from 'primevue/button'
@@ -9,12 +8,13 @@ import Skeleton from 'primevue/skeleton'
 import ProgressSpinner from 'primevue/progressspinner'
 import EmptyState from '../../components/EmptyState.vue'
 import { useToast } from 'primevue/usetoast'
+import { injectDocument } from './documentKey'
 
 /** How often to re-poll /file/list while any file is still processing. */
 const POLL_INTERVAL_MS = 2500
 
 const { t } = useI18n()
-const doc = inject<Ref<DocumentDetail | null>>('document')!
+const doc = injectDocument()
 const toast = useToast()
 
 interface FileText {

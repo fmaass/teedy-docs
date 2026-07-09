@@ -10,7 +10,7 @@ import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
 import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
@@ -25,7 +25,7 @@ import {
   buildLanguageParams,
   type BulkResult,
 } from '../../utils/bulkOps'
-import { clampOffset } from '../../utils/pagination'
+import { useClampedOffset } from '../../composables/useClampedOffset'
 import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
@@ -33,7 +33,7 @@ const router = useRouter()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
@@ -75,13 +75,7 @@ const totalCount = computed(() => documentsData.value?.total ?? 0)
 // Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
 // the server returns zero rows while total is still positive — a false-empty page
 // with no paginator to escape. Clamp back to the last valid page when that happens.
-// Gated on !isLoading so the keep-previous phase (rows present) and the genuine-empty
-// case (total 0) both stay untouched.
-watch(documentsData, () => {
-  if (isLoading.value) return
-  const next = clampOffset(pageOffset.value, documents.value.length, totalCount.value, PAGE_SIZE)
-  if (next !== pageOffset.value) pageOffset.value = next
-})
+useClampedOffset(documentsData, isLoading, pageOffset, PAGE_SIZE)
 
 function onPage(event: DataTablePageEvent) {
   pageOffset.value = event.first
@@ -133,7 +127,7 @@ const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError }
 watch(slideOverError, (err) => {
   if (err) {
     slideOverOpen.value = false
-    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: 'document' }), life: 3000 })
+    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: t('ui.item_document') }), life: 3000 })
   }
 })
 
@@ -202,10 +196,10 @@ const contextMenuItems = computed(() => {
   }))
 
   const items: MenuItem[] = []
-  if (addItems.length) items.push({ label: 'Add tag', items: addItems })
+  if (addItems.length) items.push({ label: t('ui.context_add_tag'), items: addItems })
   if (removeItems.length) {
     if (items.length) items.push({ separator: true })
-    items.push({ label: 'Remove tag', items: removeItems })
+    items.push({ label: t('ui.context_remove_tag'), items: removeItems })
   }
   return items
 })
@@ -283,12 +277,9 @@ function bulkSetLanguage(language: string) {
 function bulkDelete() {
   const count = selectedDocs.value.length
   if (!count) return
-  confirm.require({
+  confirmDanger({
     message: t('ui.bulk.delete_confirm', { count }),
     header: t('ui.bulk.delete'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => runBulkOp((doc) => deleteDocument(doc.id)),
   })
 }

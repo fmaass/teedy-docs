@@ -9,7 +9,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import { getFileVersions, getFileUrl, type FileVersion } from '../api/file'
-import { formatDate } from '../composables/useFormatters'
+import { formatDate } from '../utils/formatters'
 import { createGeneration } from '../utils/staleGuard'
 
 const props = defineProps<{

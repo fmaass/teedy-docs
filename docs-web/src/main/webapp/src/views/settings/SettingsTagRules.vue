@@ -13,13 +13,13 @@ import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Dialog from 'primevue/dialog'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 interface Rule {
@@ -119,12 +119,9 @@ function handleSave() {
 }
 
 function handleDelete(rule: Rule) {
-  confirm.require({
+  confirmDanger({
     message: t('ui.tag_rules.delete_confirm'),
     header: t('ui.tag_rules.delete_title'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => deleteRule(rule.id),
   })
 }

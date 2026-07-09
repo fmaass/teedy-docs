@@ -10,13 +10,13 @@ import ColorPicker from 'primevue/colorpicker'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
-import { useConfirm } from 'primevue/useconfirm'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
 const props = defineProps<{ id: string }>()
 const { t } = useI18n()
 const router = useRouter()
 const toast = useToast()
-const confirm = useConfirm()
+const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const name = ref('')
@@ -79,12 +79,9 @@ const { mutate: save, isPending: loading } = useMutation({
 })
 
 function handleDelete() {
-  confirm.require({
+  confirmDanger({
     message: t('ui.tag_edit.delete_confirm', { name: name.value }),
     header: t('ui.tag_edit.delete_tag'),
-    icon: 'pi pi-trash',
-    acceptProps: { severity: 'danger' },
-    rejectProps: { severity: 'secondary', outlined: true },
     accept: () => {
       deleteTag(props.id).then(() => {
         queryClient.invalidateQueries({ queryKey: ['tags'] })

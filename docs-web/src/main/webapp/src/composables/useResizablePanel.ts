@@ -1,25 +1,29 @@
 import { ref, getCurrentInstance, onBeforeUnmount, onMounted, type Ref } from 'vue'
 
-export interface ResizablePanelOptions {
-  /** Default width applied when nothing valid is persisted, and on reset. */
-  defaultWidth?: number
-  minWidth?: number
-  /** Upper bound in px. The effective max is `min(maxWidth, maxViewportFraction * innerWidth)`. */
-  maxWidth?: number
-  /** Fraction of the viewport width the panel may never exceed (e.g. 0.4 = 40vw). */
-  maxViewportFraction?: number
-  /** localStorage key used to persist the chosen width. */
-  storageKey?: string
-  /** Injectable viewport width source (defaults to window.innerWidth); keeps clampWidth testable. */
-  viewportWidth?: () => number
+// The panel's sizing envelope. Fixed constants: the resizable panel is the tag
+// sidebar and nothing else, so these never varied per call. Only the storage key
+// (and the test-only viewport source) are parameters.
+const DEFAULT_WIDTH = 250
+const MIN_WIDTH = 200
+const MAX_WIDTH = 480
+/** Fraction of the viewport width the panel may never exceed (0.4 = 40vw). */
+const MAX_VIEWPORT_FRACTION = 0.4
+/** Default localStorage key used to persist the chosen width. */
+const DEFAULT_STORAGE_KEY = 'teedy_tag_panel_width'
+
+// The clamp envelope as a single object, reused by clampWidth and the composable.
+const CLAMP_CFG: ClampCfg = {
+  defaultWidth: DEFAULT_WIDTH,
+  minWidth: MIN_WIDTH,
+  maxWidth: MAX_WIDTH,
+  maxViewportFraction: MAX_VIEWPORT_FRACTION,
 }
 
-const DEFAULTS = {
-  defaultWidth: 250,
-  minWidth: 200,
-  maxWidth: 480,
-  maxViewportFraction: 0.4,
-  storageKey: 'teedy_tag_panel_width',
+export interface ClampCfg {
+  defaultWidth: number
+  minWidth: number
+  maxWidth: number
+  maxViewportFraction: number
 }
 
 /**
@@ -27,16 +31,19 @@ const DEFAULTS = {
  * Pure and viewport-injected so it is unit-testable without a DOM. A non-finite
  * request (NaN from a bad localStorage value) falls back to the default width.
  */
-export function clampWidth(
-  requested: number,
-  opts: Required<Pick<ResizablePanelOptions, 'defaultWidth' | 'minWidth' | 'maxWidth' | 'maxViewportFraction'>>,
-  viewportWidth: number,
-): number {
+export function clampWidth(requested: number, opts: ClampCfg, viewportWidth: number): number {
   const value = Number.isFinite(requested) ? requested : opts.defaultWidth
   const viewportCap = Math.floor(viewportWidth * opts.maxViewportFraction)
   // Guard against a 0/absent viewport (SSR / test): fall back to the fixed max.
   const upper = viewportCap > opts.minWidth ? Math.min(opts.maxWidth, viewportCap) : opts.maxWidth
   return Math.round(Math.min(Math.max(value, opts.minWidth), upper))
+}
+
+export interface ResizablePanelOptions {
+  /** localStorage key used to persist the chosen width. Defaults to the tag-panel key. */
+  storageKey?: string
+  /** Injectable viewport width source (defaults to window.innerWidth); keeps clampWidth testable. */
+  viewportWidth?: () => number
 }
 
 export function useResizablePanel(options: ResizablePanelOptions = {}): {
@@ -45,36 +52,29 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
   onKeydown: (e: KeyboardEvent) => void
   reset: () => void
 } {
-  const cfg = { ...DEFAULTS, ...Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined)) }
+  const storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY
   const viewport = options.viewportWidth ?? (() => (typeof window !== 'undefined' ? window.innerWidth : 0))
 
-  const clampCfg = {
-    defaultWidth: cfg.defaultWidth,
-    minWidth: cfg.minWidth,
-    maxWidth: cfg.maxWidth,
-    maxViewportFraction: cfg.maxViewportFraction,
-  }
-
   function apply(requested: number): number {
-    return clampWidth(requested, clampCfg, viewport())
+    return clampWidth(requested, CLAMP_CFG, viewport())
   }
 
   function load(): number {
     let stored = NaN
     try {
-      const raw = localStorage.getItem(cfg.storageKey)
+      const raw = localStorage.getItem(storageKey)
       if (raw != null) stored = Number.parseInt(raw, 10)
     } catch {
       // localStorage unavailable (private mode / SSR) — use default.
     }
-    return apply(Number.isFinite(stored) ? stored : cfg.defaultWidth)
+    return apply(Number.isFinite(stored) ? stored : DEFAULT_WIDTH)
   }
 
   const width = ref(load())
 
   function persist() {
     try {
-      localStorage.setItem(cfg.storageKey, String(width.value))
+      localStorage.setItem(storageKey, String(width.value))
     } catch {
       // Ignore persistence failures — width still applies for the session.
     }
@@ -131,18 +131,18 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
       persist()
       e.preventDefault()
     } else if (e.key === 'Home') {
-      setWidth(cfg.minWidth)
+      setWidth(MIN_WIDTH)
       persist()
       e.preventDefault()
     } else if (e.key === 'End') {
-      setWidth(cfg.maxWidth)
+      setWidth(MAX_WIDTH)
       persist()
       e.preventDefault()
     }
   }
 
   function reset() {
-    setWidth(cfg.defaultWidth)
+    setWidth(DEFAULT_WIDTH)
     persist()
   }
 
