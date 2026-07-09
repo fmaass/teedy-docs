@@ -64,6 +64,7 @@ const settingsAdminItems = computed(() => [
   { label: t('ui.groups.title'), icon: 'pi pi-sitemap', to: '/settings/groups', name: 'settings-groups' },
   { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
   { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
+  { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
   { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
 ])
 
