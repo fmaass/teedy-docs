@@ -199,3 +199,111 @@ test.describe('tag filter panel', () => {
     await expect(treeBtn).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+// --- Behavior C (filterable tag pickers with colored chips, #14/#23) ---------
+// The document-edit tag MultiSelect gained a filter box + a colored-chip #chip
+// slot (TagBadge), and the tag-edit parent Select gained a filter box. Both were
+// unusable past a few dozen tags before, and selected doc tags rendered as plain
+// uncolored labels.
+//
+// REALNESS: the filter is asserted to actually WINNOW the option list (a matching
+// option stays, a non-matching one is removed) — a decorative-but-dead filter box
+// would leave both visible and fail. The colored chip is asserted to be the
+// TagBadge span carrying the tag's real background color (not a plain label) —
+// reverting the #chip slot would drop .teedy-tag and fail.
+test.describe('tag pickers (behavior C)', () => {
+  async function createTag(page: import('@playwright/test').Page, name: string) {
+    await page.goto('/#/tag')
+    await page.getByPlaceholder('Tag name').fill(name)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    // The success signal is the new node in the tree — the transient "Tag created"
+    // toast can stack across successive creates, so we do not assert on it here.
+    await expect(page.locator('.tag-tree').getByText(name, { exact: true })).toBeVisible()
+  }
+
+  async function deleteTag(page: import('@playwright/test').Page, name: string) {
+    await page.goto('/#/tag')
+    await page.locator('.tag-tree').getByText(name, { exact: true }).click()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirmDanger(page)
+    await expect(page).toHaveURL(/#\/tag$/)
+  }
+
+  test('document-edit tag MultiSelect: filter box winnows options and a selection renders as a colored chip', async ({ page }) => {
+    // Two distinctly-named tags so the filter has something to include AND exclude.
+    const keepTag = unique('cfilterkeep')
+    const dropTag = unique('cfilterdrop')
+    await createTag(page, keepTag)
+    await createTag(page, dropTag)
+
+    try {
+      await page.goto('/#/document/add')
+      await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
+
+      // Open the MultiSelect overlay.
+      await page.locator('#edit-tags').click()
+      const overlay = page.locator('.p-multiselect-overlay')
+      await expect(overlay).toBeVisible()
+
+      // The filter box exists (the #14/#23 addition).
+      const filterInput = overlay.locator('input.p-multiselect-filter, .p-multiselect-filter input, input[role=searchbox]').first()
+      await expect(filterInput).toBeVisible()
+
+      // Type a fragment unique to keepTag: the matching option stays, the other is
+      // removed — proving the filter actually filters (not a dead box).
+      await filterInput.fill(keepTag)
+      await expect(page.getByRole('option', { name: keepTag })).toBeVisible()
+      await expect(page.getByRole('option', { name: dropTag })).toHaveCount(0)
+
+      // Select the surviving option, then close the overlay.
+      await page.getByRole('option', { name: keepTag }).click()
+      await page.keyboard.press('Escape')
+
+      // The selected tag renders as a COLORED TagBadge chip (span.teedy-tag with an
+      // inline background-color), not a plain label.
+      const chip = page.locator('.tag-multiselect .teedy-tag', { hasText: keepTag })
+      await expect(chip).toBeVisible()
+      const bg = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+      // A real colored chip has a non-transparent, non-default background.
+      expect(bg).toMatch(/^rgba?\(/)
+      expect(bg).not.toBe('rgba(0, 0, 0, 0)')
+    } finally {
+      await deleteTag(page, keepTag)
+      await deleteTag(page, dropTag)
+    }
+  })
+
+  test('tag-edit parent Select has a working filter box', async ({ page }) => {
+    // Need at least two candidate parents so filtering is observable.
+    const parentKeep = unique('cparentkeep')
+    const parentDrop = unique('cparentdrop')
+    const child = unique('cchild')
+    await createTag(page, parentKeep)
+    await createTag(page, parentDrop)
+    await createTag(page, child)
+
+    try {
+      // Open the child's edit page and its parent Select.
+      await page.goto('/#/tag')
+      await page.locator('.tag-tree').getByText(child, { exact: true }).click()
+      await expect(page).toHaveURL(/#\/tag\//)
+
+      await page.locator('#tag-parent').click()
+      const overlay = page.locator('.p-select-overlay')
+      await expect(overlay).toBeVisible()
+
+      const filterInput = overlay.locator('input.p-select-filter, .p-select-filter input, input[role=searchbox]').first()
+      await expect(filterInput).toBeVisible()
+
+      // Filter to parentKeep: it stays, parentDrop is removed.
+      await filterInput.fill(parentKeep)
+      await expect(page.getByRole('option', { name: parentKeep })).toBeVisible()
+      await expect(page.getByRole('option', { name: parentDrop })).toHaveCount(0)
+      await page.keyboard.press('Escape')
+    } finally {
+      await deleteTag(page, parentKeep)
+      await deleteTag(page, parentDrop)
+      await deleteTag(page, child)
+    }
+  })
+})

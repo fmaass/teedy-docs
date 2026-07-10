@@ -9,18 +9,18 @@ of it per-test.
 | Spec | Feature proven |
 | --- | --- |
 | `smoke.spec.ts` | App boots and the authenticated shell renders. |
-| `auth.spec.ts` | Native form login: success, bad-credentials error, logout. |
-| `documents.spec.ts` | Document create / view / delete. |
+| `auth.spec.ts` | Native form login: success, bad-credentials error, logout; **TOTP login (v3.2.2 A)** — a TOTP-enabled account is challenged (OTP field revealed), a computed valid RFC-6238 code completes login, a wrong code shows the invalid-code error, and editing the username retracts the challenge. |
+| `documents.spec.ts` | Document create / view / delete; **document-list UX (v3.2.2 D)** — double-click a row opens the full view, a >3-tag document shows a focusable `+N` overflow whose popover reveals the hidden tags, and admin/settings pages render at the wider width. |
+| `admin-guards.spec.ts` | Non-admin routes/redirects are guarded; **disabled-user enforcement (v3.2.2 B)** — an admin disables a user (native login then denied), re-enabling restores it, and the toggle is hidden for the guest+admin rows. |
+| `tags.spec.ts` | Tag CRUD and the tri-state (include/exclude/clear) tag filter; **tag pickers (v3.2.2 C)** — the document-edit tag MultiSelect filter winnows options and renders a selected tag as a colored chip, and the tag-edit parent Select filter winnows options. |
 | `files.spec.ts` | File attach + the file list on a document. |
 | `versions.spec.ts` | File version-history dialog lists the current version. **Documents the product gap**: no UI path adds a *second* file version (backend supports `previousFileId`, the SPA never sets it) — that case is an explicit `test.skip`. |
-| `tags.spec.ts` | Tag CRUD and the tri-state (include/exclude/clear) tag filter. |
 | `search.spec.ts` | Full-text + structured document search. |
 | `bulk.spec.ts` | Multi-select bulk actions on the document list. |
 | `comments.spec.ts` | Add + delete a document comment. |
 | `share.spec.ts` | Public share-link create -> anonymous read-only view -> revoke (server-side write denial asserted). |
 | `trash.spec.ts` | Soft-delete to trash, restore, purge. |
 | `settings-crud.spec.ts` | Admin settings CRUD: groups, custom-metadata fields, webhooks, API keys, tag rules. |
-| `admin-guards.spec.ts` | Non-admin routes/redirects are guarded. |
 | `ldap.spec.ts` | LDAP settings UI + client-side validation (no live LDAP needed). |
 | `workflow.spec.ts` | **Route models + document routing**: admin builds a VALIDATE→APPROVE model (SettingsWorkflow), runs it to DONE (validate then approve), and a second run halts on REJECT (route ends REJECTED, no advance); history shows status badges + acted/rejected rows. |
 | `vocabulary.spec.ts` | **Vocabulary CRUD** (SettingsVocabulary): create namespace, add/rename/reorder/delete entries; and a vocabulary value backing a document dropdown (built-in `type` namespace → `#edit-type` Select). |
