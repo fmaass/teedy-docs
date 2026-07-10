@@ -67,6 +67,7 @@ const settingsAdminItems = computed(() => [
   { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
   { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
   { label: t('ui.monitoring.title'), icon: 'pi pi-chart-line', to: '/settings/monitoring', name: 'settings-monitoring' },
+  { label: t('ui.inbox.title'), icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
 ])
 
 const tagManageItems = computed(() => [

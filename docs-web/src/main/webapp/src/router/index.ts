@@ -198,6 +198,15 @@ const router = createRouter({
               // mount. Nav is already admin-hidden; this stops a direct-URL mount.
               meta: { requiresAdmin: true },
             },
+            {
+              path: 'inbox',
+              name: 'settings-inbox',
+              component: () => import('../views/settings/SettingsInbox.vue'),
+              // Admin-only: SettingsInbox fires the admin-gated GET /app/config_inbox
+              // on mount. The nav item is already admin-hidden, but a direct URL hit
+              // would otherwise mount it (the backend 403 the only defence).
+              meta: { requiresAdmin: true },
+            },
           ],
         },
       ],

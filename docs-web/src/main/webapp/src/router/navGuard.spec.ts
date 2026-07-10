@@ -46,6 +46,7 @@ describe('resolveNavGuard', () => {
     'settings-ldap',
     'settings-metadata',
     'settings-monitoring',
+    'settings-inbox',
   ] as const
 
   // User-level routes (settingsNavItems) — reachable by any logged-in user.
