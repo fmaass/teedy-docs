@@ -45,6 +45,7 @@ describe('resolveNavGuard', () => {
     'settings-webhooks',
     'settings-ldap',
     'settings-metadata',
+    'settings-workflow',
     'settings-monitoring',
     'settings-inbox',
   ] as const

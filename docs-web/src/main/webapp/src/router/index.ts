@@ -191,6 +191,15 @@ const router = createRouter({
               meta: { requiresAdmin: true },
             },
             {
+              path: 'workflow',
+              name: 'settings-workflow',
+              component: () => import('../views/settings/SettingsWorkflow.vue'),
+              // Admin-only: SettingsWorkflow fires the admin-gated route-model
+              // endpoints. The nav item is already admin-hidden; this stops a
+              // direct-URL mount by a non-admin.
+              meta: { requiresAdmin: true },
+            },
+            {
               path: 'monitoring',
               name: 'settings-monitoring',
               component: () => import('../views/settings/SettingsMonitoring.vue'),

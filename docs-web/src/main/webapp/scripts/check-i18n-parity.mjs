@@ -39,6 +39,8 @@ const STRICT_LOCALES = ['de']
 const DYNAMIC_KEY_PREFIXES = [
   // SettingsMetadata.vue: t(`ui.metadata.type_${type.toLowerCase()}`)
   'ui.metadata.type_',
+  // WorkflowStepEditor.vue: t(`ui.workflow_admin.transition_${name.toLowerCase()}`)
+  'ui.workflow_admin.transition_',
 ]
 
 // AWAITING_PREFIXES: keys for features intentionally on the roadmap but not yet
