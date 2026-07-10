@@ -829,6 +829,10 @@
     "cancel_rename": "Cancel rename",
     "load_error": "Something went wrong while loading",
     "retry": "Retry",
+    "tree_view": "Tree",
+    "facets_view": "Facets",
+    "mode_and": "AND",
+    "mode_or": "OR",
     "bulk": {
       "toolbar": "Bulk actions",
       "selected_count": "{count} selected",

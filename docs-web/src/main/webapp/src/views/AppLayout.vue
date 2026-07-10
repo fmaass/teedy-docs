@@ -18,10 +18,10 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const tf = useTagFilterStore()
 
-const modeOptions: Array<{ label: string; value: 'and' | 'or' }> = [
-  { label: 'AND', value: 'and' },
-  { label: 'OR', value: 'or' },
-]
+const modeOptions = computed<Array<{ label: string; value: 'and' | 'or' }>>(() => [
+  { label: t('ui.mode_and'), value: 'and' },
+  { label: t('ui.mode_or'), value: 'or' },
+])
 
 const isMobile = ref(false)
 const drawerOpen = ref(false)

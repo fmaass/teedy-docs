@@ -20,6 +20,8 @@ Teedy is an open source, lightweight document management system for individuals 
 - **API key authentication** for programmatic access (`Authorization: Bearer tdapi_*`)
 - **Trash / recycle bin** with soft-delete, restore, permanent delete, and auto-purge
 - **Document workflows & controlled vocabularies** (v3.2): multi-step approval routes (validate / approve / reject-halts) and vocabulary-backed metadata, with a native Vue UI
+- **Two-factor (TOTP) web login**: TOTP-enabled users can sign in through the Vue UI (an OTP field appears after the password step), with the login rate-limiter counting wrong OTP codes toward lockout
+- **User account state management**: admins can disable and re-enable users from the settings UI (not just delete them); disabled users are denied at every auth path (login, session cookie, API key, OIDC)
 - **Vue 3 frontend** replacing AngularJS (PrimeVue 4, Vite 7, Pinia 3, TypeScript 5.9, vue-i18n)
 - **Full internationalization** with 12 languages and live language switching
 - **Accessibility**: keyboard navigation, label associations, ARIA attributes, PrimeVue FileUpload
@@ -65,7 +67,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.2.1`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.2.2`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -120,6 +122,16 @@ To build external URL, the server is expecting a `DOCS_BASE_URL` environment var
 
 - Webhooks
   - `DOCS_WEBHOOK_ALLOW_PRIVATE`: Allows webhook URLs targeting private, loopback, or link-local addresses when set to `true`. Default: `false`.
+
+## System properties (JVM `-D`)
+
+A few settings are only read as JVM system properties, passed via `JAVA_OPTIONS`
+(or a `-D` flag), not as `DOCS_*` environment variables:
+
+- `docs.logout_url`: External URL the browser is redirected to after logout. When set, it takes precedence over any OIDC `end_session_endpoint`. If unset and OIDC is active, Teedy composes an RP-initiated logout URL from the provider's `end_session_endpoint` instead. If neither applies, no external redirect is performed.
+- `docs.header_authentication_trusted_proxies`: Comma-separated allowlist of IPs and/or CIDR ranges (e.g. `10.0.0.0/8, 192.168.1.5`) permitted to assert the `X-Authenticated-User` header when header-based proxy authentication (`docs.header_authentication=true`) is enabled. If header auth is enabled but this list is empty, all header-based authentication is refused (fail-closed). The built-in `admin` account can never be authenticated through this header.
+- `application.mode`: Set to `dev` to run in development mode; any other value (or unset) is production mode.
+- `docs.home`: Absolute path to the base data directory (documents, index, database when using H2). If unset, Teedy falls back to `/var/docs` on Linux, `%APPDATA%\Sismics\Docs` on Windows, and `~/Library/Sismics/Docs` on macOS. In the Docker image this is the `/data` volume.
 
 ## API Key Authentication
 
@@ -237,7 +249,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.2.1
+    image: ghcr.io/fmaass/teedy-docs:v3.2.2
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -296,7 +308,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.2.1
+    image: ghcr.io/fmaass/teedy-docs:v3.2.2
     restart: unless-stopped
     ports:
       - 8080:8080

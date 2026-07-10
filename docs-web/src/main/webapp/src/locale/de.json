@@ -829,6 +829,10 @@
     "cancel_rename": "Umbenennen abbrechen",
     "load_error": "Beim Laden ist ein Fehler aufgetreten",
     "retry": "Erneut versuchen",
+    "tree_view": "Baum",
+    "facets_view": "Facetten",
+    "mode_and": "UND",
+    "mode_or": "ODER",
     "bulk": {
       "toolbar": "Sammelaktionen",
       "selected_count": "{count} ausgewählt",
