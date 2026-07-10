@@ -26,15 +26,11 @@ public class SecurityUtil {
             case USER:
                 UserDao userDao = new UserDao();
                 User user = userDao.getActiveByUsername(name);
-                if (user != null) {
-                    return user.getId();
-                }
+                return user != null ? user.getId() : null;
             case GROUP:
                 GroupDao groupDao = new GroupDao();
                 Group group = groupDao.getActiveByName(name);
-                if (group != null) {
-                    return group.getId();
-                }
+                return group != null ? group.getId() : null;
         }
 
         return null;
