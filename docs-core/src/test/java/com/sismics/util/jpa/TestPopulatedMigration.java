@@ -29,16 +29,17 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==39, every retired table/row is gone, and
- * every retained row + FK relationship survives intact.
+ * and asserts that after the run: db.version==42, the retired rows are gone (the workflow/
+ * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
+ * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
  * <p>Runs on H2 locally (no Docker). {@link #populatedMigrationPreservesRetainedDataPostgres()}
  * runs the identical fixture on real PostgreSQL when Docker is available (CI).
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041). */
-    private static final int TARGET_VERSION = 41;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042). */
+    private static final int TARGET_VERSION = 42;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -100,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 41).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 42).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -117,21 +118,31 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-041 must run cleanly on a populated database");
+                "migrations 037-042 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 41 after the full upgrade path");
+                "DB_VERSION must be 42 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
                 "040 must create the IDX_DOT_TAG index on T_DOCUMENT_TAG");
 
-        // 5b. Retired tables are gone (dropped).
-        Assertions.assertFalse(tableExists(connection, "T_ROUTE_STEP"), "T_ROUTE_STEP must be dropped by 037");
-        Assertions.assertFalse(tableExists(connection, "T_ROUTE"), "T_ROUTE must be dropped by 037");
-        Assertions.assertFalse(tableExists(connection, "T_ROUTE_MODEL"), "T_ROUTE_MODEL must be dropped by 037");
-        Assertions.assertFalse(tableExists(connection, "T_VOCABULARY"), "T_VOCABULARY must be dropped by 038");
+        // 5b. The workflow/vocabulary tables were dropped by 037/038 (wiping the old rows) and then
+        //     REINSTATED empty by 042. The data-loss guardrail is that the OLD seed rows did not
+        //     survive the drop: the tables exist again but the retired rows are gone.
+        Assertions.assertTrue(tableExists(connection, "T_ROUTE_STEP"), "T_ROUTE_STEP must be reinstated by 042");
+        Assertions.assertTrue(tableExists(connection, "T_ROUTE"), "T_ROUTE must be reinstated by 042");
+        Assertions.assertTrue(tableExists(connection, "T_ROUTE_MODEL"), "T_ROUTE_MODEL must be reinstated by 042");
+        Assertions.assertTrue(tableExists(connection, "T_VOCABULARY"), "T_VOCABULARY must be reinstated by 042");
+        Assertions.assertEquals(0, count(connection, "T_ROUTE_STEP", "RTP_ID_C = 'rtp-1'"), "old route step row must not survive the 037 drop");
+        Assertions.assertEquals(0, count(connection, "T_ROUTE", "RTE_ID_C = 'rte-1'"), "old route row must not survive the 037 drop");
+        Assertions.assertEquals(0, count(connection, "T_ROUTE_MODEL", "RTM_ID_C = 'rtm-1'"), "old route model row must not survive the 037 drop");
+        Assertions.assertEquals(0, count(connection, "T_VOCABULARY", "VOC_ID_C = 'voc-1'"), "old vocabulary row must not survive the 038 drop");
+        // 042 reinstatement seed landed: default review route model + full vocabulary.
+        Assertions.assertEquals(1, count(connection, "T_ROUTE_MODEL", "RTM_ID_C = 'default-document-review'"), "042 must seed the default review route model");
+        Assertions.assertEquals(270, count(connection, "T_VOCABULARY", "1 = 1"), "042 must seed 270 vocabulary rows");
+        Assertions.assertEquals(3, count(connection, "T_ROUTE_MODEL_TARGET", "RMT_IDROUTEMODEL_C = 'default-document-review'"), "042 must seed 3 index rows for the default model");
 
         // 5c. Retired rows are gone: ROUTING and route-model-scoped ACLs deleted; LDAP_* config deleted.
         Assertions.assertEquals(0, count(connection, "T_ACL", "ACL_TYPE_C = 'ROUTING'"),

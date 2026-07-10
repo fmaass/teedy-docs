@@ -95,6 +95,11 @@ public class Constants {
     public static final String EMAIL_TEMPLATE_PASSWORD_RECOVERY = "password_recovery";
 
     /**
+     * Email template for route step validation.
+     */
+    public static final String EMAIL_TEMPLATE_ROUTE_STEP_VALIDATE = "route_step_validate";
+
+    /**
      * mm per inch.
      */
     public static float MM_PER_INCH = 1 / (10 * 2.54f) * 72f;
