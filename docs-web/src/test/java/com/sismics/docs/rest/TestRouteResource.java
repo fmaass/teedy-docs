@@ -697,6 +697,199 @@ public class TestRouteResource extends BaseJerseyTest {
     }
 
     /**
+     * FOLD: the assignment ("please validate") email HTML-escapes the user-authored document title.
+     * EmailUtil's FreeMarker config has no auto-escaping, so a raw ${document_title} would inject the
+     * title's HTML into the email body. Start a route on a document whose title contains <b>evil</b>;
+     * the captured assignment email must carry the escaped form and never the raw markup.
+     */
+    @Test
+    public void testAssignmentEmailEscapesDocumentTitle() throws Exception {
+        String adminToken = adminToken();
+        configureSmtp(adminToken);
+
+        // Document with an HTML-injection title.
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "<b>evil</b> title")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Starting the seeded route sends the assignment email to the first step's target (admins).
+        target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")), JsonObject.class);
+
+        String assignmentEmail = popEmail();
+        Assertions.assertNotNull(assignmentEmail, "The assignment email must be sent to the step target");
+        String normalizedEmail = assignmentEmail.replace("=\r\n", "").replace("=\n", "");
+        Assertions.assertTrue(normalizedEmail.contains("&lt;b&gt;evil&lt;/b&gt;"),
+                "The user-authored document title must be HTML-escaped in the assignment email body");
+        Assertions.assertFalse(normalizedEmail.contains("<b>evil</b>"),
+                "Raw user-authored HTML must never reach the assignment email body");
+    }
+
+    /**
+     * B1: starting a route on a TRASHED document is rejected NotFound (404) even as admin, and no
+     * route is created. The only gate before the fix was an ACL check that admins BYPASS
+     * (skipAclCheck), so an admin could start a route on a trashed/deleted document. The fix locks
+     * the document row FOR UPDATE and rejects it when its deleteDate is set, regardless of the ACL
+     * check. Without the fix this start returns 200 and creates an ACTIVE route on a trashed document.
+     */
+    @Test
+    public void testStartOnTrashedDocumentIs404() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Trash then start")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Trash the document (admin owns it)
+        target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+
+        // Start a route on the now-trashed document as admin -> 404, not 200.
+        Response start = target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")));
+        Assertions.assertEquals(Response.Status.NOT_FOUND.getStatusCode(), start.getStatus(),
+                "Starting a route on a trashed document must be rejected NotFound, even as admin");
+
+        // No route was created on the trashed document (its ROUTING ACL set stays empty too).
+        Assertions.assertEquals(0, activeRoutingAclCount(documentId),
+                "A rejected start must leave no ROUTING ACL on the trashed document");
+    }
+
+    /**
+     * B1 (post-guard rejection): with an ACTIVE route already present, a SEQUENTIAL second start on
+     * the same document is rejected RunningRoute by the "no active route" check.
+     * <p>
+     * HONESTY NOTE: this test does NOT prove start atomicity — it stays green even with the FOR
+     * UPDATE lock removed, because the pre-existing getCurrentStep guard already rejects a sequential
+     * second start. True start-atomicity (two truly concurrent starts must not both create an ACTIVE
+     * route) is enforced by the FOR UPDATE row lock in RouteResource.start /
+     * DocumentDao.getActiveByIdForUpdate, and is exercised by the concurrency test
+     * testConcurrentStartCreatesExactlyOneRoute below. This test only asserts the post-guard
+     * rejection surface (the RunningRoute response shape).
+     */
+    @Test
+    public void testSecondStartRejectedWhenRouteActive() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Only one active route")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // First start succeeds and creates the ACTIVE route.
+        Response first = target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")));
+        Assertions.assertEquals(Response.Status.OK.getStatusCode(), first.getStatus());
+
+        // Second start is rejected RunningRoute (the post-lock re-check).
+        Response second = target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")));
+        Assertions.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), second.getStatus());
+        Assertions.assertEquals("RunningRoute", second.readEntity(JsonObject.class).getString("type"),
+                "A second start with an ACTIVE route present must be rejected RunningRoute");
+
+        // Exactly one route exists on the document.
+        json = target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("routes").size(),
+                "Only one route may exist after a rejected second start");
+    }
+
+    /**
+     * B1 (genuine atomicity): two TRULY CONCURRENT starts on the SAME document must create exactly
+     * ONE active route — never two. The FOR UPDATE lock on the document row (taken by
+     * RouteResource.start via DocumentDao.getActiveByIdForUpdate before the "no active route" check)
+     * serializes the two requests: one wins and creates the route, the other blocks on the lock,
+     * then sees the winner's ACTIVE route and is rejected RunningRoute. Without the lock the two
+     * check-and-creates interleave and both create an ACTIVE route (the loser is NOT rejected),
+     * which a later single-route cancel would only partly clean up — stranding the other route's
+     * ROUTING grant. RED without the lock: routes count == 2 and okCount == 2.
+     */
+    @Test
+    public void testConcurrentStartCreatesExactlyOneRoute() throws Exception {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Concurrent start race")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Two identical starts fired concurrently on the same document. A launch barrier makes both
+        // threads issue the /route/start POST together, so the race is deterministically exercised
+        // (not left to the scheduler): without the FOR UPDATE lock both check-and-creates interleave.
+        java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+        Callable<Response> startCall = () -> {
+            barrier.await();
+            return target().path("/route/start").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .post(Entity.form(new Form()
+                            .param("documentId", documentId)
+                            .param("routeModelId", "default-document-review")));
+        };
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Response> f1 = pool.submit(startCall);
+            Future<Response> f2 = pool.submit(startCall);
+            Response r1 = f1.get();
+            Response r2 = f2.get();
+
+            int okCount = 0;
+            int runningRouteCount = 0;
+            for (Response r : new Response[]{r1, r2}) {
+                if (r.getStatus() == Response.Status.OK.getStatusCode()) {
+                    okCount++;
+                } else if (r.getStatus() == Response.Status.BAD_REQUEST.getStatusCode()
+                        && "RunningRoute".equals(r.readEntity(JsonObject.class).getString("type"))) {
+                    runningRouteCount++;
+                }
+            }
+            // Exactly one start wins; the concurrent loser must be rejected RunningRoute (it blocked
+            // on the FOR UPDATE lock, then saw the winner's ACTIVE route).
+            Assertions.assertEquals(1, okCount, "Exactly one concurrent start may win");
+            Assertions.assertEquals(1, runningRouteCount,
+                    "The losing concurrent start must be rejected RunningRoute, not create a second route");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // Authoritative check: exactly ONE route exists on the document.
+        json = target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("routes").size(),
+                "Two concurrent starts must leave exactly one route on the document");
+    }
+
+    /**
      * The guarded step-end wins exactly once: two concurrent validations of the same current step
      * yield exactly one success and one AlreadyEnded (400) — the lost-race response. This exercises
      * the deviation that a duplicate validation cannot double-run the transition.

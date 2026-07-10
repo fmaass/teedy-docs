@@ -1,7 +1,9 @@
 <#import "../layout.ftl" as layout>
 <@layout.email>
   <h2>${app_name} - ${messages['email.template.route_step_rejected.subject']}</h2>
-  <p>${messages('email.template.route_step_rejected.hello', user_name)}</p>
+  <#-- user_name is user-controlled under LDAP provisioning (login-supplied, unvalidated username):
+       HTML-escape it with ?html, matching the step name / comment / title escaping below. -->
+  <p>${messages('email.template.route_step_rejected.hello', user_name?html)}</p>
   <#-- User-authored values (step name, comment, document title) are HTML-escaped with ?html:
        EmailUtil's FreeMarker config has no auto-escaping, so a raw interpolation would inject
        user HTML into the email. base_url/document_id are system values and stay raw. -->

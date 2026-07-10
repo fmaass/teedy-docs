@@ -3,6 +3,7 @@ package com.sismics.docs.core.util;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.RouteStatus;
 import com.sismics.docs.core.dao.AuditLogDao;
+import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.RouteDao;
 import com.sismics.docs.core.dao.RouteModelDao;
 import com.sismics.docs.core.dao.RouteStepDao;
@@ -90,10 +91,20 @@ public class PrincipalDeletionUtil {
 
         RouteDao routeDao = new RouteDao();
         RouteStepDao routeStepDao = new RouteStepDao();
+        DocumentDao documentDao = new DocumentDao();
         int cancelled = 0;
         for (Object[] row : rows) {
             String routeId = (String) row[0];
             String documentId = (String) row[1];
+
+            // GLOBAL LOCK ORDER: DOCUMENT before ROUTE. Lock the route's document row FOR UPDATE
+            // before any route/step UPDATE below. Every other doc-vs-route lock site takes the same
+            // order (DocumentDao.delete and RouteResource.start lock the document first, then touch
+            // routes), so no path can hold a route lock while waiting on a document lock — the
+            // deadlock cycle is eliminated. lockByIdForUpdate (not getActiveByIdForUpdate) is used
+            // because the route's document may already be trashed in the target-cancel scenario, and
+            // the row must be locked regardless of its deleteDate.
+            documentDao.lockByIdForUpdate(documentId);
 
             // Halt the route and close its open steps with a system comment. The NULL transition
             // marks them system-ended: no actor rejected/approved anything (orchestrator-wide
@@ -101,8 +112,14 @@ public class PrincipalDeletionUtil {
             routeDao.endRoute(routeId, RouteStatus.CANCELLED);
             routeStepDao.endAllOpenSteps(routeId, null, "Cancelled: step target deleted");
 
-            // Remove the transient routing READ ACL granted to the deleted principal on the document.
-            deleteRoutingAcl(documentId, principalId, userId);
+            // Remove ALL of the document's transient ROUTING READ ACLs (target-agnostic), not just
+            // the deleted principal's. The deleted principal may own a FUTURE step (all steps are
+            // created unended, so the OPEN-step selection above matches future steps too) while a
+            // DIFFERENT principal holds the CURRENT step's ROUTING grant. A per-principal delete
+            // would cancel the route yet leave the current approver's grant on a now-terminal route
+            // (an authz leak). The invariant is the same one the in-place cancel enforces: a
+            // cancelled route leaves ZERO ROUTING ACLs on its document.
+            deleteAllRoutingAclsForDocument(documentId, userId);
 
             // Audit the cancellation on the route entity (matches RouteDao's audit idioms).
             Route route = em.find(Route.class, routeId);
@@ -163,7 +180,40 @@ public class PrincipalDeletionUtil {
         if (cancelled > 0) {
             deleteRoutingAclsForDocument(documentId, userId, documentDeleteDate);
         }
+
+        // Restore-safety normalization for a route that was ALREADY cancelled before this call (so
+        // the block above skipped it). The prior cancellation — e.g. the user-deletion target-cancel
+        // path (cancelRoutesTargetingPrincipal) that runs before the owner's document is trashed —
+        // soft-deleted the ROUTING ACLs with an INDEPENDENT current-clock timestamp. When the deleted
+        // user is BOTH the document owner and a step target, that timestamp can collide with the
+        // document's own trash timestamp (documentDeleteDate), and restore-from-trash (exact-equality
+        // on documentDeleteDate) would then resurrect the grant. Re-stamp any ROUTING ACL whose delete
+        // timestamp is not strictly before documentDeleteDate to the deterministic (documentDeleteDate
+        // - 1ms), guaranteeing distinctness regardless of which path first deleted it.
+        normalizeRoutingAclDeleteTimestamp(documentId, documentDeleteDate);
         return cancelled;
+    }
+
+    /**
+     * Ensure no soft-deleted ROUTING ACL on the document carries a delete timestamp at or after the
+     * document's own trash timestamp, by re-stamping any such ACL to (documentDeleteDate - 1ms). This
+     * is the restore-safety guard for ROUTING ACLs that a PRIOR cancellation soft-deleted with an
+     * independent clock sample (which could collide with documentDeleteDate); the deterministic offset
+     * used everywhere else is only guaranteed for ACLs this class deletes in the trash path itself.
+     *
+     * @param documentId Document (ACL source) ID
+     * @param documentDeleteDate The document's own soft-delete timestamp
+     */
+    private static void normalizeRoutingAclDeleteTimestamp(String documentId, Date documentDeleteDate) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query upd = em.createNativeQuery("update T_ACL set ACL_DELETEDATE_D = :safeDate " +
+                " where ACL_SOURCEID_C = :sourceId and ACL_TYPE_C = :type " +
+                " and ACL_DELETEDATE_D is not null and ACL_DELETEDATE_D >= :docDeleteDate");
+        upd.setParameter("safeDate", new Date(documentDeleteDate.getTime() - 1L));
+        upd.setParameter("sourceId", documentId);
+        upd.setParameter("type", ACL_TYPE_ROUTING);
+        upd.setParameter("docDeleteDate", documentDeleteDate);
+        upd.executeUpdate();
     }
 
     /**
@@ -238,55 +288,6 @@ public class PrincipalDeletionUtil {
                 " where ACL_SOURCEID_C = :sourceId and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
         upd.setParameter("dateNow", routingAclDeleteDate);
         upd.setParameter("sourceId", documentId);
-        upd.setParameter("type", ACL_TYPE_ROUTING);
-        upd.executeUpdate();
-    }
-
-    /**
-     * Soft-delete the transient workflow ("ROUTING") READ ACLs on a document for a given target,
-     * writing a DELETE audit log for each (mirroring the AclDao delete idiom). Uses a literal type
-     * string rather than the AclType enum because the routing enum value is owned by the workflow
-     * REST layer — which also means a ROUTING row cannot be loaded as an Acl entity (enum mapping
-     * would fail), so the audit rows are written via AuditLogDao with the exact fields
-     * AuditLogUtil.create would produce (entityClass "Acl", message = perm name).
-     *
-     * @param documentId Document (ACL source) ID
-     * @param targetId Target principal ID
-     * @param userId User performing the deletion (audit attribution)
-     */
-    @SuppressWarnings("unchecked")
-    private static void deleteRoutingAcl(String documentId, String targetId, String userId) {
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
-
-        // Audit each ACL row before soft-deleting it.
-        Query q = em.createNativeQuery("select ACL_ID_C, ACL_PERM_C from T_ACL " +
-                " where ACL_SOURCEID_C = :sourceId and ACL_TARGETID_C = :targetId " +
-                " and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
-        q.setParameter("sourceId", documentId);
-        q.setParameter("targetId", targetId);
-        q.setParameter("type", ACL_TYPE_ROUTING);
-        List<Object[]> aclRows = q.getResultList();
-        if (aclRows.isEmpty()) {
-            return;
-        }
-
-        AuditLogDao auditLogDao = new AuditLogDao();
-        for (Object[] aclRow : aclRows) {
-            AuditLog auditLog = new AuditLog();
-            auditLog.setUserId(userId == null ? "admin" : userId);
-            auditLog.setEntityId((String) aclRow[0]);
-            auditLog.setEntityClass("Acl");
-            auditLog.setType(AuditLogType.DELETE);
-            auditLog.setMessage((String) aclRow[1]);
-            auditLogDao.create(auditLog);
-        }
-
-        Query upd = em.createNativeQuery("update T_ACL set ACL_DELETEDATE_D = :dateNow " +
-                " where ACL_SOURCEID_C = :sourceId and ACL_TARGETID_C = :targetId " +
-                " and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
-        upd.setParameter("dateNow", new Date());
-        upd.setParameter("sourceId", documentId);
-        upd.setParameter("targetId", targetId);
         upd.setParameter("type", ACL_TYPE_ROUTING);
         upd.executeUpdate();
     }

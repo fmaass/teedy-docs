@@ -19,6 +19,7 @@ import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.criteria.UserCriteria;
 import com.sismics.docs.core.dao.dto.UserDto;
+import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
@@ -343,12 +344,47 @@ public class UserDao {
         q = em.createQuery("delete from AuthenticationToken at where at.userId = :userId");
         q.setParameter("userId", userDb.getId());
         q.executeUpdate();
-        
+
+        // For each of the user's OWNED documents, cancel any ACTIVE route and clear its ROUTING ACLs
+        // BEFORE the documents are trashed, as ONE coherent per-document operation sharing the SAME
+        // dateNow used for the trash below. cancelActiveRoutesForDocument ends the route CANCELLED,
+        // system-ends its open steps, and soft-deletes ALL the document's ROUTING ACLs with the
+        // deterministic (dateNow - 1ms) timestamp — guaranteed distinct from the document's own trash
+        // timestamp (dateNow) even when the deleted user is BOTH the owner and a step target (there is
+        // no independent clock sample to collide), so restore-from-trash cannot resurrect the grant.
+        //
+        // Each owned document is LOCKED FOR UPDATE (getActiveByIdForUpdate) first; the lock is held to
+        // transaction commit, so it spans both this cancel and the bulk document-trash below. A
+        // concurrent route-start on the same document — which takes the same row lock — therefore
+        // blocks until this deletion commits, then re-reads the row as trashed and is rejected
+        // NotFound. That closes the TOCTOU window a bare scan-then-trash would leave open (a start
+        // slipping in between and creating a fresh ACTIVE route on a document about to be trashed).
+        //
+        // NOTE: file trashing deliberately stays with the OWNER-scoped bulk File update below (only
+        // the deleted user's OWN files), NOT the per-document file trash. A collaborator's file
+        // uploaded into the owner's document is intentionally left stranded (deleteDate == null) for
+        // the trash-purge quota reclaim to charge back to its own uploader (BL-021). Routing owned
+        // docs through DocumentDao.delete (which trashes files by documentId) would over-trash those
+        // collaborator files and break that reclaim invariant, so the route/ACL cancellation is done
+        // directly here rather than via the full document-delete path.
+        DocumentDao documentDao = new DocumentDao();
+        // Lock the owned documents in a STABLE ascending order by document ID. Two concurrent
+        // multi-document lockers (e.g. two user-deletions, or a user-delete vs a batch trash) that
+        // acquired overlapping document locks in different orders could deadlock on doc-vs-doc; a
+        // single global ordering removes that cycle.
+        List<Document> ownedDocuments = new ArrayList<>(documentDao.findByUserId(userDb.getId()));
+        ownedDocuments.sort(java.util.Comparator.comparing(Document::getId));
+        for (Document ownedDocument : ownedDocuments) {
+            documentDao.getActiveByIdForUpdate(ownedDocument.getId());
+            com.sismics.docs.core.util.PrincipalDeletionUtil.cancelActiveRoutesForDocument(
+                    ownedDocument.getId(), userId, dateNow);
+        }
+
         q = em.createQuery("update Document d set d.deleteDate = :dateNow where d.userId = :userId and d.deleteDate is null");
         q.setParameter("userId", userDb.getId());
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();
-        
+
         q = em.createQuery("update File f set f.deleteDate = :dateNow where f.userId = :userId and f.deleteDate is null");
         q.setParameter("userId", userDb.getId());
         q.setParameter("dateNow", dateNow);
