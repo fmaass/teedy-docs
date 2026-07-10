@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
@@ -25,6 +25,11 @@ const queryClient = useQueryClient()
 const username = ref('')
 const password = ref('')
 const remember = ref(false)
+const validationCode = ref('')
+// Set true after the backend challenges a TOTP-enabled login with
+// "ValidationCodeRequired": the OTP code field is revealed and the user re-submits.
+// Stays false for every non-TOTP login, so the field never shows for them.
+const totpRequired = ref(false)
 const loading = ref(false)
 const guestLoading = ref(false)
 const error = ref('')
@@ -35,7 +40,9 @@ const oidcError = ref(false)
 
 interface ApiError {
   response?: {
+    status?: number
     data?: {
+      type?: string
       message?: string
     }
   }
@@ -44,6 +51,33 @@ interface ApiError {
 function extractLoginErrorMessage(error: unknown, fallback: string): string {
   return (error as ApiError).response?.data?.message || fallback
 }
+
+// The backend signals a TOTP-enabled account with a 400 whose JSON body carries
+// type "ValidationCodeRequired" (UserResource#login). api/client.ts leaves this
+// rejection intact (only 401 is intercepted), so the type is read straight off
+// error.response.data. Require the 400 status too, so an unrelated failure that
+// happened to echo the type string can't force the code prompt.
+function isValidationCodeRequired(error: unknown): boolean {
+  const res = (error as ApiError).response
+  return res?.status === 400 && res?.data?.type === 'ValidationCodeRequired'
+}
+
+// A wrong TOTP code is a genuine 403 (ForbiddenClientException). Only this status
+// is treated as "wrong code"; a network error, rate-limit (429) or any other
+// failure falls through to normal error handling instead of being mislabeled.
+function isForbidden(error: unknown): boolean {
+  return (error as ApiError).response?.status === 403
+}
+
+// After a challenge, editing the username or password must retract the code prompt
+// so a code entered for one account can't be submitted against a different one.
+watch([username, password], () => {
+  if (totpRequired.value) {
+    totpRequired.value = false
+    validationCode.value = ''
+    error.value = ''
+  }
+})
 
 onMounted(async () => {
   try {
@@ -67,10 +101,29 @@ async function handleLogin() {
   error.value = ''
   loading.value = true
   try {
-    await auth.login(username.value, password.value, remember.value)
+    await auth.login(
+      username.value,
+      password.value,
+      remember.value,
+      totpRequired.value ? validationCode.value : undefined,
+    )
     router.push({ name: 'documents' })
   } catch (loginError: unknown) {
-    error.value = extractLoginErrorMessage(loginError, 'Invalid username or password')
+    if (isValidationCodeRequired(loginError)) {
+      // TOTP-enabled account: reveal the code field and let the user re-submit.
+      // Password was accepted; only the OTP code is outstanding.
+      totpRequired.value = true
+      error.value = t('login.validation_code_required')
+    } else if (totpRequired.value && isForbidden(loginError)) {
+      // Code field is showing and the backend returned 403 — the OTP code was
+      // wrong. Clear it, keep the field visible for a retry, show a wrong-code msg.
+      validationCode.value = ''
+      error.value = t('login.validation_code_invalid')
+    } else {
+      // Any other failure (bad password before challenge, network error, 429
+      // rate-limit, etc.) uses the backend message / generic fallback.
+      error.value = extractLoginErrorMessage(loginError, 'Invalid username or password')
+    }
   } finally {
     loading.value = false
   }
@@ -155,6 +208,19 @@ async function handleForgot() {
             :inputProps="{ autocomplete: 'current-password', name: 'password' }"
             inputClass="w-full"
             class="w-full"
+          />
+        </div>
+
+        <div v-if="totpRequired" class="teedy-login-field">
+          <label for="login-code">{{ t('login.validation_code') }}</label>
+          <p class="text-sm text-muted mb-2">{{ t('login.validation_code_title') }}</p>
+          <InputText
+            id="login-code"
+            v-model="validationCode"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            class="w-full"
+            autofocus
           />
         </div>
 

@@ -27,11 +27,15 @@ export function getCurrentUser() {
   return api.get<UserInfo>('/user')
 }
 
-export function login(username: string, password: string, remember: boolean) {
+// `code` is the TOTP 2FA validation code. It is appended ONLY when non-empty:
+// a non-TOTP login sends nothing new, and the backend rejects a login for a
+// TOTP-enabled user that omits it with ClientException type "ValidationCodeRequired".
+export function login(username: string, password: string, remember: boolean, code?: string) {
   const params = new URLSearchParams()
   params.set('username', username)
   params.set('password', password)
   params.set('remember', String(remember))
+  if (code) params.set('code', code)
   return api.post('/user/login', params)
 }
 

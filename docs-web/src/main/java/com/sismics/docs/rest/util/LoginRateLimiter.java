@@ -81,6 +81,15 @@ public class LoginRateLimiter {
         attempts.remove(key);
     }
 
+    /**
+     * Clear all tracked attempts. Test support only: the limiter is a process-wide
+     * singleton whose in-memory state would otherwise leak across tests sharing the
+     * loopback client IP.
+     */
+    public void reset() {
+        attempts.clear();
+    }
+
     private static class AttemptInfo {
         final int failCount;
         final long lastFailTime;

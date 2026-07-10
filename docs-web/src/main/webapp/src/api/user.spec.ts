@@ -11,7 +11,38 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { listSessions, deleteOtherSessions, type UserSession } from './user'
+import { listSessions, deleteOtherSessions, login, type UserSession } from './user'
+
+describe('login', () => {
+  beforeEach(() => mock.post.mockClear())
+
+  function postedParams(): URLSearchParams {
+    return mock.post.mock.calls[0][1] as URLSearchParams
+  }
+
+  it('POSTs /user/login with username, password, remember and NO code when code is omitted', async () => {
+    await login('alice', 'secret', true)
+    expect(mock.post).toHaveBeenCalledTimes(1)
+    expect(mock.post.mock.calls[0][0]).toBe('/user/login')
+    const params = postedParams()
+    expect(params.get('username')).toBe('alice')
+    expect(params.get('password')).toBe('secret')
+    expect(params.get('remember')).toBe('true')
+    // Non-TOTP login must send no `code` param (the backend contract for it).
+    expect(params.has('code')).toBe(false)
+  })
+
+  it('appends the code param only when a non-empty code is provided', async () => {
+    await login('alice', 'secret', false, '123456')
+    const params = postedParams()
+    expect(params.get('code')).toBe('123456')
+  })
+
+  it('omits the code param when the code is an empty string', async () => {
+    await login('alice', 'secret', false, '')
+    expect(postedParams().has('code')).toBe(false)
+  })
+})
 
 describe('listSessions', () => {
   beforeEach(() => mock.get.mockClear())

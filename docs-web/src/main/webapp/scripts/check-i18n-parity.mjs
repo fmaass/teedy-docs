@@ -54,7 +54,6 @@ const AWAITING_PREFIXES = [
   'settings.menu_two_factor_auth',
   'settings.inbox.',              // IMAP inbox import — not ported
   'settings.menu_inbox',
-  'login.validation_code',        // 2FA login validation-code prompt — pairs with 2FA
 ]
 
 // Fail the build on newly-unused keys, or only warn? Warning-first so the remaining

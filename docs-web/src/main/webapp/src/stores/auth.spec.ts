@@ -162,10 +162,34 @@ describe('auth store', () => {
 
       await store.login('carol', 'pw', true)
 
-      expect(mockApiLogin).toHaveBeenCalledWith('carol', 'pw', true)
+      expect(mockApiLogin).toHaveBeenCalledWith('carol', 'pw', true, undefined)
       expect(mockGetCurrentUser).toHaveBeenCalledTimes(1)
       expect(store.user?.username).toBe('carol')
       expect(store.initialized).toBe(true)
+    })
+
+    // TOTP 2FA: the store must forward the optional validation code to the API so a
+    // challenged login (ValidationCodeRequired) can be re-submitted with the code.
+    it('forwards the optional TOTP code to the login API', async () => {
+      mockApiLogin.mockResolvedValue({} as any)
+      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ username: 'carol' }) } as any)
+      const store = useAuthStore()
+
+      await store.login('carol', 'pw', false, '654321')
+
+      expect(mockApiLogin).toHaveBeenCalledWith('carol', 'pw', false, '654321')
+    })
+
+    // A rejected login (wrong code / bad password) must propagate so the view can
+    // reveal the code field or surface a wrong-code error.
+    it('propagates a rejected login instead of swallowing it', async () => {
+      mockApiLogin.mockRejectedValue({ response: { status: 400, data: { type: 'ValidationCodeRequired' } } })
+      const store = useAuthStore()
+
+      await expect(store.login('carol', 'pw', false)).rejects.toMatchObject({
+        response: { data: { type: 'ValidationCodeRequired' } },
+      })
+      expect(mockGetCurrentUser).not.toHaveBeenCalled()
     })
   })
 

@@ -336,25 +336,34 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Clear rate limiter on successful auth
-        rateLimiter.recordSuccess(clientIp);
-        if (username != null) rateLimiter.recordSuccess("user:" + username);
-
-        // Two factor authentication
+        // Two factor authentication. The rate limiter is NOT cleared until the FULL
+        // authentication (password AND, if enabled, TOTP) succeeds, so a wrong TOTP
+        // code counts toward lockout just like a wrong password. Otherwise an attacker
+        // holding the password could brute-force the 6-digit code without limit.
         if (user.getTotpKey() != null) {
-            // If TOTP is enabled, ask a validation code
+            // If TOTP is enabled, ask a validation code. This is a prompt, not a failed
+            // attempt, so no failure is recorded here.
             if (Strings.isNullOrEmpty(validationCodeStr)) {
                 throw new ClientException("ValidationCodeRequired", "An OTP validation code is required");
             }
-            
+
             // Check the validation code
             int validationCode = ValidationUtil.validateInteger(validationCodeStr, "code");
             GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
             if (!googleAuthenticator.authorize(user.getTotpKey(), validationCode)) {
+                // A wrong TOTP code is a failed authentication attempt: record it against
+                // the same IP + user keys used for wrong passwords, so repeated wrong
+                // codes trigger lockout.
+                rateLimiter.recordFailure(clientIp);
+                if (username != null) rateLimiter.recordFailure("user:" + username);
                 throw new ForbiddenClientException();
             }
         }
-        
+
+        // Clear rate limiter on fully successful auth (password + TOTP, if enabled)
+        rateLimiter.recordSuccess(clientIp);
+        if (username != null) rateLimiter.recordSuccess("user:" + username);
+
         // Get the remote IP
         String ip = request.getHeader("x-forwarded-for");
         if (Strings.isNullOrEmpty(ip)) {
