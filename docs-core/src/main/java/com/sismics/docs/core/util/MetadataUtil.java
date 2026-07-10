@@ -4,10 +4,12 @@ import com.google.common.collect.Maps;
 import com.sismics.docs.core.constant.MetadataType;
 import com.sismics.docs.core.dao.DocumentMetadataDao;
 import com.sismics.docs.core.dao.MetadataDao;
+import com.sismics.docs.core.dao.VocabularyDao;
 import com.sismics.docs.core.dao.criteria.MetadataCriteria;
 import com.sismics.docs.core.dao.dto.DocumentMetadataDto;
 import com.sismics.docs.core.dao.dto.MetadataDto;
 import com.sismics.docs.core.model.jpa.DocumentMetadata;
+import com.sismics.docs.core.model.jpa.Vocabulary;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 
 import jakarta.json.Json;
@@ -48,12 +50,20 @@ public class MetadataUtil {
         List<MetadataDto> metadataDtoList = metadataDao.findByCriteria(new MetadataCriteria(), null);
         List<DocumentMetadataDto> documentMetadataDtoList = documentMetadataDao.getByDocumentId(documentId);
 
+        // Index metadata definitions by ID for vocabulary lookup
+        Map<String, MetadataDto> metadataById = Maps.newHashMap();
+        for (MetadataDto metadataDto : metadataDtoList) {
+            metadataById.put(metadataDto.getId(), metadataDto);
+        }
+
         // Update existing values
         for (DocumentMetadataDto documentMetadataDto : documentMetadataDtoList) {
             if (newValues.containsKey(documentMetadataDto.getMetadataId())) {
                 // Update the value
                 String value = newValues.get(documentMetadataDto.getMetadataId());
-                validateValue(documentMetadataDto.getType(), value);
+                MetadataDto definition = metadataById.get(documentMetadataDto.getMetadataId());
+                validateValue(documentMetadataDto.getType(), value,
+                        definition == null ? null : definition.getVocabulary());
                 updateValue(documentMetadataDto.getId(), value);
                 newValues.remove(documentMetadataDto.getMetadataId());
             } else {
@@ -78,7 +88,7 @@ public class MetadataUtil {
             }
 
             // Add the value
-            validateValue(metadata.getType(), entry.getValue());
+            validateValue(metadata.getType(), entry.getValue(), metadata.getVocabulary());
             createValue(documentId, entry.getKey(), entry.getValue());
         }
     }
@@ -103,9 +113,10 @@ public class MetadataUtil {
      *
      * @param type Metadata type
      * @param value Value
+     * @param vocabulary Referenced vocabulary name (only used when type is VOCABULARY)
      * @throws Exception In case of validation error
      */
-    private static void validateValue(MetadataType type, String value) throws Exception {
+    private static void validateValue(MetadataType type, String value, String vocabulary) throws Exception {
         switch (type) {
             case STRING:
             case BOOLEAN:
@@ -129,6 +140,21 @@ public class MetadataUtil {
                     Integer.parseInt(value);
                 } catch (NumberFormatException e) {
                     throw new Exception("Integer value not parsable");
+                }
+                break;
+            case VOCABULARY:
+                if (vocabulary == null) {
+                    throw new Exception("Vocabulary metadata has no referenced vocabulary");
+                }
+                boolean found = false;
+                for (Vocabulary entry : new VocabularyDao().getByName(vocabulary)) {
+                    if (entry.getValue().equals(value)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw new Exception(MessageFormat.format("Value ''{0}'' is not part of vocabulary ''{1}''", value, vocabulary));
                 }
                 break;
         }
@@ -181,11 +207,15 @@ public class MetadataUtil {
                     .add("id", metadataDto.getId())
                     .add("name", metadataDto.getName())
                     .add("type", metadataDto.getType().name());
+            if (metadataDto.getVocabulary() != null) {
+                meta.add("vocabulary", metadataDto.getVocabulary());
+            }
             for (DocumentMetadataDto documentMetadataDto : documentMetadataDtoList) {
                 if (documentMetadataDto.getMetadataId().equals(metadataDto.getId())) {
                     if (documentMetadataDto.getValue() != null) {
                         switch (metadataDto.getType()) {
                             case STRING:
+                            case VOCABULARY:
                                 meta.add("value", documentMetadataDto.getValue());
                                 break;
                             case BOOLEAN:

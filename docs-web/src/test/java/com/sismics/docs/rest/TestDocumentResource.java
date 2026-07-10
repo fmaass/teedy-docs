@@ -1425,6 +1425,87 @@ public class TestDocumentResource extends BaseJerseyTest {
     }
 
     /**
+     * A VOCABULARY-typed metadata value on a document must be one of the referenced
+     * vocabulary's entry values: an in-vocabulary value is accepted, an out-of-vocabulary
+     * value is rejected.
+     */
+    @Test
+    public void testVocabularyMetadataValue() {
+        // Login admin, define a VOCABULARY metadata backed by the seeded 'type' vocabulary
+        String adminToken = adminToken();
+        JsonObject json = target().path("/metadata").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("name", "DublinType")
+                        .param("type", "VOCABULARY")
+                        .param("vocabulary", "type")), JsonObject.class);
+        String metaId = json.getString("id");
+
+        // Login a normal user
+        clientUtil.createUser("vocvalue1");
+        String token = clientUtil.login("vocvalue1");
+
+        // In-vocabulary value ('Text' is a seeded 'type' entry) is accepted
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Voc value ok")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "Text")), JsonObject.class);
+        String docId = json.getString("id");
+
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonObject meta = findMetadata(json.getJsonArray("metadata"), metaId);
+        Assertions.assertEquals("VOCABULARY", meta.getString("type"));
+        Assertions.assertEquals("Text", meta.getString("value"));
+
+        // Out-of-vocabulary value is rejected on CREATE
+        Response response = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Voc value bad")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "NotAVocabularyValue")));
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+
+        // The same membership invariant must hold on the UPDATE path: setting an
+        // out-of-vocabulary value via document update is rejected.
+        response = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Voc value ok")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "StillNotAVocabularyValue")));
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+
+        // A valid in-vocabulary value IS accepted on update (changes 'Text' -> 'Image').
+        target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Voc value ok")
+                        .param("language", "eng")
+                        .param("metadata_id", metaId)
+                        .param("metadata_value", "Image")), JsonObject.class);
+        json = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        meta = findMetadata(json.getJsonArray("metadata"), metaId);
+        Assertions.assertEquals("Image", meta.getString("value"));
+
+        // Clean up the metadata definition. addMetadata() returns EVERY defined field,
+        // so a leaked definition would inflate the metadata-array size other tests in
+        // this shared-database class assert on (e.g. testCustomMetadata).
+        target().path("/metadata/" + metaId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+    }
+
+    /**
      * SEC-01: emptying trash must be scoped to the caller's own documents.
      * A non-admin user can empty their own trash (regression: the ACL join
      * required a live READ ACL, which is soft-deleted on trash, so this

@@ -12,6 +12,7 @@ import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.model.jpa.UserGroup;
+import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
@@ -149,16 +150,22 @@ public class GroupResource extends BaseResource {
             parentId = parentGroup.getId();
         }
 
+        // Route models resolve their step targets by name, so a rename orphans any model that
+        // referenced this group (its blob still names the old group). Collect the affected models
+        // before the rename to warn the operator; the blob is intentionally left untouched.
+        List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(group.getId());
+
         // Update the group
         groupDao.update(group.setName(name)
                 .setParentId(parentId), principal.getId());
-        
-        // Always return OK
+
+        // Return OK plus a warning payload naming any route models that referenced this group.
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
+        UserResource.addRouteModelsAffected(response, affectedRouteModels);
         return Response.ok().entity(response.build()).build();
     }
-    
+
     /**
      * Delete a group.
      *
@@ -198,15 +205,21 @@ public class GroupResource extends BaseResource {
             }
         }
 
+        // Gracefully handle workflow references (never blocks): collect affected route models and
+        // cancel active routes with an open step targeting this group.
+        List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(group.getId());
+        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(group.getId(), principal.getId());
+
         // Delete the group
         groupDao.delete(group.getId(), principal.getId());
-        
-        // Always return OK
+
+        // Return OK plus a warning payload naming any route models that referenced this group.
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
+        UserResource.addRouteModelsAffected(response, affectedRouteModels);
         return Response.ok().entity(response.build()).build();
     }
-    
+
     /**
      * Add a user to a group.
      *

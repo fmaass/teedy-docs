@@ -3,9 +3,10 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { getDocument, createDocument, updateDocument } from '../../api/document'
+import { getDocument, createDocument, updateDocument, importEml } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
+import { getVocabulary } from '../../api/vocabulary'
 import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
 import { shouldResetTags } from '../../utils/tagsReset'
 import { useTagFilterStore } from '../../stores/tagFilter'
@@ -96,6 +97,42 @@ const metadataSetIds = ref<Set<string>>(new Set())
 // metadata_reset=true") apart from a document that simply never had metadata.
 const metadataHadValuesAtLoad = ref(false)
 
+// Vocabulary option cache keyed by vocabulary name. Each entry is the list of
+// selectable values for that vocabulary, loaded on demand and shared by the Dublin
+// Core trio selects (type/coverage/rights) and any VOCABULARY custom-metadata field.
+const vocabularyOptions = ref<Record<string, string[]>>({})
+
+function loadVocabulary(name: string) {
+  if (!name || vocabularyOptions.value[name] !== undefined) return
+  // Mark as loading (empty list) so we do not fire the request twice.
+  vocabularyOptions.value[name] = []
+  getVocabulary(name)
+    .then(({ data }) => {
+      vocabularyOptions.value[name] = (data.entries ?? []).map((e) => e.value)
+    })
+    .catch(() => {
+      // Leave an empty option list on failure; the Select simply shows no options.
+    })
+}
+
+function vocabularyOptionsFor(name?: string): string[] {
+  if (!name) return []
+  return vocabularyOptions.value[name] ?? []
+}
+
+// Load the vocabularies referenced by the current metadata definitions (VOCABULARY
+// fields) plus the Dublin Core trio (type/coverage/rights, which are always selects).
+function loadMetadataVocabularies() {
+  loadVocabulary('type')
+  loadVocabulary('coverage')
+  loadVocabulary('rights')
+  for (const def of metadataDefinitions.value) {
+    if (def.type === 'VOCABULARY' && def.vocabulary) {
+      loadVocabulary(def.vocabulary)
+    }
+  }
+}
+
 const fileUploadRef = ref()
 
 const languages = SUPPORTED_LANGUAGES
@@ -142,7 +179,9 @@ async function initFromRoute() {
         id: m.id,
         name: m.name,
         type: m.type as MetadataDefinition['type'],
+        vocabulary: m.vocabulary,
       }))
+      loadMetadataVocabularies()
       hydrateMetadataValues(data.metadata ?? [])
       existingFiles.value = data.files || []
     } catch {
@@ -166,6 +205,7 @@ async function initFromRoute() {
       const { data } = await listMetadata()
       if (gen !== initGen) return
       metadataDefinitions.value = data.metadata
+      loadMetadataVocabularies()
       hydrateMetadataValues(data.metadata)
     } catch { /* no custom fields available */ }
     if (gen !== initGen) return
@@ -392,6 +432,39 @@ async function handleSubmit() {
     uploadingFiles.value = false
   }
 }
+
+// --- .eml import (create mode only) ---
+// The EML endpoint creates a whole document from the email itself (title, body, and
+// attachments), so it is a one-shot import rather than a file added to THIS form's
+// document. The user picks an .eml file; we PUT it to /document/eml and navigate to
+// the created document. Kept separate from the normal file queue, whose files attach
+// to the document built from the form fields above.
+const emlInputRef = ref<HTMLInputElement | null>(null)
+const importingEml = ref(false)
+
+function triggerEmlPicker() {
+  emlInputRef.value?.click()
+}
+
+async function onEmlSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Reset the input so re-picking the same file fires change again.
+  input.value = ''
+  if (!file) return
+
+  importingEml.value = true
+  try {
+    const { data } = await importEml(file)
+    await queryClient.invalidateQueries({ queryKey: ['documents'] })
+    toast.add({ severity: 'success', summary: t('ui.eml_imported'), life: 2000 })
+    router.push({ name: 'document-view', params: { id: data.id } })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.eml_import_failed'), life: 4000 })
+  } finally {
+    importingEml.value = false
+  }
+}
 </script>
 
 <template>
@@ -487,17 +560,41 @@ async function handleSubmit() {
           </div>
           <div class="form-field">
             <label for="edit-type">{{ t('document.type') }}</label>
-            <InputText id="edit-type" v-model="form.type" class="w-full" />
+            <Select
+              id="edit-type"
+              v-model="form.type"
+              :options="vocabularyOptionsFor('type')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
             <label for="edit-coverage">{{ t('document.coverage') }}</label>
-            <InputText id="edit-coverage" v-model="form.coverage" class="w-full" />
+            <Select
+              id="edit-coverage"
+              v-model="form.coverage"
+              :options="vocabularyOptionsFor('coverage')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
           <div class="form-field">
             <label for="edit-rights">{{ t('document.rights') }}</label>
-            <InputText id="edit-rights" v-model="form.rights" class="w-full" />
+            <Select
+              id="edit-rights"
+              v-model="form.rights"
+              :options="vocabularyOptionsFor('rights')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
         </div>
       </div>
@@ -535,6 +632,16 @@ async function handleSubmit() {
             :useGrouping="false"
             :minFractionDigits="1"
             :maxFractionDigits="6"
+            class="w-full"
+          />
+          <Select
+            v-else-if="def.type === 'VOCABULARY'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as string)"
+            :options="vocabularyOptionsFor(def.vocabulary)"
+            showClear
+            filter
+            :placeholder="t('ui.vocabulary.select_placeholder')"
             class="w-full"
           />
           <InputText
@@ -591,6 +698,29 @@ async function handleSubmit() {
 
       <!-- Camera capture: opens the device camera on mobile; photos queue for save. -->
       <CameraCaptureButton @capture="onCameraCapture" />
+
+      <!-- .eml import (create only): builds a whole document from an email file via
+           the dedicated endpoint, then navigates to it. Separate from the file queue. -->
+      <div v-if="!isEdit" class="eml-import">
+        <input
+          ref="emlInputRef"
+          type="file"
+          accept=".eml,message/rfc822"
+          class="eml-input"
+          @change="onEmlSelected"
+        />
+        <Button
+          type="button"
+          :label="t('ui.import_eml')"
+          icon="pi pi-envelope"
+          severity="secondary"
+          outlined
+          size="small"
+          :loading="importingEml"
+          @click="triggerEmlPicker"
+        />
+        <span class="eml-hint">{{ t('ui.import_eml_hint') }}</span>
+      </div>
 
       <!-- Real per-file upload progress while saving. -->
       <UploadProgressList
@@ -744,6 +874,20 @@ a.file-name:hover {
 
 .upload-hint {
   margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+.eml-import {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+.eml-input {
+  display: none;
+}
+.eml-hint {
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
 }

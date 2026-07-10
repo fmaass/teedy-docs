@@ -10,5 +10,6 @@ public enum MetadataType {
     INTEGER,
     FLOAT,
     DATE,
-    BOOLEAN
+    BOOLEAN,
+    VOCABULARY
 }

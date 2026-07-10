@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 import api from '../../api/client'
+import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, type SmtpConfig, type SmtpEnvManagedField } from '../../api/app'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { formatFileSize } from '../../utils/formatters'
 import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
+import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
+import Password from 'primevue/password'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
@@ -86,7 +90,80 @@ function handleOcrToggle(val: boolean) {
   toggleOcr(val)
 }
 
+// --- SMTP configuration ---
+// The password is write-only: the GET never returns it (and there is NO password_set
+// flag). We keep the field blank and show a "leave blank to keep" hint unconditionally.
+const smtp = reactive<SmtpConfig>({ hostname: '', port: null, username: '', password: '', from: '' })
+
+// Fields the backend OMITTED from the GET response are managed by a DOCS_SMTP_*
+// environment variable (absent key), as opposed to present-but-null (unset,
+// editable). Env-managed fields render disabled — a value typed there would be
+// saved to the DB but silently shadowed by the env var at runtime.
+const smtpEnvManaged = ref<Set<SmtpEnvManagedField>>(new Set())
+const SMTP_ENV_VAR: Record<SmtpEnvManagedField, string> = {
+  hostname: 'DOCS_SMTP_HOSTNAME',
+  port: 'DOCS_SMTP_PORT',
+  username: 'DOCS_SMTP_USERNAME',
+}
+
+const { data: smtpConfig } = useQuery({
+  queryKey: ['smtp-config'],
+  queryFn: () => getSmtpConfig(),
+})
+
+let smtpSeeded = false
+watch(smtpConfig, (config) => {
+  if (!config || smtpSeeded) return
+  smtpEnvManaged.value = smtpEnvManagedFields(config)
+  smtp.hostname = config.hostname ?? ''
+  smtp.port = config.port ?? null
+  smtp.username = config.username ?? ''
+  smtp.from = config.from ?? ''
+  smtp.password = ''
+  smtpSeeded = true
+}, { immediate: true })
+
+const { mutate: saveSmtp, isPending: savingSmtp } = useMutation({
+  mutationFn: () => {
+    // Never POST an env-managed field: its input is disabled/blank, and the value
+    // shown to the admin is the env var's, not whatever might linger in the DB.
+    const payload: SmtpConfig = { ...smtp }
+    for (const field of smtpEnvManaged.value) {
+      delete payload[field]
+    }
+    return saveSmtpConfig(payload)
+  },
+  onSuccess: () => {
+    // Clear the just-typed secret so it is not left in memory or re-sent on the next save.
+    smtp.password = ''
+    toast.add({ severity: 'success', summary: t('ui.smtp.saved'), life: 2000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: t('ui.smtp.failed_save'), life: 3000 })
+  },
+})
+
 const reindexing = ref(false)
+const cleaningStorage = ref(false)
+
+function handleCleanStorage() {
+  confirmDanger({
+    message: t('ui.config.clean_storage_confirm'),
+    header: t('ui.config.clean_storage_header'),
+    icon: 'pi pi-exclamation-triangle',
+    accept: async () => {
+      cleaningStorage.value = true
+      try {
+        await cleanStorage()
+        toast.add({ severity: 'success', summary: t('ui.config.clean_storage_done'), life: 3000 })
+      } catch {
+        toast.add({ severity: 'error', summary: t('ui.config.clean_storage_failed'), life: 3000 })
+      } finally {
+        cleaningStorage.value = false
+      }
+    },
+  })
+}
 
 function handleReindex() {
   confirmDanger({
@@ -146,18 +223,59 @@ function handleReindex() {
     </template></Card>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>
+      <h3>{{ t('ui.smtp.title') }}</h3>
+      <p class="section-hint">{{ t('ui.smtp.hint') }}</p>
+      <div class="form-field">
+        <label for="smtp-hostname">{{ t('ui.smtp.hostname') }}</label>
+        <InputText id="smtp-hostname" v-model="smtp.hostname" class="w-full" :disabled="smtpEnvManaged.has('hostname')" />
+        <small v-if="smtpEnvManaged.has('hostname')" class="field-hint">{{ t('ui.smtp.env_managed', { env: SMTP_ENV_VAR.hostname }) }}</small>
+      </div>
+      <div class="form-field">
+        <label for="smtp-port">{{ t('ui.smtp.port') }}</label>
+        <InputNumber inputId="smtp-port" v-model="smtp.port" :useGrouping="false" class="w-full" :min="0" :disabled="smtpEnvManaged.has('port')" />
+        <small v-if="smtpEnvManaged.has('port')" class="field-hint">{{ t('ui.smtp.env_managed', { env: SMTP_ENV_VAR.port }) }}</small>
+      </div>
+      <div class="form-field">
+        <label for="smtp-from">{{ t('ui.smtp.from') }}</label>
+        <InputText id="smtp-from" v-model="smtp.from" class="w-full" />
+      </div>
+      <div class="form-field">
+        <label for="smtp-username">{{ t('ui.smtp.username') }}</label>
+        <InputText id="smtp-username" v-model="smtp.username" :autocomplete="'off'" class="w-full" :disabled="smtpEnvManaged.has('username')" />
+        <small v-if="smtpEnvManaged.has('username')" class="field-hint">{{ t('ui.smtp.env_managed', { env: SMTP_ENV_VAR.username }) }}</small>
+      </div>
+      <div class="form-field">
+        <label for="smtp-password">{{ t('ui.smtp.password') }}</label>
+        <Password inputId="smtp-password" v-model="smtp.password" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'smtp-password' }" :placeholder="t('ui.smtp.password_keep')" inputClass="w-full" class="w-full" />
+        <small class="field-hint">{{ t('ui.smtp.password_keep') }}</small>
+      </div>
+      <Button :label="t('save')" icon="pi pi-check" :loading="savingSmtp" @click="saveSmtp()" />
+    </template></Card>
+
+    <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>{{ t('ui.config.maintenance') }}</h3>
       <p class="section-hint">
         {{ t('ui.config.maintenance_hint') }}
       </p>
-      <Button
-        :label="t('ui.config.rebuild_index')"
-        icon="pi pi-sync"
-        severity="danger"
-        outlined
-        :loading="reindexing"
-        @click="handleReindex"
-      />
+      <div class="maintenance-actions">
+        <Button
+          :label="t('ui.config.rebuild_index')"
+          icon="pi pi-sync"
+          severity="danger"
+          outlined
+          :loading="reindexing"
+          @click="handleReindex"
+        />
+        <Button
+          :label="t('ui.config.clean_storage')"
+          icon="pi pi-trash"
+          severity="danger"
+          outlined
+          :loading="cleaningStorage"
+          @click="handleCleanStorage"
+        />
+      </div>
+      <p class="section-hint clean-storage-hint">{{ t('ui.config.clean_storage_hint') }}</p>
     </template></Card>
   </div>
 </template>
@@ -203,5 +321,16 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
   gap: 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
+}
+.maintenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.clean-storage-hint {
+  margin: 0.75rem 0 0;
+}
+.w-full {
+  width: 100%;
 }
 </style>

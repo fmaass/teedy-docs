@@ -12,6 +12,7 @@ import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.RelationDao;
+import com.sismics.docs.core.dao.RouteStepDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.DocumentCriteria;
@@ -20,6 +21,7 @@ import com.sismics.docs.core.dao.dto.AclDto;
 import com.sismics.docs.core.dao.dto.ContributorDto;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.dao.dto.RelationDto;
+import com.sismics.docs.core.dao.dto.RouteStepDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.event.DocumentRestoredAsyncEvent;
@@ -163,6 +165,10 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {String} relations.id ID
      * @apiSuccess {String} relations.title Title
      * @apiSuccess {String} relations.source True if this document is the source of the relation
+     * @apiSuccess {Object} route_step The current active route step
+     * @apiSuccess {String} route_step.name Route step name
+     * @apiSuccess {String="APPROVE", "VALIDATE"} route_step.type Route step type
+     * @apiSuccess {Boolean} route_step.transitionable True if the route step is actionable by the current user
      * @apiSuccess {Object[]} files List of files
      * @apiSuccess {String} files.id ID
      * @apiSuccess {String} files.name File name
@@ -268,6 +274,14 @@ public class DocumentResource extends BaseResource {
                     .add("source", relationDto.isSource()));
         }
         document.add("relations", relationList);
+
+        // Add current route step
+        RouteStepDto routeStepDto = new RouteStepDao().getCurrentStep(documentId);
+        if (routeStepDto != null && !principal.isAnonymous()) {
+            JsonObjectBuilder step = routeStepDto.toJson();
+            step.add("transitionable", getTargetIdList(null).contains(routeStepDto.getTargetId()));
+            document.add("route_step", step);
+        }
 
         // Add custom metadata
         MetadataUtil.addMetadata(document, documentId);
@@ -385,6 +399,7 @@ public class DocumentResource extends BaseResource {
      * @apiParam {String} [search[title]] The document's title must be the value, several comma-separated values can be specified and the document must match any of the titles
      * @apiParam {String} [search[uafter]] The document must have been updated after or at the value moment, accepted format is <code>yyyy-MM-dd</code>
      * @apiParam {String} [search[ubefore]] The document must have been updated before or at the value moment, accepted format is <code>yyyy-MM-dd</code>
+     * @apiParam {String} [search[workflow]] If the value is <code>me</code> the document must have an active route, for other values the criteria is ignored
      *
      * @apiSuccess {Number} total Total number of documents
      * @apiSuccess {Object[]} documents List of documents
@@ -397,6 +412,8 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {Number} documents.update_date Update date (timestamp)
      * @apiSuccess {String} documents.language Language
      * @apiSuccess {Boolean} documents.shared True if the document is shared
+     * @apiSuccess {Boolean} documents.active_route True if a route is active on this document
+     * @apiSuccess {Boolean} documents.current_step_name Name of the current route step
      * @apiSuccess {Number} documents.file_count Number of files in this document
      * @apiSuccess {Object[]} documents.tags List of tags
      * @apiSuccess {String} documents.tags.id ID
@@ -446,6 +463,7 @@ public class DocumentResource extends BaseResource {
             @QueryParam("search[title]") String searchTitle,
             @QueryParam("search[uafter]") String searchUpdatedAfter,
             @QueryParam("search[ubefore]") String searchUpdatedBefore,
+            @QueryParam("search[searchworkflow]") String searchWorkflow,
             @QueryParam("search[tagMode]") String searchTagMode
     ) {
         if (!authenticate()) {
@@ -478,6 +496,7 @@ public class DocumentResource extends BaseResource {
                 searchTitle,
                 searchUpdatedAfter,
                 searchUpdatedBefore,
+                searchWorkflow,
                 allTagDtoList);
 
         if ("or".equalsIgnoreCase(searchTagMode)) {
@@ -519,6 +538,8 @@ public class DocumentResource extends BaseResource {
             }
 
             JsonObjectBuilder documentObjectBuilder = DocumentResourceHelper.createDocumentObjectBuilder(documentDto)
+                    .add("active_route", documentDto.isActiveRoute())
+                    .add("current_step_name", JsonUtil.nullable(documentDto.getCurrentStepName()))
                     .add("highlight", JsonUtil.nullable(documentDto.getHighlight()))
                     .add("file_count", filesCount)
                     .add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
@@ -689,6 +710,7 @@ public class DocumentResource extends BaseResource {
             @FormParam("search[title]") String searchTitle,
             @FormParam("search[uafter]") String searchUpdatedAfter,
             @FormParam("search[ubefore]") String searchUpdatedBefore,
+            @FormParam("search[searchworkflow]") String searchWorkflow,
             @FormParam("search[tagMode]") String searchTagMode
     ) {
         return list(
@@ -711,6 +733,7 @@ public class DocumentResource extends BaseResource {
                 searchTitle,
                 searchUpdatedAfter,
                 searchUpdatedBefore,
+                searchWorkflow,
                 searchTagMode
         );
     }

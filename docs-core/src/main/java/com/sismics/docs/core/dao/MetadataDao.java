@@ -61,6 +61,7 @@ public class MetadataDao {
 
         // Update the metadata
         metadataDb.setName(metadata.getName());
+        metadataDb.setVocabulary(metadata.getVocabulary());
 
         // Create audit log
         AuditLogUtil.create(metadataDb, AuditLogType.UPDATE, userId);
@@ -118,7 +119,7 @@ public class MetadataDao {
         Map<String, Object> parameterMap = new HashMap<>();
         List<String> criteriaList = new ArrayList<>();
 
-        StringBuilder sb = new StringBuilder("select m.MET_ID_C c0, m.MET_NAME_C c1, m.MET_TYPE_C c2");
+        StringBuilder sb = new StringBuilder("select m.MET_ID_C c0, m.MET_NAME_C c1, m.MET_TYPE_C c2, m.MET_VOCABULARY_C c3");
         sb.append(" from T_METADATA m ");
 
         criteriaList.add("m.MET_DELETEDATE_D is null");
@@ -138,7 +139,8 @@ public class MetadataDao {
             MetadataDto dto = new MetadataDto();
             dto.setId((String) o[i++]);
             dto.setName((String) o[i++]);
-            dto.setType(MetadataType.valueOf((String) o[i]));
+            dto.setType(MetadataType.valueOf((String) o[i++]));
+            dto.setVocabulary((String) o[i]);
             dtoList.add(dto);
         }
         return dtoList;

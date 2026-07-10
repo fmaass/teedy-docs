@@ -17,34 +17,55 @@ const v1 = resolve(here, 'fixtures/sample.txt')
 test('the version-history dialog opens and lists the current version', async ({ page }) => {
   const title = unique('ver')
   const { id } = await createDocument(page, title)
+  try {
+    await page.goto(`/#/document/view/${id}/content`)
+    await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(v1)
+    await expect(page.getByText('Files uploaded').first()).toBeVisible()
+    await expect(page.locator('.file-row', { hasText: 'sample.txt' })).toBeVisible()
 
-  await page.goto(`/#/document/view/${id}/content`)
-  await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(v1)
-  await expect(page.getByText('Files uploaded').first()).toBeVisible()
-  await expect(page.locator('.file-row', { hasText: 'sample.txt' })).toBeVisible()
+    const row = page.locator('.file-row', { hasText: 'sample.txt' }).first()
+    await row.getByRole('button', { name: 'Version history' }).click()
 
-  const row = page.locator('.file-row', { hasText: 'sample.txt' }).first()
-  await row.getByRole('button', { name: 'Version history' }).click()
+    const dialog = page.getByRole('dialog', { name: /Version history/ })
+    await expect(dialog).toBeVisible()
+    // The read-only history hint and the current version row (v1) are shown.
+    await expect(dialog.getByText(/read-only/i)).toBeVisible()
+    await expect(dialog.getByText('v1')).toBeVisible()
 
-  const dialog = page.getByRole('dialog', { name: /Version history/ })
-  await expect(dialog).toBeVisible()
-  // The read-only history hint and the current version row (v1) are shown.
-  await expect(dialog.getByText(/read-only/i)).toBeVisible()
-  await expect(dialog.getByText('v1')).toBeVisible()
-
-  // The footer "Close" button (a text button, distinct from the header X icon).
-  await dialog.locator('.p-dialog-footer').getByRole('button', { name: 'Close' }).click()
-  await expect(dialog).toBeHidden()
-
-  // Cleanup the document.
-  await page.goto(`/#/document/view/${id}`)
-  await page.getByRole('button', { name: 'Delete', exact: true }).click()
-  await confirmDanger(page)
+    // The footer "Close" button (a text button, distinct from the header X icon).
+    await dialog.locator('.p-dialog-footer').getByRole('button', { name: 'Close' }).click()
+    await expect(dialog).toBeHidden()
+  } finally {
+    // Cleanup the document (runs even if an assertion above fails).
+    await page.goto(`/#/document/view/${id}`)
+    const del = page.getByRole('button', { name: 'Delete', exact: true })
+    if (await del.isVisible().catch(() => false)) {
+      await del.click()
+      await confirmDanger(page)
+    }
+  }
 })
 
-// The multi-version case is intentionally skipped: it cannot be driven through the
-// SPA, which never uploads a file with `previousFileId` set. Documented here so the
-// coverage gap is explicit rather than silent.
-test.skip('lists two versions after a same-file re-upload', async () => {
-  // Unreachable via the UI under test — see the note above.
+// PRODUCT GAP (not a test defect): the "add a second file version" flow is
+// intentionally skipped because NO UI PATH produces one.
+//
+//   - The backend DOES support versions: PUT /api/file accepts an optional
+//     `previousFileId`; when present, FileResource.add supersedes that file and the
+//     new upload becomes v2 of the same logical file (Version history then lists v1
+//     + v2).
+//   - The frontend NEVER sets `previousFileId`. Both upload surfaces
+//     (DocumentViewContent's advanced FileUpload and the DocumentEdit attach flow)
+//     call the plain `uploadFile(documentId, file)` client, which posts only
+//     `id` (=documentId) + `file`. There is no "replace with new version" / "upload
+//     new version of THIS file" control anywhere in the SPA.
+//
+// Therefore any spec that "adds a second version" through the UI could only upload a
+// SEPARATE new attachment — which produces a second v1 file, NOT a v2 of the first.
+// Asserting "two versions" off that would be a FAKE test (asserting a state the UI
+// cannot actually reach). We keep the skip until a real add-version UI wires
+// `previousFileId`. See the runnable test above for the reachable coverage (the
+// history dialog opening and listing the current version).
+test.skip('lists two versions after adding a second file version (no UI path)', async () => {
+  // Unreachable via the UI under test: no SPA control sets `previousFileId`, so a
+  // multi-version file cannot be created from the frontend. See the note above.
 })

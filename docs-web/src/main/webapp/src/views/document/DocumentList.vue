@@ -15,6 +15,7 @@ import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
+import ToggleButton from 'primevue/togglebutton'
 import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 import BulkActionBar from '../../components/BulkActionBar.vue'
@@ -43,9 +44,13 @@ const pageOffset = ref(0)
 const sortField = ref<string>('create_date')
 const sortOrder = ref<number>(-1)
 
+// "Assigned to me" workflow filter — sent as the typed search[searchworkflow]=me param, NOT folded
+// into the free-text search. Restricts the list to documents whose current step targets the viewer.
+const workflowMe = ref(false)
+
 const SORT_FIELD_MAP: Record<string, number> = { title: 1, create_date: 3 }
 
-watch([() => tf.combinedSearch, () => tf.tagMode], () => {
+watch([() => tf.combinedSearch, () => tf.tagMode, workflowMe], () => {
   pageOffset.value = 0
 })
 
@@ -53,6 +58,7 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
   queryKey: computed(() => [...queryKeys.documents(), {
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
+    workflowMe: workflowMe.value,
     offset: pageOffset.value,
     sortField: sortField.value,
     sortOrder: sortOrder.value,
@@ -65,6 +71,7 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
       asc: sortOrder.value === 1,
       search: tf.combinedSearch || undefined,
       'search[tagMode]': tf.selectedTagIds.size > 1 ? tf.tagMode : undefined,
+      'search[searchworkflow]': workflowMe.value ? 'me' : undefined,
     }).then((r) => r.data),
   placeholderData: keepPreviousData,
 })
@@ -303,6 +310,17 @@ function bulkDelete() {
         @remove-tag="tf.removeTag($event)"
         @toggle-tag="tf.toggleTag($event)"
       />
+
+      <div class="wf-filter-row">
+        <ToggleButton
+          v-model="workflowMe"
+          :onLabel="t('ui.workflow.assigned_to_me')"
+          :offLabel="t('ui.workflow.assigned_to_me')"
+          onIcon="pi pi-sitemap"
+          offIcon="pi pi-sitemap"
+          size="small"
+        />
+      </div>
     </div>
 
     <!-- Bulk action toolbar -->
@@ -378,6 +396,13 @@ function bulkDelete() {
   flex-direction: column;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+/* --- Workflow filter --- */
+
+.wf-filter-row {
+  display: flex;
+  gap: 0.5rem;
 }
 
 /* --- Bulk action toolbar --- */

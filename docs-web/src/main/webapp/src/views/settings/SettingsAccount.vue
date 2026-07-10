@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { setLocale } from '../../i18n'
@@ -8,13 +8,19 @@ import Password from 'primevue/password'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
+import DataTable from 'primevue/datatable'
+import Column from 'primevue/column'
+import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
+import { listSessions, deleteOtherSessions, type UserSession } from '../../api/user'
+import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const { switchTheme } = useThemeSwitch()
+const { confirmDanger } = useConfirmDanger()
 
 const currentPassword = ref('')
 const password = ref('')
@@ -45,8 +51,55 @@ interface SelectChangeEvent {
   value: string
 }
 
+// --- Active sessions (self-service; not admin-gated) ---
+const sessions = ref<UserSession[]>([])
+const sessionsLoading = ref(false)
+const revokingSessions = ref(false)
+
+// True once more than one session exists — the "sign out other sessions" action is
+// only meaningful when there is another session to revoke.
+const hasOtherSessions = computed(() => sessions.value.length > 1)
+
+async function loadSessions() {
+  sessionsLoading.value = true
+  try {
+    const { data } = await listSessions()
+    sessions.value = data.sessions ?? []
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.account.sessions.load_failed'), life: 3000 })
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function confirmRevokeOthers() {
+  confirmDanger({
+    header: t('ui.account.sessions.revoke_title'),
+    message: t('ui.account.sessions.revoke_confirm'),
+    icon: 'pi pi-sign-out',
+    accept: async () => {
+      revokingSessions.value = true
+      try {
+        await deleteOtherSessions()
+        await loadSessions()
+        toast.add({ severity: 'success', summary: t('ui.account.sessions.revoked'), life: 2000 })
+      } catch {
+        toast.add({ severity: 'error', summary: t('ui.account.sessions.revoke_failed'), life: 3000 })
+      } finally {
+        revokingSessions.value = false
+      }
+    },
+  })
+}
+
+function formatSessionDate(ts?: number): string {
+  if (ts == null) return '—'
+  return new Date(ts).toLocaleString()
+}
+
 onMounted(() => {
   selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
+  loadSessions()
 })
 
 async function handleSave() {
@@ -156,6 +209,45 @@ function onLocaleSelect(event: SelectChangeEvent) {
         <Button type="submit" :label="t('save')" icon="pi pi-check" :loading="saving" />
       </form>
     </template></Card>
+
+    <!-- Active sessions -->
+    <Card class="mt-3 sessions-card"><template #content>
+      <div class="sessions-header">
+        <h3 class="section-title">{{ t('ui.account.sessions.title') }}</h3>
+        <Button
+          :label="t('ui.account.sessions.revoke_others')"
+          icon="pi pi-sign-out"
+          severity="danger"
+          outlined
+          size="small"
+          :disabled="!hasOtherSessions"
+          :loading="revokingSessions"
+          @click="confirmRevokeOthers"
+        />
+      </div>
+      <p class="text-sm text-muted mb-3">{{ t('ui.account.sessions.description') }}</p>
+      <DataTable :value="sessions" :loading="sessionsLoading" stripedRows class="sessions-table">
+        <Column :header="t('ui.account.sessions.created')" style="width: 190px">
+          <template #body="{ data }">
+            <span class="session-cell">{{ formatSessionDate(data.create_date) }}</span>
+            <Tag v-if="data.current" :value="t('ui.account.sessions.current')" severity="success" class="ml-2" />
+          </template>
+        </Column>
+        <Column :header="t('ui.account.sessions.last_access')" style="width: 190px">
+          <template #body="{ data }">
+            <span class="session-cell">{{ formatSessionDate(data.last_connection_date) }}</span>
+          </template>
+        </Column>
+        <Column :header="t('ui.account.sessions.ip')">
+          <template #body="{ data }">
+            <code class="session-ip">{{ data.ip || '—' }}</code>
+          </template>
+        </Column>
+        <template #empty>
+          <span class="text-sm text-muted">{{ t('ui.account.sessions.none') }}</span>
+        </template>
+      </DataTable>
+    </template></Card>
   </div>
 </template>
 
@@ -174,5 +266,22 @@ function onLocaleSelect(event: SelectChangeEvent) {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--p-text-color);
+}
+.sessions-card {
+  max-width: 720px;
+}
+.sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.session-cell {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.session-ip {
+  font-family: monospace;
+  font-size: 0.75rem;
 }
 </style>

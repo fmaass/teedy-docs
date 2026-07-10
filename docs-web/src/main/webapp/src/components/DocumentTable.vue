@@ -87,6 +87,15 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     <Column field="title" :header="t('document.title')" sortable>
       <template #body="{ data }">
         <span class="doc-title">{{ data.title }}</span>
+        <!-- "Awaiting your action" badge. active_route is target-scoped server-side: it is true only
+             when the current route step targets the viewer, so it IS the "awaiting you" signal. -->
+        <span
+          v-if="data.active_route"
+          class="wf-awaiting"
+          v-tooltip.top="data.current_step_name || t('ui.workflow.awaiting_you')"
+        >
+          <i class="pi pi-sitemap" aria-hidden="true" />{{ t('ui.workflow.awaiting_you') }}
+        </span>
       </template>
     </Column>
     <Column :header="t('document.tags')" style="width: 200px">
@@ -155,6 +164,15 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     <Column field="title" :header="t('document.title')" sortable>
       <template #body="{ data }">
         <span class="doc-title">{{ data.title }}</span>
+        <!-- "Awaiting your action" badge. active_route is target-scoped server-side: it is true only
+             when the current route step targets the viewer, so it IS the "awaiting you" signal. -->
+        <span
+          v-if="data.active_route"
+          class="wf-awaiting"
+          v-tooltip.top="data.current_step_name || t('ui.workflow.awaiting_you')"
+        >
+          <i class="pi pi-sitemap" aria-hidden="true" />{{ t('ui.workflow.awaiting_you') }}
+        </span>
       </template>
     </Column>
     <Column :header="t('document.tags')" style="width: 200px">
@@ -209,6 +227,23 @@ function onRowSelect(event: DataTableRowSelectEvent) {
 
 .doc-title {
   font-weight: 500;
+}
+
+.wf-awaiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--teedy-warning-bg);
+  color: var(--teedy-warning-text);
+  vertical-align: baseline;
+}
+.wf-awaiting i {
+  font-size: 0.625rem;
 }
 
 .doc-tags {

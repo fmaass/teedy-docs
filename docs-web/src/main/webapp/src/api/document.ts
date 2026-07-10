@@ -1,4 +1,5 @@
 import api from './client'
+import type { RouteStepSummary } from './route'
 
 export interface DocumentListItem {
   id: string
@@ -11,6 +12,8 @@ export interface DocumentListItem {
   file_count: number
   tags: Array<{ id: string; name: string; color: string }>
   shared: boolean
+  active_route?: boolean
+  current_step_name?: string | null
   highlight?: string
 }
 
@@ -51,10 +54,13 @@ export interface DocumentDetail extends DocumentListItem {
   file_count: number
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
-  metadata: Array<{ id: string; name: string; type: string; value?: unknown }>
+  metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
   files?: Array<{ id: string; name: string; mimetype: string; size: number }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
+  // Current active route step, present only when a route is active on this document AND the caller
+  // is not anonymous. Carries `transitionable` (may the caller act now). See DocumentResource.
+  route_step?: RouteStepSummary
 }
 
 export interface DocumentListParams {
@@ -65,6 +71,11 @@ export interface DocumentListParams {
   search?: string
   files?: boolean
   'search[tagMode]'?: 'and' | 'or'
+  // Structured "awaiting my action" filter. Value 'me' restricts the list to documents whose
+  // current route step targets the caller (the active_route/current_step_name row fields are
+  // target-scoped to the same signal). Sent as a typed param instead of a literal `workflow:me`
+  // token folded into the free-text search.
+  'search[searchworkflow]'?: 'me'
 }
 
 export function listDocuments(params: DocumentListParams) {
@@ -83,6 +94,20 @@ export function createDocument(params: URLSearchParams) {
 
 export function updateDocument(id: string, params: URLSearchParams) {
   return api.post<{ id: string }>(`/document/${id}`, params)
+}
+
+/**
+ * Import a new document from an .eml email file via PUT /api/document/eml
+ * (multipart/form-data, param `file`). The backend parses the email, uses its
+ * subject as the title, and attaches the body + attachments as files; it returns
+ * the new document's id. Normal authenticated user — not admin-gated.
+ */
+export function importEml(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.put<{ id: string }>('/document/eml', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
 }
 
 export function deleteDocument(id: string) {

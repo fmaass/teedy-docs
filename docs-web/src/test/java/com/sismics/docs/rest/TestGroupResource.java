@@ -1,5 +1,20 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.constant.RouteStatus;
+import com.sismics.docs.core.constant.RouteStepType;
+import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.GroupDao;
+import com.sismics.docs.core.dao.RouteDao;
+import com.sismics.docs.core.dao.RouteModelDao;
+import com.sismics.docs.core.dao.RouteStepDao;
+import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.Group;
+import com.sismics.docs.core.model.jpa.Route;
+import com.sismics.docs.core.model.jpa.RouteModel;
+import com.sismics.docs.core.model.jpa.RouteStep;
+import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -10,6 +25,7 @@ import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 
@@ -208,5 +224,93 @@ public class TestGroupResource extends BaseJerseyTest {
         target().path("/user/admin2").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
+    }
+
+    /**
+     * Deleting a group referenced by a route model and targeted by an open route step succeeds with
+     * the warning payload; the active route is cancelled and its open step closed (history intact).
+     */
+    @Test
+    public void testDeleteGroupHandlesWorkflowReferences() {
+        String adminToken = adminToken();
+        clientUtil.createGroup("wfgroup");
+
+        String[] routeId = new String[1];
+        String[] stepId = new String[1];
+        String modelId = TestUserResource.inTx(() -> {
+            Group group = new GroupDao().getActiveByName("wfgroup");
+            User admin = new UserDao().getActiveByUsername("admin");
+
+            Document document = new Document();
+            document.setUserId(admin.getId());
+            document.setLanguage("eng");
+            document.setTitle("Group route doc");
+            document.setCreateDate(new Date());
+            String docId = new DocumentDao().create(document, admin.getId());
+
+            routeId[0] = new RouteDao().create(new Route().setDocumentId(docId).setName("Group route"), admin.getId());
+            stepId[0] = new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0])
+                    .setName("Open step")
+                    .setType(RouteStepType.VALIDATE)
+                    .setTargetId(group.getId())
+                    .setOrder(0));
+            TestUserResource.insertRoutingAcl(docId, group.getId());
+
+            String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"wfgroup\",\"type\":\"GROUP\"},\"name\":\"Step 1\"}]";
+            return new RouteModelDao().create(new RouteModel().setName("Group model").setSteps(steps), "admin");
+        });
+
+        // Delete the group.
+        JsonObject json = target().path("/group/wfgroup").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        JsonArray affected = json.getJsonArray("route_models_affected");
+        Assertions.assertNotNull(affected);
+        Assertions.assertTrue(TestUserResource.containsString(affected, "Group model"));
+        Assertions.assertNotNull(modelId);
+
+        // The route was cancelled and the step history preserved.
+        TestUserResource.inTx(() -> {
+            Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
+            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus());
+            RouteStep step = ThreadLocalContext.get().getEntityManager().find(RouteStep.class, stepId[0]);
+            Assertions.assertNotNull(step);
+            Assertions.assertNull(step.getDeleteDate());
+            Assertions.assertNotNull(step.getEndDate());
+            Assertions.assertEquals("Cancelled: step target deleted", step.getComment());
+            Assertions.assertNull(step.getTransition(),
+                    "System-ended step must have a NULL transition, not a user-action value");
+            return null;
+        });
+    }
+
+    /**
+     * Renaming a group referenced by a route model succeeds and returns the warning payload (the
+     * model's blob names the old group, so the rename orphans it). The blob is not rewritten.
+     */
+    @Test
+    public void testRenameGroupReferencedByRouteModel() {
+        String adminToken = adminToken();
+        clientUtil.createGroup("wfrenamegroup");
+
+        String modelId = TestUserResource.inTx(() -> {
+            String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"wfrenamegroup\",\"type\":\"GROUP\"},\"name\":\"Step 1\"}]";
+            return new RouteModelDao().create(new RouteModel().setName("Rename model").setSteps(steps), "admin");
+        });
+
+        // Rename the group.
+        JsonObject json = target().path("/group/wfrenamegroup").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("name", "wfrenamedgroup")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        JsonArray affected = json.getJsonArray("route_models_affected");
+        Assertions.assertNotNull(affected, "Rename must warn about the orphaned route model");
+        Assertions.assertTrue(TestUserResource.containsString(affected, "Rename model"));
+
+        // The model blob was left untouched (still names the old group).
+        String steps = TestUserResource.inTx(() -> new RouteModelDao().getActiveById(modelId).getSteps());
+        Assertions.assertTrue(steps.contains("wfrenamegroup"), "Blob must not be rewritten on rename");
     }
 }

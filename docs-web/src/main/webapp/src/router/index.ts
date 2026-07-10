@@ -101,6 +101,11 @@ const router = createRouter({
               component: () => import('../views/document/DocumentViewPermissions.vue'),
             },
             {
+              path: 'workflow',
+              name: 'document-view-workflow',
+              component: () => import('../views/document/DocumentViewWorkflow.vue'),
+            },
+            {
               path: 'activity',
               name: 'document-view-activity',
               component: () => import('../views/document/DocumentViewActivity.vue'),
@@ -188,6 +193,41 @@ const router = createRouter({
               path: 'metadata',
               name: 'settings-metadata',
               component: () => import('../views/settings/SettingsMetadata.vue'),
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'workflow',
+              name: 'settings-workflow',
+              component: () => import('../views/settings/SettingsWorkflow.vue'),
+              // Admin-only: SettingsWorkflow fires the admin-gated route-model
+              // endpoints. The nav item is already admin-hidden; this stops a
+              // direct-URL mount by a non-admin.
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'vocabulary',
+              name: 'settings-vocabulary',
+              component: () => import('../views/settings/SettingsVocabulary.vue'),
+              // Admin-only: SettingsVocabulary fires the admin-gated GET /vocabulary
+              // (name list) on mount. Nav is already admin-hidden; this stops a
+              // direct-URL mount from firing that admin call as a non-admin.
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'monitoring',
+              name: 'settings-monitoring',
+              component: () => import('../views/settings/SettingsMonitoring.vue'),
+              // Admin-only: SettingsMonitoring fires the admin-gated GET /app/log on
+              // mount. Nav is already admin-hidden; this stops a direct-URL mount.
+              meta: { requiresAdmin: true },
+            },
+            {
+              path: 'inbox',
+              name: 'settings-inbox',
+              component: () => import('../views/settings/SettingsInbox.vue'),
+              // Admin-only: SettingsInbox fires the admin-gated GET /app/config_inbox
+              // on mount. The nav item is already admin-hidden, but a direct URL hit
+              // would otherwise mount it (the backend 403 the only defence).
               meta: { requiresAdmin: true },
             },
           ],

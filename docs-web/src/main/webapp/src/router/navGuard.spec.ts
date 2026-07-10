@@ -45,6 +45,10 @@ describe('resolveNavGuard', () => {
     'settings-webhooks',
     'settings-ldap',
     'settings-metadata',
+    'settings-workflow',
+    'settings-vocabulary',
+    'settings-monitoring',
+    'settings-inbox',
   ] as const
 
   // User-level routes (settingsNavItems) — reachable by any logged-in user.

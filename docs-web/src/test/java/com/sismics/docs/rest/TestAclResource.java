@@ -450,4 +450,122 @@ public class TestAclResource extends BaseJerseyTest {
                         .param("tags", tag1Id)
                         .param("language", "eng")), JsonObject.class);
     }
+
+    /**
+     * Regression test for the USER-&gt;GROUP fall-through in
+     * {@code SecurityUtil.getTargetIdFromName}: requesting a USER ACL for a name that
+     * only matches a group (no active user of that name) must be rejected as an invalid
+     * target, not silently resolved to the same-named group.
+     */
+    @Test
+    public void testAclUserTargetDoesNotFallThroughToGroup() {
+        // Create a group with a name that no user shares
+        clientUtil.createGroup("phantomtarget");
+
+        // Login the document owner
+        clientUtil.createUser("aclphantom1");
+        String owner = clientUtil.login("aclphantom1");
+
+        // Create a document as the owner
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .put(Entity.form(new Form()
+                        .param("title", "Phantom target document")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Grant a USER ACL targeting "phantomtarget" (a group name, but no such user exists)
+        Response response = target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "READ")
+                        .param("target", "phantomtarget")
+                        .param("type", "USER")));
+
+        // Must be rejected as an invalid target (400), not resolved to the group
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        JsonObject error = response.readEntity(JsonObject.class);
+        Assertions.assertEquals("InvalidTarget", error.getString("type"));
+
+        // And no ACL should have been created for that name
+        json = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .get(JsonObject.class);
+        JsonArray acls = json.getJsonArray("acls");
+        for (int i = 0; i < acls.size(); i++) {
+            Assertions.assertNotEquals("phantomtarget", acls.getJsonObject(i).getString("name"),
+                    "A phantom USER ACL was created targeting the same-named group");
+        }
+    }
+
+    /**
+     * Disambiguation test: when an active user and an active group share the same name,
+     * a USER grant resolves to the user id (type USER) and a GROUP grant resolves to the
+     * group id (type GROUP). The two ACLs are distinct entries pointing at different ids.
+     */
+    @Test
+    public void testAclUserAndGroupSameNameDisambiguation() {
+        // Create a group and a user that share the same name
+        clientUtil.createGroup("acldup");
+        clientUtil.createUser("acldup");
+
+        // Login the document owner
+        clientUtil.createUser("acldupowner");
+        String owner = clientUtil.login("acldupowner");
+
+        // Create a document as the owner
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .put(Entity.form(new Form()
+                        .param("title", "Disambiguation document")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Grant a USER ACL for "acldup" -> must resolve to the user
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "READ")
+                        .param("target", "acldup")
+                        .param("type", "USER")), JsonObject.class);
+
+        // Grant a GROUP ACL for "acldup" -> must resolve to the group
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .put(Entity.form(new Form()
+                        .param("source", documentId)
+                        .param("perm", "READ")
+                        .param("target", "acldup")
+                        .param("type", "GROUP")), JsonObject.class);
+
+        // Read the ACLs back: the two "acldup" grants must target different ids with
+        // distinct target types (one USER, one GROUP).
+        json = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, owner)
+                .get(JsonObject.class);
+        JsonArray acls = json.getJsonArray("acls");
+
+        String userAclId = null;
+        String groupAclId = null;
+        for (int i = 0; i < acls.size(); i++) {
+            JsonObject acl = acls.getJsonObject(i);
+            if (!"acldup".equals(acl.getString("name"))) {
+                continue;
+            }
+            if ("USER".equals(acl.getString("type"))) {
+                userAclId = acl.getString("id");
+            } else if ("GROUP".equals(acl.getString("type"))) {
+                groupAclId = acl.getString("id");
+            }
+        }
+
+        Assertions.assertNotNull(userAclId, "USER grant for 'acldup' should resolve to a user target");
+        Assertions.assertNotNull(groupAclId, "GROUP grant for 'acldup' should resolve to a group target");
+        Assertions.assertNotEquals(userAclId, groupAclId,
+                "USER and GROUP grants for the same name must resolve to different target ids");
+    }
 }
