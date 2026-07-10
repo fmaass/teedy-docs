@@ -267,14 +267,38 @@ public class LuceneIndexingHandler implements IndexingHandler {
 
         boolean trashQuery = Boolean.TRUE.equals(criteria.getDeleted());
 
+        // Tracks whether any emitted SQL fragment references the :targetIdList parameter. Both the
+        // route-step join (below) and the ACL joins (when the ACL check is not skipped) reference it;
+        // the parameter is bound iff at least one of them did. Binding it when no fragment references
+        // it raised an UnknownParameterException on admin/skip-ACL searches (the retirement's bug),
+        // and NOT binding it when a fragment does reference it would fail on non-admin searches.
+        boolean targetIdListReferenced = false;
+
         StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C c0, d.DOC_TITLE_C c1, d.DOC_DESCRIPTION_C c2, d.DOC_CREATEDATE_D c3, d.DOC_LANGUAGE_C c4, d.DOC_IDFILE_C, ");
         sb.append(" s.count c5, ");
-        sb.append(" d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
+        sb.append(" rs2.RTP_ID_C c7, rs2.RTP_NAME_C, d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
         sb.append(" from T_DOCUMENT d ");
         sb.append(" left join (SELECT count(s.SHA_ID_C) count, ac.ACL_SOURCEID_C " +
                 "   FROM T_SHARE s, T_ACL ac " +
                 "   WHERE ac.ACL_TARGETID_C = s.SHA_ID_C AND ac.ACL_DELETEDATE_D IS NULL AND " +
                 "         s.SHA_DELETEDATE_D IS NULL group by ac.ACL_SOURCEID_C) s on s.ACL_SOURCEID_C = d.DOC_ID_C ");
+        // Route-step join: pick the current (min-order) OPEN step of each ACTIVE route targeting one
+        // of :targetIdList, exposed per document. The route must be ACTIVE (RTE_STATUS_C = 'ACTIVE'):
+        // a terminal route (REJECTED/CANCELLED/DONE) exposes no current step even if an open step row
+        // survives — consistent with RouteStepDao's current-step query.
+        //
+        // This join is emitted UNCONDITIONALLY (unlike the ACL joins below): the active_route and
+        // current_step_name columns it feeds are part of EVERY list result (the workflow indicator is
+        // always rendered), so rs2 must always be joined. It therefore ALWAYS references :targetIdList,
+        // which is why the bind of :targetIdList (guarded by targetIdListReferenced) is always safe —
+        // there is no path that binds an unreferenced parameter. Do NOT make this join conditional:
+        // that would drop active_route from the output. The targetIdListReferenced flag remains as
+        // belt-and-suspenders for the ACL branch and any future conditional change to either branch.
+        sb.append(" left join (select rs.*, rs3.idDocument " +
+                "from T_ROUTE_STEP rs " +
+                "join (select r.RTE_IDDOCUMENT_C idDocument, rs.RTP_IDROUTE_C idRoute, min(rs.RTP_ORDER_N) minOrder from T_ROUTE_STEP rs join T_ROUTE r on r.RTE_ID_C = rs.RTP_IDROUTE_C and r.RTE_DELETEDATE_D is null and r.RTE_STATUS_C = 'ACTIVE' where rs.RTP_DELETEDATE_D is null and rs.RTP_ENDDATE_D is null group by rs.RTP_IDROUTE_C, r.RTE_IDDOCUMENT_C) rs3 on rs.RTP_IDROUTE_C = rs3.idRoute and rs.RTP_ORDER_N = rs3.minOrder " +
+                "where rs.RTP_IDTARGET_C in (:targetIdList)) rs2 on rs2.idDocument = d.DOC_ID_C ");
+        targetIdListReferenced = true;
 
         // Add search criterias
         if (!SecurityUtil.skipAclCheck(criteria.getTargetIdList())) {
@@ -283,9 +307,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
             sb.append(" left join T_DOCUMENT_TAG dta on dta.DOT_IDDOCUMENT_C = d.DOC_ID_C and dta.DOT_DELETEDATE_D is null ");
             sb.append(" left join T_ACL a2 on a2.ACL_TARGETID_C in (:targetIdList) and a2.ACL_SOURCEID_C = dta.DOT_IDTAG_C and a2.ACL_PERM_C = 'READ' and a2.ACL_DELETEDATE_D is null ");
             criteriaList.add("(a.ACL_ID_C is not null or a2.ACL_ID_C is not null)");
-            // The :targetIdList parameter is only referenced by the ACL joins above, so bind it
-            // only when those joins are present (i.e. not skipping the ACL check). Binding it
-            // unconditionally would make it an unknown parameter for admin/skip-ACL searches.
+            targetIdListReferenced = true;
+        }
+        if (targetIdListReferenced) {
             parameterMap.put("targetIdList", criteria.getTargetIdList());
         }
         if (!Strings.isNullOrEmpty(criteria.getSimpleSearch()) || !Strings.isNullOrEmpty(criteria.getFullSearch())) {
@@ -372,6 +396,10 @@ public class LuceneIndexingHandler implements IndexingHandler {
             criteriaList.add("d.DOC_IDUSER_C = :creatorId");
             parameterMap.put("creatorId", criteria.getCreatorId());
         }
+        if (criteria.getActiveRoute() != null && criteria.getActiveRoute()) {
+            criteriaList.add("rs2.RTP_ID_C is not null");
+        }
+
         criteriaList.add(trashQuery ? "d.DOC_DELETEDATE_D is not null" : "d.DOC_DELETEDATE_D is null");
 
         sb.append(" where ");
@@ -394,6 +422,8 @@ public class LuceneIndexingHandler implements IndexingHandler {
             documentDto.setFileId((String) o[i++]);
             Number shareCount = (Number) o[i++];
             documentDto.setShared(shareCount != null && shareCount.intValue() > 0);
+            documentDto.setActiveRoute(o[i++] != null);
+            documentDto.setCurrentStepName((String) o[i++]);
             documentDto.setUpdateTimestamp(((Timestamp) o[i++]).getTime());
             Timestamp deleteTs = (Timestamp) o[i];
             if (deleteTs != null) {

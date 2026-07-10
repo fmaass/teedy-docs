@@ -11,6 +11,8 @@ export interface DocumentListItem {
   file_count: number
   tags: Array<{ id: string; name: string; color: string }>
   shared: boolean
+  active_route?: boolean
+  current_step_name?: string | null
   highlight?: string
 }
 

@@ -5,6 +5,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.util.AuditLogUtil;
+import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
@@ -174,6 +175,15 @@ public class DocumentDao {
         // Delete the document
         Date dateNow = new Date();
         documentDb.setDeleteDate(dateNow);
+
+        // Cancel any ACTIVE route on the document before the generic ACL soft-delete below: the
+        // route is ended CANCELLED, its open steps are system-ended, and its transient ROUTING ACLs
+        // are soft-deleted with a timestamp DETERMINISTICALLY derived from dateNow (dateNow - 1ms) so
+        // it is guaranteed distinct from the document's own delete timestamp. This is what prevents
+        // restore() — which un-deletes the document's ACLs by exact-equality match on dateNow — from
+        // resurrecting the routing ACL of a cancelled route. Must run first so the ROUTING ACLs are
+        // already deleted and skipped by the bulk ACL update (which only touches still-active ACLs).
+        PrincipalDeletionUtil.cancelActiveRoutesForDocument(id, userId, dateNow);
 
         // Delete linked data
         Query q = em.createQuery("update File f set f.deleteDate = :dateNow where f.documentId = :documentId and f.deleteDate is null");

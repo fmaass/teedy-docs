@@ -49,6 +49,7 @@ public class DocumentSearchCriteriaUtil {
             .toFormatter();
 
     private static final String PARAMETER_WITH_MULTIPLE_VALUES_SEPARATOR = ",";
+    private static final String WORKFLOW_ME = "me";
 
     /**
      * Parse a query according to the specified syntax, eg.:
@@ -104,6 +105,9 @@ public class DocumentSearchCriteriaUtil {
                 case "by":
                     parseByCriteria(documentCriteria, paramValue);
                     break;
+                case "workflow":
+                    documentCriteria.setActiveRoute(paramValue.equals(WORKFLOW_ME));
+                    break;
                 case "simple":
                     simpleQuery.add(paramValue);
                     break;
@@ -142,6 +146,7 @@ public class DocumentSearchCriteriaUtil {
      * @param searchTitle         title
      * @param searchUpdatedAfter  update moment after
      * @param searchUpdatedBefore update moment before
+     * @param searchWorkflow      existing workflow
      * @param allTagDtoList       list of existing tags
      */
     public static void addHttpSearchParams(
@@ -159,6 +164,7 @@ public class DocumentSearchCriteriaUtil {
             String searchTitle,
             String searchUpdatedAfter,
             String searchUpdatedBefore,
+            String searchWorkflow,
             List<TagDto> allTagDtoList
     ) {
         if (searchBy != null) {
@@ -203,6 +209,9 @@ public class DocumentSearchCriteriaUtil {
         }
         if (searchUpdatedBefore != null) {
             parseDateCriteria(documentCriteria, searchUpdatedBefore, DAY_FORMATTER, true, true);
+        }
+        if ((WORKFLOW_ME.equals(searchWorkflow))) {
+            documentCriteria.setActiveRoute(true);
         }
     }
 

@@ -116,6 +116,104 @@ public class PrincipalDeletionUtil {
     }
 
     /**
+     * Cancels every ACTIVE route on a document (used when the document is moved to trash). For each
+     * such route: the route is ended as CANCELLED, all still-open steps are closed with a system
+     * comment and a NULL transition (system-ended: nobody acted), and a route audit log entry is
+     * written. The transient ROUTING READ ACLs the routes granted on the document are soft-deleted
+     * (with per-ACL DELETE audit rows) with a timestamp intentionally distinct from the document's
+     * own delete timestamp, so a later restore-from-trash — which un-deletes the document's own ACLs
+     * by matching that timestamp — does NOT resurrect the routing ACL of a cancelled route.
+     *
+     * @param documentId Document ID
+     * @param userId User performing the deletion (audit attribution)
+     * @param documentDeleteDate The document's own soft-delete timestamp; the ROUTING-ACL delete
+     *        timestamp is derived deterministically from it (documentDeleteDate - 1ms) so the two are
+     *        guaranteed distinct and restore-from-trash cannot resurrect the routing ACL
+     * @return Number of routes cancelled
+     */
+    public static int cancelActiveRoutesForDocument(String documentId, String userId, Date documentDeleteDate) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        Query q = em.createNativeQuery("select r.RTE_ID_C from T_ROUTE r " +
+                " where r.RTE_IDDOCUMENT_C = :documentId " +
+                " and r.RTE_STATUS_C = :activeStatus and r.RTE_DELETEDATE_D is null");
+        q.setParameter("documentId", documentId);
+        q.setParameter("activeStatus", RouteStatus.ACTIVE.name());
+        @SuppressWarnings("unchecked")
+        List<String> routeIdList = q.getResultList();
+
+        RouteDao routeDao = new RouteDao();
+        RouteStepDao routeStepDao = new RouteStepDao();
+        int cancelled = 0;
+        for (String routeId : routeIdList) {
+            routeDao.endRoute(routeId, RouteStatus.CANCELLED);
+            routeStepDao.endAllOpenSteps(routeId, null, "Cancelled: document moved to trash");
+
+            Route route = em.find(Route.class, routeId);
+            if (route != null) {
+                AuditLogUtil.create(route, AuditLogType.UPDATE, userId);
+            }
+            cancelled++;
+        }
+
+        // Soft-delete every ROUTING ACL on the document (target-agnostic) with a timestamp distinct
+        // from the document's own delete timestamp so restore-from-trash cannot resurrect it. Done
+        // unconditionally when at least one route was cancelled: an ACTIVE route always granted a
+        // routing ACL to its current step's target.
+        if (cancelled > 0) {
+            deleteRoutingAclsForDocument(documentId, userId, documentDeleteDate);
+        }
+        return cancelled;
+    }
+
+    /**
+     * Soft-delete ALL transient workflow ("ROUTING") READ ACLs on a document (regardless of target),
+     * writing a DELETE audit log for each. The delete timestamp is derived DETERMINISTICALLY from the
+     * document's own delete timestamp (documentDeleteDate - 1ms) — never sampled from the clock
+     * independently — so it is guaranteed distinct from documentDeleteDate. restore() un-deletes the
+     * document's ACLs by exact-equality match on documentDeleteDate, so a distinct timestamp is what
+     * keeps a cancelled route's ACL from being resurrected. Sampling the clock here would risk the two
+     * timestamps colliding (sub-millisecond cancellation / coarse clock resolution).
+     *
+     * @param documentId Document (ACL source) ID
+     * @param userId User performing the deletion (audit attribution)
+     * @param documentDeleteDate The document's own soft-delete timestamp
+     */
+    @SuppressWarnings("unchecked")
+    private static void deleteRoutingAclsForDocument(String documentId, String userId, Date documentDeleteDate) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        Query q = em.createNativeQuery("select ACL_ID_C, ACL_PERM_C from T_ACL " +
+                " where ACL_SOURCEID_C = :sourceId and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
+        q.setParameter("sourceId", documentId);
+        q.setParameter("type", ACL_TYPE_ROUTING);
+        List<Object[]> aclRows = q.getResultList();
+        if (aclRows.isEmpty()) {
+            return;
+        }
+
+        AuditLogDao auditLogDao = new AuditLogDao();
+        for (Object[] aclRow : aclRows) {
+            AuditLog auditLog = new AuditLog();
+            auditLog.setUserId(userId == null ? "admin" : userId);
+            auditLog.setEntityId((String) aclRow[0]);
+            auditLog.setEntityClass("Acl");
+            auditLog.setType(AuditLogType.DELETE);
+            auditLog.setMessage((String) aclRow[1]);
+            auditLogDao.create(auditLog);
+        }
+
+        // Deterministic offset from the document's delete timestamp (never a fresh clock sample).
+        Date routingAclDeleteDate = new Date(documentDeleteDate.getTime() - 1L);
+        Query upd = em.createNativeQuery("update T_ACL set ACL_DELETEDATE_D = :dateNow " +
+                " where ACL_SOURCEID_C = :sourceId and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
+        upd.setParameter("dateNow", routingAclDeleteDate);
+        upd.setParameter("sourceId", documentId);
+        upd.setParameter("type", ACL_TYPE_ROUTING);
+        upd.executeUpdate();
+    }
+
+    /**
      * Soft-delete the transient workflow ("ROUTING") READ ACLs on a document for a given target,
      * writing a DELETE audit log for each (mirroring the AclDao delete idiom). Uses a literal type
      * string rather than the AclType enum because the routing enum value is owned by the workflow

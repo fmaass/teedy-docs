@@ -74,6 +74,11 @@ public class DocumentCriteria {
     private String creatorId;
 
     /**
+     * A route is active.
+     */
+    private Boolean activeRoute;
+
+    /**
      * MIME type of a file.
      */
     private String mimeType;
@@ -182,6 +187,13 @@ public class DocumentCriteria {
         this.updateDateMax = updateDateMax;
     }
 
+    public Boolean getActiveRoute() {
+        return activeRoute;
+    }
+
+    public void setActiveRoute(Boolean activeRoute) {
+        this.activeRoute = activeRoute;
+    }
 
     public String getMimeType() {
         return mimeType;
