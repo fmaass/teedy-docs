@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * User REST resources.
@@ -830,13 +831,19 @@ public class UserResource extends BaseResource {
         UserDao userDao = new UserDao();
         RoleBaseFunctionDao roleBaseFunctionDao = new RoleBaseFunctionDao();
         List<UserDto> userDtoList = userDao.findByCriteria(new UserCriteria().setGroupId(groupId), sortCriteria);
+
+        // Mirror the update endpoint's disable-refusal rule (see update()): the guest
+        // user and any user with the ADMIN base function cannot be disabled. Exposing
+        // `admin` lets the admin UI hide the disable/enable toggle for those rows so it
+        // does not present a false-success affordance. Resolve the ADMIN flag for every
+        // distinct role in a single query to avoid an N+1 lookup over the user list.
+        Set<String> roleIdSet = userDtoList.stream()
+                .map(UserDto::getRoleId)
+                .collect(Collectors.toSet());
+        Set<String> adminRoleIds = roleBaseFunctionDao.getRoleIdsWithBaseFunction(BaseFunction.ADMIN.name(), roleIdSet);
+
         for (UserDto userDto : userDtoList) {
-            // Mirror the update endpoint's disable-refusal rule (see update()): the guest
-            // user and any user with the ADMIN base function cannot be disabled. Exposing
-            // `admin` lets the admin UI hide the disable/enable toggle for those rows so it
-            // does not present a false-success affordance.
-            Set<String> baseFunctionSet = roleBaseFunctionDao.findByRoleId(Sets.newHashSet(userDto.getRoleId()));
-            boolean admin = baseFunctionSet.contains(BaseFunction.ADMIN.name());
+            boolean admin = adminRoleIds.contains(userDto.getRoleId());
             users.add(Json.createObjectBuilder()
                     .add("id", userDto.getId())
                     .add("username", userDto.getUsername())

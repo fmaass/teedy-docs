@@ -80,6 +80,23 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertFalse(user.getBoolean("totp_enabled"));
         Assertions.assertFalse(user.getBoolean("disabled"));
 
+        // The admin flag must map per-user across the SAME response: true for the
+        // built-in admin (admin role), false for a normal user (default user role).
+        Boolean adminUserAdminFlag = null;
+        Boolean aliceUserAdminFlag = null;
+        for (int i = 0; i < users.size(); i++) {
+            JsonObject row = users.getJsonObject(i);
+            if ("admin".equals(row.getString("username"))) {
+                adminUserAdminFlag = row.getBoolean("admin");
+            } else if ("alice".equals(row.getString("username"))) {
+                aliceUserAdminFlag = row.getBoolean("admin");
+            }
+        }
+        Assertions.assertNotNull(adminUserAdminFlag, "admin user must be present in /user/list");
+        Assertions.assertNotNull(aliceUserAdminFlag, "alice user must be present in /user/list");
+        Assertions.assertTrue(adminUserAdminFlag, "admin user must have admin=true");
+        Assertions.assertFalse(aliceUserAdminFlag, "normal user alice must have admin=false");
+
         // Create a user KO (login length validation)
         Response response = target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
