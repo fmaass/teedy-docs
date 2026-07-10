@@ -28,8 +28,21 @@ describe('metadata api module', () => {
     clientMock.delete.mockReset().mockResolvedValue({ data: { status: 'ok' } })
   })
 
-  it('exposes the five backend metadata types', () => {
-    expect(METADATA_TYPES).toEqual(['STRING', 'INTEGER', 'FLOAT', 'DATE', 'BOOLEAN'])
+  it('exposes the six backend metadata types', () => {
+    expect(METADATA_TYPES).toEqual(['STRING', 'INTEGER', 'FLOAT', 'DATE', 'BOOLEAN', 'VOCABULARY'])
+  })
+
+  it('createMetadata sends the vocabulary param for a VOCABULARY field', async () => {
+    await createMetadata('Kind', 'VOCABULARY', 'type')
+    const [, body] = clientMock.put.mock.calls[0]
+    expect((body as URLSearchParams).get('type')).toBe('VOCABULARY')
+    expect((body as URLSearchParams).get('vocabulary')).toBe('type')
+  })
+
+  it('createMetadata omits vocabulary for a non-VOCABULARY field even if one is passed', async () => {
+    await createMetadata('Priority', 'STRING', 'type')
+    const [, body] = clientMock.put.mock.calls[0]
+    expect((body as URLSearchParams).has('vocabulary')).toBe(false)
   })
 
   it('listMetadata GETs /metadata', async () => {
@@ -62,6 +75,19 @@ describe('metadata api module', () => {
     expect(body).toBeInstanceOf(URLSearchParams)
     expect((body as URLSearchParams).get('name')).toBe('Renamed')
     expect((body as URLSearchParams).has('type')).toBe(false)
+  })
+
+  it('updateMetadata sends the vocabulary param when one is passed (VOCABULARY rename)', async () => {
+    await updateMetadata('m-8', 'Renamed', 'coverage')
+    const [, body] = clientMock.post.mock.calls[0]
+    expect((body as URLSearchParams).get('name')).toBe('Renamed')
+    expect((body as URLSearchParams).get('vocabulary')).toBe('coverage')
+  })
+
+  it('updateMetadata omits the vocabulary param when none is passed', async () => {
+    await updateMetadata('m-9', 'Renamed')
+    const [, body] = clientMock.post.mock.calls[0]
+    expect((body as URLSearchParams).has('vocabulary')).toBe(false)
   })
 
   it('deleteMetadata DELETEs /metadata/:id', async () => {

@@ -23,6 +23,11 @@ public class MetadataDto {
      */
     private MetadataType type;
 
+    /**
+     * Referenced vocabulary name (only set when type is VOCABULARY).
+     */
+    private String vocabulary;
+
     public String getId() {
         return id;
     }
@@ -47,6 +52,15 @@ public class MetadataDto {
 
     public MetadataDto setType(MetadataType type) {
         this.type = type;
+        return this;
+    }
+
+    public String getVocabulary() {
+        return vocabulary;
+    }
+
+    public MetadataDto setVocabulary(String vocabulary) {
+        this.vocabulary = vocabulary;
         return this;
     }
 }

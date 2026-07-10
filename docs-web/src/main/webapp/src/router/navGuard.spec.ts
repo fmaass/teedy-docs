@@ -46,6 +46,7 @@ describe('resolveNavGuard', () => {
     'settings-ldap',
     'settings-metadata',
     'settings-workflow',
+    'settings-vocabulary',
     'settings-monitoring',
     'settings-inbox',
   ] as const

@@ -2,11 +2,14 @@ package com.sismics.docs.rest.resource;
 
 import com.sismics.docs.core.constant.MetadataType;
 import com.sismics.docs.core.dao.MetadataDao;
+import com.sismics.docs.core.dao.VocabularyDao;
 import com.sismics.docs.core.dao.criteria.MetadataCriteria;
 import com.sismics.docs.core.dao.dto.MetadataDto;
 import com.sismics.docs.core.model.jpa.Metadata;
+import com.sismics.docs.core.model.jpa.Vocabulary;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
 
@@ -56,10 +59,14 @@ public class MetadataResource extends BaseResource {
         MetadataDao metadataDao = new MetadataDao();
         List<MetadataDto> metadataDtoList = metadataDao.findByCriteria(new MetadataCriteria(), sortCriteria);
         for (MetadataDto metadataDto : metadataDtoList) {
-            metadata.add(Json.createObjectBuilder()
+            JsonObjectBuilder item = Json.createObjectBuilder()
                     .add("id", metadataDto.getId())
                     .add("name", metadataDto.getName())
-                    .add("type", metadataDto.getType().name()));
+                    .add("type", metadataDto.getType().name());
+            if (metadataDto.getVocabulary() != null) {
+                item.add("vocabulary", metadataDto.getVocabulary());
+            }
+            metadata.add(item);
         }
 
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -85,11 +92,13 @@ public class MetadataResource extends BaseResource {
      *
      * @param name Name
      * @param typeStr Type
+     * @param vocabulary Referenced vocabulary name (required when type is VOCABULARY)
      * @return Response
      */
     @PUT
     public Response add(@FormParam("name") String name,
-                        @FormParam("type") String typeStr) {
+                        @FormParam("type") String typeStr,
+                        @FormParam("vocabulary") String vocabulary) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -98,12 +107,14 @@ public class MetadataResource extends BaseResource {
         // Validate input data
         name = ValidationUtil.validateLength(name, "name", 1, 50, false);
         MetadataType type = MetadataType.valueOf(ValidationUtil.validateLength(typeStr, "type", 1, 20, false));
+        vocabulary = validateVocabulary(type, vocabulary);
 
         // Create the metadata
         MetadataDao metadataDao = new MetadataDao();
         Metadata metadata = new Metadata();
         metadata.setName(name);
         metadata.setType(type);
+        metadata.setVocabulary(vocabulary);
         metadataDao.create(metadata, principal.getId());
 
         // Returns the metadata
@@ -111,7 +122,33 @@ public class MetadataResource extends BaseResource {
                 .add("id", metadata.getId())
                 .add("name", metadata.getName())
                 .add("type", metadata.getType().name());
+        if (metadata.getVocabulary() != null) {
+            response.add("vocabulary", metadata.getVocabulary());
+        }
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Validate and resolve the referenced vocabulary name for a metadata definition.
+     * When the type is VOCABULARY the name is mandatory, must match the vocabulary name
+     * pattern and must resolve to an existing (non-empty) vocabulary. For any other type
+     * the vocabulary is not applicable and is cleared to null.
+     *
+     * @param type Metadata type
+     * @param vocabulary Referenced vocabulary name
+     * @return Sanitised vocabulary name (null when not applicable)
+     */
+    private String validateVocabulary(MetadataType type, String vocabulary) {
+        if (type != MetadataType.VOCABULARY) {
+            return null;
+        }
+        vocabulary = ValidationUtil.validateLength(vocabulary, "vocabulary", 1, 50, false);
+        ValidationUtil.validateRegex(vocabulary, "vocabulary", "[a-z0-9\\-]+");
+        List<Vocabulary> entries = new VocabularyDao().getByName(vocabulary);
+        if (entries.isEmpty()) {
+            throw new ClientException("ValidationError", "Vocabulary not found: " + vocabulary);
+        }
+        return vocabulary;
     }
 
     /**
@@ -122,9 +159,11 @@ public class MetadataResource extends BaseResource {
      * @apiGroup Metadata
      * @apiParam {String} id Metadata ID
      * @apiParam {String{1..50}} name Name
+     * @apiParam {String{1..50}} [vocabulary] Referenced vocabulary name (VOCABULARY fields; defaults to the stored one)
      * @apiSuccess {String} id ID
      * @apiSuccess {String} name Name
-     * @apiSuccess {String="STRING","INTEGER","FLOAT","DATE","BOOLEAN"} type Type
+     * @apiSuccess {String="STRING","INTEGER","FLOAT","DATE","BOOLEAN","VOCABULARY"} type Type
+     * @apiSuccess {String} [vocabulary] Referenced vocabulary name (VOCABULARY fields only)
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
      * @apiError (client) NotFound Metadata not found
@@ -133,12 +172,14 @@ public class MetadataResource extends BaseResource {
      *
      * @param id ID
      * @param name Name
+     * @param vocabulary Referenced vocabulary name (required when type is VOCABULARY)
      * @return Response
      */
     @POST
     @Path("{id: [a-z0-9\\-]+}")
     public Response update(@PathParam("id") String id,
-                           @FormParam("name") String name) {
+                           @FormParam("name") String name,
+                           @FormParam("vocabulary") String vocabulary) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -154,8 +195,13 @@ public class MetadataResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        // Update the metadata
+        // Update the metadata. A VOCABULARY field's referenced vocabulary defaults to the
+        // stored one when the caller omits it (a plain rename must preserve it), and can be
+        // changed by supplying a new name. For non-VOCABULARY types validateVocabulary clears
+        // it to null regardless.
+        String vocabularyToApply = vocabulary != null ? vocabulary : metadata.getVocabulary();
         metadata.setName(name);
+        metadata.setVocabulary(validateVocabulary(metadata.getType(), vocabularyToApply));
         metadataDao.update(metadata, principal.getId());
 
         // Returns the metadata
@@ -163,6 +209,9 @@ public class MetadataResource extends BaseResource {
                 .add("id", metadata.getId())
                 .add("name", metadata.getName())
                 .add("type", metadata.getType().name());
+        if (metadata.getVocabulary() != null) {
+            response.add("vocabulary", metadata.getVocabulary());
+        }
         return Response.ok().entity(response.build()).build();
     }
 

@@ -53,7 +53,7 @@ export interface DocumentDetail extends DocumentListItem {
   file_count: number
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
-  metadata: Array<{ id: string; name: string; type: string; value?: unknown }>
+  metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
   files?: Array<{ id: string; name: string; mimetype: string; size: number }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]

@@ -200,6 +200,15 @@ const router = createRouter({
               meta: { requiresAdmin: true },
             },
             {
+              path: 'vocabulary',
+              name: 'settings-vocabulary',
+              component: () => import('../views/settings/SettingsVocabulary.vue'),
+              // Admin-only: SettingsVocabulary fires the admin-gated GET /vocabulary
+              // (name list) on mount. Nav is already admin-hidden; this stops a
+              // direct-URL mount from firing that admin call as a non-admin.
+              meta: { requiresAdmin: true },
+            },
+            {
               path: 'monitoring',
               name: 'settings-monitoring',
               component: () => import('../views/settings/SettingsMonitoring.vue'),

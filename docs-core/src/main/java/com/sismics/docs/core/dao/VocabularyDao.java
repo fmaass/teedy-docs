@@ -49,8 +49,20 @@ public class VocabularyDao {
     }
 
     /**
+     * Get the distinct list of vocabulary names.
+     *
+     * @return Distinct vocabulary names, ordered alphabetically
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> getDistinctNames() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select distinct v.name from Vocabulary v order by v.name");
+        return q.getResultList();
+    }
+
+    /**
      * Get a vocabulary entry by ID.
-     * 
+     *
      * @param id ID
      * @return Vocabulary
      */

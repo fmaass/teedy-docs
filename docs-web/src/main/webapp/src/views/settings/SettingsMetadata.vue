@@ -11,6 +11,7 @@ import {
   type MetadataDefinition,
   type MetadataType,
 } from '../../api/metadata'
+import { listVocabularyNames } from '../../api/vocabulary'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -35,6 +36,13 @@ const { data: metadataData, isLoading, isError, refetch } = useQuery({
 
 const fields = computed(() => metadataData.value ?? [])
 
+// Vocabulary names — used to pick which vocabulary a VOCABULARY-typed field references.
+const { data: vocabularyNamesData } = useQuery({
+  queryKey: ['vocabulary-names'],
+  queryFn: () => listVocabularyNames().then((r) => r.data.names),
+})
+const vocabularyNames = computed(() => vocabularyNamesData.value ?? [])
+
 const typeOptions = METADATA_TYPES.map((type) => ({
   label: t(`ui.metadata.type_${type.toLowerCase()}`),
   value: type,
@@ -48,13 +56,16 @@ function typeLabel(type: string) {
 const showAddDialog = ref(false)
 const newName = ref('')
 const newType = ref<MetadataType>(METADATA_TYPES[0])
+const newVocabulary = ref<string | null>(null)
 
 const addMutation = useMutation({
-  mutationFn: () => createMetadata(newName.value.trim(), newType.value),
+  mutationFn: () =>
+    createMetadata(newName.value.trim(), newType.value, newVocabulary.value ?? undefined),
   onSuccess: () => {
     showAddDialog.value = false
     newName.value = ''
     newType.value = METADATA_TYPES[0]
+    newVocabulary.value = null
     queryClient.invalidateQueries({ queryKey: ['metadata'] })
     toast.add({ severity: 'success', summary: t('ui.metadata.field_added'), life: 3000 })
   },
@@ -65,25 +76,36 @@ const addMutation = useMutation({
 
 function doAdd() {
   if (!newName.value.trim()) return
+  // A VOCABULARY field must reference a vocabulary.
+  if (newType.value === 'VOCABULARY' && !newVocabulary.value) return
   addMutation.mutate()
 }
 
-// Inline rename
+// Inline rename. For VOCABULARY fields the referenced vocabulary is editable inline via
+// the same picker used on create; renameVocabulary carries it (null for other types) and
+// is resent so the backend both preserves it on a plain rename and applies any change.
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
+const renameType = ref<MetadataType | null>(null)
+const renameVocabulary = ref<string | null>(null)
 
 function startRename(field: MetadataDefinition) {
   renamingId.value = field.id
   renameValue.value = field.name
+  renameType.value = field.type
+  renameVocabulary.value = field.vocabulary ?? null
 }
 
 function cancelRename() {
   renamingId.value = null
   renameValue.value = ''
+  renameType.value = null
+  renameVocabulary.value = null
 }
 
 const renameMutation = useMutation({
-  mutationFn: (vars: { id: string; name: string }) => updateMetadata(vars.id, vars.name),
+  mutationFn: (vars: { id: string; name: string; vocabulary?: string }) =>
+    updateMetadata(vars.id, vars.name, vars.vocabulary),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['metadata'] })
     toast.add({ severity: 'success', summary: t('ui.metadata.field_updated'), life: 3000 })
@@ -97,7 +119,13 @@ const renameMutation = useMutation({
 function commitRename(id: string) {
   const name = renameValue.value.trim()
   if (!name) return cancelRename()
-  renameMutation.mutate({ id, name })
+  // A VOCABULARY field must keep a vocabulary; block committing an empty one.
+  if (renameType.value === 'VOCABULARY' && !renameVocabulary.value) return
+  renameMutation.mutate({
+    id,
+    name,
+    vocabulary: renameType.value === 'VOCABULARY' ? (renameVocabulary.value ?? undefined) : undefined,
+  })
 }
 
 // Delete
@@ -143,13 +171,22 @@ function confirmDelete(field: MetadataDefinition) {
               @keyup.escape="cancelRename"
               autofocus
             />
+            <Select
+              v-if="renameType === 'VOCABULARY'"
+              v-model="renameVocabulary"
+              :options="vocabularyNames"
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="rename-input rename-vocabulary"
+            />
           </template>
           <span v-else class="field-name">{{ data.name }}</span>
         </template>
       </Column>
-      <Column :header="t('ui.metadata.type')" style="width: 140px">
+      <Column :header="t('ui.metadata.type')" style="width: 180px">
         <template #body="{ data }">
           <Tag :value="typeLabel(data.type)" severity="secondary" />
+          <span v-if="data.type === 'VOCABULARY' && data.vocabulary" class="vocabulary-ref">{{ data.vocabulary }}</span>
         </template>
       </Column>
       <Column header="" style="width: 96px">
@@ -184,10 +221,22 @@ function confirmDelete(field: MetadataDefinition) {
           <Select id="metadata-type" v-model="newType" :options="typeOptions" optionLabel="label" optionValue="value" class="w-full" />
           <small class="field-hint">{{ t('ui.metadata.type_immutable_hint') }}</small>
         </div>
+        <div v-if="newType === 'VOCABULARY'" class="form-field">
+          <label for="metadata-vocabulary">{{ t('ui.metadata.vocabulary') }}</label>
+          <Select
+            id="metadata-vocabulary"
+            v-model="newVocabulary"
+            :options="vocabularyNames"
+            filter
+            :placeholder="t('ui.vocabulary.select_placeholder')"
+            class="w-full"
+          />
+          <small class="field-hint">{{ t('ui.metadata.vocabulary_hint') }}</small>
+        </div>
       </div>
       <template #footer>
         <Button :label="t('cancel')" severity="secondary" text @click="showAddDialog = false" />
-        <Button :label="t('add')" :disabled="!newName.trim()" :loading="addMutation.isPending.value" @click="doAdd" />
+        <Button :label="t('add')" :disabled="!newName.trim() || (newType === 'VOCABULARY' && !newVocabulary)" :loading="addMutation.isPending.value" @click="doAdd" />
       </template>
     </Dialog>
   </div>
@@ -222,6 +271,9 @@ function confirmDelete(field: MetadataDefinition) {
   width: 100%;
   font-size: 0.875rem;
 }
+.rename-vocabulary {
+  margin-top: 0.375rem;
+}
 
 .row-actions {
   display: flex;
@@ -243,6 +295,11 @@ function confirmDelete(field: MetadataDefinition) {
   font-weight: 500;
 }
 .field-hint {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+.vocabulary-ref {
+  margin-left: 0.5rem;
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
 }

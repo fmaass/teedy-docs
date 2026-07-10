@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument, importEml } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
+import { getVocabulary } from '../../api/vocabulary'
 import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
 import { shouldResetTags } from '../../utils/tagsReset'
 import { useTagFilterStore } from '../../stores/tagFilter'
@@ -96,6 +97,42 @@ const metadataSetIds = ref<Set<string>>(new Set())
 // metadata_reset=true") apart from a document that simply never had metadata.
 const metadataHadValuesAtLoad = ref(false)
 
+// Vocabulary option cache keyed by vocabulary name. Each entry is the list of
+// selectable values for that vocabulary, loaded on demand and shared by the Dublin
+// Core trio selects (type/coverage/rights) and any VOCABULARY custom-metadata field.
+const vocabularyOptions = ref<Record<string, string[]>>({})
+
+function loadVocabulary(name: string) {
+  if (!name || vocabularyOptions.value[name] !== undefined) return
+  // Mark as loading (empty list) so we do not fire the request twice.
+  vocabularyOptions.value[name] = []
+  getVocabulary(name)
+    .then(({ data }) => {
+      vocabularyOptions.value[name] = (data.entries ?? []).map((e) => e.value)
+    })
+    .catch(() => {
+      // Leave an empty option list on failure; the Select simply shows no options.
+    })
+}
+
+function vocabularyOptionsFor(name?: string): string[] {
+  if (!name) return []
+  return vocabularyOptions.value[name] ?? []
+}
+
+// Load the vocabularies referenced by the current metadata definitions (VOCABULARY
+// fields) plus the Dublin Core trio (type/coverage/rights, which are always selects).
+function loadMetadataVocabularies() {
+  loadVocabulary('type')
+  loadVocabulary('coverage')
+  loadVocabulary('rights')
+  for (const def of metadataDefinitions.value) {
+    if (def.type === 'VOCABULARY' && def.vocabulary) {
+      loadVocabulary(def.vocabulary)
+    }
+  }
+}
+
 const fileUploadRef = ref()
 
 const languages = SUPPORTED_LANGUAGES
@@ -142,7 +179,9 @@ async function initFromRoute() {
         id: m.id,
         name: m.name,
         type: m.type as MetadataDefinition['type'],
+        vocabulary: m.vocabulary,
       }))
+      loadMetadataVocabularies()
       hydrateMetadataValues(data.metadata ?? [])
       existingFiles.value = data.files || []
     } catch {
@@ -166,6 +205,7 @@ async function initFromRoute() {
       const { data } = await listMetadata()
       if (gen !== initGen) return
       metadataDefinitions.value = data.metadata
+      loadMetadataVocabularies()
       hydrateMetadataValues(data.metadata)
     } catch { /* no custom fields available */ }
     if (gen !== initGen) return
@@ -520,17 +560,41 @@ async function onEmlSelected(event: Event) {
           </div>
           <div class="form-field">
             <label for="edit-type">{{ t('document.type') }}</label>
-            <InputText id="edit-type" v-model="form.type" class="w-full" />
+            <Select
+              id="edit-type"
+              v-model="form.type"
+              :options="vocabularyOptionsFor('type')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
         </div>
         <div class="form-row">
           <div class="form-field">
             <label for="edit-coverage">{{ t('document.coverage') }}</label>
-            <InputText id="edit-coverage" v-model="form.coverage" class="w-full" />
+            <Select
+              id="edit-coverage"
+              v-model="form.coverage"
+              :options="vocabularyOptionsFor('coverage')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
           <div class="form-field">
             <label for="edit-rights">{{ t('document.rights') }}</label>
-            <InputText id="edit-rights" v-model="form.rights" class="w-full" />
+            <Select
+              id="edit-rights"
+              v-model="form.rights"
+              :options="vocabularyOptionsFor('rights')"
+              showClear
+              filter
+              :placeholder="t('ui.vocabulary.select_placeholder')"
+              class="w-full"
+            />
           </div>
         </div>
       </div>
@@ -568,6 +632,16 @@ async function onEmlSelected(event: Event) {
             :useGrouping="false"
             :minFractionDigits="1"
             :maxFractionDigits="6"
+            class="w-full"
+          />
+          <Select
+            v-else-if="def.type === 'VOCABULARY'"
+            :inputId="`meta-${def.id}`"
+            v-model="(metadataValues[def.id] as string)"
+            :options="vocabularyOptionsFor(def.vocabulary)"
+            showClear
+            filter
+            :placeholder="t('ui.vocabulary.select_placeholder')"
             class="w-full"
           />
           <InputText

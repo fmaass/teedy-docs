@@ -35,6 +35,12 @@ public class Metadata implements Loggable {
     private MetadataType type;
 
     /**
+     * Referenced vocabulary name (only set when type is VOCABULARY).
+     */
+    @Column(name = "MET_VOCABULARY_C", length = 50)
+    private String vocabulary;
+
+    /**
      * Deletion date.
      */
     @Column(name = "MET_DELETEDATE_D")
@@ -67,6 +73,15 @@ public class Metadata implements Loggable {
         return this;
     }
 
+    public String getVocabulary() {
+        return vocabulary;
+    }
+
+    public Metadata setVocabulary(String vocabulary) {
+        this.vocabulary = vocabulary;
+        return this;
+    }
+
     @Override
     public Date getDeleteDate() {
         return deleteDate;
@@ -82,6 +97,7 @@ public class Metadata implements Loggable {
                 .add("id", id)
                 .add("name", name)
                 .add("type", type)
+                .add("vocabulary", vocabulary)
                 .toString();
     }
 

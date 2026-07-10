@@ -21,6 +21,37 @@ import java.util.List;
 @Path("/vocabulary")
 public class VocabularyResource extends BaseResource {
     /**
+     * Returns the list of all vocabulary names.
+     *
+     * @api {get} /vocabulary List vocabulary names
+     * @apiName GetVocabulary
+     * @apiGroup Vocabulary
+     * @apiSuccess {String[]} names List of distinct vocabulary names
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission admin
+     * @apiVersion 1.13.0
+     *
+     * @return Response
+     */
+    @GET
+    public Response list() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        VocabularyDao vocabularyDao = new VocabularyDao();
+        JsonArrayBuilder names = Json.createArrayBuilder();
+        for (String name : vocabularyDao.getDistinctNames()) {
+            names.add(name);
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("names", names);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
      * Get a vocabulary.
      *
      * @api {get} /vocabulary/:name Get a vocabulary
