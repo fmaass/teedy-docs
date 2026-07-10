@@ -60,7 +60,7 @@ public class RouteDao {
         Map<String, Object> parameterMap = new HashMap<String, Object>();
         List<String> criteriaList = new ArrayList<>();
 
-        StringBuilder sb = new StringBuilder("select r.RTE_ID_C c0, r.RTE_NAME_C c1, r.RTE_STATUS_C c2, r.RTE_CREATEDATE_D c3");
+        StringBuilder sb = new StringBuilder("select r.RTE_ID_C c0, r.RTE_NAME_C c1, r.RTE_STATUS_C c2, r.RTE_CREATEDATE_D c3, r.RTE_IDUSER_C c4");
         sb.append(" from T_ROUTE r ");
 
         // Add search criterias
@@ -87,6 +87,7 @@ public class RouteDao {
             dto.setName((String) o[i++]);
             dto.setStatus((String) o[i++]);
             dto.setCreateTimestamp(((Timestamp) o[i++]).getTime());
+            dto.setUserId((String) o[i++]);
             dtoList.add(dto);
         }
         return dtoList;

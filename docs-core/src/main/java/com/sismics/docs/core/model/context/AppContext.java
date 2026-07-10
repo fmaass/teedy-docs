@@ -207,6 +207,8 @@ public class AppContext {
 
         mailEventBus = newAsyncEventBus();
         mailEventBus.register(new PasswordLostAsyncListener());
+        mailEventBus.register(new RouteStepValidateAsyncListener());
+        mailEventBus.register(new RouteStepRejectedAsyncListener());
     }
 
     /**

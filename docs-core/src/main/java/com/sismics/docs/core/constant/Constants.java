@@ -100,6 +100,11 @@ public class Constants {
     public static final String EMAIL_TEMPLATE_ROUTE_STEP_VALIDATE = "route_step_validate";
 
     /**
+     * Email template for the rejection notice sent to the route initiator.
+     */
+    public static final String EMAIL_TEMPLATE_ROUTE_STEP_REJECTED = "route_step_rejected";
+
+    /**
      * mm per inch.
      */
     public static float MM_PER_INCH = 1 / (10 * 2.54f) * 72f;

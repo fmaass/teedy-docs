@@ -69,10 +69,10 @@ public class WebhookResource extends BaseResource {
      * Add a webhook.
      *
      * @api {put} /webhook Add a webhook
-     * @apiDescription Each time the specified event is raised, the webhook URL will be POST-ed with the following JSON payload: {"event": "Event name", "id": "ID of the document or file"}
+     * @apiDescription Each time the specified event is raised, the webhook URL will be POST-ed with the following JSON payload: {"event": "Event name", "id": "ID of the document or file"}. Route events (ROUTE_STARTED, ROUTE_STEP_TRANSITIONED, ROUTE_COMPLETED) carry the routed document ID as "id" plus additional fields: "route_id", and for step events "step_name" and (for transitions) "transition".
      * @apiName PutWebhook
      * @apiGroup Webhook
-     * @apiParam {String="DOCUMENT_CREATED","DOCUMENT_UPDATED","DOCUMENT_DELETED","FILE_CREATED","FILE_UPDATED","FILE_DELETED"} event Event
+     * @apiParam {String="DOCUMENT_CREATED","DOCUMENT_UPDATED","DOCUMENT_DELETED","FILE_CREATED","FILE_UPDATED","FILE_DELETED","ROUTE_STARTED","ROUTE_STEP_TRANSITIONED","ROUTE_COMPLETED"} event Event
      * @apiParam {String} url URL
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied

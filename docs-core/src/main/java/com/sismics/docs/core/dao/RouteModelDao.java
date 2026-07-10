@@ -200,6 +200,24 @@ public class RouteModelDao {
     }
 
     /**
+     * Returns the IDs of the non-deleted route models that are "incomplete": at least one of their
+     * derived T_ROUTE_MODEL_TARGET rows references a principal (user or group) that no longer
+     * resolves to an active user or active group. Used by the LIST endpoint to flag models that can
+     * no longer be started faithfully because one of their step targets was deleted.
+     *
+     * @return Distinct list of incomplete route model IDs
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> findIncompleteModelIds() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select distinct t.RMT_IDROUTEMODEL_C from T_ROUTE_MODEL_TARGET t " +
+                " join T_ROUTE_MODEL rm on rm.RTM_ID_C = t.RMT_IDROUTEMODEL_C and rm.RTM_DELETEDATE_D is null " +
+                " where not exists (select 1 from T_USER u where u.USE_ID_C = t.RMT_IDTARGET_C and u.USE_DELETEDATE_D is null) " +
+                "   and not exists (select 1 from T_GROUP g where g.GRP_ID_C = t.RMT_IDTARGET_C and g.GRP_DELETEDATE_D is null)");
+        return q.getResultList();
+    }
+
+    /**
      * Rebuild the derived index rows for a route model from its steps JSON blob: drop the existing
      * rows and re-insert one per step target that resolves to a live principal. Runs in the same
      * transaction as the model create/update.

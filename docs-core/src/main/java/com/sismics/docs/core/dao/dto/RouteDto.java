@@ -22,6 +22,11 @@ public class RouteDto {
     private String status;
 
     /**
+     * Initiator user ID.
+     */
+    private String userId;
+
+    /**
      * Creation date.
      */
     private Long createTimestamp;
@@ -50,6 +55,15 @@ public class RouteDto {
 
     public RouteDto setStatus(String status) {
         this.status = status;
+        return this;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public RouteDto setUserId(String userId) {
+        this.userId = userId;
         return this;
     }
 
