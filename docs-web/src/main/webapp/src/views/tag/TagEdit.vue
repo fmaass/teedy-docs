@@ -127,6 +127,7 @@ function handleDelete() {
             optionValue="value"
             class="w-full"
             showClear
+            filter
             :placeholder="t('ui.tag_edit.no_parent')"
           />
         </div>

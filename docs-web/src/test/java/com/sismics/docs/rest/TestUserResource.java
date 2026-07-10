@@ -80,6 +80,23 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertFalse(user.getBoolean("totp_enabled"));
         Assertions.assertFalse(user.getBoolean("disabled"));
 
+        // The admin flag must map per-user across the SAME response: true for the
+        // built-in admin (admin role), false for a normal user (default user role).
+        Boolean adminUserAdminFlag = null;
+        Boolean aliceUserAdminFlag = null;
+        for (int i = 0; i < users.size(); i++) {
+            JsonObject row = users.getJsonObject(i);
+            if ("admin".equals(row.getString("username"))) {
+                adminUserAdminFlag = row.getBoolean("admin");
+            } else if ("alice".equals(row.getString("username"))) {
+                aliceUserAdminFlag = row.getBoolean("admin");
+            }
+        }
+        Assertions.assertNotNull(adminUserAdminFlag, "admin user must be present in /user/list");
+        Assertions.assertNotNull(aliceUserAdminFlag, "alice user must be present in /user/list");
+        Assertions.assertTrue(adminUserAdminFlag, "admin user must have admin=true");
+        Assertions.assertFalse(aliceUserAdminFlag, "normal user alice must have admin=false");
+
         // Create a user KO (login length validation)
         Response response = target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
@@ -444,6 +461,82 @@ public class TestUserResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Response.Status.OK, Response.Status.fromStatusCode(response.getStatus()));
+    }
+
+    /**
+     * Guards against OTP brute-force: repeated WRONG TOTP codes must count toward the
+     * login rate limiter (lockout), exactly like wrong passwords, and a CORRECT code
+     * before the threshold must clear the counter. Without recording wrong-code
+     * failures the 2FA second factor could be guessed unboundedly.
+     */
+    @Test
+    public void testTotpLoginBruteForceLockout() {
+        int maxAttempts = Integer.parseInt(
+                System.getenv().getOrDefault("DOCS_LOGIN_MAX_ATTEMPTS", "5"));
+
+        // Isolate from the shared loopback-IP limiter state of other tests.
+        com.sismics.docs.rest.util.LoginRateLimiter.getInstance().reset();
+        try {
+            // Login admin, create + enable TOTP for a fresh user
+            String adminToken = adminToken();
+            clientUtil.createUser("totplock");
+            String totplockToken = clientUtil.login("totplock");
+            JsonObject json = target().path("/user/enable_totp").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totplockToken)
+                    .post(Entity.form(new Form()), JsonObject.class);
+            String secret = json.getString("secret");
+            Assertions.assertNotNull(secret);
+
+            GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
+
+            // A CORRECT code below the threshold logs in AND clears the counter. We
+            // first burn (maxAttempts - 1) wrong codes, then a correct one, and prove
+            // the counter reset by immediately doing another full round of wrong codes.
+            for (int i = 0; i < maxAttempts - 1; i++) {
+                Response wrong = target().path("/user/login").request()
+                        .post(Entity.form(new Form()
+                                .param("username", "totplock")
+                                .param("password", "Test1234")
+                                .param("code", "000000")
+                                .param("remember", "false")));
+                Assertions.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), wrong.getStatus());
+            }
+            // Correct code clears the counter (login succeeds, not rate-limited).
+            int good = googleAuthenticator.calculateCode(secret, new Date().getTime() / 30000);
+            Response ok = target().path("/user/login").request()
+                    .post(Entity.form(new Form()
+                            .param("username", "totplock")
+                            .param("password", "Test1234")
+                            .param("code", Integer.toString(good))
+                            .param("remember", "false")));
+            Assertions.assertEquals(Response.Status.OK.getStatusCode(), ok.getStatus());
+
+            // Now exhaust the threshold with wrong codes: after maxAttempts failures the
+            // account is locked out (429), proving wrong TOTP codes count toward lockout.
+            for (int i = 0; i < maxAttempts; i++) {
+                Response wrong = target().path("/user/login").request()
+                        .post(Entity.form(new Form()
+                                .param("username", "totplock")
+                                .param("password", "Test1234")
+                                .param("code", "000000")
+                                .param("remember", "false")));
+                Assertions.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), wrong.getStatus());
+            }
+            // Even a CORRECT code is now refused with 429 — the limiter is engaged.
+            int goodButLocked = googleAuthenticator.calculateCode(secret, new Date().getTime() / 30000);
+            Response locked = target().path("/user/login").request()
+                    .post(Entity.form(new Form()
+                            .param("username", "totplock")
+                            .param("password", "Test1234")
+                            .param("code", Integer.toString(goodButLocked))
+                            .param("remember", "false")));
+            Assertions.assertEquals(429, locked.getStatus());
+            JsonObject lockedJson = locked.readEntity(JsonObject.class);
+            Assertions.assertEquals("RateLimited", lockedJson.getString("type"));
+        } finally {
+            // Do not leak the lockout to other tests sharing the loopback IP key.
+            com.sismics.docs.rest.util.LoginRateLimiter.getInstance().reset();
+        }
     }
 
     @Test

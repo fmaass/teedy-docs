@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { createHmac } from 'node:crypto'
 
 // Shared e2e helpers. Kept selector-light and user-facing to match the harness
 // style (getByRole/getByLabel/getByText; the reused #edit-title id for the doc
@@ -57,4 +58,48 @@ export async function login(page: Page, user: string, pass: string): Promise<voi
   await page.locator('#login-pass').fill(pass)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page).toHaveURL(/#\/document$/)
+}
+
+// --- TOTP (behavior A) -------------------------------------------------------
+// The backend's GoogleAuthenticator is a standard RFC-6238 TOTP: Base32 secret,
+// 30-second window, HmacSHA1, 6 digits (see
+// docs-core/.../util/totp/GoogleAuthenticator.java). We recompute the SAME code
+// here so a spec can drive a genuine valid-OTP login end to end — no mock, the
+// code is checked by the real server. If the algorithm regressed server-side, a
+// code computed here would be rejected and the login would fail, so this is a
+// REAL assertion of the server's TOTP verification, not a self-check.
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+function base32Decode(secret: string): Buffer {
+  const clean = secret.replace(/=+$/, '').toUpperCase().replace(/\s/g, '')
+  let bits = ''
+  for (const ch of clean) {
+    const idx = BASE32_ALPHABET.indexOf(ch)
+    if (idx === -1) continue
+    bits += idx.toString(2).padStart(5, '0')
+  }
+  const bytes: number[] = []
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8), 2))
+  }
+  return Buffer.from(bytes)
+}
+
+// Compute the 6-digit TOTP for a Base32 secret at a given epoch-ms (default now).
+export function totpCode(secret: string, atMs: number = Date.now()): string {
+  const key = base32Decode(secret)
+  const counter = Math.floor(atMs / 1000 / 30)
+  const buf = Buffer.alloc(8)
+  // 64-bit big-endian counter (high word is 0 for all realistic times).
+  buf.writeUInt32BE(Math.floor(counter / 2 ** 32), 0)
+  buf.writeUInt32BE(counter >>> 0, 4)
+  const hmac = createHmac('sha1', key).update(buf).digest()
+  const offset = hmac[hmac.length - 1] & 0x0f
+  const binary =
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff)
+  return (binary % 1_000_000).toString().padStart(6, '0')
 }

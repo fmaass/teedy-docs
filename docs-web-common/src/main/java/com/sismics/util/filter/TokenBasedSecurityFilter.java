@@ -148,6 +148,16 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
             return null;
         }
 
+        // Load the user before any bookkeeping side effect. A disabled account (shared
+        // User.isDisabled() eligibility predicate) is rejected here so a disabled cookie
+        // request never rotates the token — the rotation below is a mutation the disabled
+        // user must not trigger. Access is separately denied downstream in
+        // SecurityFilter.injectUser, which also treats a disabled user as anonymous.
+        User user = new UserDao().getById(authToken.getUserId());
+        if (user == null || user.isDisabled()) {
+            return user;
+        }
+
         // Token rotation: if < 30 days remaining on a long-lived token, extend by 90 days
         if (authToken.isLongLasted()) {
             long now = System.currentTimeMillis();
@@ -160,6 +170,6 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
             }
         }
 
-        return new UserDao().getById(authToken.getUserId());
+        return user;
     }
 }

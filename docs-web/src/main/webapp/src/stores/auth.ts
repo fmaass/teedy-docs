@@ -27,8 +27,12 @@ export const useAuthStore = defineStore('auth', () => {
     initialized.value = true
   }
 
-  async function login(username: string, password: string, remember: boolean) {
-    await apiLogin(username, password, remember)
+  // `code` is the optional TOTP 2FA validation code, forwarded to the API when the
+  // backend has challenged the login with "ValidationCodeRequired". A rejection here
+  // propagates to the caller so the login view can reveal the code field / show a
+  // wrong-code error.
+  async function login(username: string, password: string, remember: boolean, code?: string) {
+    await apiLogin(username, password, remember, code)
     await fetchCurrentUser()
   }
 

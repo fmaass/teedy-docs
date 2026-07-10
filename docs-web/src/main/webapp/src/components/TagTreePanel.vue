@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type Tag } from '../api/tag'
 import Tree from 'primevue/tree'
@@ -35,10 +36,10 @@ const emit = defineEmits<{
   selectTag: [tagId: string]
 }>()
 
-const viewModeOptions = [
-  { label: 'Tree', value: 'tree' },
-  { label: 'Facets', value: 'facets' },
-]
+const viewModeOptions = computed(() => [
+  { label: t('ui.tree_view'), value: 'tree' },
+  { label: t('ui.facets_view'), value: 'facets' },
+])
 
 function nodeTagId(key: string): string {
   const idx = key.indexOf('__')

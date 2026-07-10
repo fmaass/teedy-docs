@@ -35,8 +35,17 @@ public class ApiKeyBasedSecurityFilter extends SecurityFilter {
             return null;
         }
 
+        // Load the user before the last-used bookkeeping update. A disabled account (shared
+        // User.isDisabled() eligibility predicate) is rejected here so a disabled API-key
+        // request never bumps lastUsedDate. Access is separately denied downstream in
+        // SecurityFilter.injectUser, which also treats a disabled user as anonymous.
+        User user = new UserDao().getById(apiKey.getUserId());
+        if (user == null || user.isDisabled()) {
+            return user;
+        }
+
         apiKeyDao.updateLastUsedDate(apiKey.getId());
-        return new UserDao().getById(apiKey.getUserId());
+        return user;
     }
 
     public static String sha256Hex(String input) {

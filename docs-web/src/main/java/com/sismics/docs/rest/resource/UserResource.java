@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * User REST resources.
@@ -336,25 +337,49 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Clear rate limiter on successful auth
-        rateLimiter.recordSuccess(clientIp);
-        if (username != null) rateLimiter.recordSuccess("user:" + username);
+        // Reject a disabled account BEFORE minting a session token / setting a cookie
+        // (shared User.isDisabled() eligibility predicate). The internal and LDAP auth
+        // handlers already return null for a disabled user, but the guest-login branch
+        // resolves the guest directly via getActiveByUsername, which still returns a
+        // disabled account — so without this guard a disabled guest gets a token minted
+        // and only the NEXT request is rejected by SecurityFilter.injectUser. Placed
+        // before TOTP so a disabled user is never prompted for an OTP, and the response is
+        // indistinguishable from a bad password (do not leak "exists but disabled"): record
+        // the same rate-limiter failure the bad-password path records.
+        if (user.isDisabled()) {
+            rateLimiter.recordFailure(clientIp);
+            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throw new ForbiddenClientException();
+        }
 
-        // Two factor authentication
+        // Two factor authentication. The rate limiter is NOT cleared until the FULL
+        // authentication (password AND, if enabled, TOTP) succeeds, so a wrong TOTP
+        // code counts toward lockout just like a wrong password. Otherwise an attacker
+        // holding the password could brute-force the 6-digit code without limit.
         if (user.getTotpKey() != null) {
-            // If TOTP is enabled, ask a validation code
+            // If TOTP is enabled, ask a validation code. This is a prompt, not a failed
+            // attempt, so no failure is recorded here.
             if (Strings.isNullOrEmpty(validationCodeStr)) {
                 throw new ClientException("ValidationCodeRequired", "An OTP validation code is required");
             }
-            
+
             // Check the validation code
             int validationCode = ValidationUtil.validateInteger(validationCodeStr, "code");
             GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
             if (!googleAuthenticator.authorize(user.getTotpKey(), validationCode)) {
+                // A wrong TOTP code is a failed authentication attempt: record it against
+                // the same IP + user keys used for wrong passwords, so repeated wrong
+                // codes trigger lockout.
+                rateLimiter.recordFailure(clientIp);
+                if (username != null) rateLimiter.recordFailure("user:" + username);
                 throw new ForbiddenClientException();
             }
         }
-        
+
+        // Clear rate limiter on fully successful auth (password + TOTP, if enabled)
+        rateLimiter.recordSuccess(clientIp);
+        if (username != null) rateLimiter.recordSuccess("user:" + username);
+
         // Get the remote IP
         String ip = request.getHeader("x-forwarded-for");
         if (Strings.isNullOrEmpty(ip)) {
@@ -804,8 +829,21 @@ public class UserResource extends BaseResource {
         }
         
         UserDao userDao = new UserDao();
+        RoleBaseFunctionDao roleBaseFunctionDao = new RoleBaseFunctionDao();
         List<UserDto> userDtoList = userDao.findByCriteria(new UserCriteria().setGroupId(groupId), sortCriteria);
+
+        // Mirror the update endpoint's disable-refusal rule (see update()): the guest
+        // user and any user with the ADMIN base function cannot be disabled. Exposing
+        // `admin` lets the admin UI hide the disable/enable toggle for those rows so it
+        // does not present a false-success affordance. Resolve the ADMIN flag for every
+        // distinct role in a single query to avoid an N+1 lookup over the user list.
+        Set<String> roleIdSet = userDtoList.stream()
+                .map(UserDto::getRoleId)
+                .collect(Collectors.toSet());
+        Set<String> adminRoleIds = roleBaseFunctionDao.getRoleIdsWithBaseFunction(BaseFunction.ADMIN.name(), roleIdSet);
+
         for (UserDto userDto : userDtoList) {
+            boolean admin = adminRoleIds.contains(userDto.getRoleId());
             users.add(Json.createObjectBuilder()
                     .add("id", userDto.getId())
                     .add("username", userDto.getUsername())
@@ -814,6 +852,7 @@ public class UserResource extends BaseResource {
                     .add("storage_quota", userDto.getStorageQuota())
                     .add("storage_current", userDto.getStorageCurrent())
                     .add("create_date", userDto.getCreateTimestamp())
+                    .add("admin", admin)
                     .add("disabled", userDto.getDisableTimestamp() != null));
         }
         

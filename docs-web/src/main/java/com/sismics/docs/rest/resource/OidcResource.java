@@ -86,6 +86,19 @@ public class OidcResource extends BaseResource {
         jwksCache = null;
     }
 
+    /**
+     * Shared account-eligibility gate for the OIDC callback: an administratively disabled
+     * account must not be granted an auth token or cookie. This delegates to the single
+     * {@link User#isDisabled()} predicate used by every authentication path (cookie, API key,
+     * header) so disabled-user enforcement has one source of truth.
+     *
+     * @param user Resolved OIDC user (never null at the call site)
+     * @return True if the account may be granted a session
+     */
+    public static boolean isOidcUserEligible(User user) {
+        return user != null && !user.isDisabled();
+    }
+
     private static final String PROP_ENABLED = "docs.oidc_enabled";
     private static final String PROP_ISSUER = "docs.oidc_issuer";
     private static final String PROP_CLIENT_ID = "docs.oidc_client_id";
@@ -229,6 +242,18 @@ public class OidcResource extends BaseResource {
                     log.error("Failed to provision OIDC user: sub={}", subject);
                     return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
                 }
+            }
+
+            // Reject an administratively disabled account BEFORE minting a token or setting a
+            // cookie (shared User.isDisabled() eligibility predicate). Checked after the stable
+            // getByOidcSubject lookup so a disabled identity is a clean rejection, not a
+            // duplicate first-login provisioning. A newly-provisioned account is never disabled,
+            // so this only catches a pre-existing OIDC identity that was later disabled.
+            if (!isOidcUserEligible(user)) {
+                // The OIDC subject is PII and must stay out of WARN (DEBUG-only policy).
+                log.warn("OIDC login refused for a disabled account");
+                log.debug("OIDC login refused for disabled account: sub={}", subject);
+                return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
             String ip = request.getHeader("x-forwarded-for");

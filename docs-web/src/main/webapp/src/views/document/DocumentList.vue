@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
@@ -168,22 +168,69 @@ function buildFilterLabel(): string {
   return parts.join(' · ')
 }
 
+// History state so the document view's in-app Back returns to the active filtered
+// list (returnTo) and shows the filter context (filterLabel). Shared by both the
+// slide-over "open full view" and the row double-click paths so double-click never
+// drops the filter context.
+function buildDocumentViewState() {
+  return {
+    returnTo: router.resolve({ name: 'documents', query: tf.buildFilterQuery() }).fullPath,
+    filterLabel: buildFilterLabel() || undefined,
+  }
+}
+
 function openFullView() {
   if (slideOverDoc.value) {
     router.push({
       name: 'document-view',
       params: { id: slideOverDoc.value.id },
-      state: {
-        returnTo: router.resolve({ name: 'documents', query: tf.buildFilterQuery() }).fullPath,
-        filterLabel: buildFilterLabel() || undefined,
-      },
+      state: buildDocumentViewState(),
     })
   }
 }
 
+// Single- vs double-click: a native double-click fires two row-clicks first, so a
+// naive single-click handler would flash the slide-over open before the dblclick
+// navigation. Debounce the slide-over open and cancel it if a dblclick lands within
+// the window — a clean double-click opens the full view with no stale slide-over.
+const CLICK_DEBOUNCE_MS = 250
+let pendingSingleClick: ReturnType<typeof setTimeout> | null = null
+
 function openDocument(doc: DocumentListItem) {
-  openSlideOver(doc)
+  if (pendingSingleClick) clearTimeout(pendingSingleClick)
+  pendingSingleClick = setTimeout(() => {
+    pendingSingleClick = null
+    openSlideOver(doc)
+  }, CLICK_DEBOUNCE_MS)
 }
+
+function openDocumentFull(doc: DocumentListItem) {
+  // Cancel any pending slide-over from the two preceding single-clicks.
+  if (pendingSingleClick) {
+    clearTimeout(pendingSingleClick)
+    pendingSingleClick = null
+  }
+  // A slow double-click can land AFTER the 250 ms single-click timer already
+  // fired and opened the slide-over. Cancelling the (now-null) timer is not
+  // enough — close the slide-over so navigation never strands it open.
+  slideOverOpen.value = false
+  slideOverDocId.value = null
+  // Carry the SAME returnTo/filterLabel state as the slide-over path so the
+  // document view's Back returns to the active filtered list.
+  router.push({
+    name: 'document-view',
+    params: { id: doc.id },
+    state: buildDocumentViewState(),
+  })
+}
+
+// No dangling debounce timer should survive teardown (navigation, filter change).
+onBeforeUnmount(() => {
+  if (pendingSingleClick) {
+    clearTimeout(pendingSingleClick)
+    pendingSingleClick = null
+  }
+})
 
 const contextMenuItems = computed(() => {
   const doc = contextMenuDoc.value
@@ -350,6 +397,7 @@ function bulkDelete() {
         :sortField="sortField"
         :sortOrder="sortOrder"
         @row-click="openDocument"
+        @row-dblclick="openDocumentFull"
         @row-context-menu="onDocContextMenu"
         @page="onPage"
         @sort="onSort"

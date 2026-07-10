@@ -39,10 +39,10 @@
 # anonymous checks order-independent and not dependent on a pre-cleared browser.
 #
 # Version gate: check 1 asserts current_version == E2E_EXPECT_VERSION (default
-# 3.2.1). A mismatch FAILS the harness so it can never certify a stale image.
+# 3.2.2). A mismatch FAILS the harness so it can never certify a stale image.
 #
 # Checks performed (each FAIL exits nonzero at the end):
-#   1. /api/app answers and current_version == expected (default 3.2.1)      [api]
+#   1. /api/app answers and current_version == expected (default 3.2.2)      [api]
 #   2. native form login admin/admin lands in the app shell (logged-in UI)   [browser]
 #   3. cold-load deep link /#/document?search=…&tags=…&exclude=… retains ALL
 #      query params after hydration (URL retention; API-level filter coverage
@@ -59,15 +59,31 @@
 #   8. Admin settings › account sessions — the self-service sessions table
 #      renders the current-session row (the computed "current" marker)         [browser]
 #   9. Admin settings › monitoring — the server-log viewer renders log rows    [browser]
+#  13. Tag pickers (v3.2.2 C) — the document-edit tag MultiSelect filter box
+#      winnows options to a typed fragment AND a selected tag renders as a COLORED
+#      TagBadge chip (non-transparent background), not a plain label            [browser]
+#  14. Tag overflow (v3.2.2 D) — a document with 5 tags shows a focusable "+2"
+#      control whose popover (teleported to <body>) reveals the 4th/5th tag names
+#      and is NOT clipped (rect inside the viewport) — a real-Chrome layout check
+#      with a CDP screenshot; activating it does not navigate the row           [browser]
+#  15. Double-click open (v3.2.2 D) — double-clicking a document row navigates to
+#      the full /#/document/view/:id (single-click only opens the slide-over)   [browser]
 #  10. Share anonymous-view (context-isolated) — after logout, the public
 #      /#/share/:doc/:share URL renders the shared document's title to an
 #      anonymous visitor                                                        [browser]
 #  11. Anonymous route guard (context-isolated) — after logout, a deep link to
 #      /#/settings/users redirects to /login                                    [browser]
-#  12. Session restore (verified) — after the logged-out checks 10-11, the admin
-#      session is restored and confirmed live via GET /api/user (username=admin,
-#      not anonymous). Checks 10-11 run inside try/finally so this restore
-#      ALWAYS runs, even if 10 or 11 throws                                    [browser+api]
+#  16. Disabled-user login (v3.2.2 B, context-isolated) — a user disabled via the
+#      admin API is DENIED native form login (stays on /login, session stays
+#      anonymous via GET /api/user)                                             [browser+api]
+#  17. TOTP login (v3.2.2 A, context-isolated) — a TOTP-enabled user's password
+#      submit reveals the OTP field (400 ValidationCodeRequired); a code computed
+#      with the same RFC-6238 algorithm the server verifies completes the login
+#      (session live via GET /api/user) — a genuine end-to-end 2FA login        [browser+api]
+#  12. Session restore (verified) — after the logged-out checks 10-11 + 16-17, the
+#      admin session is restored and confirmed live via GET /api/user
+#      (username=admin, not anonymous). Those checks run inside try/finally so this
+#      restore ALWAYS runs, even if one of them throws                          [browser+api]
 #
 # Every browser check performs a real interaction (search / click / open / act)
 # plus an assertion on rendered DOM or authoritative API state, and saves a
@@ -77,7 +93,7 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
-expect_version="${E2E_EXPECT_VERSION:-3.2.1}"
+expect_version="${E2E_EXPECT_VERSION:-3.2.2}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"
@@ -139,16 +155,65 @@ route_start="$(api_post -d "routeModelId=default-document-review" -d "documentId
 route_ok="$(printf '%s' "${route_start}" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("1" if d.get("route_step") else "")' 2>/dev/null || true)"
 [ -z "${route_ok}" ] && note FAIL "seed: could not start route on document (got: ${route_start:0:120})"
 
+# --- Seed for the v3.2.2 behavior checks (A/B/C/D) ----------------------------
+# D (#24): a document carrying FIVE tags so the list row deterministically
+# overflows (>3) and renders the "+2" TagOverflow control the popover check drives.
+ovf_tag_ids=""
+ovf_tag_4=""
+ovf_tag_5=""
+for n in 1 2 3 4 5; do
+  tid="$(api_put -d "name=${run_token}-ovf${n}&color=#2aabd2" "${base_url}/api/tag" | json_field id || true)"
+  [ -z "${tid}" ] && note FAIL "seed: could not create overflow tag ${n}"
+  ovf_tag_ids="${ovf_tag_ids} -d tags=${tid}"
+  [ "${n}" = "4" ] && ovf_tag_4="${tid}"
+  [ "${n}" = "5" ] && ovf_tag_5="${tid}"
+done
+ovf_doc_title="${run_token} Overflow Document"
+# shellcheck disable=SC2086
+ovf_doc_id="$(api_put --data-urlencode "title=${ovf_doc_title}" -d "language=eng" ${ovf_tag_ids} \
+  "${base_url}/api/document" | json_field id || true)"
+[ -z "${ovf_doc_id}" ] && note FAIL "seed: could not create overflow document"
+
+# B (#17): a normal user that admin will DISABLE, then confirm login is denied.
+dis_user="${run_token}dis"
+dis_pass="DisablePass123"
+api_put -d "username=${dis_user}" -d "password=${dis_pass}" \
+  -d "email=${dis_user}@example.com" -d "storage_quota=1000000000" \
+  "${base_url}/api/user" >/dev/null || note FAIL "seed: could not create disable-target user"
+# Disable it via the admin API (the SettingsUsers toggle posts the same param).
+api_post -d "disabled=true" "${base_url}/api/user/${dis_user}" >/dev/null \
+  || note FAIL "seed: could not disable target user"
+
+# A (#18): a TOTP-enabled user. Create it, log in AS it to enable TOTP (the secret
+# is bound to that account), capture the Base32 secret so the browser can compute a
+# valid code with the SAME RFC-6238 algorithm the server verifies.
+totp_user="${run_token}totp"
+totp_pass="TotpPass123"
+api_put -d "username=${totp_user}" -d "password=${totp_pass}" \
+  -d "email=${totp_user}@example.com" -d "storage_quota=1000000000" \
+  "${base_url}/api/user" >/dev/null || note FAIL "seed: could not create TOTP user"
+totp_jar="$(mktemp)"
+curl -sf -c "${totp_jar}" -X POST -d "username=${totp_user}&password=${totp_pass}&remember=false" \
+  "${base_url}/api/user/login" >/dev/null || note FAIL "seed: TOTP user login failed"
+totp_secret="$(curl -sf -b "${totp_jar}" -X POST "${base_url}/api/user/enable_totp" | json_field secret || true)"
+rm -f "${totp_jar}"
+[ -z "${totp_secret}" ] && note FAIL "seed: could not enable TOTP / read secret"
+
 echo "[seed] doc=${doc_id} tag_in=${tag_in} tag_ex=${tag_ex} share=${share_id} route_started=${route_ok:-0}" \
   | tee -a "${art_dir}/checks.log"
+echo "[seed] ovf_doc=${ovf_doc_id} dis_user=${dis_user} totp_user=${totp_user} totp_secret_len=${#totp_secret}" \
+  | tee -a "${art_dir}/checks.log"
 
-# --- Checks 2-11: real-browser flow -------------------------------------------
+# --- Checks 2-17: real-browser flow -------------------------------------------
 BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_TAG_IN="${tag_in}" BH_TAG_EX="${tag_ex}" BH_TAG_IN_NAME="${run_token}-in" \
   BH_DOC_ID="${doc_id}" BH_DOC_TITLE="${doc_title}" BH_SHARE_ID="${share_id}" \
   BH_RUN="${run_token}" \
+  BH_OVF_DOC_TITLE="${ovf_doc_title}" BH_OVF_TAG4="${run_token}-ovf4" BH_OVF_TAG5="${run_token}-ovf5" \
+  BH_DIS_USER="${dis_user}" BH_DIS_PASS="${dis_pass}" \
+  BH_TOTP_USER="${totp_user}" BH_TOTP_PASS="${totp_pass}" BH_TOTP_SECRET="${totp_secret}" \
   browser-harness <<'PY'
-import json, os, time, urllib.parse
+import json, os, time, urllib.parse, hmac, hashlib, base64, struct
 
 base = os.environ["BH_BASE_URL"]
 art = os.environ["BH_ART"]
@@ -159,7 +224,26 @@ doc_id = os.environ.get("BH_DOC_ID", "")
 doc_title = os.environ.get("BH_DOC_TITLE", "")
 share_id = os.environ.get("BH_SHARE_ID", "")
 run = os.environ.get("BH_RUN", "")
+ovf_doc_title = os.environ.get("BH_OVF_DOC_TITLE", "")
+ovf_tag4 = os.environ.get("BH_OVF_TAG4", "")
+ovf_tag5 = os.environ.get("BH_OVF_TAG5", "")
+dis_user = os.environ.get("BH_DIS_USER", "")
+dis_pass = os.environ.get("BH_DIS_PASS", "")
+totp_user = os.environ.get("BH_TOTP_USER", "")
+totp_pass = os.environ.get("BH_TOTP_PASS", "")
+totp_secret = os.environ.get("BH_TOTP_SECRET", "")
 results = {}
+
+# RFC-6238 TOTP: recompute the SAME 6-digit code the server verifies (Base32 secret,
+# 30s window, HmacSHA1). A mock would pass against a broken server — this does not.
+def totp_now(secret):
+    key = base64.b32decode(secret.upper() + "=" * ((8 - len(secret) % 8) % 8))
+    counter = int(time.time()) // 30
+    msg = struct.pack(">Q", counter)
+    h = hmac.new(key, msg, hashlib.sha1).digest()
+    off = h[-1] & 0x0F
+    binary = ((h[off] & 0x7F) << 24) | ((h[off+1] & 0xFF) << 16) | ((h[off+2] & 0xFF) << 8) | (h[off+3] & 0xFF)
+    return str(binary % 1_000_000).zfill(6)
 
 def shot(name):
     capture_screenshot(path=os.path.join(art, name + ".png"))
@@ -405,7 +489,146 @@ mon_ok = int(mon.get("rows") or 0) >= 1
 results["monitoring_logs"] = (mon_ok, f"log rows={mon.get('rows')} total='{mon.get('total')}'")
 shot("09-monitoring-logs")
 
-# --- Checks 10-11: anonymous, CONTEXT-ISOLATED ---------------------------------
+# --- Check 13 (behavior C): doc-edit tag MultiSelect filter + colored chip -----
+# Open the document-edit MultiSelect, type the include-tag name into the FILTER box,
+# assert the option list winnows to it, pick it, and assert the selected chip is a
+# COLORED TagBadge (span.teedy-tag with a non-transparent background) — not a plain
+# label. Reverting the #14/#23 filter box or the #chip slot would fail this.
+# The seed document is tagged with tag_in, so document-edit renders that selection
+# through the MultiSelect #chip slot on load — a COLORED TagBadge (span.teedy-tag with
+# the tag's #2aabd2 background), NOT a plain PrimeVue label. Read that chip first
+# (before touching the overlay), then open the overlay and prove the FILTER winnows.
+goto_url(base + f"/#/document/edit/{doc_id}"); time.sleep(2.5); wait_for_load()
+chip = js("""
+  return (() => {
+    const chips = [...document.querySelectorAll('#edit-tags .teedy-tag, .tag-multiselect .teedy-tag')]
+      .filter(c => (c.textContent||'').includes(arguments0));
+    if (!chips.length) return {found: false};
+    return {found: true, bg: getComputedStyle(chips[0]).backgroundColor};
+  })();
+""".replace("arguments0", json.dumps(tag_in_name)))
+shot("13a-tag-chip")
+# Open the overlay and confirm the filter box is present + winnows the option list.
+js("""
+  (() => {
+    const ms = document.querySelector('#edit-tags');
+    const trigger = ms && (ms.querySelector('.p-multiselect-dropdown') || ms.querySelector('.p-multiselect-label') || ms);
+    if (trigger) trigger.click();
+  })();
+""")
+time.sleep(1.2)
+filt = js("""
+  return (() => !!document.querySelector('.p-multiselect-overlay input.p-multiselect-filter, .p-multiselect-overlay .p-multiselect-filter input, .p-multiselect-overlay input[role=searchbox]'))();
+""")
+before_n = js("return (() => document.querySelectorAll('.p-multiselect-overlay li[role=option]').length)();")
+js("""
+  (() => {
+    const box = document.querySelector('.p-multiselect-overlay input.p-multiselect-filter, .p-multiselect-overlay .p-multiselect-filter input, .p-multiselect-overlay input[role=searchbox]');
+    if (box) { box.value = arguments0; box.dispatchEvent(new Event('input', {bubbles:true})); }
+  })();
+""".replace("arguments0", json.dumps(tag_in_name)))
+time.sleep(1.2)
+after = js("""
+  return (() => {
+    const opts = [...document.querySelectorAll('.p-multiselect-overlay li[role=option]')];
+    const matching = opts.filter(o => (o.textContent||'').includes(arguments0)).length;
+    return {total: opts.length, matching};
+  })();
+""".replace("arguments0", json.dumps(tag_in_name)))
+shot("13b-tag-filter")
+opts_before = int(before_n or 0)
+opts_total = int(after.get("total") or 0)
+opts_match = int(after.get("matching") or 0)
+chip_bg = (chip.get("bg") or "") if isinstance(chip, dict) else ""
+tag_picker_ok = (
+    bool(chip.get("found"))                              # selected tag rendered as a chip
+    and chip_bg.startswith("rgb") and chip_bg != "rgba(0, 0, 0, 0)"  # and it is COLORED
+    and bool(filt)                                       # filter box present
+    and opts_before > opts_match                         # filter actually REMOVED non-matching options
+    and opts_total >= 1 and opts_total == opts_match     # only the match(es) remain
+)
+results["tag_picker"] = (tag_picker_ok, f"chip={chip} filter_box={filt} opts_before={opts_before} opts_total={opts_total} opts_match={opts_match}")
+
+# --- Check 14 (behavior D): +N tag overflow popover (real-Chrome layout) -------
+# The overflow doc carries 5 tags: the list row shows the first 3 inline plus a
+# focusable "+2" TagOverflow control whose popover teleports to <body> (escaping the
+# DataTable overflow clip) and reveals the 4th and 5th tag names. A real-Chrome
+# layout concern worth a CDP screenshot: assert the popover is visible AND within the
+# viewport (not clipped), and that it reveals the hidden tag names.
+goto_url(base + "/#/document"); time.sleep(1.5); wait_for_load()
+# Search for the overflow doc so its row is on the page.
+js("""
+  (() => {
+    const el = document.querySelector('.search-input input, input.search-input, .search-row input');
+    if (el) { el.value = arguments0; el.dispatchEvent(new Event('input', {bubbles:true})); }
+  })();
+""".replace("arguments0", json.dumps(ovf_doc_title)))
+time.sleep(2.5); wait_for_load()
+ovf_before = js("""
+  return (() => {
+    const el = document.querySelector('.tag-overflow');
+    if (!el) return {present: false};
+    return {present: true, text: el.textContent.trim(), expanded: el.getAttribute('aria-expanded')};
+  })();
+""")
+# Activate the overflow control (click) and read the teleported popover panel.
+js("""
+  (() => { const el = document.querySelector('.tag-overflow'); if (el) el.click(); })();
+""")
+time.sleep(1.0)
+ovf_after = js("""
+  return (() => {
+    const panel = document.querySelector('.tag-overflow-panel');
+    if (!panel) return {open: false};
+    const names = [...panel.querySelectorAll('.teedy-tag')].map(e => e.textContent.trim());
+    const r = panel.getBoundingClientRect();
+    // "Not clipped": the panel rect is non-empty and inside the viewport bounds.
+    const inViewport = r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0
+      && r.bottom <= (window.innerHeight + 1) && r.right <= (window.innerWidth + 1);
+    const ctrl = document.querySelector('.tag-overflow');
+    return {open: true, names, inViewport, expanded: ctrl ? ctrl.getAttribute('aria-expanded') : null,
+            still_on_list: location.hash.replace(/\\?.*$/, '') === '#/document'};
+  })();
+""")
+shot("14-tag-overflow-popover")
+names = ovf_after.get("names", []) if isinstance(ovf_after, dict) else []
+overflow_ok = (
+    bool(ovf_before.get("present"))
+    and "+2" in (ovf_before.get("text") or "")
+    and bool(ovf_after.get("open"))
+    and ovf_tag4 in names and ovf_tag5 in names
+    and bool(ovf_after.get("inViewport"))         # not clipped by the DataTable overflow
+    and ovf_after.get("expanded") == "true"
+    and bool(ovf_after.get("still_on_list"))      # activating it did not navigate the row
+)
+results["tag_overflow"] = (overflow_ok, f"before={ovf_before} after_names={names} inViewport={ovf_after.get('inViewport') if isinstance(ovf_after, dict) else None}")
+
+# --- Check 15 (behavior D): double-click a row opens the full document view ----
+# Single-click opens a slide-over; a DOUBLE-click must navigate to /document/view/<id>.
+goto_url(base + "/#/document"); time.sleep(1.5); wait_for_load()
+js("""
+  (() => {
+    const el = document.querySelector('.search-input input, input.search-input, .search-row input');
+    if (el) { el.value = arguments0; el.dispatchEvent(new Event('input', {bubbles:true})); }
+  })();
+""".replace("arguments0", json.dumps(doc_title)))
+time.sleep(2.5); wait_for_load()
+# Dispatch a real dblclick on the seeded document's row title cell.
+js("""
+  (() => {
+    const cell = [...document.querySelectorAll('.doc-title')].find(e => (e.textContent||'').includes(arguments0));
+    const row = cell ? cell.closest('tr') : null;
+    const target = row || cell;
+    if (target) target.dispatchEvent(new MouseEvent('dblclick', {bubbles:true, cancelable:true, view:window}));
+  })();
+""".replace("arguments0", json.dumps(run)))
+time.sleep(2.5); wait_for_load()
+dbl_url = cur_url()
+dblclick_ok = "/document/view/" in dbl_url
+results["dblclick_open"] = (dblclick_ok, f"after dblclick url={dbl_url}")
+shot("15-dblclick-open")
+
+# --- Checks 10-11 + 16-17: anonymous / login-form, CONTEXT-ISOLATED ------------
 # These run the browser LOGGED OUT. The whole logged-out region is wrapped in
 # try/finally so that no matter how a check fails (navigation, DOM, screenshot,
 # API), the admin session is ALWAYS restored before the harness exits — and the
@@ -430,6 +653,97 @@ try:
     guard_url = cur_url()
     results["guard_redirect"] = ("/login" in guard_url, guard_url)
     shot("11-anon-route-guard")
+
+    # --- Check 16 (behavior B): a DISABLED user is denied native form login --
+    # The seeded dis_user was disabled via the admin API. Driving the real login
+    # form must be REJECTED (stays on /login, no session). If the backend stopped
+    # enforcing isDisabled(), the user would enter the app and this would fail.
+    def form_login(u, p, code=None):
+        goto_url(base + "/#/login"); wait_for_load(); time.sleep(0.8)
+        js("""
+          (() => {
+            const uu = document.querySelector('input[type=text], input[autocomplete=username], #login-user');
+            const pp = document.querySelector('input[type=password]');
+            const set = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles:true})); };
+            if (uu) set(uu, arg_u); if (pp) set(pp, arg_p);
+          })();
+        """.replace("arg_u", json.dumps(u)).replace("arg_p", json.dumps(p)))
+        time.sleep(0.3)
+        js("""
+          (() => {
+            const b = [...document.querySelectorAll('button')].find(x => /sign\\s*in/i.test(x.textContent||''));
+            (b ?? document.querySelector('form button[type=submit]')).click();
+          })();
+        """)
+        time.sleep(2.0); wait_for_load()
+
+    form_login(dis_user, dis_pass)
+    time.sleep(1.0)
+    dis_url = cur_url()
+    dis_alert = js("""
+      return (() => !!document.querySelector('.p-message-error, [role=alert]'))();
+    """)
+    # Authoritative: the session is genuinely anonymous, not established.
+    dis_anon = js("""
+      return (() => fetch(location.origin + '/api/user', {credentials:'include'})
+        .then(r => r.ok ? r.json() : {})
+        .then(u => u && u.anonymous === true).catch(() => false))();
+    """)
+    disabled_login_ok = ("/login" in dis_url) and bool(dis_alert) and bool(dis_anon)
+    results["disabled_login_denied"] = (disabled_login_ok, f"url={dis_url} alert={dis_alert} anonymous={dis_anon}")
+    shot("16-disabled-login-denied")
+
+    # --- Check 17 (behavior A): TOTP challenge + full valid-code login -------
+    # Submitting the TOTP user's password reveals the OTP field (400
+    # ValidationCodeRequired). We then compute the CURRENT valid code and complete
+    # the login — a genuine end-to-end 2FA login, code verified by the real server.
+    goto_url(base + "/#/login"); wait_for_load(); time.sleep(0.8)
+    js("""
+      (() => {
+        const uu = document.querySelector('input[type=text], input[autocomplete=username], #login-user');
+        const pp = document.querySelector('input[type=password]');
+        const set = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles:true})); };
+        if (uu) set(uu, arg_u); if (pp) set(pp, arg_p);
+      })();
+    """.replace("arg_u", json.dumps(totp_user)).replace("arg_p", json.dumps(totp_pass)))
+    time.sleep(0.3)
+    js("""
+      (() => {
+        const b = [...document.querySelectorAll('button')].find(x => /sign\\s*in/i.test(x.textContent||''));
+        (b ?? document.querySelector('form button[type=submit]')).click();
+      })();
+    """)
+    time.sleep(2.0); wait_for_load()
+    # The OTP field (#login-code) is revealed by the challenge and we are still on /login.
+    otp_field = js("return (() => !!document.querySelector('#login-code'))();")
+    otp_url = cur_url()
+    shot("17a-totp-challenge")
+    # Compute the valid code and resubmit.
+    code = totp_now(totp_secret)
+    js("""
+      (() => {
+        const c = document.querySelector('#login-code');
+        if (c) { c.value = arg_code; c.dispatchEvent(new Event('input', {bubbles:true})); }
+      })();
+    """.replace("arg_code", json.dumps(code)))
+    time.sleep(0.3)
+    js("""
+      (() => {
+        const b = [...document.querySelectorAll('button')].find(x => /sign\\s*in/i.test(x.textContent||''));
+        (b ?? document.querySelector('form button[type=submit]')).click();
+      })();
+    """)
+    time.sleep(2.5); wait_for_load()
+    totp_url = cur_url()
+    # Authoritative: a session for the TOTP user is now live (not anonymous).
+    totp_live = js("""
+      return (() => fetch(location.origin + '/api/user', {credentials:'include'})
+        .then(r => r.ok ? r.json() : {})
+        .then(u => (u && u.username === arg_u && u.anonymous !== true)).catch(() => false))();
+    """.replace("arg_u", json.dumps(totp_user)))
+    totp_ok = bool(otp_field) and ("/login" in otp_url) and ("/document" in totp_url) and bool(totp_live)
+    results["totp_login"] = (totp_ok, f"otp_field={otp_field} challenge_url={otp_url} final_url={totp_url} session_live={totp_live}")
+    shot("17b-totp-logged-in")
 except Exception as e:
     # A crash in the logged-out region records a failure but does NOT skip the
     # finally restore, and does not abort the BH_RESULTS emission below.
@@ -464,8 +778,13 @@ labels = {
     "workflow_act": "check7: workflow first (VALIDATE) step acted on and advanced (authoritative read-back)",
     "account_sessions": "check8: account settings sessions table rendered the current-session row",
     "monitoring_logs": "check9: monitoring log viewer rendered log rows",
+    "tag_picker": "check13: doc-edit tag MultiSelect filter winnowed options + selected chip is colored (behavior C)",
+    "tag_overflow": "check14: +N tag overflow popover revealed the hidden tags, not clipped (behavior D)",
+    "dblclick_open": "check15: double-clicking a document row navigated to the full view (behavior D)",
     "share_anonymous": "check10: anonymous visitor saw the shared document (context-isolated)",
     "guard_redirect": "check11: anonymous /settings/users redirected to /login (context-isolated)",
+    "disabled_login_denied": "check16: a disabled user was denied native form login (behavior B, context-isolated)",
+    "totp_login": "check17: TOTP challenge revealed the OTP field + a valid code completed login (behavior A, context-isolated)",
     "session_restored": "check12: admin session restored + verified live after the anonymous checks",
 }
 order = list(labels.keys())
@@ -484,12 +803,22 @@ for key, (ok, detail) in res.items():
 sys.exit(1 if bad else 0)
 PY
 
-# --- Cleanup: trash the documents this run created (best-effort) ---------------
-if [ -n "${doc_id:-}" ]; then
-  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${doc_id}" >/dev/null 2>&1 \
-    && echo "[cleanup] trashed document ${doc_id}" | tee -a "${art_dir}/checks.log" \
-    || echo "[cleanup] could not trash document ${doc_id} (non-fatal)" | tee -a "${art_dir}/checks.log"
-fi
+# --- Cleanup: trash the documents + delete the seeded users this run created ---
+# Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
+# never collides with a later run. The top-of-script cookie_jar admin session is
+# still valid (the harness restored admin at the end of its logged-out region).
+for d in "${doc_id:-}" "${ovf_doc_id:-}"; do
+  [ -n "${d}" ] || continue
+  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
+    && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
+    || echo "[cleanup] could not trash document ${d} (non-fatal)" | tee -a "${art_dir}/checks.log"
+done
+for u in "${dis_user:-}" "${totp_user:-}"; do
+  [ -n "${u}" ] || continue
+  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/user/${u}" >/dev/null 2>&1 \
+    && echo "[cleanup] deleted user ${u}" | tee -a "${art_dir}/checks.log" \
+    || echo "[cleanup] could not delete user ${u} (non-fatal)" | tee -a "${art_dir}/checks.log"
+done
 
 if [ "${fail}" -ne 0 ]; then
   echo "== RESULT: FAIL (see ${art_dir}) =="
