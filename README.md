@@ -19,6 +19,7 @@ Teedy is an open source, lightweight document management system for individuals 
 - **Security hardening**: JWKS key validation, discovery issuer verification, nonce fail-closed
 - **API key authentication** for programmatic access (`Authorization: Bearer tdapi_*`)
 - **Trash / recycle bin** with soft-delete, restore, permanent delete, and auto-purge
+- **Document workflows & controlled vocabularies** (v3.2): multi-step approval routes (validate / approve / reject-halts) and vocabulary-backed metadata, with a native Vue UI
 - **Vue 3 frontend** replacing AngularJS (PrimeVue 4, Vite 7, Pinia 3, TypeScript 5.9, vue-i18n)
 - **Full internationalization** with 12 languages and live language switching
 - **Accessibility**: keyboard navigation, label associations, ARIA attributes, PrimeVue FileUpload
@@ -38,7 +39,9 @@ Teedy is an open source, lightweight document management system for individuals 
 - Flexible search engine with suggestions and highlighting
 - Full text search in all supported files
 - All [Dublin Core](http://dublincore.org/) metadata
-- Custom user-defined metadata
+- Custom user-defined metadata (incl. vocabulary-backed dropdown fields)
+- Controlled vocabularies (admin-managed value lists)
+- Document approval workflows (multi-step routes: validate / approve / reject-halts, with per-document history)
 - 256-bit AES encryption of stored files
 - File versioning
 - Tag system with nesting
@@ -62,7 +65,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.1.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.2.1`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -234,7 +237,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.1.0
+    image: ghcr.io/fmaass/teedy-docs:v3.2.1
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -293,7 +296,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.1.0
+    image: ghcr.io/fmaass/teedy-docs:v3.2.1
     restart: unless-stopped
     ports:
       - 8080:8080
