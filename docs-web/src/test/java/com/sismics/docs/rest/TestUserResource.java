@@ -1,7 +1,26 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.constant.RouteStatus;
+import com.sismics.docs.core.constant.RouteStepTransition;
+import com.sismics.docs.core.constant.RouteStepType;
+import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.RouteDao;
+import com.sismics.docs.core.dao.RouteModelDao;
+import com.sismics.docs.core.dao.RouteStepDao;
+import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.Route;
+import com.sismics.docs.core.model.jpa.RouteModel;
+import com.sismics.docs.core.model.jpa.RouteStep;
+import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
+import com.sismics.util.jpa.EMF;
 import com.sismics.util.totp.GoogleAuthenticator;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityTransaction;
+import jakarta.persistence.Query;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -12,7 +31,10 @@ import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -544,5 +566,235 @@ public class TestUserResource extends BaseJerseyTest {
                         .param("password", "Recovered5678")
                         .param("remember", "false")));
         Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
+    }
+
+    /**
+     * Admin-deleting a user referenced by a route model succeeds and returns a warning payload
+     * naming the affected model. The model keeps its blob but becomes unstartable because its
+     * target no longer resolves (asserted at the DAO/SecurityUtil level: the branch has no route
+     * start REST endpoint yet, it belongs to the parallel workflow-REST phase).
+     */
+    @Test
+    public void testDeleteUserReferencedByRouteModel() {
+        String adminToken = adminToken();
+        clientUtil.createUser("wfmodeluser");
+
+        // Seed a route model whose step targets wfmodeluser (name-resolved into the index).
+        String[] userId = new String[1];
+        String modelId = inTx(() -> {
+            User user = new UserDao().getActiveByUsername("wfmodeluser");
+            userId[0] = user.getId();
+            String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"wfmodeluser\",\"type\":\"USER\"},\"name\":\"Step 1\"}]";
+            return new RouteModelDao().create(new RouteModel().setName("Model targeting wfmodeluser").setSteps(steps), "admin");
+        });
+
+        // The model references the user before deletion.
+        Boolean referencedBefore = inTx(() ->
+                new RouteModelDao().findModelsReferencingTarget(userId[0]).contains(modelId));
+        Assertions.assertTrue(referencedBefore);
+
+        // Delete the user: 200 + warning payload naming the affected model.
+        JsonObject json = target().path("/user/wfmodeluser").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        JsonArray affected = json.getJsonArray("route_models_affected");
+        Assertions.assertNotNull(affected, "Response must warn about the affected route model");
+        Assertions.assertTrue(containsString(affected, "Model targeting wfmodeluser"),
+                "Warning must name the affected route model");
+
+        // Unstartability: the model's step target no longer resolves to a live user.
+        String resolved = inTx(() ->
+                com.sismics.docs.core.util.SecurityUtil.getTargetIdFromName("wfmodeluser",
+                        com.sismics.docs.core.constant.AclTargetType.USER));
+        Assertions.assertNull(resolved, "Deleted user no longer resolves; the model is unstartable");
+    }
+
+    /**
+     * Admin-deleting a user targeted by an OPEN route step cancels the route (status CANCELLED),
+     * closes the open step with a system comment, removes the transient ROUTING ACL on the document,
+     * and preserves step history.
+     */
+    @Test
+    public void testDeleteUserTargetedByOpenStep() {
+        String adminToken = adminToken();
+        clientUtil.createUser("wfstepuser");
+
+        String[] routeId = new String[1];
+        String[] stepId = new String[1];
+        String[] documentId = new String[1];
+        String[] aclId = new String[1];
+        inTx(() -> {
+            User user = new UserDao().getActiveByUsername("wfstepuser");
+            User admin = new UserDao().getActiveByUsername("admin");
+
+            Document document = new Document();
+            document.setUserId(admin.getId());
+            document.setLanguage("eng");
+            document.setTitle("Doc with open route");
+            document.setCreateDate(new Date());
+            documentId[0] = new DocumentDao().create(document, admin.getId());
+
+            RouteDao routeDao = new RouteDao();
+            routeId[0] = routeDao.create(new Route().setDocumentId(documentId[0]).setName("Route"), admin.getId());
+
+            RouteStep step = new RouteStep()
+                    .setRouteId(routeId[0])
+                    .setName("Open step")
+                    .setType(RouteStepType.VALIDATE)
+                    .setTargetId(user.getId())
+                    .setOrder(0);
+            stepId[0] = new RouteStepDao().create(step);
+
+            // Seed the transient ROUTING READ ACL that route-start would have granted the target.
+            aclId[0] = insertRoutingAcl(documentId[0], user.getId());
+            return null;
+        });
+
+        // Delete the user.
+        JsonObject json = target().path("/user/wfstepuser").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // The route is CANCELLED, the open step is closed with the system comment (history intact),
+        // and the ROUTING ACL is gone.
+        inTx(() -> {
+            Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
+            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus());
+            Assertions.assertNotNull(route.getEndDate());
+
+            RouteStep step = ThreadLocalContext.get().getEntityManager().find(RouteStep.class, stepId[0]);
+            Assertions.assertNotNull(step, "Step history must survive");
+            Assertions.assertNull(step.getDeleteDate(), "Step is closed, not deleted");
+            Assertions.assertNotNull(step.getEndDate(), "Open step must be closed");
+            Assertions.assertEquals("Cancelled: step target deleted", step.getComment());
+            Assertions.assertNull(step.getTransition(),
+                    "System-ended step must have a NULL transition, not a user-action value");
+
+            long routingAclCount = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_ACL where ACL_SOURCEID_C = :src and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
+                    .setParameter("src", documentId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(0, routingAclCount, "Transient ROUTING ACL must be removed");
+
+            long aclDeleteAuditCount = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_AUDIT_LOG where LOG_IDENTITY_C = :aclId and LOG_CLASSENTITY_C = 'Acl' and LOG_TYPE_C = 'DELETE'")
+                    .setParameter("aclId", aclId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(1, aclDeleteAuditCount,
+                    "Each removed ROUTING ACL must get a DELETE audit log entry");
+            return null;
+        });
+    }
+
+    /**
+     * Self-delete path exercises the identical graceful handling: a user referenced by a model and
+     * targeted by an open step deletes themselves, gets the warning payload, and their route is
+     * cancelled.
+     */
+    @Test
+    public void testSelfDeleteHandlesWorkflowReferences() {
+        clientUtil.createUser("wfselfuser");
+        String selfToken = clientUtil.login("wfselfuser");
+
+        String[] routeId = new String[1];
+        String modelId = inTx(() -> {
+            User user = new UserDao().getActiveByUsername("wfselfuser");
+            User admin = new UserDao().getActiveByUsername("admin");
+
+            Document document = new Document();
+            document.setUserId(admin.getId());
+            document.setLanguage("eng");
+            document.setTitle("Self doc");
+            document.setCreateDate(new Date());
+            String docId = new DocumentDao().create(document, admin.getId());
+
+            routeId[0] = new RouteDao().create(new Route().setDocumentId(docId).setName("Self route"), admin.getId());
+            new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0])
+                    .setName("Open step")
+                    .setType(RouteStepType.VALIDATE)
+                    .setTargetId(user.getId())
+                    .setOrder(0));
+
+            String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"wfselfuser\",\"type\":\"USER\"},\"name\":\"Step 1\"}]";
+            return new RouteModelDao().create(new RouteModel().setName("Self model").setSteps(steps), "admin");
+        });
+
+        // Self-delete.
+        JsonObject json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, selfToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        JsonArray affected = json.getJsonArray("route_models_affected");
+        Assertions.assertNotNull(affected);
+        Assertions.assertTrue(containsString(affected, "Self model"));
+
+        // The route was cancelled.
+        RouteStatus status = inTx(() ->
+                ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]).getStatus());
+        Assertions.assertEquals(RouteStatus.CANCELLED, status);
+        Assertions.assertNotNull(modelId);
+    }
+
+    /**
+     * Run a supplier inside a committed database transaction on the test thread, so the in-process
+     * Grizzly server (its request threads use their own transactions) observes the seeded/asserted
+     * state. Mirrors TransactionUtil's lifecycle but commits.
+     */
+    static <T> T inTx(Supplier<T> supplier) {
+        EntityManager em = EMF.get().createEntityManager();
+        ThreadLocalContext previous = ThreadLocalContext.get();
+        ThreadLocalContext context = ThreadLocalContext.get();
+        context.setEntityManager(em);
+        EntityTransaction tx = em.getTransaction();
+        tx.begin();
+        try {
+            T result = supplier.get();
+            tx.commit();
+            return result;
+        } catch (RuntimeException e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
+        } finally {
+            if (em.isOpen()) {
+                em.close();
+            }
+            previous.setEntityManager(null);
+        }
+    }
+
+    /**
+     * Insert a transient ("ROUTING") READ ACL directly, standing in for what the workflow route-start
+     * (owned by the parallel phase) would create. Uses a native insert with the literal type string.
+     *
+     * @return The generated ACL ID
+     */
+    static String insertRoutingAcl(String documentId, String targetId) {
+        String aclId = UUID.randomUUID().toString();
+        Query q = ThreadLocalContext.get().getEntityManager().createNativeQuery(
+                "insert into T_ACL (ACL_ID_C, ACL_PERM_C, ACL_SOURCEID_C, ACL_TARGETID_C, ACL_TYPE_C) values (:id, :perm, :src, :target, :type)");
+        q.setParameter("id", aclId);
+        q.setParameter("perm", PermType.READ.name());
+        q.setParameter("src", documentId);
+        q.setParameter("target", targetId);
+        q.setParameter("type", "ROUTING");
+        q.executeUpdate();
+        return aclId;
+    }
+
+    /**
+     * True if a JSON string array contains the given value.
+     */
+    static boolean containsString(JsonArray array, String value) {
+        for (int i = 0; i < array.size(); i++) {
+            if (value.equals(array.getString(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 }

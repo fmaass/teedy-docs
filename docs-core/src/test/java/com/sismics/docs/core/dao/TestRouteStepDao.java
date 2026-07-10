@@ -118,4 +118,26 @@ public class TestRouteStepDao extends BaseTransactionalTest {
         int again = new RouteStepDao().endAllOpenSteps(routeId, RouteStepTransition.REJECTED, "Halted by rejection");
         Assertions.assertEquals(0, again);
     }
+
+    @Test
+    public void endAllOpenStepsWithNullTransitionMarksSystemEnded() throws Exception {
+        User user = createUser("step_sysend");
+        String documentId = createDocument(user);
+        RouteDao routeDao = new RouteDao();
+        String routeId = routeDao.create(new Route().setDocumentId(documentId).setName("Route"), user.getId());
+        String stepId = createStep(routeId);
+
+        // A null transition closes the step without attributing a user action.
+        int closed = new RouteStepDao().endAllOpenSteps(routeId, null, "Cancelled: step target deleted");
+        Assertions.assertEquals(1, closed);
+
+        // The native update bypasses the persistence context: clear it so find() reloads from the DB.
+        jakarta.persistence.EntityManager em = com.sismics.util.context.ThreadLocalContext.get().getEntityManager();
+        em.flush();
+        em.clear();
+        RouteStep step = em.find(RouteStep.class, stepId);
+        Assertions.assertNotNull(step.getEndDate(), "Step must be closed");
+        Assertions.assertNull(step.getTransition(), "System-ended step must have a NULL transition");
+        Assertions.assertEquals("Cancelled: step target deleted", step.getComment());
+    }
 }

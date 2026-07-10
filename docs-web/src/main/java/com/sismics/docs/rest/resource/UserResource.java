@@ -16,6 +16,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.*;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
+import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.docs.rest.util.UserUpdateUtil;
@@ -486,24 +487,30 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "This user cannot be deleted");
         }
 
+        // Gracefully handle workflow references (never blocks): collect affected route models and
+        // cancel active routes with an open step targeting this user.
+        List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(principal.getId());
+        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(principal.getId(), principal.getId());
+
         // Find linked data
         DocumentDao documentDao = new DocumentDao();
         List<Document> documentList = documentDao.findByUserId(principal.getId());
         FileDao fileDao = new FileDao();
         List<File> fileList = fileDao.findByUserId(principal.getId());
-        
+
         // Delete the user
         UserDao userDao = new UserDao();
         userDao.delete(principal.getName(), principal.getId());
-        
+
         sendDeletionEvents(documentList, fileList);
 
-        // Always return OK
+        // Return OK plus a warning payload naming any route models that referenced this user.
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
+        addRouteModelsAffected(response, affectedRouteModels);
         return Response.ok().entity(response.build()).build();
     }
-    
+
     /**
      * Deletes a user.
      *
@@ -548,20 +555,26 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "The admin user cannot be deleted");
         }
 
+        // Gracefully handle workflow references (never blocks): collect affected route models and
+        // cancel active routes with an open step targeting this user.
+        List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
+        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
+
         // Find linked data
         DocumentDao documentDao = new DocumentDao();
         List<Document> documentList = documentDao.findByUserId(user.getId());
         FileDao fileDao = new FileDao();
         List<File> fileList = fileDao.findByUserId(user.getId());
-        
+
         // Delete the user
         userDao.delete(user.getUsername(), principal.getId());
 
         sendDeletionEvents(documentList, fileList);
 
-        // Always return OK
+        // Return OK plus a warning payload naming any route models that referenced this user.
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
+        addRouteModelsAffected(response, affectedRouteModels);
         return Response.ok().entity(response.build()).build();
     }
 
@@ -1173,6 +1186,25 @@ public class UserResource extends BaseResource {
             }
         }
         return null;
+    }
+
+    /**
+     * Add a "route_models_affected" warning array to the response when a deleted/renamed principal
+     * was referenced by one or more route models. Those models keep their (now unresolvable) blob
+     * and become unstartable; the UI surfaces this warning to the operator. Absent when empty.
+     *
+     * @param response Response builder
+     * @param routeModelNames Names of the affected route models
+     */
+    static void addRouteModelsAffected(JsonObjectBuilder response, List<String> routeModelNames) {
+        if (routeModelNames == null || routeModelNames.isEmpty()) {
+            return;
+        }
+        JsonArrayBuilder affected = Json.createArrayBuilder();
+        for (String name : routeModelNames) {
+            affected.add(name);
+        }
+        response.add("route_models_affected", affected);
     }
 
     /**

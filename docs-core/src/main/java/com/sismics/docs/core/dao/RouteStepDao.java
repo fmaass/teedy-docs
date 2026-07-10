@@ -166,20 +166,27 @@ public class RouteStepDao {
     }
 
     /**
-     * End all still-open steps of a route (used when a route is halted, e.g. on rejection).
-     * The closed steps are stamped with the given transition and a system comment; no validator
-     * is attributed. Already-closed steps are left untouched.
+     * End all still-open steps of a route (used when a route is halted, e.g. on rejection or when
+     * a step target is deleted). The closed steps are stamped with the given transition and a
+     * system comment; no validator is attributed. Already-closed steps are left untouched.
+     * <p>
+     * A NULL transition marks a system-ended step (nobody acted on it) — user-action values
+     * (APPROVED/REJECTED/VALIDATED) are reserved for steps an actor actually decided.
      *
      * @param routeId Route ID
-     * @param transition Transition to stamp on the halted steps
+     * @param transition Transition to stamp on the halted steps, or null for a system-ended step
      * @param comment System comment describing why the steps were halted
      * @return Number of steps closed
      */
     public int endAllOpenSteps(String routeId, RouteStepTransition transition, String comment) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery("update T_ROUTE_STEP r set RTP_ENDDATE_D = :endDate, RTP_TRANSITION_C = :transition, RTP_COMMENT_C = :comment where r.RTP_IDROUTE_C = :routeId and r.RTP_ENDDATE_D is null and r.RTP_DELETEDATE_D is null");
+        // A literal NULL branch avoids Hibernate native-query null-parameter typing issues.
+        String transitionSql = transition == null ? "NULL" : ":transition";
+        Query q = em.createNativeQuery("update T_ROUTE_STEP r set RTP_ENDDATE_D = :endDate, RTP_TRANSITION_C = " + transitionSql + ", RTP_COMMENT_C = :comment where r.RTP_IDROUTE_C = :routeId and r.RTP_ENDDATE_D is null and r.RTP_DELETEDATE_D is null");
         q.setParameter("endDate", new Date());
-        q.setParameter("transition", transition.name());
+        if (transition != null) {
+            q.setParameter("transition", transition.name());
+        }
         q.setParameter("comment", comment);
         q.setParameter("routeId", routeId);
         return q.executeUpdate();
