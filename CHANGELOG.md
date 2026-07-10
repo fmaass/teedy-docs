@@ -6,7 +6,7 @@ All notable changes to this fork are documented here. The format is based on
 
 Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teedy-docs/releases).
 
-## [3.2.2] - Unreleased
+## [3.2.2] - 2026-07-10
 
 ### Added
 - Admins can disable and re-enable user accounts from the settings UI, not just delete them (#17).
