@@ -689,6 +689,228 @@ public class TestUserResource extends BaseJerseyTest {
     }
 
     /**
+     * B2: deleting a principal that owns a FUTURE step of an active route cancels the route AND
+     * clears the CURRENT approver's ROUTING grant. Route: step1 -> alice (current, holds the ROUTING
+     * READ ACL), step2 -> bob (future, unended). Deleting bob cancels the route (its open step2
+     * targets bob) but the current grant belongs to alice. The fix clears ALL of the document's
+     * ROUTING ACLs on cancellation (target-agnostic), so alice's grant is gone. Before the fix, only
+     * the deleted principal's (bob's) ACLs were removed, leaving alice's READ grant on a now-cancelled
+     * route (an authz leak) — that is the RED assertion (0 active ROUTING ACLs would fail).
+     */
+    @Test
+    public void testDeleteUserOwningFutureStepClearsCurrentAcl() {
+        String adminToken = adminToken();
+        clientUtil.createUser("wfalice");
+        clientUtil.createUser("wfbob");
+
+        String[] documentId = new String[1];
+        String[] routeId = new String[1];
+        String[] aliceAclId = new String[1];
+        inTx(() -> {
+            User alice = new UserDao().getActiveByUsername("wfalice");
+            User bob = new UserDao().getActiveByUsername("wfbob");
+            User admin = new UserDao().getActiveByUsername("admin");
+
+            Document document = new Document();
+            document.setUserId(admin.getId());
+            document.setLanguage("eng");
+            document.setTitle("Doc with alice+bob route");
+            document.setCreateDate(new Date());
+            documentId[0] = new DocumentDao().create(document, admin.getId());
+
+            routeId[0] = new RouteDao().create(new Route().setDocumentId(documentId[0]).setName("Route"), admin.getId());
+
+            // step1 -> alice (current), step2 -> bob (future). Both created unended (open).
+            new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0]).setName("Alice step").setType(RouteStepType.VALIDATE)
+                    .setTargetId(alice.getId()).setOrder(0));
+            new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0]).setName("Bob step").setType(RouteStepType.VALIDATE)
+                    .setTargetId(bob.getId()).setOrder(1));
+
+            // The CURRENT step's ROUTING READ grant is alice's (route-start would have granted it).
+            aliceAclId[0] = insertRoutingAcl(documentId[0], alice.getId());
+            return null;
+        });
+
+        // Delete bob (owner of the FUTURE step2). This cancels the route (its open step2 targets bob).
+        JsonObject json = target().path("/user/wfbob").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        inTx(() -> {
+            Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
+            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus(), "The route must be cancelled");
+
+            // The invariant: a cancelled route leaves ZERO active ROUTING ACLs on the document —
+            // alice's current grant included, even though alice was NOT the deleted principal.
+            long routingAclCount = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_ACL where ACL_SOURCEID_C = :src and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
+                    .setParameter("src", documentId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(0, routingAclCount,
+                    "Cancelling the route must clear the current approver's ROUTING ACL too, not just the deleted principal's");
+
+            // Alice's specific grant got a DELETE audit row (target-agnostic cleanup still audits it).
+            long aliceAclDeleteAudit = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_AUDIT_LOG where LOG_IDENTITY_C = :aclId and LOG_CLASSENTITY_C = 'Acl' and LOG_TYPE_C = 'DELETE'")
+                    .setParameter("aclId", aliceAclId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(1, aliceAclDeleteAudit, "The cleared current-approver ACL must get a DELETE audit row");
+            return null;
+        });
+    }
+
+    /**
+     * B3: deleting a user who OWNS a document that has an ACTIVE route targeting SOMEONE ELSE cancels
+     * that route and clears its ROUTING ACLs as the document is trashed. The structural fix does NOT
+     * route owned documents through DocumentDao.delete (that would trash files by documentId and
+     * over-trash a collaborator's file, breaking BL-021's stranded-file quota reclaim). Instead
+     * UserDao.delete, for each owned document it is about to bulk-trash, first locks the document row
+     * FOR UPDATE and calls cancelActiveRoutesForDocument — which cancels the active route, system-ends
+     * its open steps, and clears ALL its ROUTING ACLs with the deterministic (documentDeleteDate - 1ms)
+     * timestamp — sharing the SAME dateNow as the trash; file trashing stays owner-scoped. Before the
+     * fix, UserDao.delete bulk-trashed owned documents directly with no route handling, leaving the
+     * route ACTIVE and the target's ROUTING grant stranded (a stuck route that can never advance —
+     * trashed docs are excluded from reads). This test also asserts the W2c restore-safety invariant:
+     * the soft-deleted ROUTING ACL's delete timestamp is DISTINCT from the document's own trash
+     * timestamp, so a later restore-from-trash (which un-deletes the doc's own ACLs by exact-equality
+     * on the doc timestamp) cannot resurrect the cancelled route's grant. RED without the fix: the
+     * route stays ACTIVE and the active ROUTING ACL count is non-zero.
+     */
+    @Test
+    public void testDeleteUserOwningDocWithActiveRouteCancelsIt() {
+        String adminToken = adminToken();
+        clientUtil.createUser("wfowner");
+        clientUtil.createUser("wftarget");
+
+        String[] documentId = new String[1];
+        String[] routeId = new String[1];
+        inTx(() -> {
+            User owner = new UserDao().getActiveByUsername("wfowner");
+            User targetUser = new UserDao().getActiveByUsername("wftarget");
+
+            // wfowner OWNS the document; the route's step targets wftarget (someone else).
+            Document document = new Document();
+            document.setUserId(owner.getId());
+            document.setLanguage("eng");
+            document.setTitle("Owned doc with active route");
+            document.setCreateDate(new Date());
+            documentId[0] = new DocumentDao().create(document, owner.getId());
+
+            RouteDao routeDao = new RouteDao();
+            // RouteDao.create sets ACTIVE status.
+            routeId[0] = routeDao.create(new Route().setDocumentId(documentId[0]).setName("Owned route"), owner.getId());
+
+            new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0]).setName("Target step").setType(RouteStepType.VALIDATE)
+                    .setTargetId(targetUser.getId()).setOrder(0));
+
+            // The ROUTING READ grant belongs to wftarget (the current step's target).
+            insertRoutingAcl(documentId[0], targetUser.getId());
+            return null;
+        });
+
+        // Delete the OWNER (wfowner). Their owned document is trashed; its active route must be
+        // cancelled and its ROUTING ACLs cleared in the process.
+        JsonObject json = target().path("/user/wfowner").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        inTx(() -> {
+            Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
+            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus(),
+                    "The owned document's active route must be cancelled, not left ACTIVE and stuck");
+            Assertions.assertNotNull(route.getEndDate(), "A cancelled route must carry an end date");
+
+            long routingAclCount = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_ACL where ACL_SOURCEID_C = :src and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
+                    .setParameter("src", documentId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(0, routingAclCount,
+                    "The stranded ROUTING ACL on the owned document must be cleared when its route is cancelled");
+
+            // W2c restore-safety: the ROUTING ACL's delete timestamp must be DISTINCT from the
+            // document's own trash timestamp. restore() un-deletes the doc's own ACLs by
+            // exact-equality on the doc's delete timestamp, so a distinct routing-ACL timestamp is
+            // what keeps the cancelled route's grant from being resurrected. The per-doc path uses
+            // (documentDeleteDate - 1ms), guaranteeing the two differ even when the deleted user is
+            // both the owner and a step target (no independent clock sample to collide).
+            java.sql.Timestamp docDeleteTs = (java.sql.Timestamp) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select DOC_DELETEDATE_D from T_DOCUMENT where DOC_ID_C = :id")
+                    .setParameter("id", documentId[0]).getSingleResult();
+            java.sql.Timestamp routingAclDeleteTs = (java.sql.Timestamp) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select ACL_DELETEDATE_D from T_ACL where ACL_SOURCEID_C = :src " +
+                            "and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is not null")
+                    .setParameter("src", documentId[0]).getSingleResult();
+            Assertions.assertNotNull(docDeleteTs, "The owned document must be trashed");
+            Assertions.assertNotNull(routingAclDeleteTs, "The ROUTING ACL must be soft-deleted");
+            Assertions.assertNotEquals(docDeleteTs.getTime(), routingAclDeleteTs.getTime(),
+                    "The ROUTING ACL delete timestamp must differ from the doc trash timestamp (restore-safety)");
+            return null;
+        });
+    }
+
+    /**
+     * Review-blocker 2 (owner == target) integration coverage: deleting a user who BOTH owns a
+     * document AND is the current step's target ends with the route CANCELLED and ZERO active ROUTING
+     * ACLs — no stuck route, no surviving grant — across the two cancellation paths that touch the
+     * document (the target-cancel in UserResource, then the owned-document trash in UserDao.delete).
+     * The DETERMINISTIC restore-safety timestamp guarantee (ROUTING ACL delete timestamp strictly
+     * below the doc trash timestamp so restore cannot resurrect it, even on a timestamp collision) is
+     * proven timing-independently by
+     * TestPrincipalDeletionUtil#normalizesCollidingRoutingAclTimestampBelowDocTrashTimestamp; this
+     * REST test only asserts the observable end state.
+     */
+    @Test
+    public void testSelfDeleteOwnerAndTargetClearsRouteAndAcls() {
+        clientUtil.createUser("wfownertarget");
+        String selfToken = clientUtil.login("wfownertarget");
+
+        String[] documentId = new String[1];
+        String[] routeId = new String[1];
+        inTx(() -> {
+            User user = new UserDao().getActiveByUsername("wfownertarget");
+
+            // The user OWNS the document AND is the current step's target.
+            Document document = new Document();
+            document.setUserId(user.getId());
+            document.setLanguage("eng");
+            document.setTitle("Owned-and-targeted doc");
+            document.setCreateDate(new Date());
+            documentId[0] = new DocumentDao().create(document, user.getId());
+
+            routeId[0] = new RouteDao().create(new Route().setDocumentId(documentId[0]).setName("Self-owned route"), user.getId());
+            new RouteStepDao().create(new RouteStep()
+                    .setRouteId(routeId[0]).setName("Self step").setType(RouteStepType.VALIDATE)
+                    .setTargetId(user.getId()).setOrder(0));
+            insertRoutingAcl(documentId[0], user.getId());
+            return null;
+        });
+
+        // Self-delete: target-cancel path clears ACLs + owned-doc path trashes the doc.
+        JsonObject json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, selfToken)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        inTx(() -> {
+            Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
+            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus());
+
+            long routingAclCount = ((Number) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select count(*) from T_ACL where ACL_SOURCEID_C = :src and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
+                    .setParameter("src", documentId[0])
+                    .getSingleResult()).longValue();
+            Assertions.assertEquals(0, routingAclCount,
+                    "owner==target deletion must leave zero active ROUTING ACLs on the owned document");
+            return null;
+        });
+    }
+
+    /**
      * Self-delete path exercises the identical graceful handling: a user referenced by a model and
      * targeted by an open step deletes themselves, gets the warning payload, and their route is
      * cancelled.

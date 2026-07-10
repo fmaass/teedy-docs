@@ -69,6 +69,20 @@ public class RouteResource extends BaseResource {
             throw new NotFoundException();
         }
 
+        // Lock the document row FOR UPDATE before the "no active route" check, making the whole
+        // check-and-create atomic per document: two concurrent starts serialize on this lock so the
+        // second sees the first's ACTIVE route and is rejected RunningRoute (below), instead of both
+        // creating an ACTIVE route (which a later single-route cancel would then only partly clean up,
+        // stranding the other route's ROUTING grant). The lock also re-reads the document under the
+        // lock and rejects a trashed/deleted document REGARDLESS of the ACL check above — admins
+        // bypass the ACL check (skipAclCheck), so without this an admin could start a route on a
+        // trashed document (or race a concurrent trash/user-delete). getActiveByIdForUpdate returns
+        // null for a non-existent or trashed document.
+        DocumentDao documentDao = new DocumentDao();
+        if (documentDao.getActiveByIdForUpdate(documentId) == null) {
+            throw new NotFoundException();
+        }
+
         // Get the route model
         RouteModelDao routeModelDao = new RouteModelDao();
         RouteModel routeModel = routeModelDao.getActiveById(routeModelId);
@@ -81,7 +95,8 @@ public class RouteResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Avoid creating 2 running routes on the same document
+        // Avoid creating 2 running routes on the same document. Safe against concurrent starts: the
+        // FOR UPDATE lock above serializes them, so this check-and-create runs one request at a time.
         RouteStepDao routeStepDao = new RouteStepDao();
         if (routeStepDao.getCurrentStep(documentId) != null) {
             throw new ClientException("RunningRoute", "A running route already exists on this document");

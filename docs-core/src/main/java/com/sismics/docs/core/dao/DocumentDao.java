@@ -9,6 +9,7 @@ import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
@@ -166,12 +167,17 @@ public class DocumentDao {
      */
     public void delete(String id, String userId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-            
-        // Get the document
+
+        // Get the document and lock its row FOR UPDATE (dialect-portable PESSIMISTIC_WRITE). This
+        // serializes the trash against a concurrent route-start on the same document (route-start
+        // takes the same row lock via getActiveByIdForUpdate): a start cannot slip in between this
+        // cancel-and-trash and create a fresh ACTIVE route on a document being trashed. The lock is
+        // held for the rest of this transaction.
         TypedQuery<Document> dq = em.createQuery("select d from Document d where d.id = :id and d.deleteDate is null", Document.class);
         dq.setParameter("id", id);
+        dq.setLockMode(LockModeType.PESSIMISTIC_WRITE);
         Document documentDb = dq.getSingleResult();
-        
+
         // Delete the document
         Date dateNow = new Date();
         documentDb.setDeleteDate(dateNow);
@@ -228,8 +234,58 @@ public class DocumentDao {
     }
     
     /**
+     * Gets an active (non-trashed) document by its ID and acquires a pessimistic write lock on its
+     * row (SELECT ... FOR UPDATE, dialect-portable via LockModeType.PESSIMISTIC_WRITE — H2 and
+     * Postgres both emit FOR UPDATE). The lock serializes concurrent callers on the same document
+     * for the remainder of the caller's transaction: it is used by route-start to make the
+     * "no active route already exists" check-and-create atomic, so two concurrent starts on one
+     * document cannot both create an ACTIVE route. A trashed/deleted document returns null (the
+     * row's deleteDate is set) — callers must treat that as not-found REGARDLESS of any ACL check,
+     * since admins bypass the ACL check and could otherwise start a route on a trashed document.
+     *
+     * @param id Document ID
+     * @return The locked active document, or null if it does not exist or is trashed/deleted
+     */
+    public Document getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Document> q = em.createQuery("select d from Document d where d.id = :id and d.deleteDate is null", Document.class);
+        q.setParameter("id", id);
+        q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Acquires a pessimistic write lock (SELECT ... FOR UPDATE, dialect-portable via
+     * LockModeType.PESSIMISTIC_WRITE) on a document row by ID REGARDLESS of its deleteDate — the row
+     * is locked whether the document is active or already trashed. This exists to enforce the single
+     * global lock order DOCUMENT-before-ROUTE from paths that must lock the document of a route whose
+     * document may already be trashed (e.g. the principal-deletion target-cancel path): getActiveByIdForUpdate
+     * filters out trashed rows and would return null without locking, so it cannot be used there.
+     * The lock is held for the remainder of the caller's transaction.
+     *
+     * @param id Document ID
+     * @return true if a document row (active or trashed) was found and locked, false if none exists
+     */
+    public boolean lockByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Document> q = em.createQuery("select d from Document d where d.id = :id", Document.class);
+        q.setParameter("id", id);
+        q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
+        try {
+            q.getSingleResult();
+            return true;
+        } catch (NoResultException e) {
+            return false;
+        }
+    }
+
+    /**
      * Update a document and log the action.
-     * 
+     *
      * @param document Document to update
      * @param userId User ID
      * @return Updated document
