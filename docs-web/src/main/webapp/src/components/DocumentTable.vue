@@ -9,6 +9,7 @@ import DataTable from 'primevue/datatable'
 import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, DataTableRowSelectEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
+import TagOverflow from './TagOverflow.vue'
 
 const { t } = useI18n()
 
@@ -31,6 +32,7 @@ defineProps<{
 
 const emit = defineEmits<{
   rowClick: [doc: DocumentListItem]
+  rowDblclick: [doc: DocumentListItem]
   rowContextMenu: [event: Event, doc: DocumentListItem]
   page: [event: DataTablePageEvent]
   sort: [event: DataTableSortEvent]
@@ -65,6 +67,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     dataKey="id"
     class="doc-table"
     @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
+    @row-dblclick="(e: DataTableRowClickEvent) => emit('rowDblclick', e.data as DocumentListItem)"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
     @page="(e: DataTablePageEvent) => emit('page', e)"
     @sort="(e: DataTableSortEvent) => emit('sort', e)"
@@ -102,7 +105,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
       <template #body="{ data }">
         <div class="doc-tags" v-if="data.tags?.length">
           <TagBadge v-for="tag in data.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
-          <span v-if="data.tags.length > 3" class="tag-overflow">+{{ data.tags.length - 3 }}</span>
+          <TagOverflow v-if="data.tags.length > 3" :tags="data.tags.slice(3)" />
         </div>
       </template>
     </Column>
@@ -142,6 +145,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     dataKey="id"
     class="doc-table"
     @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
+    @row-dblclick="(e: DataTableRowClickEvent) => emit('rowDblclick', e.data as DocumentListItem)"
     @row-select="onRowSelect"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
     @page="(e: DataTablePageEvent) => emit('page', e)"
@@ -179,7 +183,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
       <template #body="{ data }">
         <div class="doc-tags" v-if="data.tags?.length">
           <TagBadge v-for="tag in data.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
-          <span v-if="data.tags.length > 3" class="tag-overflow">+{{ data.tags.length - 3 }}</span>
+          <TagOverflow v-if="data.tags.length > 3" :tags="data.tags.slice(3)" />
         </div>
       </template>
     </Column>
@@ -250,12 +254,6 @@ function onRowSelect(event: DataTableRowSelectEvent) {
   display: flex;
   gap: 0.2rem;
   flex-wrap: wrap;
-}
-
-.tag-overflow {
-  font-size: 0.6875rem;
-  color: var(--p-text-muted-color);
-  align-self: center;
 }
 
 .doc-lang,

@@ -164,6 +164,7 @@
     "add_first_document": "Fügen Sie Ihr erstes Dokument hinzu",
     "add_document": "Dokument hinzufügen",
     "manage_tags": "Tags verwalten",
+    "more_tags": "{count} weitere Tags",
     "resize_panel": "Tag-Leiste anpassen",
     "back_to_tags": "Zurück zu den Tags",
     "failed_to_load": "{item} konnte nicht geladen werden",

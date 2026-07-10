@@ -160,25 +160,25 @@ const router = createRouter({
               path: 'users',
               name: 'settings-users',
               component: () => import('../views/settings/SettingsUsers.vue'),
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'groups',
               name: 'settings-groups',
               component: () => import('../views/settings/SettingsGroups.vue'),
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'tag-rules',
               name: 'settings-tag-rules',
               component: () => import('../views/settings/SettingsTagRules.vue'),
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'webhooks',
               name: 'settings-webhooks',
               component: () => import('../views/settings/SettingsWebhooks.vue'),
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'ldap',
@@ -193,7 +193,7 @@ const router = createRouter({
               path: 'metadata',
               name: 'settings-metadata',
               component: () => import('../views/settings/SettingsMetadata.vue'),
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'workflow',
@@ -202,7 +202,7 @@ const router = createRouter({
               // Admin-only: SettingsWorkflow fires the admin-gated route-model
               // endpoints. The nav item is already admin-hidden; this stops a
               // direct-URL mount by a non-admin.
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'vocabulary',
@@ -219,7 +219,7 @@ const router = createRouter({
               component: () => import('../views/settings/SettingsMonitoring.vue'),
               // Admin-only: SettingsMonitoring fires the admin-gated GET /app/log on
               // mount. Nav is already admin-hidden; this stops a direct-URL mount.
-              meta: { requiresAdmin: true },
+              meta: { requiresAdmin: true, wideSettings: true },
             },
             {
               path: 'inbox',

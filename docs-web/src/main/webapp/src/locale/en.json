@@ -164,6 +164,7 @@
     "add_first_document": "Add your first document",
     "add_document": "Add document",
     "manage_tags": "Manage tags",
+    "more_tags": "{count} more tags",
     "resize_panel": "Resize tag panel",
     "back_to_tags": "Back to tags",
     "failed_to_load": "Failed to load {item}",
