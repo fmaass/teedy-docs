@@ -188,6 +188,19 @@ public class User implements Loggable {
         return this;
     }
 
+    /**
+     * Shared account-eligibility predicate: an administratively disabled account
+     * (non-null disable date) must be rejected by every authentication path BEFORE
+     * that path performs any bookkeeping side effect (token rotation, API-key
+     * last-used update, OIDC token mint) or grants access. This is the single
+     * source of truth referenced at each of those call sites.
+     *
+     * @return True if this account has been disabled
+     */
+    public boolean isDisabled() {
+        return disableDate != null;
+    }
+
     public String getPrivateKey() {
         return privateKey;
     }

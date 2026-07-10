@@ -393,7 +393,16 @@
       "disable_totp_title": "Disable two-factor authentication",
       "disable_totp_message": "Disable two-factor authentication for this user? Use this to recover a user locked out of their authenticator.",
       "totp_disabled": "Two-factor authentication disabled",
-      "failed_disable_totp": "Failed to disable two-factor authentication"
+      "failed_disable_totp": "Failed to disable two-factor authentication",
+      "disable_user_btn": "Disable account",
+      "enable_user_btn": "Enable account",
+      "disable_user_title": "Disable account",
+      "disable_user_message": "Disable \"{username}\"? They will be signed out and blocked from logging in. Their documents are preserved (unlike deleting, which trashes them). This is a soft block checked per request: re-enabling restores their old sessions and API keys.",
+      "user_disabled": "Account disabled",
+      "user_enabled": "Account enabled",
+      "failed_disable_user": "Failed to disable account",
+      "failed_enable_user": "Failed to enable account",
+      "disable_hint": "Disabling preserves the user's documents (deleting trashes them). It is a soft, per-request block: re-enabling resurrects old sessions and API keys."
     },
     "groups": {
       "title": "Groups",

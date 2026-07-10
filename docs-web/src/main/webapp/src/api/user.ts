@@ -20,6 +20,9 @@ export interface UserListItem {
   storage_quota: number
   storage_current: number
   create_date: number
+  // True if the user has the ADMIN base function. The backend refuses to disable an
+  // admin (or the guest) user, so the UI hides the disable/enable toggle for them.
+  admin: boolean
   disabled: boolean
 }
 
@@ -56,11 +59,17 @@ export function createUser(username: string, password: string, email: string, st
   return api.put('/user', params)
 }
 
-export function updateUser(username: string, data: { email?: string; password?: string; storage_quota?: number }) {
+export function updateUser(
+  username: string,
+  data: { email?: string; password?: string; storage_quota?: number; disabled?: boolean },
+) {
   const params = new URLSearchParams()
   if (data.email !== undefined) params.set('email', data.email)
   if (data.password !== undefined) params.set('password', data.password)
   if (data.storage_quota !== undefined) params.set('storage_quota', String(data.storage_quota))
+  // A disabled account is rejected per-request (soft): re-enabling resurrects old
+  // sessions/API keys rather than hard-revoking them. Only sent when explicitly set.
+  if (data.disabled !== undefined) params.set('disabled', String(data.disabled))
   return api.post(`/user/${username}`, params)
 }
 

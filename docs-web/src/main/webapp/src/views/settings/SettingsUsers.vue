@@ -101,6 +101,40 @@ function confirmDelete(user: UserListItem) {
   })
 }
 
+// Disable or re-enable an account. Disabling is a soft, per-request block that
+// preserves the user's documents (unlike delete); re-enabling resurrects old
+// sessions and API keys, so it is not treated as a destructive action.
+function toggleDisabled(user: UserListItem) {
+  if (user.disabled) {
+    void setDisabled(user, false)
+    return
+  }
+  confirmDanger({
+    message: t('ui.users.disable_user_message', { username: user.username }),
+    header: t('ui.users.disable_user_title'),
+    icon: 'pi pi-ban',
+    accept: () => setDisabled(user, true),
+  })
+}
+
+async function setDisabled(user: UserListItem, disabled: boolean) {
+  try {
+    await updateUser(user.username, { disabled })
+    queryClient.invalidateQueries({ queryKey: ['users'] })
+    toast.add({
+      severity: 'success',
+      summary: disabled ? t('ui.users.user_disabled') : t('ui.users.user_enabled'),
+      life: 2000,
+    })
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: disabled ? t('ui.users.failed_disable_user') : t('ui.users.failed_enable_user'),
+      life: 3000,
+    })
+  }
+}
+
 function confirmDisableTotp(user: UserListItem) {
   confirmDanger({
     message: t('ui.users.disable_totp_message'),
@@ -127,6 +161,14 @@ function userRowClass(data: UserListItem): string {
   return data.disabled ? 'row-disabled' : ''
 }
 
+// The backend force-ignores disabling the guest user or any ADMIN user
+// (UserResource.update). Hide the toggle for those rows so it never presents a
+// false-success affordance (a toast with no state change).
+const GUEST_USERNAME = 'guest'
+function canToggleDisabled(data: UserListItem): boolean {
+  return data.username !== GUEST_USERNAME && !data.admin
+}
+
 </script>
 
 <template>
@@ -135,6 +177,8 @@ function userRowClass(data: UserListItem): string {
       <h2>{{ t('ui.users.title') }}</h2>
       <Button :label="t('ui.users.add_user')" icon="pi pi-plus" size="small" @click="openAddDialog" />
     </div>
+
+    <p class="users-hint"><i class="pi pi-info-circle" aria-hidden="true" /> {{ t('ui.users.disable_hint') }}</p>
 
     <DataTable
       :value="users"
@@ -171,10 +215,19 @@ function userRowClass(data: UserListItem): string {
           <span class="user-date">{{ formatDate(data.create_date) }}</span>
         </template>
       </Column>
-      <Column header="" style="width: 128px">
+      <Column header="" style="width: 160px">
         <template #body="{ data }">
           <span class="user-actions">
             <Button v-if="data.totp_enabled" icon="pi pi-shield" text rounded size="small" severity="warn" @click="confirmDisableTotp(data)" v-tooltip="t('ui.users.disable_totp_btn')" :aria-label="t('ui.users.disable_totp_btn')" />
+            <Button
+              v-if="canToggleDisabled(data)"
+              :icon="data.disabled ? 'pi pi-check-circle' : 'pi pi-ban'"
+              text rounded size="small"
+              :severity="data.disabled ? 'success' : 'warn'"
+              @click="toggleDisabled(data)"
+              v-tooltip="data.disabled ? t('ui.users.enable_user_btn') : t('ui.users.disable_user_btn')"
+              :aria-label="data.disabled ? t('ui.users.enable_user_btn') : t('ui.users.disable_user_btn')"
+            />
             <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="t('edit')" :aria-label="t('edit')" />
             <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
           </span>
@@ -237,6 +290,15 @@ function userRowClass(data: UserListItem): string {
 }
 .users-header h2 {
   margin: 0;
+}
+
+.users-hint {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
+  color: var(--p-text-muted-color);
 }
 
 .users-table {

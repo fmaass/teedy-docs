@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { listSessions, deleteOtherSessions, login, type UserSession } from './user'
+import { listSessions, deleteOtherSessions, login, updateUser, type UserSession } from './user'
 
 describe('login', () => {
   beforeEach(() => mock.post.mockClear())
@@ -63,6 +63,33 @@ describe('listSessions', () => {
     const res = await listSessions()
     expect(res.data.sessions).toEqual(sessions)
     expect(res.data.sessions[0].current).toBe(true)
+  })
+})
+
+describe('updateUser', () => {
+  beforeEach(() => mock.post.mockClear())
+
+  function postedParams(): URLSearchParams {
+    return mock.post.mock.calls[0][1] as URLSearchParams
+  }
+
+  it('POSTs /user/{username} and sends disabled=true when disabling', async () => {
+    await updateUser('bob', { disabled: true })
+    expect(mock.post).toHaveBeenCalledTimes(1)
+    expect(mock.post.mock.calls[0][0]).toBe('/user/bob')
+    expect(postedParams().get('disabled')).toBe('true')
+  })
+
+  it('sends disabled=false when re-enabling', async () => {
+    await updateUser('bob', { disabled: false })
+    expect(postedParams().get('disabled')).toBe('false')
+  })
+
+  it('omits disabled when not provided (e.g. an email-only edit)', async () => {
+    await updateUser('bob', { email: 'bob@example.com' })
+    const params = postedParams()
+    expect(params.get('email')).toBe('bob@example.com')
+    expect(params.has('disabled')).toBe(false)
   })
 })
 

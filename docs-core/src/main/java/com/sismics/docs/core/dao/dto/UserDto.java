@@ -48,6 +48,12 @@ public class UserDto {
      */
     private String totpKey;
 
+    /**
+     * Role ID. Used to derive whether a user is an administrator (whose account the
+     * update endpoint refuses to disable), so the admin UI can mirror that rule.
+     */
+    private String roleId;
+
     public String getId() {
         return id;
     }
@@ -103,6 +109,14 @@ public class UserDto {
 
     public void setStorageCurrent(Long storageCurrent) {
         this.storageCurrent = storageCurrent;
+    }
+
+    public String getRoleId() {
+        return roleId;
+    }
+
+    public void setRoleId(String roleId) {
+        this.roleId = roleId;
     }
 
     public String getTotpKey() {

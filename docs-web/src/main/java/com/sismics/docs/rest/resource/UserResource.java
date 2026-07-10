@@ -336,6 +336,21 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
+        // Reject a disabled account BEFORE minting a session token / setting a cookie
+        // (shared User.isDisabled() eligibility predicate). The internal and LDAP auth
+        // handlers already return null for a disabled user, but the guest-login branch
+        // resolves the guest directly via getActiveByUsername, which still returns a
+        // disabled account — so without this guard a disabled guest gets a token minted
+        // and only the NEXT request is rejected by SecurityFilter.injectUser. Placed
+        // before TOTP so a disabled user is never prompted for an OTP, and the response is
+        // indistinguishable from a bad password (do not leak "exists but disabled"): record
+        // the same rate-limiter failure the bad-password path records.
+        if (user.isDisabled()) {
+            rateLimiter.recordFailure(clientIp);
+            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throw new ForbiddenClientException();
+        }
+
         // Two factor authentication. The rate limiter is NOT cleared until the FULL
         // authentication (password AND, if enabled, TOTP) succeeds, so a wrong TOTP
         // code counts toward lockout just like a wrong password. Otherwise an attacker
@@ -813,8 +828,15 @@ public class UserResource extends BaseResource {
         }
         
         UserDao userDao = new UserDao();
+        RoleBaseFunctionDao roleBaseFunctionDao = new RoleBaseFunctionDao();
         List<UserDto> userDtoList = userDao.findByCriteria(new UserCriteria().setGroupId(groupId), sortCriteria);
         for (UserDto userDto : userDtoList) {
+            // Mirror the update endpoint's disable-refusal rule (see update()): the guest
+            // user and any user with the ADMIN base function cannot be disabled. Exposing
+            // `admin` lets the admin UI hide the disable/enable toggle for those rows so it
+            // does not present a false-success affordance.
+            Set<String> baseFunctionSet = roleBaseFunctionDao.findByRoleId(Sets.newHashSet(userDto.getRoleId()));
+            boolean admin = baseFunctionSet.contains(BaseFunction.ADMIN.name());
             users.add(Json.createObjectBuilder()
                     .add("id", userDto.getId())
                     .add("username", userDto.getUsername())
@@ -823,6 +845,7 @@ public class UserResource extends BaseResource {
                     .add("storage_quota", userDto.getStorageQuota())
                     .add("storage_current", userDto.getStorageCurrent())
                     .add("create_date", userDto.getCreateTimestamp())
+                    .add("admin", admin)
                     .add("disabled", userDto.getDisableTimestamp() != null));
         }
         
