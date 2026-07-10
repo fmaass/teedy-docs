@@ -66,6 +66,7 @@ const settingsAdminItems = computed(() => [
   { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
   { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
   { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
+  { label: t('ui.monitoring.title'), icon: 'pi pi-chart-line', to: '/settings/monitoring', name: 'settings-monitoring' },
 ])
 
 const tagManageItems = computed(() => [

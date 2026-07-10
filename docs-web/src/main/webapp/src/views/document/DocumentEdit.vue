@@ -3,7 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { getDocument, createDocument, updateDocument } from '../../api/document'
+import { getDocument, createDocument, updateDocument, importEml } from '../../api/document'
 import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
 import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
@@ -392,6 +392,39 @@ async function handleSubmit() {
     uploadingFiles.value = false
   }
 }
+
+// --- .eml import (create mode only) ---
+// The EML endpoint creates a whole document from the email itself (title, body, and
+// attachments), so it is a one-shot import rather than a file added to THIS form's
+// document. The user picks an .eml file; we PUT it to /document/eml and navigate to
+// the created document. Kept separate from the normal file queue, whose files attach
+// to the document built from the form fields above.
+const emlInputRef = ref<HTMLInputElement | null>(null)
+const importingEml = ref(false)
+
+function triggerEmlPicker() {
+  emlInputRef.value?.click()
+}
+
+async function onEmlSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // Reset the input so re-picking the same file fires change again.
+  input.value = ''
+  if (!file) return
+
+  importingEml.value = true
+  try {
+    const { data } = await importEml(file)
+    await queryClient.invalidateQueries({ queryKey: ['documents'] })
+    toast.add({ severity: 'success', summary: t('ui.eml_imported'), life: 2000 })
+    router.push({ name: 'document-view', params: { id: data.id } })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.eml_import_failed'), life: 4000 })
+  } finally {
+    importingEml.value = false
+  }
+}
 </script>
 
 <template>
@@ -592,6 +625,29 @@ async function handleSubmit() {
       <!-- Camera capture: opens the device camera on mobile; photos queue for save. -->
       <CameraCaptureButton @capture="onCameraCapture" />
 
+      <!-- .eml import (create only): builds a whole document from an email file via
+           the dedicated endpoint, then navigates to it. Separate from the file queue. -->
+      <div v-if="!isEdit" class="eml-import">
+        <input
+          ref="emlInputRef"
+          type="file"
+          accept=".eml,message/rfc822"
+          class="eml-input"
+          @change="onEmlSelected"
+        />
+        <Button
+          type="button"
+          :label="t('ui.import_eml')"
+          icon="pi pi-envelope"
+          severity="secondary"
+          outlined
+          size="small"
+          :loading="importingEml"
+          @click="triggerEmlPicker"
+        />
+        <span class="eml-hint">{{ t('ui.import_eml_hint') }}</span>
+      </div>
+
       <!-- Real per-file upload progress while saving. -->
       <UploadProgressList
         v-if="uploadingFiles"
@@ -744,6 +800,20 @@ a.file-name:hover {
 
 .upload-hint {
   margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+.eml-import {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+.eml-input {
+  display: none;
+}
+.eml-hint {
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
 }

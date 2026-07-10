@@ -183,6 +183,10 @@
     "drag_or_choose_upload": "Dateien hierher ziehen oder auf Auswählen klicken, um sie hochzuladen",
     "take_photo": "Foto aufnehmen",
     "files_upload_hint": "{count} Datei(en) werden beim Speichern hochgeladen.",
+    "import_eml": "Aus .eml importieren",
+    "import_eml_hint": "Ein Dokument aus einer E-Mail-Datei (.eml) erstellen.",
+    "eml_imported": "E-Mail importiert",
+    "eml_import_failed": "E-Mail konnte nicht importiert werden",
     "uploading": "Wird hochgeladen …",
     "upload_failed": "Hochladen fehlgeschlagen",
     "files_uploaded": "Dateien hochgeladen",
@@ -318,7 +322,22 @@
       "password_updated": "Passwort aktualisiert",
       "failed_update_password": "Passwort konnte nicht aktualisiert werden",
       "language_updated": "Sprache aktualisiert",
-      "theme_switched": "Design geändert zu {name}"
+      "theme_switched": "Design geändert zu {name}",
+      "sessions": {
+        "title": "Aktive Sitzungen",
+        "description": "Geräte und Browser, die derzeit bei Ihrem Konto angemeldet sind.",
+        "created": "Angemeldet",
+        "last_access": "Zuletzt aktiv",
+        "ip": "IP-Adresse",
+        "current": "Diese Sitzung",
+        "none": "Keine aktiven Sitzungen",
+        "revoke_others": "Andere Sitzungen abmelden",
+        "revoke_title": "Andere Sitzungen abmelden",
+        "revoke_confirm": "Dadurch werden alle anderen Sitzungen außer der aktuell verwendeten abgemeldet. Fortfahren?",
+        "revoked": "Andere Sitzungen abgemeldet",
+        "revoke_failed": "Andere Sitzungen konnten nicht abgemeldet werden",
+        "load_failed": "Sitzungen konnten nicht geladen werden"
+      }
     },
     "default_password_banner": {
       "title": "Standard-Administratorpasswort in Verwendung",
@@ -471,6 +490,23 @@
       "failed_delete": "Feld konnte nicht gelöscht werden",
       "delete_title": "Metadatenfeld löschen",
       "delete_confirm": "Das Feld \"{name}\" löschen? Seine Werte auf allen Dokumenten werden entfernt."
+    },
+    "monitoring": {
+      "title": "Überwachung",
+      "description": "Das speicherinterne Anwendungsprotokoll des Servers durchsuchen.",
+      "level": "Stufe",
+      "level_all": "Alle Stufen",
+      "tag": "Logger",
+      "tag_placeholder": "z. B. com.sismics",
+      "message": "Meldung",
+      "message_placeholder": "Nach Meldungstext filtern",
+      "time": "Zeit",
+      "apply": "Anwenden",
+      "clear": "Zurücksetzen",
+      "refresh": "Aktualisieren",
+      "refresh_failed": "Protokolle konnten nicht aktualisiert werden",
+      "total_count": "{count} Protokolleinträge",
+      "no_logs": "Keine Protokolleinträge entsprechen diesen Filtern"
     },
     "config": {
       "title": "Konfiguration",

@@ -183,6 +183,10 @@
     "drag_or_choose_upload": "Drag files here or click Choose to upload",
     "take_photo": "Take photo",
     "files_upload_hint": "{count} file(s) will be uploaded on save.",
+    "import_eml": "Import from .eml",
+    "import_eml_hint": "Create a document from an email (.eml) file.",
+    "eml_imported": "Email imported",
+    "eml_import_failed": "Failed to import email",
     "uploading": "Uploading...",
     "upload_failed": "Upload failed",
     "files_uploaded": "Files uploaded",
@@ -318,7 +322,22 @@
       "password_updated": "Password updated",
       "failed_update_password": "Failed to update password",
       "language_updated": "Language updated",
-      "theme_switched": "Theme switched to {name}"
+      "theme_switched": "Theme switched to {name}",
+      "sessions": {
+        "title": "Active sessions",
+        "description": "Devices and browsers currently signed in to your account.",
+        "created": "Signed in",
+        "last_access": "Last active",
+        "ip": "IP address",
+        "current": "This session",
+        "none": "No active sessions",
+        "revoke_others": "Sign out other sessions",
+        "revoke_title": "Sign out other sessions",
+        "revoke_confirm": "This signs out every other session except the one you are using now. Continue?",
+        "revoked": "Other sessions signed out",
+        "revoke_failed": "Failed to sign out other sessions",
+        "load_failed": "Failed to load sessions"
+      }
     },
     "default_password_banner": {
       "title": "Default admin password in use",
@@ -471,6 +490,23 @@
       "failed_delete": "Failed to delete field",
       "delete_title": "Delete metadata field",
       "delete_confirm": "Delete the field \"{name}\"? Its values on all documents will be removed."
+    },
+    "monitoring": {
+      "title": "Monitoring",
+      "description": "Browse the server's in-memory application log.",
+      "level": "Level",
+      "level_all": "All levels",
+      "tag": "Logger",
+      "tag_placeholder": "e.g. com.sismics",
+      "message": "Message",
+      "message_placeholder": "Filter by message text",
+      "time": "Time",
+      "apply": "Apply",
+      "clear": "Clear",
+      "refresh": "Refresh",
+      "refresh_failed": "Failed to refresh logs",
+      "total_count": "{count} log entries",
+      "no_logs": "No log entries match these filters"
     },
     "config": {
       "title": "Configuration",

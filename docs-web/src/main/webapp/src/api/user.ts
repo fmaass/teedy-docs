@@ -70,6 +70,32 @@ export function disableUserTotp(username: string) {
   return api.post(`/user/${username}/disable_totp`)
 }
 
+/**
+ * One active authentication session for the current user, as returned by
+ * GET /api/user/session. `current` marks the session used for THIS request (the
+ * one "sign out other sessions" preserves). `last_connection_date` is absent for a
+ * session that has never been used since creation, so it is optional.
+ */
+export interface UserSession {
+  create_date: number
+  ip: string | null
+  user_agent: string | null
+  last_connection_date?: number
+  current: boolean
+}
+
+// List the current user's active sessions. Self-service (any authenticated
+// non-guest user); the backend returns an empty list for the guest user.
+export function listSessions() {
+  return api.get<{ sessions: UserSession[] }>('/user/session')
+}
+
+// Revoke every session of the current user EXCEPT the one making this request.
+// Self-service; the caller stays logged in.
+export function deleteOtherSessions() {
+  return api.delete<{ status: string }>('/user/session')
+}
+
 export function requestPasswordReset(username: string) {
   const params = new URLSearchParams()
   params.set('username', username)

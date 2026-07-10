@@ -85,6 +85,20 @@ export function updateDocument(id: string, params: URLSearchParams) {
   return api.post<{ id: string }>(`/document/${id}`, params)
 }
 
+/**
+ * Import a new document from an .eml email file via PUT /api/document/eml
+ * (multipart/form-data, param `file`). The backend parses the email, uses its
+ * subject as the title, and attaches the body + attachments as files; it returns
+ * the new document's id. Normal authenticated user — not admin-gated.
+ */
+export function importEml(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.put<{ id: string }>('/document/eml', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
 export function deleteDocument(id: string) {
   return api.delete(`/document/${id}`)
 }

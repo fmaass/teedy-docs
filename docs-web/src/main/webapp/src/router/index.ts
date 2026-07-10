@@ -190,6 +190,14 @@ const router = createRouter({
               component: () => import('../views/settings/SettingsMetadata.vue'),
               meta: { requiresAdmin: true },
             },
+            {
+              path: 'monitoring',
+              name: 'settings-monitoring',
+              component: () => import('../views/settings/SettingsMonitoring.vue'),
+              // Admin-only: SettingsMonitoring fires the admin-gated GET /app/log on
+              // mount. Nav is already admin-hidden; this stops a direct-URL mount.
+              meta: { requiresAdmin: true },
+            },
           ],
         },
       ],
