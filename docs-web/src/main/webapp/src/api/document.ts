@@ -1,4 +1,5 @@
 import api from './client'
+import type { RouteStepSummary } from './route'
 
 export interface DocumentListItem {
   id: string
@@ -57,6 +58,9 @@ export interface DocumentDetail extends DocumentListItem {
   files?: Array<{ id: string; name: string; mimetype: string; size: number }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
+  // Current active route step, present only when a route is active on this document AND the caller
+  // is not anonymous. Carries `transitionable` (may the caller act now). See DocumentResource.
+  route_step?: RouteStepSummary
 }
 
 export interface DocumentListParams {
@@ -67,6 +71,11 @@ export interface DocumentListParams {
   search?: string
   files?: boolean
   'search[tagMode]'?: 'and' | 'or'
+  // Structured "awaiting my action" filter. Value 'me' restricts the list to documents whose
+  // current route step targets the caller (the active_route/current_step_name row fields are
+  // target-scoped to the same signal). Sent as a typed param instead of a literal `workflow:me`
+  // token folded into the free-text search.
+  'search[searchworkflow]'?: 'me'
 }
 
 export function listDocuments(params: DocumentListParams) {

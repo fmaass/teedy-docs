@@ -14,12 +14,14 @@ import com.sismics.docs.core.model.jpa.Route;
 import com.sismics.docs.core.model.jpa.RouteModel;
 import com.sismics.docs.core.model.jpa.RouteStep;
 import com.sismics.docs.core.util.ActionUtil;
+import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.RoutingUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.json.*;
@@ -150,8 +152,13 @@ public class RouteResource extends BaseResource {
      * @apiParam {String} documentId Document ID
      * @apiParam {String} transition Route step transition
      * @apiParam {String} comment Route step comment
+     * @apiParam {String} [routeStepId] Expected current step ID. When supplied, the resolved current
+     *   step MUST match it or the request is rejected StepChanged, binding the action to the step the
+     *   caller actually saw (stale tab / double-click / concurrent actor protection). Optional for
+     *   back-compatible API clients that act on whatever the current step is.
      * @apiSuccess {String} status Status OK
      * @apiError (client) ValidationError Invalid transition
+     * @apiError (client) StepChanged The current step differs from the one the caller acted on
      * @apiError (client) AlreadyEnded The step was already ended by a concurrent validation
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) NotFound Document or route not found
@@ -164,7 +171,8 @@ public class RouteResource extends BaseResource {
     @Path("validate")
     public Response validate(@FormParam("documentId") String documentId,
                              @FormParam("transition") String transitionStr,
-                             @FormParam("comment") String comment) {
+                             @FormParam("comment") String comment,
+                             @FormParam("routeStepId") String routeStepId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -182,6 +190,16 @@ public class RouteResource extends BaseResource {
         RouteStepDto routeStepDto = routeStepDao.getCurrentStep(documentId);
         if (routeStepDto == null) {
             throw new NotFoundException();
+        }
+
+        // Bind the action to the step the caller actually saw. When routeStepId is supplied and the
+        // resolved current step is a DIFFERENT step, the route has advanced since the caller loaded it
+        // (stale tab, double-click, or a concurrent group member): reject StepChanged and advance
+        // NOTHING. Consecutive same-type/same-target steps (e.g. the seeded two administrator VALIDATE
+        // steps) make this essential — without it, one intended action could advance two steps. Absent
+        // routeStepId, today's behavior is preserved for back-compat API clients.
+        if (routeStepId != null && !routeStepId.equals(routeStepDto.getId())) {
+            throw new ClientException("StepChanged", "The current step differs from the one you acted on");
         }
 
         // Check permission to validate this step
@@ -390,8 +408,12 @@ public class RouteResource extends BaseResource {
             }
 
             routes.add(Json.createObjectBuilder()
+                    .add("id", routeDto.getId())
                     .add("name", routeDto.getName())
+                    .add("status", JsonUtil.nullable(routeDto.getStatus()))
                     .add("create_date", routeDto.getCreateTimestamp())
+                    .add("end_date", JsonUtil.nullable(routeDto.getEndTimestamp()))
+                    .add("initiator_username", JsonUtil.nullable(routeDto.getInitiatorUsername()))
                     .add("steps", steps));
         }
 
@@ -434,9 +456,6 @@ public class RouteResource extends BaseResource {
             throw new NotFoundException();
         }
 
-        // Remove the current step's routing READ ACL
-        RoutingUtil.updateAcl(documentId, null, routeStepDto, principal.getId());
-
         // Terminal-cancel semantics: mark the route CANCELLED + end date and close all open steps,
         // rather than hard-deleting the history. The route and its ended steps stay listable in GET.
         String routeId = routeStepDto.getRouteId();
@@ -444,6 +463,15 @@ public class RouteResource extends BaseResource {
         routeDao.endRoute(routeId, RouteStatus.CANCELLED);
         // NULL transition = system-ended: nobody acted on the open steps of a cancelled route.
         routeStepDao.endAllOpenSteps(routeId, null, "Route cancelled");
+
+        // Remove the ROUTING READ grant so no transient workflow ACL survives this terminal route.
+        // Target-AGNOSTIC (all ROUTING ACLs on the document), not scoped to the step we resolved above:
+        // a concurrent validate can advance the route between our getCurrentStep() read and here,
+        // shifting the ROUTING ACL from the resolved step's target to a later step. A step-scoped
+        // removal would then miss the shifted ACL and leave a persistent READ grant on a cancelled
+        // route (authz leak). Deleting every ROUTING ACL for the document closes that race regardless
+        // of which step advanced — matching the trash-cancel path's semantics (W2c invariant).
+        PrincipalDeletionUtil.deleteAllRoutingAclsForDocument(documentId, principal.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

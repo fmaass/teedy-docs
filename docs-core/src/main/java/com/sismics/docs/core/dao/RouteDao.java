@@ -60,8 +60,9 @@ public class RouteDao {
         Map<String, Object> parameterMap = new HashMap<String, Object>();
         List<String> criteriaList = new ArrayList<>();
 
-        StringBuilder sb = new StringBuilder("select r.RTE_ID_C c0, r.RTE_NAME_C c1, r.RTE_STATUS_C c2, r.RTE_CREATEDATE_D c3, r.RTE_IDUSER_C c4");
+        StringBuilder sb = new StringBuilder("select r.RTE_ID_C c0, r.RTE_NAME_C c1, r.RTE_STATUS_C c2, r.RTE_CREATEDATE_D c3, r.RTE_IDUSER_C c4, r.RTE_ENDDATE_D c5, u.USE_USERNAME_C c6");
         sb.append(" from T_ROUTE r ");
+        sb.append(" left join T_USER u on u.USE_ID_C = r.RTE_IDUSER_C ");
 
         // Add search criterias
         if (criteria.getDocumentId() != null) {
@@ -88,6 +89,9 @@ public class RouteDao {
             dto.setStatus((String) o[i++]);
             dto.setCreateTimestamp(((Timestamp) o[i++]).getTime());
             dto.setUserId((String) o[i++]);
+            Timestamp endDate = (Timestamp) o[i++];
+            dto.setEndTimestamp(endDate == null ? null : endDate.getTime());
+            dto.setInitiatorUsername((String) o[i]);
             dtoList.add(dto);
         }
         return dtoList;

@@ -31,6 +31,16 @@ public class RouteDto {
      */
     private Long createTimestamp;
 
+    /**
+     * End date (null while the route is still ACTIVE).
+     */
+    private Long endTimestamp;
+
+    /**
+     * Initiator's username (nullable if the initiator user no longer exists).
+     */
+    private String initiatorUsername;
+
     public String getId() {
         return id;
     }
@@ -73,6 +83,24 @@ public class RouteDto {
 
     public RouteDto setCreateTimestamp(Long createTimestamp) {
         this.createTimestamp = createTimestamp;
+        return this;
+    }
+
+    public Long getEndTimestamp() {
+        return endTimestamp;
+    }
+
+    public RouteDto setEndTimestamp(Long endTimestamp) {
+        this.endTimestamp = endTimestamp;
+        return this;
+    }
+
+    public String getInitiatorUsername() {
+        return initiatorUsername;
+    }
+
+    public RouteDto setInitiatorUsername(String initiatorUsername) {
+        this.initiatorUsername = initiatorUsername;
         return this;
     }
 }

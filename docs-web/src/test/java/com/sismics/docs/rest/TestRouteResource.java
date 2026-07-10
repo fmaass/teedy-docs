@@ -492,6 +492,211 @@ public class TestRouteResource extends BaseJerseyTest {
     }
 
     /**
+     * B3 step-id guard: a route whose two consecutive steps share the SAME target+type (the seeded
+     * default-document-review has two administrator VALIDATE steps in a row). Acting on step 1 with
+     * ITS step id advances to step 2; replaying the SAME routeStepId is rejected StepChanged (400) and
+     * advances NOTHING — step 2 stays open. Without the id-guard this stale replay would wrongly end
+     * step 2 (a double advance from one intended action).
+     */
+    @Test
+    public void testStepIdGuardBlocksStaleReplay() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Step-id guard")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Start the seeded default route (steps 1 & 2 are both administrator VALIDATE steps)
+        json = target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")), JsonObject.class);
+        // The start payload exposes the current step id (B3 step-id exposure)
+        String step1Id = json.getJsonObject("route_step").getString("id");
+        Assertions.assertNotNull(step1Id);
+
+        // Act on step 1 with ITS id -> advances to step 2
+        json = target().path("/route/validate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("transition", "VALIDATED")
+                        .param("routeStepId", step1Id)), JsonObject.class);
+        String step2Id = json.getJsonObject("route_step").getString("id");
+        Assertions.assertNotEquals(step1Id, step2Id, "Step 1 and step 2 are distinct steps");
+        Assertions.assertEquals("Add relevant files to the document", json.getJsonObject("route_step").getString("name"));
+
+        // Replay the SAME (now-stale) step1Id: current step is step 2, ids mismatch -> StepChanged 400
+        Response replay = target().path("/route/validate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("transition", "VALIDATED")
+                        .param("routeStepId", step1Id)));
+        Assertions.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), replay.getStatus());
+        Assertions.assertEquals("StepChanged", replay.readEntity(JsonObject.class).getString("type"));
+
+        // Step 2 must still be OPEN (not advanced): the doc-detail route_step is still step 2
+        json = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(step2Id, json.getJsonObject("route_step").getString("id"),
+                "Step 2 must remain the open current step after a rejected stale replay");
+    }
+
+    /**
+     * B1 GET /route contract: each route carries id, status, end_date and each step carries its id.
+     * An ACTIVE route has a null end_date; a completed route carries status DONE and a non-null
+     * end_date.
+     */
+    @Test
+    public void testGetRouteEnrichedContract() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Route contract")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Single VALIDATE-step model so one validate completes the route
+        String modelId = createGroupValidateModel(adminToken, "Contract model", null);
+
+        target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", modelId)), JsonObject.class);
+
+        // While ACTIVE: id + status ACTIVE + null end_date; step carries an id
+        json = target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        JsonObject activeRoute = json.getJsonArray("routes").getJsonObject(0);
+        Assertions.assertNotNull(activeRoute.getString("id"));
+        Assertions.assertEquals("ACTIVE", activeRoute.getString("status"));
+        Assertions.assertTrue(activeRoute.isNull("end_date"), "An ACTIVE route has no end_date");
+        Assertions.assertNotNull(activeRoute.getJsonArray("steps").getJsonObject(0).getString("id"),
+                "Each step must carry its id");
+
+        // Complete the route
+        target().path("/route/validate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("transition", "VALIDATED")), JsonObject.class);
+
+        // Now DONE with a non-null end_date
+        json = target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        JsonObject doneRoute = json.getJsonArray("routes").getJsonObject(0);
+        Assertions.assertEquals("DONE", doneRoute.getString("status"));
+        Assertions.assertFalse(doneRoute.isNull("end_date"), "A completed route carries an end_date");
+    }
+
+    /**
+     * Cancel-vs-validate race hardening: cancel removes EVERY ROUTING ACL on the document, not just
+     * the step it resolved. Reproduces the deterministic post-race state — a route advanced so a
+     * ROUTING ACL exists for the CURRENT step's target, PLUS a lingering ROUTING ACL from a prior
+     * step's target (seeded directly to stand in for the raced grant a step-scoped cancel would miss).
+     * After cancel, ZERO active ROUTING ACLs may remain: no transient workflow grant survives a
+     * terminal route (the W2c invariant). A step-scoped cancel would leave the lingering ACL (RED).
+     */
+    @Test
+    public void testCancelRemovesAllRoutingAcls() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Cancel routing-ACL cleanup")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        // Start the seeded default route: this grants a ROUTING ACL to the current step's target.
+        target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")), JsonObject.class);
+
+        // Seed a lingering ROUTING ACL for a DIFFERENT target directly (committed). It stands in for
+        // the raced grant a step-scoped cancel would never see: a concurrent validate would have
+        // shifted the ROUTING ACL to a later step's target between cancel's getCurrentStep() read and
+        // its ACL removal. The cleanup is target-agnostic, so the seeded target id can be synthetic.
+        String racedTargetId = java.util.UUID.randomUUID().toString();
+        TestUserResource.inTx(() -> TestUserResource.insertRoutingAcl(documentId, racedTargetId));
+
+        // Two active ROUTING ACLs now exist: the current step's + the seeded lingering one.
+        Assertions.assertTrue(activeRoutingAclCount(documentId) >= 2,
+                "Pre-cancel state must have the current-step ROUTING ACL plus the seeded lingering one");
+
+        // Cancel the route
+        target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+
+        // Invariant: no ROUTING ACL survives the now-terminal route — including the lingering one.
+        Assertions.assertEquals(0, activeRoutingAclCount(documentId),
+                "A cancelled (terminal) route must leave ZERO active ROUTING ACLs on the document");
+    }
+
+    /**
+     * The normal (non-race) cancel path also ends with zero ROUTING ACLs on the document.
+     */
+    @Test
+    public void testNormalCancelLeavesNoRoutingAcl() {
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Normal cancel routing-ACL")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", "default-document-review")), JsonObject.class);
+        Assertions.assertTrue(activeRoutingAclCount(documentId) >= 1, "Start grants a ROUTING ACL");
+
+        target().path("/route")
+                .queryParam("documentId", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete(JsonObject.class);
+
+        Assertions.assertEquals(0, activeRoutingAclCount(documentId),
+                "Normal cancel must also leave zero active ROUTING ACLs");
+    }
+
+    /**
+     * The count of still-active (non-deleted) ROUTING ACLs on a document, read in its own committed
+     * transaction so the in-process server's writes are visible.
+     */
+    private long activeRoutingAclCount(String documentId) {
+        return TestUserResource.inTx(() -> ((Number) com.sismics.util.context.ThreadLocalContext.get()
+                .getEntityManager().createNativeQuery(
+                        "select count(*) from T_ACL where ACL_SOURCEID_C = :id " +
+                                "and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
+                .setParameter("id", documentId).getSingleResult()).longValue());
+    }
+
+    /**
      * The guarded step-end wins exactly once: two concurrent validations of the same current step
      * yield exactly one success and one AlreadyEnded (400) — the lost-race response. This exercises
      * the deviation that a duplicate validation cannot double-run the transition.

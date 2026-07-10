@@ -179,8 +179,39 @@ public class PrincipalDeletionUtil {
      * @param userId User performing the deletion (audit attribution)
      * @param documentDeleteDate The document's own soft-delete timestamp
      */
-    @SuppressWarnings("unchecked")
     private static void deleteRoutingAclsForDocument(String documentId, String userId, Date documentDeleteDate) {
+        // Deterministic offset from the document's delete timestamp (never a fresh clock sample) so
+        // restore-from-trash (exact-equality on documentDeleteDate) cannot resurrect this ACL.
+        deleteAllRoutingAclsForDocument(documentId, userId, new Date(documentDeleteDate.getTime() - 1L));
+    }
+
+    /**
+     * Soft-delete ALL transient workflow ("ROUTING") READ ACLs on a document (regardless of target),
+     * writing a DELETE audit log for each, stamped with the CURRENT time. Used when a route is
+     * cancelled in place (not via trash): the document itself is not deleted, so there is no
+     * document-delete timestamp to coordinate with. Enforces the invariant that no ROUTING grant
+     * survives a terminal route — target-agnostic, so it closes a cancel-vs-validate race where the
+     * ROUTING ACL has already shifted from the cancel-resolved step to a later step.
+     *
+     * @param documentId Document (ACL source) ID
+     * @param userId User performing the deletion (audit attribution)
+     */
+    public static void deleteAllRoutingAclsForDocument(String documentId, String userId) {
+        deleteAllRoutingAclsForDocument(documentId, userId, new Date());
+    }
+
+    /**
+     * Core soft-delete of every ROUTING ACL on a document, at the supplied delete timestamp, with a
+     * per-ACL DELETE audit row. The timestamp is a parameter because the two callers need different
+     * values: trash-cancel derives it from the document's own delete timestamp (restore-safety),
+     * while in-place cancel uses the current clock.
+     *
+     * @param documentId Document (ACL source) ID
+     * @param userId User performing the deletion (audit attribution)
+     * @param routingAclDeleteDate Timestamp to stamp on the soft-deleted ROUTING ACL rows
+     */
+    @SuppressWarnings("unchecked")
+    private static void deleteAllRoutingAclsForDocument(String documentId, String userId, Date routingAclDeleteDate) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
 
         Query q = em.createNativeQuery("select ACL_ID_C, ACL_PERM_C from T_ACL " +
@@ -203,8 +234,6 @@ public class PrincipalDeletionUtil {
             auditLogDao.create(auditLog);
         }
 
-        // Deterministic offset from the document's delete timestamp (never a fresh clock sample).
-        Date routingAclDeleteDate = new Date(documentDeleteDate.getTime() - 1L);
         Query upd = em.createNativeQuery("update T_ACL set ACL_DELETEDATE_D = :dateNow " +
                 " where ACL_SOURCEID_C = :sourceId and ACL_TYPE_C = :type and ACL_DELETEDATE_D is null");
         upd.setParameter("dateNow", routingAclDeleteDate);

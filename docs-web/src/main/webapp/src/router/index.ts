@@ -101,6 +101,11 @@ const router = createRouter({
               component: () => import('../views/document/DocumentViewPermissions.vue'),
             },
             {
+              path: 'workflow',
+              name: 'document-view-workflow',
+              component: () => import('../views/document/DocumentViewWorkflow.vue'),
+            },
+            {
               path: 'activity',
               name: 'document-view-activity',
               component: () => import('../views/document/DocumentViewActivity.vue'),
