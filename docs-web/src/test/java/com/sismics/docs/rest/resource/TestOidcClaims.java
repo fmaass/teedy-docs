@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Phase 6 (#21): configurable claim names, username sanitization + deterministic collision
+ * Configurable OIDC claim names (#21), username sanitization + deterministic collision
  * policy, and the sub-verified UserInfo fallback. The UserInfo path is exercised against an
  * ephemeral local {@link HttpServer} (no live IdP), asserting the request is a GET carrying
  * the Bearer access token, that the response is parsed, and that a {@code sub} mismatch is

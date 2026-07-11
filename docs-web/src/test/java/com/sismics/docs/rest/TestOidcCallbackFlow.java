@@ -35,7 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Phase 6 (#21): end-to-end OIDC callback coverage against a mock IdP (ephemeral
+ * End-to-end OIDC callback coverage (#21) against a mock IdP (ephemeral
  * {@link HttpServer} serving token / JWKS / UserInfo). Exercises the REAL callback code path
  * — token exchange, JWKS verification, nonce check — around the new behaviors:
  *
@@ -270,6 +270,42 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
         deleteUser(first.getUsername());
     }
 
+    /**
+     * A disabled identity's login attempt must be rejected WITHOUT mutating stored profile
+     * data: the eligibility check must run before the repeat-login email refresh. (The error
+     * redirect is a 3xx, so the request transaction COMMITS — an email update executed
+     * before the rejection would silently persist.)
+     */
+    @Test
+    public void disabledAccountLoginRejectedWithoutEmailMutation() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+
+        // Provision normally, then disable the account.
+        String nonce1 = UUID.randomUUID().toString();
+        String state1 = seedState(nonce1);
+        startTokenEndpoint(signIdToken(subject, nonce1, "karla", "karla@example.com"), "at-d1");
+        Response r1 = doCallback("code-d1", state1);
+        Assertions.assertEquals(Response.Status.TEMPORARY_REDIRECT.getStatusCode(), r1.getStatus());
+        User user = lookupBySub("https://iss.mock.example", subject);
+        Assertions.assertNotNull(user);
+        disableUser(user.getUsername());
+
+        // Repeat login with a CHANGED email claim: rejected, and the change must NOT stick.
+        String nonce2 = UUID.randomUUID().toString();
+        String state2 = seedState(nonce2);
+        startTokenEndpoint(signIdToken(subject, nonce2, "karla", "karla-new@example.com"), "at-d2");
+        Response r2 = doCallback("code-d2", state2);
+        Assertions.assertEquals(Response.Status.TEMPORARY_REDIRECT.getStatusCode(), r2.getStatus());
+        Assertions.assertTrue(r2.getHeaderString("Location").endsWith("/#/login?error=oidc"),
+                "a disabled account must be rejected, got: " + r2.getHeaderString("Location"));
+        Assertions.assertFalse(r2.getCookies().containsKey("auth_token"),
+                "no session cookie may be set for a disabled account");
+        Assertions.assertEquals("karla@example.com",
+                lookupBySub("https://iss.mock.example", subject).getEmail(),
+                "a disabled identity's login attempt must not mutate the stored email");
+        deleteUser(user.getUsername());
+    }
+
     // --- mock IdP plumbing -----------------------------------------------------------------
 
     private Algorithm rsa() {
@@ -366,6 +402,16 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
                             "select count(*) from T_USER where USE_OIDC_ISSUER_C = :i and USE_OIDC_SUBJECT_C = :s and USE_DELETEDATE_D is null")
                     .setParameter("i", issuer).setParameter("s", subject).getSingleResult();
             return ((Number) n).longValue();
+        });
+    }
+
+    /** Administratively disables a user (sets USE_DISABLEDATE_D) on a committed transaction. */
+    private void disableUser(String username) {
+        inTx(() -> {
+            ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("update T_USER set USE_DISABLEDATE_D = CURRENT_TIMESTAMP where USE_USERNAME_C = :u")
+                    .setParameter("u", username).executeUpdate();
+            return null;
         });
     }
 

@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Phase 6 (#21): OIDC provisioning failure-path hardening against REAL H2 rows.
+ * OIDC provisioning failure-path hardening (#21) against REAL H2 rows.
  *
  * <ul>
  *   <li>fail closed on a missing {@code sub} (no user row created);</li>
@@ -229,6 +229,37 @@ public class TestOidcProvisioning {
                 "no second user row may be created on conflict");
     }
 
+    /**
+     * The conflict-recovery branch returns a re-read PRE-EXISTING row (the race winner),
+     * which is NOT guaranteed enabled: here the winner was disabled before the loser's
+     * insert conflicts (equivalently: between the loser's failed insert and its recovery
+     * re-read — the loser never looked the row up). The callback's SINGLE eligibility
+     * chokepoint runs unconditionally on the final resolved user, so this login is
+     * rejected and no token/cookie is minted — asserted here via the exact predicate the
+     * chokepoint applies ({@link OidcResource#isOidcUserEligible}).
+     */
+    @Test
+    public void conflictRecoveryDisabledWinnerFailsEligibilityChokepoint() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+        User winner = invokeProvision("lena", "lena@example.com", subject, ISSUER);
+        track(winner);
+        Assertions.assertNotNull(winner);
+        disableCommittedUser(winner.getUsername());
+
+        // The loser's provisioning: real IDX_USER_OIDC conflict, recovery re-read on a
+        // clean transaction — returns the DISABLED winner row.
+        User recovered = invokeProvision("lena", "lena@example.com", subject, ISSUER);
+        Assertions.assertNotNull(recovered, "recovery still converges on the winner row");
+        Assertions.assertEquals(winner.getId(), recovered.getId(), "must be the pre-existing winner");
+        Assertions.assertNotNull(recovered.getDisableDate(),
+                "seam sanity: the recovered winner must actually be disabled");
+        Assertions.assertFalse(OidcResource.isOidcUserEligible(recovered),
+                "the callback's unconditional eligibility chokepoint must reject this login"
+                        + " (no session token/cookie for a disabled recovered winner)");
+        Assertions.assertEquals(1, countOidcUsers(ISSUER, subject),
+                "no second user row may be created on conflict");
+    }
+
     // --- residual username collision: hash-prefix extension --------------------------------
 
     /**
@@ -277,6 +308,21 @@ public class TestOidcProvisioning {
                 "deriveUsername", String.class, String.class, String.class, int.class);
         m.setAccessible(true);
         return (String) m.invoke(null, stem, issuer, subject, hashLen);
+    }
+
+    /** Administratively disables a committed user (sets USE_DISABLEDATE_D) on its own transaction. */
+    private void disableCommittedUser(String username) {
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            tx.begin();
+            em.createNativeQuery("update T_USER set USE_DISABLEDATE_D = CURRENT_TIMESTAMP where USE_USERNAME_C = :u")
+                    .setParameter("u", username).executeUpdate();
+            tx.commit();
+        } finally {
+            if (tx.isActive()) tx.rollback();
+            em.close();
+        }
     }
 
     /** Creates a plain local (non-OIDC) user on a committed transaction and tracks it for cleanup. */

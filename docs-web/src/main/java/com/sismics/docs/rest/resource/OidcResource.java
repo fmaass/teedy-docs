@@ -285,33 +285,40 @@ public class OidcResource extends BaseResource {
 
             // First: stable lookup by OIDC subject (prevents email-based account takeover)
             User user = userDao.getByOidcSubject(issuer, subject);
+            boolean repeatLogin = user != null;
 
             // Security: do NOT auto-link to existing local accounts by username/email.
             // First OIDC login always provisions a new user to prevent account takeover.
-            if (user == null) {
+            if (!repeatLogin) {
                 user = provisionOrRecover(userDao, usernameClaim, email, subject, issuer);
                 if (user == null) {
-                    log.error("Failed to provision OIDC user: sub={}", subject);
+                    // The OIDC subject is PII and must stay out of ERROR (DEBUG-only policy).
+                    log.error("Failed to provision OIDC user (subject at DEBUG)");
+                    log.debug("Failed to provision OIDC user: sub={}", subject);
                     return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
                 }
-            } else {
-                // Repeat login: refresh the stored email from a fresh, valid claim. Username is
-                // immutable (workflow blobs store USER targets by username). The synthetic
-                // <username>@oidc.local fallback is provisioning-only and must never overwrite a
-                // real stored address when the claim is temporarily absent (profile-data-loss guard).
-                maybeUpdateEmail(userDao, user, email);
             }
 
-            // Reject an administratively disabled account BEFORE minting a token or setting a
-            // cookie (shared User.isDisabled() eligibility predicate). Checked after the stable
-            // getByOidcSubject lookup so a disabled identity is a clean rejection, not a
-            // duplicate first-login provisioning. A newly-provisioned account is never disabled,
-            // so this only catches a pre-existing OIDC identity that was later disabled.
+            // SINGLE eligibility chokepoint: reject an administratively disabled account
+            // unconditionally once the user is FINAL — however it was resolved. The lookup
+            // path can return a later-disabled identity, and provisionOrRecover's
+            // conflict-recovery branch returns a re-read PRE-EXISTING row (the race winner),
+            // which is not guaranteed enabled either. This runs BEFORE any profile mutation
+            // (the rejection redirect is a 3xx, so the request transaction COMMITS — a prior
+            // email refresh would silently persist) and BEFORE minting a token or cookie.
             if (!isOidcUserEligible(user)) {
                 // The OIDC subject is PII and must stay out of WARN (DEBUG-only policy).
                 log.warn("OIDC login refused for a disabled account");
                 log.debug("OIDC login refused for disabled account: sub={}", subject);
                 return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
+            }
+
+            if (repeatLogin) {
+                // Repeat login: refresh the stored email from a fresh, valid claim. Username is
+                // immutable (workflow blobs store USER targets by username). The synthetic
+                // <username>@oidc.local fallback is provisioning-only and must never overwrite a
+                // real stored address when the claim is temporarily absent (profile-data-loss guard).
+                maybeUpdateEmail(userDao, user, email);
             }
 
             String ip = request.getHeader("x-forwarded-for");
@@ -747,10 +754,12 @@ public class OidcResource extends BaseResource {
             // transaction and continue with the winner.
             User winner = readOidcUserFreshTx(issuer, subject);
             if (winner != null) {
-                log.info("OIDC concurrent first-login converged on the winner row (sub={})", subject);
+                log.info("OIDC concurrent first-login converged on the winner row (subject at DEBUG)");
+                log.debug("OIDC concurrent first-login converged on the winner row: sub={}", subject);
                 return winner;
             }
-            log.error("OIDC unique-conflict recovery found no winner row (sub={})", subject);
+            log.error("OIDC unique-conflict recovery found no winner row (subject at DEBUG)");
+            log.debug("OIDC unique-conflict recovery found no winner row: sub={}", subject);
             return null;
         } catch (Exception e) {
             log.error("Error creating OIDC user", e);
@@ -840,7 +849,8 @@ public class OidcResource extends BaseResource {
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     }
-                    log.info("Provisioned new OIDC user: {} (issuer={}, sub={})", finalUsername, issuer, subject);
+                    log.info("Provisioned new OIDC user: {} (subject at DEBUG)", finalUsername);
+                    log.debug("Provisioned new OIDC user: {} (issuer={}, sub={})", finalUsername, issuer, subject);
                     return user;
                 });
             } catch (RuntimeException e) {
@@ -856,7 +866,8 @@ public class OidcResource extends BaseResource {
                 throw e;
             }
         }
-        log.error("OIDC provisioning exhausted username disambiguation for sub={}", subject);
+        log.error("OIDC provisioning exhausted username disambiguation (subject at DEBUG)");
+        log.debug("OIDC provisioning exhausted username disambiguation for sub={}", subject);
         return null;
     }
 
