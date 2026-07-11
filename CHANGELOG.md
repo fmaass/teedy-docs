@@ -153,7 +153,7 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[3.4.0]: https://github.com/fmaass/teedy-docs/compare/v3.3.0...HEAD
+[3.4.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.0
 [3.3.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.3.0
 [3.2.2]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.2
 [3.2.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.1
