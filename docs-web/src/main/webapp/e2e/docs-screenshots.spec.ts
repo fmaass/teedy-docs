@@ -259,7 +259,7 @@ test('saved-filters dropdown in the search bar', async ({ page, request }) => {
 
   // Open the Saved-filters dropdown so both it and the "Save filter" button show.
   await page.getByRole('button', { name: 'Saved filters' }).click()
-  await expect(page.getByRole('button', { name: 'Unpaid invoices' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Unpaid invoices', exact: true })).toBeVisible()
   await page.waitForLoadState('networkidle')
   // Full-viewport: the "Saved filters" dropdown renders in a teleported overlay,
   // so a viewport shot reliably frames the search bar + dropdown + "Save filter".
