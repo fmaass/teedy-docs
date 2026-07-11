@@ -28,8 +28,14 @@ test('add a relation A→B, see it on both views, then remove the last relation'
     const addRow = page.locator('.relation-add')
     await addRow.locator('input').first().fill(titleB)
     await page.getByRole('option', { name: new RegExp(titleB) }).click()
+    // Scope the toast assertion to the alert role: the add and the later removal each
+    // fire an identical "Relations updated" toast, and a fast run can stack them. Wait
+    // for THIS toast to appear THEN expire before the removal step so the post-removal
+    // assertion below matches only the new toast, never the residual stacked one.
+    const relationsToast = page.getByRole('alert').filter({ hasText: 'Relations updated' })
     await addRow.getByRole('button', { name: 'Add', exact: true }).click()
-    await expect(page.getByText('Relations updated')).toBeVisible()
+    await expect(relationsToast).toBeVisible()
+    await expect(relationsToast).toBeHidden({ timeout: 3_000 })
 
     // --- In-app propagation (NO reload): follow the new outgoing link straight to B ---
     // This guards the cross-document cache invalidation: B's detail query must not serve
@@ -70,7 +76,7 @@ test('add a relation A→B, see it on both views, then remove the last relation'
       .getByRole('button', { name: 'Remove relation' })
       .click()
     await confirmDanger(page)
-    await expect(page.getByText('Relations updated')).toBeVisible()
+    await expect(relationsToast).toBeVisible()
 
     // --- After a fresh reload it is gone from BOTH views ---
     await page.goto(`/#/document/view/${idA}`)

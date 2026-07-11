@@ -89,7 +89,9 @@ test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42)', 
 
   // Re-apply from the saved-filters dropdown.
   await page.getByRole('button', { name: 'Saved filters' }).click()
-  await page.getByRole('button', { name: filterName }).click()
+  // exact: the delete control's accessible name now also contains the filter name
+  // (Delete saved filter "<name>"), so match the apply button by its exact name.
+  await page.getByRole('button', { name: filterName, exact: true }).click()
 
   // The URL carries the stored filter again.
   await expect(page).toHaveURL(/[?&]tags=/)
@@ -101,13 +103,27 @@ test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42)', 
   await expect(otherRow).toBeHidden()
   await expect(matchRow).toBeVisible()
 
-  // Delete the saved filter from the dropdown via the danger confirm.
+  // Delete the saved filter from the dropdown via the danger confirm. The delete
+  // control's accessible name identifies its filter, so this targets THIS test's
+  // filter even when other saved filters (residue from a prior run) coexist.
   await page.getByRole('button', { name: 'Saved filters' }).click()
-  await page.getByRole('button', { name: 'Delete saved filter' }).click()
+  // The dropdown Popover keeps micro-repositioning after open (PrimeVue recomputes
+  // its position via observers), so Playwright's stability check on the delete button
+  // never settles and the actionability wait times out. Assert the button is present
+  // and visible (its unique per-filter accessible name — the accessibility fix — makes
+  // this unambiguous), then dispatch the click directly. The delete effect is still
+  // fully verified below (the confirm dialog + "Filter deleted" toast + filter-gone).
+  const deleteButton = page.getByRole('button', {
+    name: `Delete saved filter "${filterName}"`,
+    exact: true,
+  })
+  await expect(deleteButton).toBeVisible()
+  await deleteButton.click({ force: true })
   await confirmDanger(page)
   await expect(page.getByText('Filter deleted')).toBeVisible()
 
-  // Re-opening the dropdown shows the empty state — the filter is gone.
+  // Re-opening the dropdown, THIS test's filter is gone (assert on the owned filter,
+  // not the global empty state — other saved filters may legitimately remain).
   await page.getByRole('button', { name: 'Saved filters' }).click()
-  await expect(page.getByText('No saved filters yet')).toBeVisible()
+  await expect(page.getByRole('button', { name: filterName, exact: true })).toHaveCount(0)
 })

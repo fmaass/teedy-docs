@@ -924,6 +924,7 @@
       "deleted": "Filter deleted",
       "delete_failed": "Failed to delete the filter",
       "delete_title": "Delete saved filter",
+      "delete_button": "Delete saved filter \"{name}\"",
       "delete_confirm": "Delete the saved filter \"{name}\"?"
     }
   }

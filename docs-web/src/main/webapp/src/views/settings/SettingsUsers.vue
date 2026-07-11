@@ -262,7 +262,7 @@ function canToggleDisabled(data: UserListItem): boolean {
         </div>
         <div class="form-field">
           <label for="add-user-quota">{{ t('ui.users.storage_quota') }}</label>
-          <InputNumber id="add-user-quota" v-model="addForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <InputNumber inputId="add-user-quota" v-model="addForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
           <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(addForm.storage_quota) }) }}</small>
         </div>
       </div>
@@ -285,7 +285,7 @@ function canToggleDisabled(data: UserListItem): boolean {
         </div>
         <div class="form-field">
           <label for="edit-user-quota">{{ t('ui.users.storage_quota') }}</label>
-          <InputNumber id="edit-user-quota" v-model="editForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <InputNumber inputId="edit-user-quota" v-model="editForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
           <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(editForm.storage_quota) }) }}</small>
         </div>
       </div>

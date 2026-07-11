@@ -182,7 +182,7 @@ function confirmDelete(filter: SavedFilterItem) {
               rounded
               size="small"
               severity="danger"
-              :aria-label="t('ui.saved_filters.delete_title')"
+              :aria-label="t('ui.saved_filters.delete_button', { name: filter.name })"
               @click="confirmDelete(filter)"
             />
           </li>

@@ -924,6 +924,7 @@
       "deleted": "Filter gelöscht",
       "delete_failed": "Filter konnte nicht gelöscht werden",
       "delete_title": "Gespeicherten Filter löschen",
+      "delete_button": "Gespeicherten Filter \"{name}\" löschen",
       "delete_confirm": "Den gespeicherten Filter \"{name}\" löschen?"
     }
   }

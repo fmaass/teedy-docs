@@ -197,7 +197,7 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     const wrapper = mountView()
     await flushPromises()
 
-    const deleteBtn = wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'ui.saved_filters.delete_title')
+    const deleteBtn = wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'ui.saved_filters.delete_button')
     expect(deleteBtn).toBeTruthy()
     await deleteBtn!.trigger('click')
 
