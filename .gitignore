@@ -14,8 +14,6 @@ import_test
 teedy-importer-linux
 teedy-importer-macos
 teedy-importer-win.exe
-docs/*
-!docs/.gitkeep
 
 # Environment files with secrets
 .env
