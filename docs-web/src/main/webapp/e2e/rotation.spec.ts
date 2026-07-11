@@ -4,16 +4,23 @@ import { dirname, resolve } from 'node:path'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // #35 — view-only PDF/image rotation. These assert a FALSIFIABLE, orientation-
-// observable change (transform / aspect ratio), NOT "swapped pixel dimensions"
-// alone, and that rotation does NOT persist across a reload (it's display-only).
+// observable change (a real applied CSS transform / a re-rendered canvas), NOT "swapped
+// pixel dimensions" alone, and that rotation does NOT persist across a reload
+// (it's display-only).
 //
-// Fixtures: wide.png is a deliberately ASYMMETRIC rectangle (60x20) so a 90/270
-// rotation is geometrically observable; the 1x1 pixel.png cannot demonstrate it.
-// nearsquare.png (600x560) is near-square and LARGER than the preview stage box,
-// so the sizing caps — not its natural size — determine its rendered dimensions;
-// that is what makes rotated CLIPPING falsifiable in a narrow column (a fixed
-// 400px cap would paint it wider than a <400px stage and clip).
-// sample.pdf is a single-page portrait PDF.
+// Fixtures & a server fact that shapes these tests: Teedy renders EVERY uploaded image
+// onto an A4 PDF page and serves the `web` variant as a normalized 1280x1280 SQUARE
+// raster (FileProcessingAsyncListener + ImageFormatHandler). So an image preview's
+// bounding box is intrinsically square regardless of the source aspect — a square
+// image's 90° rotation is NOT observable by box aspect (that was the false premise
+// behind the earlier flaky `boundingBox().width > height` precondition, which could
+// never hold). For images we therefore prove rotation by the REAL applied transform
+// (getComputedStyle().transform is a concrete 90° matrix, not `none`), the sideways
+// stage class, sibling isolation, and reset-on-reload. The genuine aspect-INVERSION
+// proof lives in the PDF test below: PDFs render at their native (portrait) aspect, so
+// rotating one to landscape is a falsifiable geometry change.
+// nearsquare.png (600x560) drives the narrow-column no-clipping test (the sizing caps,
+// not the natural size, determine the rendered box). sample.pdf is a portrait PDF.
 
 const here = dirname(fileURLToPath(import.meta.url))
 const widePng = resolve(here, 'fixtures/wide.png')
@@ -27,13 +34,26 @@ async function appliedRotation(el: import('@playwright/test').Locator): Promise<
   return m ? Number(m[1]) : 0
 }
 
-test('image preview rotates asymmetrically, leaves siblings alone, and resets on reload', async ({ page }) => {
+// The COMPUTED transform (a DOMMatrix string like "matrix(a,b,c,d,e,f)") of a 90°
+// rotation — proves the rotation actually took visual effect at the pixel level, not
+// merely that an inline style string was written. For a pure +90° rotation the matrix
+// is ~matrix(0, 1, -1, 0, 0, 0): a ≈ 0 and b ≈ 1. `none` (no rotation) fails this.
+async function computedIsRotated90(el: import('@playwright/test').Locator): Promise<boolean> {
+  const t = await el.evaluate((node) => getComputedStyle(node as Element).transform)
+  if (!t || t === 'none') return false
+  const m = t.match(/matrix\(([^)]+)\)/)
+  if (!m) return false
+  const [a, b] = m[1].split(',').map((s) => Number(s.trim()))
+  return Math.abs(a) < 0.01 && Math.abs(Math.abs(b) - 1) < 0.01
+}
+
+test('image preview rotates (real computed transform), leaves siblings alone, and resets on reload', async ({ page }) => {
   const title = unique('rotate-img')
   const { id } = await createDocument(page, title)
 
   await page.goto(`/#/document/view/${id}/content`)
 
-  // Upload the asymmetric image TWICE (two sibling cards of the same file shape).
+  // Upload the same image TWICE (two sibling cards) to prove per-card isolation.
   const input = page.locator('.p-fileupload-advanced input[type="file"]')
   await input.setInputFiles(widePng)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
@@ -48,29 +68,21 @@ test('image preview rotates asymmetrically, leaves siblings alone, and resets on
   await expect(firstImg).toBeVisible()
   await expect(secondImg).toBeVisible()
 
-  // Capture the first image's on-screen bounding box while UPRIGHT (wide: w > h).
-  const before = await firstImg.boundingBox()
-  expect(before, 'first image bounding box').not.toBeNull()
-  expect(before!.width).toBeGreaterThan(before!.height)
+  // Upright: neither card carries a rotation (baseline for the change below).
+  expect(await appliedRotation(firstImg)).toBe(0)
+  expect(await computedIsRotated90(firstImg)).toBe(false)
 
-  // Rotate the first card RIGHT (90deg). The stage gains the sideways class and
-  // the image carries a rotate(90deg) transform — an orientation-observable change.
+  // Rotate the first card RIGHT (90deg). The stage gains the sideways class and the
+  // image carries a rotate(90deg) transform that is ACTUALLY COMPOSITED (a real 90°
+  // matrix in the computed style) — an orientation-observable change, not a no-op.
   await cards.nth(0).getByRole('button', { name: 'Rotate right' }).click()
   await expect(cards.nth(0).locator('.image-preview-stage')).toHaveClass(/is-sideways/)
   expect(await appliedRotation(firstImg)).toBe(90)
+  await expect.poll(() => computedIsRotated90(firstImg)).toBe(true)
 
-  // The rotated image's rendered orientation is now tall (the 60x20 wide image
-  // painted at 90deg is 20 wide x 60 tall on screen) — falsifiable geometry, not
-  // a mere dimension swap in the DOM box.
-  await expect
-    .poll(async () => {
-      const box = await firstImg.boundingBox()
-      return box ? box.height > box.width : false
-    })
-    .toBe(true)
-
-  // Sibling is UNAFFECTED: still upright, no transform, no sideways class.
+  // Sibling is UNAFFECTED: still upright, no rotation matrix, no sideways class.
   expect(await appliedRotation(secondImg)).toBe(0)
+  expect(await computedIsRotated90(secondImg)).toBe(false)
   await expect(cards.nth(1).locator('.image-preview-stage')).not.toHaveClass(/is-sideways/)
 
   // Reload: rotation is display-only, never persisted → first card returns upright.
@@ -78,6 +90,7 @@ test('image preview rotates asymmetrically, leaves siblings alone, and resets on
   const firstAfterReload = page.locator('.file-preview-card').nth(0).locator('.rotatable-image')
   await expect(firstAfterReload).toBeVisible()
   expect(await appliedRotation(firstAfterReload)).toBe(0)
+  expect(await computedIsRotated90(firstAfterReload)).toBe(false)
   await expect(page.locator('.file-preview-card').nth(0).locator('.image-preview-stage')).not.toHaveClass(/is-sideways/)
 
   // Cleanup.

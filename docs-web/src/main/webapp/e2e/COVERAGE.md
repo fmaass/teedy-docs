@@ -30,6 +30,10 @@ of it per-test.
 | `workflow-filter.spec.ts` | **"Assigned to me" filter round-trip (v3.3.0 #28)**: an API-seeded workflow (single VALIDATE step targeting USER admin) makes one doc genuinely assigned; toggling the filter puts `workflow=me` in the URL and the spec waits for the post-refresh row set (assigned visible, unassigned detached) before opening the doc; the document view's own back-link (`history.state.returnTo`) restores the filter — URL, `aria-pressed`, and the filtered row set are all re-asserted. |
 | `facets.spec.ts` | **Facet children cap + overflow node (v3.3.0 #12)**: 22 mutually co-occurring tags seeded on one document; the expanded facet root shows exactly 19 interactive children plus one non-interactive "…and 2 more" overflow node (no button role); clicking the overflow changes no filter state (URL and `aria-pressed` unchanged). |
 | `relations.spec.ts` | **Document relations add/remove (v3.4.0 #36)**: create documents A and B; from A's Content tab add an outgoing relation A→B via the AutoComplete; follow the new link to B IN-APP (no reload — guards the cross-document cache invalidation) and see "Linked from" A; after reload it renders on BOTH views (A under "Links to" with a remove control, B under "Linked from" read-only, no remove control on B's side); removing it from A (the last relation, `relations_reset` path) clears it from both views after reload. |
+| `apikey-auth.spec.ts` | **API-key bearer auth end to end**: mint a `tdapi_` key in the real Settings UI, capture the one-time token, then from a cookie-less request context call `/api/user` with `Authorization: Bearer <token>` and read back the OWNER's identity (`anonymous:false`, username `admin`) plus a 200 on the auth-gated `/api/document/list`; negatives: no credential and a garbage token both 403 on the gated endpoint, and after the key is DELETED via the UI the same token is rejected (revocation honoured server-side). |
+| `webhook-delivery.spec.ts` | **Webhook delivery OBSERVED (not just CRUD)**: an in-test HTTP listener on an ephemeral port is registered as a `DOCUMENT_CREATED` webhook (via `host.docker.internal`, reachable through the harness `--add-host` + `DOCS_WEBHOOK_ALLOW_PRIVATE=true`); creating a document drives the async `WebhookAsyncListener` POST, and the listener asserts the delivery is a POST to the registered path with the payload shape `{"event":"DOCUMENT_CREATED","id":<the created doc id>}`. The harness guarantees the topology, so a rejected registration (allow-flag dropped, alias unresolvable) FAILS the spec — no silent skip. |
+| `i18n.spec.ts` | **UI language switch (de)**: the real Settings → Account language Select flips rendered strings to German (verbatim `de.json` values: Benutzerkonto / Darstellung / Passwort ändern), a reload proves persistence (localStorage `teedy-locale`), and switching back to English restores them (English present, German gone). |
+| `dark-mode.spec.ts` | **Dark-mode toggle (computed style)**: the real header "Dark mode" control flips `getComputedStyle(document.body).backgroundColor` to an actually-dark value (low luminance, darker than light) and adds `.dark-mode`; a reload proves persistence (localStorage `teedy-dark-mode`, restored in `main.ts`); toggling back restores the light background exactly. |
 
 ## Not covered by Playwright (by design)
 
@@ -40,3 +44,17 @@ of it per-test.
   `/api/oidc/login` authorization redirect; the client secret is never read/printed).
 - **Adding a second file version** — no SPA control sets `previousFileId`; see the
   `versions.spec.ts` skip note. Product gap, not a test gap.
+- **OIDC provider-binding security fix** — the login/logout flow is bound to its
+  originating provider (a callback whose login state has no pinned provider is
+  rejected). This has no in-browser CI coverage because the e2e container is booted
+  with no OIDC config and there is no IdP to round-trip against. It is covered by the
+  backend JUnit suites `TestOidcCallbackFlow`, `TestOidcProvisioning`, and
+  `TestOidcTokenHardening` (docs-web/src/test/java/…), which exercise the provider
+  binding directly against the resource.
+
+## Screenshot capture (opt-in)
+
+- `docs-screenshots.spec.ts` still SEEDS realistic data and ASSERTS the UI on every
+  run, but it only WRITES the `docs/images/*.png` files when `E2E_UPDATE_SCREENSHOTS=1`.
+  A normal run (and CI) leaves the working tree clean; set the env var to refresh the
+  docs images.

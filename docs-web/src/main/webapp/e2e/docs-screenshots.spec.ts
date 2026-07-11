@@ -16,14 +16,18 @@ import { unique } from './helpers'
 // serial test (workers=1) so the seeded fixtures compose across sections without
 // cross-test ordering assumptions.
 //
-// Output: docs/images/<name>.png (git-tracked). The container starts empty, so
-// everything shot here is created by this spec.
+// Output: docs/images/<name>.png (git-tracked) — but ONLY when
+// E2E_UPDATE_SCREENSHOTS=1. Regenerating these PNGs dirties the working tree of anyone
+// who runs the suite (and of CI, which never wants to commit them), so by default the
+// spec still SEEDS data and ASSERTS the UI (the stable barriers below) but writes
+// nothing to disk. Set E2E_UPDATE_SCREENSHOTS=1 to refresh the docs images.
 
 const here = dirname(fileURLToPath(import.meta.url))
 // e2e -> webapp -> main -> src -> docs-web -> repo root, then docs/images.
 const IMAGES_DIR = resolve(here, '../../../../..', 'docs/images')
 const invoicePdf = resolve(here, 'fixtures/invoice.pdf')
 const VIEWPORT = { width: 1280, height: 800 }
+const UPDATE_SCREENSHOTS = process.env.E2E_UPDATE_SCREENSHOTS === '1'
 
 function shotPath(name: string): string {
   return resolve(IMAGES_DIR, `${name}.png`)
@@ -31,15 +35,20 @@ function shotPath(name: string): string {
 
 // A full-viewport (not full-page) screenshot: the fixed 1280x800 frame keeps the
 // docs images a consistent size and avoids capturing an over-long scrolled body.
+// A no-op unless E2E_UPDATE_SCREENSHOTS=1 so a normal run never writes to the tree.
 async function shootViewport(page: Page, name: string): Promise<void> {
+  if (!UPDATE_SCREENSHOTS) return
   await page.screenshot({ path: shotPath(name), animations: 'disabled' })
 }
 
 // A shot clipped to a single element's bounding box (padded) — used for focused
-// captures like the search-bar dropdown so the docs image frames the feature.
+// captures like the search-bar dropdown so the docs image frames the feature. The
+// bounding-box assertion still runs (it is a real check of the element) but the write
+// is gated on E2E_UPDATE_SCREENSHOTS=1.
 async function shootElement(page: Page, locator: ReturnType<Page['locator']>, name: string): Promise<void> {
   const box = await locator.boundingBox()
   expect(box, `bounding box for ${name}`).not.toBeNull()
+  if (!UPDATE_SCREENSHOTS) return
   const pad = 12
   await page.screenshot({
     path: shotPath(name),
@@ -139,7 +148,7 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request 
     await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
     await anon.waitForLoadState('networkidle')
     await anon.setViewportSize(VIEWPORT)
-    await anon.screenshot({ path: shotPath('login-first'), animations: 'disabled' })
+    if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-first'), animations: 'disabled' })
   } finally {
     await context.close()
   }
@@ -494,7 +503,7 @@ test('OIDC settings, SSO login screen, footer links, and the users list', async 
     await expect(anon.getByRole('link', { name: 'Imprint' })).toBeVisible()
     await anon.waitForLoadState('networkidle')
     await anon.setViewportSize(VIEWPORT)
-    await anon.screenshot({ path: shotPath('login-sso'), animations: 'disabled' })
+    if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-sso'), animations: 'disabled' })
   } finally {
     await context.close()
   }

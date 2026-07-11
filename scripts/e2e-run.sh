@@ -17,6 +17,7 @@
 #   E2E_IMAGE     image ref to boot (default: build ./ as teedy-e2e:local)
 #   E2E_PORT      host port to expose 8080 on (default 8080)
 #   E2E_TIMEOUT   seconds to wait for /api/user readiness (default 180)
+#   E2E_ALLOW_STALE_WAR   set to 1 to skip the reused-WAR/pom version match check
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,16 +41,50 @@ if [ -z "${image}" ]; then
   # The Dockerfile COPYies a pre-built prod WAR (docs-web/target/docs-web-*.war)
   # rather than building inside the image — build it first unless it already exists
   # (CI's `build` job produces it; a local run builds it here).
-  if ! ls "${repo_root}"/docs-web/target/docs-web-*.war >/dev/null 2>&1; then
+  war_glob=("${repo_root}"/docs-web/target/docs-web-*.war)
+  if [ ! -e "${war_glob[0]}" ]; then
     echo "Building production WAR (./mvnw -Pprod -DskipTests clean install)..."
     "${repo_root}/mvnw" -f "${repo_root}/pom.xml" -Pprod -DskipTests clean install
+  else
+    # A REUSED WAR must match the current pom version — a stale WAR (e.g. a v3.3.0
+    # artifact left in target while the tree is v3.4.0) silently boots the OLD app
+    # under the CURRENT specs and produces bogus failures (2026-07-11). Fail loudly;
+    # E2E_ALLOW_STALE_WAR=1 overrides for a deliberate cross-version run.
+    war_file="$(basename "${war_glob[0]}")"
+    war_version="${war_file#docs-web-}"
+    war_version="${war_version%.war}"
+    # Parent pom carries the authoritative version (literal <version> under docs-parent).
+    pom_version="$(sed -n '/<artifactId>docs-parent<\/artifactId>/,/<\/version>/{s/.*<version>\(.*\)<\/version>.*/\1/p;}' "${repo_root}/pom.xml" | head -n1)"
+    if [ -z "${pom_version}" ]; then
+      echo "FAIL: could not read the project version from ${repo_root}/pom.xml." >&2
+      exit 1
+    fi
+    if [ "${war_version}" != "${pom_version}" ]; then
+      if [ "${E2E_ALLOW_STALE_WAR:-}" = "1" ]; then
+        echo "WARNING: reusing WAR ${war_file} (v${war_version}) against pom v${pom_version} — E2E_ALLOW_STALE_WAR=1 set." >&2
+      else
+        echo "FAIL: reused WAR ${war_file} is v${war_version} but the tree is v${pom_version}." >&2
+        echo "       A stale WAR runs the OLD app under the CURRENT specs (bogus failures)." >&2
+        echo "       Rebuild it (./mvnw -Pprod -DskipTests clean install) or set E2E_ALLOW_STALE_WAR=1." >&2
+        exit 1
+      fi
+    fi
   fi
   echo "Building Docker image ${image}..."
   docker build -t "${image}" "${repo_root}"
 fi
 
+# --add-host maps host.docker.internal -> the host gateway so a container can reach a
+#   listener the test process runs on the host (webhook-delivery.spec.ts). It is a
+#   built-in alias on Docker Desktop (macOS/Windows) and harmless there; on Linux/CI it
+#   is what makes the alias resolve at all.
+# DOCS_WEBHOOK_ALLOW_PRIVATE lets that same test register a webhook whose URL points at
+#   the (private) host gateway — the SSRF guard blocks private targets by default.
 echo "Starting container from ${image} (embedded H2, port ${host_port})..."
-docker run -d --name "${container}" -p "${host_port}:8080" "${image}" >/dev/null
+docker run -d --name "${container}" \
+  --add-host=host.docker.internal:host-gateway \
+  -e DOCS_WEBHOOK_ALLOW_PRIVATE=true \
+  -p "${host_port}:8080" "${image}" >/dev/null
 
 url="http://localhost:${host_port}/api/user"
 echo "Waiting up to ${max_wait}s for ${url} to return HTTP 200..."
