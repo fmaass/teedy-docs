@@ -1,0 +1,26 @@
+{
+  "_comment": "Endpoints whose request body is read via MultivaluedMap (not @FormParam), so their form fields are invisible to a signature scan. check-openapi-parity.mjs enforces that each endpoint here is present in the spec AND documents every parameter listed. Keys are 'VERB /path' with OpenAPI-normalized paths. Keep in sync with the resource sources.",
+  "endpoints": {
+    "POST /document/{id}": [
+      "title",
+      "description",
+      "subject",
+      "identifier",
+      "publisher",
+      "format",
+      "source",
+      "type",
+      "coverage",
+      "rights",
+      "tags",
+      "relations",
+      "metadata_id",
+      "metadata_value",
+      "language",
+      "create_date",
+      "tags_reset",
+      "relations_reset",
+      "metadata_reset"
+    ]
+  }
+}
