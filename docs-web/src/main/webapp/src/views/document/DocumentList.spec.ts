@@ -205,6 +205,7 @@ function mountView() {
           template: '<div class="slide-over" v-if="visible">{{ document?.id }}</div>',
         },
         DocumentSearchBar: passthrough,
+        SavedFilters: passthrough,
         TagFilterChips: passthrough,
         BulkActionBar: passthrough,
         EmptyState: passthrough,

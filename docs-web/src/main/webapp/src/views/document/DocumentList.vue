@@ -14,6 +14,7 @@ import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
+import SavedFilters from '../../components/SavedFilters.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import ToggleButton from 'primevue/togglebutton'
 import DocumentTable from '../../components/DocumentTable.vue'
@@ -419,6 +420,7 @@ function bulkDelete() {
           offIcon="pi pi-sitemap"
           size="small"
         />
+        <SavedFilters />
       </div>
     </div>
 

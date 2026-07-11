@@ -867,6 +867,20 @@
       "summary_ok": "{count} document(s) updated",
       "summary_partial": "{ok} succeeded, {failed} failed",
       "delete_confirm": "Delete {count} document(s)? They will be moved to the trash."
+    },
+    "saved_filters": {
+      "saved_label": "Saved filters",
+      "save_current": "Save filter",
+      "empty": "No saved filters yet",
+      "name_label": "Filter name",
+      "name_required": "Enter a name",
+      "name_exists": "A saved filter with this name already exists",
+      "saved": "Filter saved",
+      "save_failed": "Failed to save the filter",
+      "deleted": "Filter deleted",
+      "delete_failed": "Failed to delete the filter",
+      "delete_title": "Delete saved filter",
+      "delete_confirm": "Delete the saved filter \"{name}\"?"
     }
   }
 }
