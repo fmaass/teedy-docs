@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -262,10 +261,15 @@ public class TestOidcClaims {
         return (String) m.invoke(null, stem, issuer, subject, hashLen);
     }
 
+    /**
+     * The claim getters are request-scoped: they read from an {@link OidcResource.OidcConfigSnapshot}.
+     * Build the snapshot from the CURRENT effective config (the test sets the relevant properties),
+     * then invoke the getter with it.
+     */
     private static String invokeStatic(String name) throws Exception {
-        Method m = OidcResource.class.getDeclaredMethod(name);
+        Method m = OidcResource.class.getDeclaredMethod(name, OidcResource.OidcConfigSnapshot.class);
         m.setAccessible(true);
-        return (String) m.invoke(null);
+        return (String) m.invoke(null, OidcResource.snapshot());
     }
 
     private static JsonObject invokeFetchUserInfo(String accessToken, String expectedSub) throws Exception {
@@ -274,18 +278,19 @@ public class TestOidcClaims {
 
     private static JsonObject invokeFetchUserInfoWithDiscovery(String accessToken, String expectedSub,
                                                                JsonObject discovery) throws Exception {
-        // fetchUserInfo is an instance method; give the discoveryCache-less path a config.
+        // fetchUserInfo is an instance method taking the request snapshot; give the discovery-
+        // derived path a config. The discovery document (when supplied) is seeded via the
+        // value-keyed cache test seam, keyed off the effective issuer set here.
         System.setProperty("docs.oidc_issuer", "https://iss.example");
-        Field f = OidcResource.class.getDeclaredField("discoveryCache");
-        f.setAccessible(true);
-        f.set(null, discovery);
+        OidcResource.setDiscoveryCacheForTest(discovery);
         try {
             OidcResource resource = new OidcResource();
-            Method m = OidcResource.class.getDeclaredMethod("fetchUserInfo", String.class, String.class);
+            Method m = OidcResource.class.getDeclaredMethod("fetchUserInfo",
+                    OidcResource.OidcConfigSnapshot.class, String.class, String.class);
             m.setAccessible(true);
-            return (JsonObject) m.invoke(resource, accessToken, expectedSub);
+            return (JsonObject) m.invoke(resource, OidcResource.snapshot(), accessToken, expectedSub);
         } finally {
-            f.set(null, null);
+            OidcResource.setDiscoveryCacheForTest(null);
         }
     }
 

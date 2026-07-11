@@ -40,8 +40,6 @@ import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.lang3.StringUtils;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -466,18 +464,14 @@ public class UserResource extends BaseResource {
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
 
-        // Determine external logout redirect (priority: explicit URL > OIDC end_session > none)
+        // Determine external logout redirect (priority: explicit URL > OIDC end_session > none).
+        // The OIDC branch is composed from ONE config snapshot inside resolveLogoutUrl, so a
+        // provider change landing mid-logout cannot produce a torn logout URL (endpoint of one
+        // provider + redirect of another) or send id_token_hint to the wrong endpoint.
         String logoutUrl = System.getProperty("docs.logout_url");
 
-        if (logoutUrl == null && oidcIdToken != null) {
-            String endSessionEndpoint = OidcResource.getEndSessionEndpoint();
-            if (endSessionEndpoint != null) {
-                String redirectUri = System.getProperty("docs.oidc_redirect_uri", "");
-                String baseUrl = redirectUri.replaceAll("/api/oidc/callback$", "");
-                logoutUrl = endSessionEndpoint
-                        + "?id_token_hint=" + URLEncoder.encode(oidcIdToken, StandardCharsets.UTF_8)
-                        + "&post_logout_redirect_uri=" + URLEncoder.encode(baseUrl, StandardCharsets.UTF_8);
-            }
+        if (logoutUrl == null) {
+            logoutUrl = OidcResource.resolveLogoutUrl(oidcIdToken);
         }
 
         if (logoutUrl != null) {

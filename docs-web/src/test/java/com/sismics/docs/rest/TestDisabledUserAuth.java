@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.OutputStream;
-import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -401,15 +401,11 @@ public class TestDisabledUserAuth extends BaseJerseyTest {
      * discovery cache is not touched because the explicit token/jwks endpoint overrides bypass it.
      */
     private static void resetOidcJwksCache() throws Exception {
-        for (String fieldName : new String[]{"jwksCache", "jwksLastRefreshMs"}) {
-            Field f = OidcResource.class.getDeclaredField(fieldName);
-            f.setAccessible(true);
-            if (f.getType() == long.class) {
-                f.setLong(null, 0L);
-            } else {
-                f.set(null, null);
-            }
-        }
+        // The value-keyed JWKS/discovery caches and the validation memo are cleared via the
+        // package-accessible test seam (replaces reflection on the now-map cache fields).
+        Method m = OidcResource.class.getDeclaredMethod("resetConfigCacheForTest");
+        m.setAccessible(true);
+        m.invoke(null);
     }
 
     /**

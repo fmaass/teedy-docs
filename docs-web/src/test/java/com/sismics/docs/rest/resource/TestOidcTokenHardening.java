@@ -8,10 +8,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Date;
 
 /**
  * R-023 ID-token hardening and R-024 logout_url composition — unit-level coverage
@@ -21,8 +19,10 @@ public class TestOidcTokenHardening {
 
     @AfterEach
     public void tearDown() throws Exception {
-        setDiscoveryCache(null);
+        OidcResource.setDiscoveryCacheForTest(null);
         System.clearProperty("docs.oidc_enabled");
+        System.clearProperty("docs.oidc_issuer");
+        System.clearProperty("docs.oidc_client_id");
     }
 
     /**
@@ -52,37 +52,41 @@ public class TestOidcTokenHardening {
     @Test
     public void endSessionEndpointReadFromDiscovery() throws Exception {
         System.setProperty("docs.oidc_enabled", "true");
+        System.setProperty("docs.oidc_issuer", "https://auth.example.com");
         JsonObject discovery = Json.createObjectBuilder()
                 .add("issuer", "https://auth.example.com")
                 .add("end_session_endpoint", "https://auth.example.com/logout")
                 .build();
-        setDiscoveryCache(discovery);
+        OidcResource.setDiscoveryCacheForTest(discovery);
 
-        Assertions.assertEquals("https://auth.example.com/logout", OidcResource.getEndSessionEndpoint());
+        Assertions.assertEquals("https://auth.example.com/logout",
+                OidcResource.getEndSessionEndpoint(OidcResource.snapshot()));
     }
 
     @Test
     public void endSessionEndpointNullWhenDisabled() throws Exception {
         System.setProperty("docs.oidc_enabled", "false");
+        System.setProperty("docs.oidc_issuer", "https://auth.example.com");
         JsonObject discovery = Json.createObjectBuilder()
                 .add("issuer", "https://auth.example.com")
                 .add("end_session_endpoint", "https://auth.example.com/logout")
                 .build();
-        setDiscoveryCache(discovery);
+        OidcResource.setDiscoveryCacheForTest(discovery);
 
-        Assertions.assertNull(OidcResource.getEndSessionEndpoint(),
+        Assertions.assertNull(OidcResource.getEndSessionEndpoint(OidcResource.snapshot()),
                 "no logout_url should be composed when OIDC is disabled");
     }
 
     @Test
     public void endSessionEndpointNullWhenDiscoveryLacksIt() throws Exception {
         System.setProperty("docs.oidc_enabled", "true");
+        System.setProperty("docs.oidc_issuer", "https://auth.example.com");
         JsonObject discovery = Json.createObjectBuilder()
                 .add("issuer", "https://auth.example.com")
                 .build();
-        setDiscoveryCache(discovery);
+        OidcResource.setDiscoveryCacheForTest(discovery);
 
-        Assertions.assertNull(OidcResource.getEndSessionEndpoint(),
+        Assertions.assertNull(OidcResource.getEndSessionEndpoint(OidcResource.snapshot()),
                 "no logout_url when the provider does not advertise end_session_endpoint");
     }
 
@@ -90,14 +94,12 @@ public class TestOidcTokenHardening {
         System.setProperty("docs.oidc_issuer", "https://auth.example.com");
         System.setProperty("docs.oidc_client_id", "test");
         OidcResource resource = new OidcResource();
-        Method m = OidcResource.class.getDeclaredMethod("verifyIdToken", String.class);
+        // verifyIdToken is request-scoped: it takes the config snapshot built from the current
+        // effective config (the properties set above). The exp guard under test fires before any
+        // snapshot value is used, so the snapshot content is immaterial here.
+        Method m = OidcResource.class.getDeclaredMethod("verifyIdToken",
+                OidcResource.OidcConfigSnapshot.class, String.class);
         m.setAccessible(true);
-        m.invoke(resource, idToken);
-    }
-
-    private static void setDiscoveryCache(JsonObject value) throws Exception {
-        Field f = OidcResource.class.getDeclaredField("discoveryCache");
-        f.setAccessible(true);
-        f.set(null, value);
+        m.invoke(resource, OidcResource.snapshot(), idToken);
     }
 }

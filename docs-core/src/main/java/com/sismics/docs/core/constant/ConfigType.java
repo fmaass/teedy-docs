@@ -77,5 +77,25 @@ public enum ConfigType {
      * Configurable footer/imprint links, stored as a JSON array of
      * {label, url} objects (validated server-side: <= 5 entries, http(s) only).
      */
-    FOOTER_LINKS
+    FOOTER_LINKS,
+
+    /**
+     * OIDC (OpenID Connect) authentication configuration. Per-field entries mirror the
+     * LDAP pattern so the client secret is a separately-stored, write-only value. A blank
+     * or absent DB value means UNSET: the effective value falls through to the
+     * {@code docs.oidc_*} system property, then to a built-in default. See
+     * {@code OidcResource.oidcConfig} — the single accessor with that precedence.
+     */
+    OIDC_ENABLED,
+    OIDC_ISSUER,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_REDIRECT_URI,
+    OIDC_SCOPE,
+    OIDC_AUTHORIZATION_ENDPOINT,
+    OIDC_TOKEN_ENDPOINT,
+    OIDC_JWKS_URI,
+    OIDC_USERINFO_ENDPOINT,
+    OIDC_USERNAME_CLAIM,
+    OIDC_EMAIL_CLAIM
 }
