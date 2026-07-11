@@ -831,6 +831,7 @@
     "retry": "Erneut versuchen",
     "tree_view": "Baum",
     "facets_view": "Facetten",
+    "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",
     "mode_or": "ODER",
     "bulk": {
