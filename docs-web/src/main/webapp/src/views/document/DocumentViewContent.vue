@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -101,6 +101,102 @@ async function onCameraCapture(captured: File[]) {
   await uploadAll(captured)
 }
 
+// View-only image rotation, per file card. Nothing is persisted — this is a
+// display transform only; file bytes and the API are never touched. State resets
+// when the document changes (a new set of files).
+const imageRotations = ref<Record<string, number>>({})
+
+// Measured stage boxes, per file card. A CSS transform does NOT change the
+// element's layout box, so the sideways (90/270) image must be constrained
+// against the stage's REAL dimensions — the preview column can be narrower than
+// the 400px stage height, and any fixed cap would let a near-square image clip.
+// Measured on ref attach and on every rotate; kept fresh via ResizeObserver.
+const stageBoxes = ref<Record<string, { w: number; h: number }>>({})
+const stageEls = new Map<string, HTMLElement>()
+const stageElToId = new Map<Element, string>()
+
+const stageObserver =
+  typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const id = stageElToId.get(entry.target)
+          if (id) {
+            stageBoxes.value[id] = {
+              w: (entry.target as HTMLElement).clientWidth,
+              h: (entry.target as HTMLElement).clientHeight,
+            }
+          }
+        }
+      })
+    : null
+
+onUnmounted(() => stageObserver?.disconnect())
+
+function setStageRef(fileId: string, el: Element | ComponentPublicInstance | null) {
+  const prev = stageEls.get(fileId)
+  if (el instanceof HTMLElement) {
+    if (prev === el) return
+    if (prev) {
+      stageObserver?.unobserve(prev)
+      stageElToId.delete(prev)
+    }
+    stageEls.set(fileId, el)
+    stageElToId.set(el, fileId)
+    stageObserver?.observe(el)
+    measureStage(fileId)
+  } else if (prev) {
+    stageObserver?.unobserve(prev)
+    stageElToId.delete(prev)
+    stageEls.delete(fileId)
+  }
+}
+
+function measureStage(fileId: string) {
+  const el = stageEls.get(fileId)
+  if (el) stageBoxes.value[fileId] = { w: el.clientWidth, h: el.clientHeight }
+}
+
+watch(
+  () => doc.value?.id,
+  () => {
+    imageRotations.value = {}
+    stageBoxes.value = {}
+  },
+)
+
+function imageRotation(fileId: string): number {
+  return imageRotations.value[fileId] ?? 0
+}
+
+function rotateImageLeft(fileId: string) {
+  measureStage(fileId)
+  imageRotations.value[fileId] = (imageRotation(fileId) + 270) % 360
+}
+
+function rotateImageRight(fileId: string) {
+  measureStage(fileId)
+  imageRotations.value[fileId] = (imageRotation(fileId) + 90) % 360
+}
+
+// Inline style for a preview image: the rotation transform plus, when sideways,
+// pixel caps derived from the MEASURED stage box. Sideways, the on-screen axes
+// swap: pre-rotation width paints as height (cap it to the stage height) and
+// pre-rotation height paints as width (cap it to the stage width). The rotated
+// bounding box then fits the actual stage on both axes — no clipping of an
+// asymmetric image at any rotation, at any column width.
+function imageStyle(fileId: string): Record<string, string> {
+  const deg = imageRotation(fileId)
+  const style: Record<string, string> = { transform: `rotate(${deg}deg)` }
+  if (deg % 180 !== 0) {
+    const box = stageBoxes.value[fileId]
+    if (box && box.w > 0 && box.h > 0) {
+      style.maxWidth = `${box.h}px`
+      style.maxHeight = `${box.w}px`
+    }
+  }
+  return style
+}
+
 function isImage(mime: string) {
   return mime.startsWith('image/')
 }
@@ -173,7 +269,39 @@ function confirmDelete(file: { id: string; name: string }) {
     <div v-if="doc.files?.length" class="file-preview-grid">
       <template v-for="file in doc.files" :key="file.id">
         <div v-if="isImage(file.mimetype)" class="file-preview-card">
-          <img :src="getFileUrl(file.id, 'web')" :alt="file.name" loading="lazy" />
+          <div
+            :ref="(el) => setStageRef(file.id, el)"
+            class="image-preview-stage"
+            :class="{ 'is-sideways': imageRotation(file.id) % 180 !== 0 }"
+          >
+            <img
+              :src="getFileUrl(file.id, 'web')"
+              :alt="file.name"
+              loading="lazy"
+              class="rotatable-image"
+              :style="imageStyle(file.id)"
+            />
+          </div>
+          <div class="image-preview-controls">
+            <Button
+              icon="pi pi-replay"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              @click="rotateImageLeft(file.id)"
+              :aria-label="t('ui.rotate_left')"
+            />
+            <Button
+              icon="pi pi-refresh"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              @click="rotateImageRight(file.id)"
+              :aria-label="t('ui.rotate_right')"
+            />
+          </div>
           <div class="file-preview-label">{{ file.name }}</div>
         </div>
         <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
@@ -342,12 +470,42 @@ function confirmDelete(file: { id: string; name: string }) {
   border-radius: var(--p-content-border-radius, 6px);
   background: var(--p-content-background);
 }
-.file-preview-card img {
-  width: 100%;
-  display: block;
-  max-height: 400px;
-  object-fit: contain;
+/* Rotation stage: a fixed-height box that centers the (possibly rotated) image.
+   At 90/270 the image is rotated in place; the stage constrains the image's
+   pre-rotation dimensions so the ROTATED result fits the box on both axes — i.e.
+   an asymmetric image is never clipped at any rotation. transform-origin is the
+   center so the rotation pivots about the box center. */
+.image-preview-stage {
+  height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: var(--p-content-hover-background);
+}
+.rotatable-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 0.2s ease;
+}
+/* Sideways (90/270) sizing is NOT handled here: a stylesheet cannot know the
+   stage's live column width, and any fixed pixel cap clips a near-square image
+   in a narrow column. The sideways caps are inline styles computed from the
+   MEASURED stage box (see imageStyle()/setStageRef in the script), which
+   override the 100% caps above. `.is-sideways` remains as a semantic hook for
+   tests/e2e. */
+
+.image-preview-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-top: 1px solid var(--p-content-border-color);
+  background: var(--p-content-background);
 }
 
 .file-preview-label {

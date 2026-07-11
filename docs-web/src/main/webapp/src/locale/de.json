@@ -219,6 +219,8 @@
     "open_new_tab": "In neuem Tab öffnen",
     "previous_page": "Vorherige Seite",
     "next_page": "Nächste Seite",
+    "rotate_left": "Nach links drehen",
+    "rotate_right": "Nach rechts drehen",
     "delete_document": "Dokument löschen",
     "delete_document_confirm": "Möchten Sie dieses Dokument wirklich löschen?",
     "document_deleted": "Dokument gelöscht",

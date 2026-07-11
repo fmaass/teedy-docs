@@ -22,12 +22,26 @@ const totalPages = ref(0)
 const loading = ref(true)
 const error = ref(false)
 const scale = ref(1)
+// User-applied rotation (0/90/180/270), document-wide within this viewer: it
+// persists across page navigation and resets only when `src` changes.
+const rotation = ref(0)
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null
+// Monotonic render generation. Every renderPage bumps this and captures the
+// value; a stale getPage/render resolution (e.g. a rotation-triggered re-render
+// racing an in-flight page nav) checks its captured id and bails without
+// clobbering the newer render's canvas.
+let renderGeneration = 0
 
 interface PdfRenderError {
   name?: string
+}
+
+function normalizedRotation(pageRotate: number): number {
+  // pdf.js: an explicit `rotation` in getViewport REPLACES page.rotate (it does
+  // not add), so we must fold the page's intrinsic rotation in ourselves.
+  return (((pageRotate + rotation.value) % 360) + 360) % 360
 }
 
 async function loadPdf() {
@@ -44,6 +58,7 @@ async function loadPdf() {
     pdfDoc = await loadingTask.promise
     totalPages.value = pdfDoc.numPages
     currentPage.value = 1
+    rotation.value = 0
     loading.value = false
     await nextTick()
     await renderPage(1)
@@ -62,14 +77,24 @@ async function renderPage(pageNum: number) {
     renderTask = null
   }
 
+  const generation = ++renderGeneration
+
   try {
     const page = await pdfDoc.getPage(pageNum)
+    // A newer renderPage started while getPage was in flight (page nav or a
+    // rotation re-render): abandon this stale one before it touches the canvas.
+    if (generation !== renderGeneration) return
     const container = containerRef.value
+    if (!container) return
 
+    const rotate = normalizedRotation(page.rotate)
     const containerWidth = container.clientWidth || 600
-    const viewport = page.getViewport({ scale: 1 })
-    const fitScale = containerWidth / viewport.width
-    const scaledViewport = page.getViewport({ scale: fitScale * scale.value })
+    // Fit-to-width against the ROTATED base viewport: at 90/270 the base width is
+    // the page's intrinsic height, so the scale must be computed from the rotated
+    // viewport's width, not the unrotated one.
+    const baseViewport = page.getViewport({ scale: 1, rotation: rotate })
+    const fitScale = containerWidth / baseViewport.width
+    const scaledViewport = page.getViewport({ scale: fitScale * scale.value, rotation: rotate })
 
     let canvas = container.querySelector<HTMLCanvasElement>('canvas')
     if (!canvas) {
@@ -86,6 +111,7 @@ async function renderPage(pageNum: number) {
     const ctx = canvas.getContext('2d')!
     renderTask = page.render({ canvasContext: ctx, viewport: scaledViewport, canvas })
     await renderTask.promise
+    if (generation !== renderGeneration) return
     renderTask = null
   } catch (renderError: unknown) {
     if ((renderError as PdfRenderError)?.name !== 'RenderingCancelledException') {
@@ -107,6 +133,16 @@ function nextPage() {
     currentPage.value++
     renderPage(currentPage.value)
   }
+}
+
+function rotateLeft() {
+  rotation.value = (rotation.value + 270) % 360
+  renderPage(currentPage.value)
+}
+
+function rotateRight() {
+  rotation.value = (rotation.value + 90) % 360
+  renderPage(currentPage.value)
 }
 
 watch(() => props.src, () => {
@@ -135,18 +171,17 @@ onUnmounted(() => {
     </div>
     <template v-else>
       <div ref="containerRef" class="pdf-canvas-container" />
-      <div v-if="totalPages > 1" class="pdf-nav">
-        <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
-        <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
-        <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
+      <div class="pdf-nav">
+        <template v-if="totalPages > 1">
+          <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
+          <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
+          <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
+        </template>
+        <Button icon="pi pi-replay" text size="small" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
+        <Button icon="pi pi-refresh" text size="small" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
         <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
           <i class="pi pi-external-link" />
-        </a>
-      </div>
-      <div v-else class="pdf-nav">
-        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
-          <i class="pi pi-external-link" />
-          <span>{{ t('ui.open_new_tab') }}</span>
+          <span v-if="totalPages <= 1">{{ t('ui.open_new_tab') }}</span>
         </a>
       </div>
     </template>
