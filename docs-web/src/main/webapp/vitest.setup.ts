@@ -37,3 +37,15 @@ function installStorage(target: typeof globalThis | Window) {
 
 installStorage(globalThis)
 if (typeof window !== 'undefined') installStorage(window)
+
+// PrimeVue's `v-tooltip` directive is registered globally in src/main.ts, but component
+// tests mount in isolation without the full app plugin. Register a no-op tooltip stub on
+// the Vue Test Utils global config so components using `v-tooltip` don't emit
+// "Failed to resolve directive: tooltip" warnings. A no-op is sufficient: no test asserts
+// tooltip behaviour, and specs that need the real directive still override it locally.
+import { config } from '@vue/test-utils'
+
+config.global.directives = {
+  ...config.global.directives,
+  tooltip: {},
+}

@@ -323,6 +323,7 @@ public class TestAppResource extends BaseJerseyTest {
                 ServerSetup.SMTP.dynamicPort(), ServerSetup.IMAP.dynamicPort() });
         greenMail.setUser("test@sismics.com", "Test1234");
         greenMail.start();
+        try {
         int smtpPort = greenMail.getSmtp().getPort();
         int imapPort = greenMail.getImap().getPort();
 
@@ -452,8 +453,11 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertFalse(lastSync.isNull("date"));
         Assertions.assertTrue(lastSync.isNull("error"));
         Assertions.assertEquals(0, lastSync.getJsonNumber("count").intValue());
-
-        greenMail.stop();
+        } finally {
+            // Stop in a finally so an assertion failure above cannot leak the embedded
+            // SMTP/IMAP server (and its bound ports) into the rest of the suite.
+            greenMail.stop();
+        }
     }
 
     /**
@@ -461,13 +465,6 @@ public class TestAppResource extends BaseJerseyTest {
      */
     @Test
     public void testLdapAuthentication() throws Exception {
-        // Reserve an OS-assigned port for the embedded LDAP server (no fixed port,
-        // so parallel test runs on one host don't collide with BindException).
-        int ldapPort;
-        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
-            ldapPort = socket.getLocalPort();
-        }
-
         // Start LDAP server
         final DirectoryServiceFactory factory = new DefaultDirectoryServiceFactory();
         factory.init("Test");
@@ -482,12 +479,18 @@ public class TestAppResource extends BaseJerseyTest {
         partition.initialize();
         directoryService.addPartition(partition);
 
+        // Bind to port 0 and read the REAL bound port back from MINA's acceptor after start —
+        // no ServerSocket(0) reserve-then-release window in which another process could steal
+        // the port (BindException race, issue #33). Transport.getPort()/LdapServer.getPort()
+        // still report the configured 0, so we must read the acceptor's local address instead.
+        final TcpTransport transport = new TcpTransport("localhost", 0);
         final LdapServer ldapServer = new LdapServer();
-        ldapServer.setTransports(new TcpTransport("localhost", ldapPort));
+        ldapServer.setTransports(transport);
         ldapServer.setDirectoryService(directoryService);
 
         directoryService.startup();
         ldapServer.start();
+        int ldapPort = ((java.net.InetSocketAddress) transport.getAcceptor().getLocalAddress()).getPort();
 
         // Load test data in LDAP
         new LdifFileLoader(directoryService.getAdminSession(), new File(Resources.getResource("test.ldif").getFile()), null).execute();

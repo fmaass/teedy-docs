@@ -174,7 +174,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     const keys: Record<string, boolean> = {}
     if (selectedTagIds.value.size === 0) return keys
     for (const node of facetTreeNodes.value) {
-      const hasSelectedChild = node.children?.some((c: any) => {
+      const hasSelectedChild = node.children?.some((c) => {
         const childTagId = resolveCompoundKey(c.key as string)
         return selectedTagIds.value.has(childTagId)
       })

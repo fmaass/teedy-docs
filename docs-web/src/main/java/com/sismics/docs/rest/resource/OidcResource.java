@@ -606,15 +606,19 @@ public class OidcResource extends BaseResource {
             if (!resp.isSuccessful() || resp.body() == null) {
                 throw new UserInfoException("UserInfo fetch failed: HTTP " + resp.code());
             }
-            String contentType = resp.header("Content-Type", "");
-            if (contentType == null || !contentType.toLowerCase().contains("application/json")) {
-                throw new UserInfoException("UserInfo response has unsupported Content-Type: " + contentType);
+            if (!isJsonContentType(resp.header("Content-Type"))) {
+                throw new UserInfoException("UserInfo response has unsupported Content-Type: "
+                        + resp.header("Content-Type"));
             }
-            // Bound the body BEFORE parsing (peek one byte past the cap to detect overflow).
-            String body = resp.peekBody(MAX_USERINFO_RESPONSE_BYTES + 1L).string();
-            if (body.length() > MAX_USERINFO_RESPONSE_BYTES) {
+            // Bound the body in RAW BYTES before decoding (peek one byte past the cap to detect
+            // overflow). Comparing decoded char count would under-count a multibyte body and let
+            // an oversized response through, so measure the encoded byte length instead.
+            okhttp3.ResponseBody peeked = resp.peekBody(MAX_USERINFO_RESPONSE_BYTES + 1L);
+            byte[] bytes = peeked.bytes();
+            if (bytes.length > MAX_USERINFO_RESPONSE_BYTES) {
                 throw new UserInfoException("UserInfo response exceeds " + MAX_USERINFO_RESPONSE_BYTES + " bytes");
             }
+            String body = new String(bytes, StandardCharsets.UTF_8);
             JsonObject userInfo;
             try (JsonReader reader = Json.createReader(new StringReader(body))) {
                 userInfo = reader.readObject();
@@ -632,6 +636,24 @@ public class OidcResource extends BaseResource {
         } catch (Exception e) {
             throw new UserInfoException("UserInfo fetch failed", e);
         }
+    }
+
+    /**
+     * True when the response Content-Type is JSON: the {@code application/json} media type or
+     * any {@code +json}-suffixed structured type (RFC 6839), e.g. {@code application/hal+json}.
+     * The media type is parsed by stripping any parameters ({@code ; charset=...}) and matching
+     * on the bare type, rather than a substring {@code contains} that would also accept
+     * unrelated types such as {@code text/notapplication/json-ish}.
+     *
+     * @param contentType Raw Content-Type header value (may be null)
+     * @return true when the media type is JSON or a +json suffix type
+     */
+    static boolean isJsonContentType(String contentType) {
+        if (StringUtils.isBlank(contentType)) {
+            return false;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase();
+        return mediaType.equals("application/json") || mediaType.endsWith("+json");
     }
 
     // ---------------------------------------------------------------------------------------------

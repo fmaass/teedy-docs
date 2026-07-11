@@ -127,7 +127,9 @@ describe('useDocumentTags — partial-update contract (title+language+tags only)
     const { addTag } = useDocumentTags()
     await addTag('doc1', 't2', makeDoc())
 
-    const invalidated = invalidateQueries.mock.calls.map((c) => (c[0] as any).queryKey[0])
+    const invalidated = invalidateQueries.mock.calls.map(
+      (c) => (c[0] as { queryKey: unknown[] }).queryKey[0],
+    )
     expect(invalidated).toContain('documents')
     expect(invalidated).toContain('document')
     expect(invalidated).toContain('tagStats')

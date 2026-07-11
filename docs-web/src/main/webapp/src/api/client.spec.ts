@@ -13,7 +13,7 @@ vi.mock('axios', () => {
   const instance = {
     interceptors: {
       response: {
-        use: (fulfilled: any, rejected: any) => {
+        use: (fulfilled: (r: unknown) => unknown, rejected: (e: unknown) => unknown) => {
           capturedHandlers.fulfilled = fulfilled
           capturedHandlers.rejected = rejected
         },

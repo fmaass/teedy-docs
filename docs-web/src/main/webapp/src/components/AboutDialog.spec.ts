@@ -15,8 +15,8 @@ describe('AboutDialog highlights (BL-019)', () => {
   })
 
   it('does NOT claim LDAP was removed in either locale (this release reinstates it)', () => {
-    const enRetire = (en as any).ui.about.highlights.retirements as string
-    const deRetire = (de as any).ui.about.highlights.retirements as string
+    const enRetire = resolve(en, 'ui.about.highlights.retirements')
+    const deRetire = resolve(de, 'ui.about.highlights.retirements')
     expect(enRetire.toLowerCase()).not.toContain('ldap')
     expect(deRetire.toLowerCase()).not.toContain('ldap')
   })
@@ -37,5 +37,11 @@ describe('AboutDialog highlights (BL-019)', () => {
 })
 
 function resolve(bundle: unknown, dotted: string): string {
-  return dotted.split('.').reduce<any>((acc, part) => acc?.[part], bundle) as string
+  const value = dotted
+    .split('.')
+    .reduce<unknown>(
+      (acc, part) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[part] : undefined),
+      bundle,
+    )
+  return value as string
 }

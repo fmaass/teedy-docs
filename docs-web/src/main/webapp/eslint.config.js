@@ -4,10 +4,31 @@
 import vueI18n from '@intlify/eslint-plugin-vue-i18n'
 import vueParser from 'vue-eslint-parser'
 import tsParser from '@typescript-eslint/parser'
+import tsPlugin from '@typescript-eslint/eslint-plugin'
 
 export default [
   {
     ignores: ['dist/**', 'node_modules/**', 'scripts/**', '*.config.*'],
+  },
+  // TypeScript coverage: the ~100 .ts files in src/ were previously linted by NOTHING
+  // (only *.vue matched). Apply the @typescript-eslint RECOMMENDED (non-type-checked) set
+  // so type-agnostic correctness rules run across the whole TS tree.
+  {
+    files: ['src/**/*.ts'],
+    plugins: { '@typescript-eslint': tsPlugin },
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    rules: {
+      ...tsPlugin.configs.recommended.rules,
+      // Honour the established `_`-prefix convention for intentionally-unused params
+      // (e.g. mock signatures that must match an arity but ignore their args).
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+    },
   },
   {
     files: ['src/**/*.vue'],

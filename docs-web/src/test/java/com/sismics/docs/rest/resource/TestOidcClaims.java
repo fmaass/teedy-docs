@@ -197,6 +197,56 @@ public class TestOidcClaims {
         }
     }
 
+    /**
+     * The size cap is measured in RAW BYTES, not decoded characters. A body whose CHARACTER
+     * count is under the 64 KiB cap but whose UTF-8 BYTE length exceeds it must still be
+     * rejected. Padded with a 3-byte character (U+20AC EURO SIGN): ~32 K chars is well under
+     * the 64 Ki-char boundary but ~96 KiB, over the byte cap. RED against the previous
+     * {@code body.length()} char-count comparison, which would have let this multibyte body
+     * through.
+     */
+    @Test
+    public void userInfoFetchRejectsMultibyteBodyOverByteCapUnderCharCount() throws Exception {
+        String pad = "€".repeat(32 * 1024); // ~32K chars, ~96 KiB in UTF-8
+        String body = "{\"sub\":\"sub-abc\",\"pad\":\"" + pad + "\"}";
+        Assertions.assertTrue(body.length() < 64 * 1024,
+                "precondition: char count must be under the cap so char-count logic would pass");
+        Assertions.assertTrue(body.getBytes(StandardCharsets.UTF_8).length > 64 * 1024,
+                "precondition: UTF-8 byte length must exceed the cap");
+        HttpServer server = startUserInfoServer(exchange -> body);
+        try {
+            System.setProperty("docs.oidc_userinfo_endpoint",
+                    "http://localhost:" + server.getAddress().getPort() + "/userinfo");
+            Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> invokeFetchUserInfo("access-tok-123", "sub-abc"),
+                    "a body over the BYTE cap must be rejected even when its char count is under it");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
+     * A structured {@code +json} suffix media type (RFC 6839), e.g. {@code application/hal+json},
+     * is valid JSON and must be accepted — not rejected like a non-JSON type. RED against the
+     * previous {@code contains("application/json")} check, which matched only the exact base type.
+     */
+    @Test
+    public void userInfoFetchAcceptsHalJsonSuffixContentType() throws Exception {
+        HttpServer server = startUserInfoServer(exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/hal+json; charset=utf-8");
+            return "{\"sub\":\"sub-abc\",\"email\":\"alice@example.com\"}";
+        });
+        try {
+            System.setProperty("docs.oidc_userinfo_endpoint",
+                    "http://localhost:" + server.getAddress().getPort() + "/userinfo");
+            JsonObject result = invokeFetchUserInfo("access-tok-123", "sub-abc");
+            Assertions.assertNotNull(result, "an application/hal+json UserInfo response must be accepted");
+            Assertions.assertEquals("alice@example.com", result.getString("email"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // --- reflection helpers ----------------------------------------------------------------
 
     private static String invokeSanitize(String raw) throws Exception {
