@@ -440,9 +440,9 @@ public class OidcResource extends BaseResource {
         // (issuer + client_id) at login. If an admin switched the OIDC provider live in between,
         // this authorization CODE was minted by the login-time provider and MUST NOT be exchanged
         // with the switched-to provider's token endpoint. Reject BEFORE the token exchange. A null
-        // pinned fingerprint is a legacy state from before this column existed (drains within the
-        // 10-minute TTL): it predates the feature, keeps its full nonce/PKCE/issuer/audience
-        // protection, and is not subject to this check.
+        // pinned fingerprint (a legacy state from before dbupdate-046) is ALSO rejected — fail
+        // closed on ambiguity; the only cost is a one-time retry for a login in-flight across the
+        // deploy moment (see providerFingerprintMatches).
         if (!providerFingerprintMatches(cfg, oidcState)) {
             log.warn("OIDC provider changed between login and callback; rejecting (fail closed)");
             return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
@@ -1399,20 +1399,27 @@ public class OidcResource extends BaseResource {
     /**
      * True when the provider fingerprint pinned on the login state still matches the CURRENT
      * effective provider (from the callback's snapshot). The fingerprint is the login-time issuer +
-     * client_id. A state with NO pinned fingerprint (both null — a legacy state from before the
-     * pinning column existed) is treated as matching: it predates the feature and drains within the
-     * state TTL; it still carries its full nonce/PKCE/issuer/audience protection.
+     * client_id.
+     *
+     * <p>Fail closed on ambiguity: a state with NO pinned fingerprint (issuer/client_id null) is
+     * REJECTED (returns false), NOT treated as matching. After {@code dbupdate-046}, {@link #login}
+     * always writes the fingerprint, so a null fingerprint can only be a legacy state created before
+     * this deploy — the sole cost of rejecting it is that a login literally in-flight across the
+     * deploy moment retries once (a benign UX blip), which is the correct trade for a security
+     * invariant. No new legitimate login produces a null fingerprint. Treating null as a match would
+     * be fail-open: a pre-migration state plus a live A→B provider switch within the state TTL would
+     * exchange provider A's code with provider B.
      *
      * @param cfg   The callback's request-scoped config snapshot (the current effective provider)
      * @param state The in-flight login state (carries the pinned login-time fingerprint)
-     * @return True when the current provider matches the pinned one (or none was pinned)
+     * @return True only when a non-null pinned fingerprint equals the current provider
      */
     static boolean providerFingerprintMatches(OidcConfigSnapshot cfg, OidcState state) {
         String pinnedIssuer = state.getIssuer();
         String pinnedClientId = state.getClientId();
-        // Legacy state with no pinned fingerprint (pre-migration drain): not subject to this check.
-        if (pinnedIssuer == null && pinnedClientId == null) {
-            return true;
+        // Fail closed: an unpinned (pre-migration) state is rejected, never accepted on ambiguity.
+        if (StringUtils.isBlank(pinnedIssuer) || StringUtils.isBlank(pinnedClientId)) {
+            return false;
         }
         return StringUtils.equals(pinnedIssuer, cfg.get(OidcKey.ISSUER))
                 && StringUtils.equals(pinnedClientId, cfg.get(OidcKey.CLIENT_ID));

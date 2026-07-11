@@ -264,7 +264,13 @@ public class TestOidcTornConfigRead extends BaseJerseyTest {
     private String seedState(String nonce) {
         return inTx(() -> {
             String id = UUID.randomUUID().toString();
-            OidcState st = new OidcState().setId(id).setNonce(nonce).setCodeVerifier("verifier").setReturnUrl(null);
+            // Pin the PRE-save provider fingerprint (issuer + client_id): the callback builds its
+            // snapshot BEFORE the concurrent client_id flip lands, so the fingerprint compares
+            // against the same pre-save client_id and the fail-closed binding check passes — exactly
+            // as a real same-provider login→callback would, leaving this test's torn-read invariant
+            // the sole thing under test.
+            OidcState st = new OidcState().setId(id).setNonce(nonce).setCodeVerifier("verifier")
+                    .setReturnUrl(null).setIssuer(ISSUER).setClientId(PRE_SAVE_CLIENT_ID);
             new OidcStateDao().create(st);
             return id;
         });

@@ -316,12 +316,17 @@ public class TestDisabledUserAuth extends BaseJerseyTest {
             resetOidcJwksCache();
 
             // Persist a valid, unexpired state row so the callback passes the state/nonce checks.
+            // Pin the provider fingerprint matching the config above so the fail-closed
+            // provider-binding check passes and the callback reaches the disabled-user eligibility
+            // chokepoint this test is asserting (rather than being rejected earlier for a mismatch).
             writeDb(em -> {
                 new OidcStateDao().create(new OidcState()
                         .setId(state)
                         .setNonce(nonce)
                         .setCodeVerifier("test-code-verifier")
-                        .setReturnUrl("/#/document"));
+                        .setReturnUrl("/#/document")
+                        .setIssuer(issuer)
+                        .setClientId(clientId));
                 return null;
             });
 

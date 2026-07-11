@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==45, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==46, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *

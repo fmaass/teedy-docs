@@ -341,6 +341,66 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
                 "nothing may be provisioned when the provider changed since login");
     }
 
+    /**
+     * Fail-closed on ambiguity (cross-model re-review): a state with NO pinned provider fingerprint
+     * (a legacy state created before {@code dbupdate-046}) must be REJECTED, not accepted. Treating
+     * null as a match would be fail-open — a pre-migration state plus a live A→B provider switch
+     * within the state TTL would exchange provider A's code with provider B. After the deploy every
+     * login writes a fingerprint, so the only cost is a one-time retry for a login in-flight across
+     * the deploy moment.
+     */
+    @Test
+    public void callbackRejectsStateWithoutProviderFingerprint() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+        String nonce = UUID.randomUUID().toString();
+        // A legacy state: no issuer/client_id pinned. The current config is a valid single provider.
+        String state = seedStateWithoutFingerprint(nonce);
+        startTokenEndpoint(signIdToken(subject, nonce, "leo", "leo@example.com"), "at-legacy");
+
+        Response resp = doCallback("code-legacy", state);
+        Assertions.assertEquals(Response.Status.TEMPORARY_REDIRECT.getStatusCode(), resp.getStatus());
+        Assertions.assertTrue(resp.getHeaderString("Location").endsWith("/#/login?error=oidc"),
+                "an unpinned (pre-migration) state must be rejected fail-closed, got: "
+                        + resp.getHeaderString("Location"));
+        Assertions.assertFalse(resp.getCookies().containsKey("auth_token"),
+                "no session cookie may be set for an unpinned state");
+        Assertions.assertFalse(tokenCalled.get(),
+                "an unpinned state must be rejected BEFORE the token exchange");
+        Assertions.assertEquals(0, countBySub("https://iss.mock.example", subject),
+                "nothing may be provisioned for an unpinned state");
+    }
+
+    /**
+     * Happy path THROUGH the provider-binding guard: a state carrying a NON-null fingerprint that
+     * MATCHES the current effective provider (issuer + client_id) must let the callback proceed
+     * exactly as before — code exchanged, session cookie minted, user provisioned. This proves
+     * {@link OidcResource#providerFingerprintMatches} returns true on a real matching fingerprint
+     * (not just the null-legacy backward-compat branch the other tests exercise).
+     */
+    @Test
+    public void callbackSucceedsWhenPinnedFingerprintMatchesCurrentProvider() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+        String nonce = UUID.randomUUID().toString();
+        // Fingerprint pinned to the CURRENT config (set in setUp): issuer + client_id both match.
+        String state = seedStateWithFingerprint(nonce,
+                "https://iss.mock.example", "test-client");
+        startTokenEndpoint(signIdToken(subject, nonce, "frank", "frank@example.com"), "at-fp");
+
+        Response resp = doCallback("code-fp", state);
+        Assertions.assertEquals(Response.Status.TEMPORARY_REDIRECT.getStatusCode(), resp.getStatus());
+        Assertions.assertFalse(resp.getHeaderString("Location").endsWith("/#/login?error=oidc"),
+                "a matching pinned fingerprint must let the login succeed, got: "
+                        + resp.getHeaderString("Location"));
+        Assertions.assertTrue(tokenCalled.get(),
+                "a matching fingerprint must proceed to the token exchange");
+        Assertions.assertTrue(resp.getCookies().containsKey("auth_token"),
+                "a matching fingerprint must mint the session cookie");
+
+        User u = lookupBySub("https://iss.mock.example", subject);
+        Assertions.assertNotNull(u, "a matching fingerprint must provision the user");
+        deleteUser(u.getUsername());
+    }
+
     // --- mock IdP plumbing -----------------------------------------------------------------
 
     private Algorithm rsa() {
@@ -412,7 +472,19 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
 
     // --- DB helpers (own transaction; independent of the callback's request tx) ------------
 
+    /**
+     * Seeds a state pinning the CURRENT config's provider fingerprint (issuer + client_id) so the
+     * callback's fail-closed provider-binding check passes and the flow reaches the code path each
+     * test exercises. Every test in this class runs under the single provider configured in setUp
+     * ({@code https://iss.mock.example} / {@code test-client}); a real login() writes exactly this
+     * fingerprint, so seeding it here mirrors a genuine same-provider login→callback.
+     */
     private String seedState(String nonce) {
+        return seedStateWithFingerprint(nonce, "https://iss.mock.example", "test-client");
+    }
+
+    /** Seeds a state with NO provider fingerprint (a legacy pre-migration state). */
+    private String seedStateWithoutFingerprint(String nonce) {
         return inTx(() -> {
             String id = UUID.randomUUID().toString();
             OidcState st = new OidcState().setId(id).setNonce(nonce).setCodeVerifier("verifier").setReturnUrl(null);
