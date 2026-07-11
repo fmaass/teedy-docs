@@ -1414,6 +1414,139 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals("again", meta.getString("value"), "omitted metadata must be preserved");
     }
 
+    /**
+     * Relations reset contract: {@code relations_reset=true} with no relations supplied clears
+     * ALL OUTGOING relations (including the last one) while PRESERVING incoming relations
+     * (which are owned by the source document). Omitting the sentinel preserves outgoing
+     * relations for backward compatibility.
+     */
+    @Test
+    public void testUpdateDocumentRelationsReset() {
+        clientUtil.createUser("relreset1");
+        String token = clientUtil.login("relreset1");
+
+        // Hub document
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")), JsonObject.class);
+        String hubId = json.getString("id");
+
+        // Outgoing target: hub -> out
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations Out")
+                        .param("language", "eng")), JsonObject.class);
+        String outId = json.getString("id");
+
+        // Add the outgoing relation from the hub
+        target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")
+                        .param("relations", outId)), JsonObject.class);
+
+        // Incoming source: in -> hub (relation owned by the source document "in")
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations In")
+                        .param("language", "eng")
+                        .param("relations", hubId)), JsonObject.class);
+        String inId = json.getString("id");
+
+        // Sanity: the hub sees BOTH relations (one outgoing source=true, one incoming source=false)
+        json = target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray relations = json.getJsonArray("relations");
+        Assertions.assertEquals(2, relations.size());
+        JsonObject outRel = findRelation(relations, outId);
+        JsonObject inRel = findRelation(relations, inId);
+        Assertions.assertTrue(outRel.getBoolean("source"), "hub -> out is outgoing (source=true)");
+        Assertions.assertFalse(inRel.getBoolean("source"), "in -> hub is incoming (source=false)");
+
+        // Explicit clear of all outgoing relations: no relations param, relations_reset=true
+        target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")
+                        .param("relations_reset", "true")), JsonObject.class);
+
+        // The outgoing relation is gone; the incoming relation is PRESERVED
+        json = target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size(), "reset clears every outgoing relation");
+        Assertions.assertEquals(inId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertFalse(relations.getJsonObject(0).getBoolean("source"),
+                "the surviving relation is the incoming one");
+
+        // The source document "in" still owns its outgoing relation to the hub
+        json = target().path("/document/" + inId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size());
+        Assertions.assertEquals(hubId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertTrue(relations.getJsonObject(0).getBoolean("source"));
+    }
+
+    /**
+     * Relations reset contract: omitting the {@code relations} param (no relations_reset)
+     * preserves the existing outgoing relation. Guards the backward-compatible path.
+     */
+    @Test
+    public void testUpdateDocumentRelationsOmittedPreserves() {
+        clientUtil.createUser("relreset2");
+        String token = clientUtil.login("relreset2");
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Keep Relation Target")
+                        .param("language", "eng")), JsonObject.class);
+        String targetId = json.getString("id");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Keep Relation Source")
+                        .param("language", "eng")
+                        .param("relations", targetId)), JsonObject.class);
+        String sourceId = json.getString("id");
+
+        // Update title only: the outgoing relation must be preserved
+        target().path("/document/" + sourceId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Keep Relation Source 2")
+                        .param("language", "eng")), JsonObject.class);
+
+        json = target().path("/document/" + sourceId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size(), "omitted relations must be preserved");
+        Assertions.assertEquals(targetId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertTrue(relations.getJsonObject(0).getBoolean("source"));
+    }
+
+    private static JsonObject findRelation(JsonArray relations, String relatedId) {
+        for (int i = 0; i < relations.size(); i++) {
+            JsonObject r = relations.getJsonObject(i);
+            if (relatedId.equals(r.getString("id"))) {
+                return r;
+            }
+        }
+        throw new AssertionError("relation not found: " + relatedId);
+    }
+
     private static JsonObject findMetadata(JsonArray metadata, String metaId) {
         for (int i = 0; i < metadata.size(); i++) {
             JsonObject m = metadata.getJsonObject(i);

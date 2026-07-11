@@ -890,6 +890,7 @@ public class DocumentResource extends BaseResource {
      * @apiParam {String} [rights] Rights (omit to preserve)
      * @apiParam {String[]} [tags] List of tags ID (omit to preserve)
      * @apiParam {String[]} [relations] List of related documents ID (omit to preserve)
+     * @apiParam {Boolean} [relations_reset] Clear all outgoing relations when true and no relations supplied
      * @apiParam {String[]} [metadata_id] List of metadata ID (omit to preserve)
      * @apiParam {String[]} [metadata_value] List of metadata values
      * @apiParam {String} [language] Language
@@ -1005,6 +1006,7 @@ public class DocumentResource extends BaseResource {
         // matching *_reset=true sentinel; old clients that never send it keep the old
         // preserve-on-omit semantics.
         boolean tagsReset = Boolean.parseBoolean(form.getFirst("tags_reset"));
+        boolean relationsReset = Boolean.parseBoolean(form.getFirst("relations_reset"));
         boolean metadataReset = Boolean.parseBoolean(form.getFirst("metadata_reset"));
         if (form.containsKey("tags") || tagsReset) {
             // updateTagList treats a null list as "no change"; a reset with no tags supplied
@@ -1012,8 +1014,11 @@ public class DocumentResource extends BaseResource {
             List<String> effectiveTags = tagList != null ? tagList : new ArrayList<>();
             DocumentResourceHelper.updateTagList(id, effectiveTags, getTargetIdList(null));
         }
-        if (form.containsKey("relations")) {
-            DocumentResourceHelper.updateRelationList(id, relationList);
+        if (form.containsKey("relations") || relationsReset) {
+            // updateRelationList treats a null list as "no change"; a reset with no relations
+            // supplied must clear every outgoing relation, so pass an empty (non-null) list.
+            List<String> effectiveRelations = relationList != null ? relationList : new ArrayList<>();
+            DocumentResourceHelper.updateRelationList(id, effectiveRelations);
         }
         if (form.containsKey("metadata_id")) {
             try {

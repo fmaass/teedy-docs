@@ -207,6 +207,17 @@
       "load_failed": "Versionsverlauf konnte nicht geladen werden",
       "loading": "Versionsverlauf wird geladen …"
     },
+    "relations": {
+      "title": "Verknüpfte Dokumente",
+      "links_to": "Verweist auf",
+      "linked_from": "Verwiesen von",
+      "search_placeholder": "Dokument zum Verknüpfen suchen …",
+      "saved": "Verknüpfungen aktualisiert",
+      "failed_save": "Verknüpfungen konnten nicht aktualisiert werden",
+      "remove": "Verknüpfung entfernen",
+      "remove_confirm": "Verknüpfung zu „{title}“ entfernen?",
+      "remove_from_source": "Verwiesen von „{title}“ – dort entfernen"
+    },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
     "failed_remove_file": "Datei konnte nicht entfernt werden",

@@ -4,11 +4,18 @@ import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { getFileUrl, deleteFile, renameFile, uploadFile } from '../../api/file'
+import {
+  listDocuments,
+  updateDocument,
+  buildRelationsParams,
+  type DocumentListItem,
+} from '../../api/document'
 import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import AutoComplete from 'primevue/autocomplete'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
@@ -41,6 +48,93 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
     return formatDate(Number(field.value))
   }
   return String(field.value)
+}
+
+// --- Related documents ---
+// getDocument returns BOTH directions in `relations`: source=true is an outgoing relation
+// this document owns (removable here); source=false is incoming, owned by the OTHER document
+// (shown read-only — it must be removed from its source document's view).
+const outgoingRelations = computed(() =>
+  (doc.value?.relations ?? []).filter((r) => r.source),
+)
+const incomingRelations = computed(() =>
+  (doc.value?.relations ?? []).filter((r) => !r.source),
+)
+
+const relationSearchResults = ref<DocumentListItem[]>([])
+const selectedRelationTarget = ref<DocumentListItem | null>(null)
+const savingRelation = ref(false)
+
+async function completeRelationSearch(event: { query: string }) {
+  const query = event.query.trim()
+  if (!query || !doc.value) {
+    relationSearchResults.value = []
+    return
+  }
+  try {
+    const { data } = await listDocuments({ search: query, limit: 10 })
+    // Exclude self and any document already related (either direction).
+    const relatedIds = new Set((doc.value.relations ?? []).map((r) => r.id))
+    relationSearchResults.value = data.documents.filter(
+      (d) => d.id !== doc.value!.id && !relatedIds.has(d.id),
+    )
+  } catch {
+    relationSearchResults.value = []
+  }
+}
+
+// Submit the FULL surviving outgoing id list (buildRelationsParams sends title + language,
+// which the backend requires, and relations_reset=true when the list is empty). Only outgoing
+// relations are reconciled by the backend — incoming ones are untouched.
+async function saveOutgoing(outgoingIds: string[]) {
+  if (!doc.value) return
+  const sourceId = doc.value.id
+  // Delta of affected TARGETS, captured before the refetch replaces doc.value: an added
+  // or removed target's own detail (its incoming list) changes with this mutation, so a
+  // cached target view would render stale relations on in-app navigation if only the
+  // source were invalidated.
+  const prevIds = new Set(outgoingRelations.value.map((r) => r.id))
+  const nextIds = new Set(outgoingIds)
+  const affectedTargetIds = [
+    ...outgoingIds.filter((id) => !prevIds.has(id)),
+    ...[...prevIds].filter((id) => !nextIds.has(id)),
+  ]
+  savingRelation.value = true
+  try {
+    await updateDocument(
+      sourceId,
+      buildRelationsParams(doc.value.title, doc.value.language, outgoingIds),
+    )
+    queryClient.invalidateQueries({ queryKey: ['document', sourceId] })
+    for (const id of affectedTargetIds) {
+      queryClient.invalidateQueries({ queryKey: ['document', id] })
+    }
+    toast.add({ severity: 'success', summary: t('ui.relations.saved'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.relations.failed_save'), life: 3000 })
+  } finally {
+    savingRelation.value = false
+  }
+}
+
+async function handleAddRelation() {
+  if (!selectedRelationTarget.value) return
+  const ids = [...outgoingRelations.value.map((r) => r.id), selectedRelationTarget.value.id]
+  await saveOutgoing(ids)
+  selectedRelationTarget.value = null
+  relationSearchResults.value = []
+}
+
+function confirmRemoveRelation(relation: { id: string; title: string }) {
+  confirmDanger({
+    message: t('ui.relations.remove_confirm', { title: relation.title }),
+    header: t('ui.relations.remove'),
+    icon: 'pi pi-link',
+    accept: async () => {
+      const ids = outgoingRelations.value.map((r) => r.id).filter((id) => id !== relation.id)
+      await saveOutgoing(ids)
+    },
+  })
 }
 
 const renamingId = ref<string | null>(null)
@@ -265,6 +359,89 @@ function confirmDelete(file: { id: string; name: string }) {
       </dl>
     </div>
 
+    <!-- Related documents -->
+    <div
+      v-if="outgoingRelations.length || incomingRelations.length || doc.writable"
+      class="doc-relations"
+    >
+      <h3 class="doc-relations-heading">{{ t('ui.relations.title') }}</h3>
+
+      <!-- Outgoing: this document links to these (removable). -->
+      <div v-if="outgoingRelations.length" class="relation-group">
+        <p class="relation-group-label">{{ t('ui.relations.links_to') }}</p>
+        <div class="relation-list">
+          <div v-for="relation in outgoingRelations" :key="relation.id" class="relation-row">
+            <i class="pi pi-arrow-right relation-dir-icon" aria-hidden="true" />
+            <router-link
+              :to="{ name: 'document-view-content', params: { id: relation.id } }"
+              class="relation-link"
+            >
+              {{ relation.title }}
+            </router-link>
+            <Button
+              v-if="doc.writable"
+              icon="pi pi-times"
+              text
+              rounded
+              size="small"
+              severity="danger"
+              :loading="savingRelation"
+              @click="confirmRemoveRelation(relation)"
+              v-tooltip="t('ui.relations.remove')"
+              :aria-label="t('ui.relations.remove')"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Incoming: other documents link here. Read-only — no remove control; the relation
+           is owned by the source document and must be removed from there. -->
+      <div v-if="incomingRelations.length" class="relation-group">
+        <p class="relation-group-label">{{ t('ui.relations.linked_from') }}</p>
+        <div class="relation-list">
+          <div v-for="relation in incomingRelations" :key="relation.id" class="relation-row">
+            <i class="pi pi-arrow-left relation-dir-icon" aria-hidden="true" />
+            <router-link
+              :to="{ name: 'document-view-content', params: { id: relation.id } }"
+              class="relation-link"
+              v-tooltip="t('ui.relations.remove_from_source', { title: relation.title })"
+            >
+              {{ relation.title }}
+            </router-link>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add an outgoing relation. Writable-only. -->
+      <div v-if="doc.writable" class="relation-add">
+        <AutoComplete
+          v-model="selectedRelationTarget"
+          :suggestions="relationSearchResults"
+          optionLabel="title"
+          forceSelection
+          size="small"
+          class="relation-add-autocomplete"
+          :placeholder="t('ui.relations.search_placeholder')"
+          @complete="completeRelationSearch"
+        >
+          <template #option="{ option }">
+            <div class="relation-search-result">
+              <i class="pi pi-file" aria-hidden="true" />
+              <span>{{ option.title }}</span>
+            </div>
+          </template>
+        </AutoComplete>
+        <Button
+          :label="t('add')"
+          icon="pi pi-plus"
+          size="small"
+          :disabled="!selectedRelationTarget"
+          :loading="savingRelation"
+          @click="handleAddRelation"
+        />
+      </div>
+    </div>
+
     <!-- File previews -->
     <div v-if="doc.files?.length" class="file-preview-grid">
       <template v-for="file in doc.files" :key="file.id">
@@ -455,6 +632,76 @@ function confirmDelete(file: { id: string; name: string }) {
   color: var(--p-text-color);
   margin: 0;
   word-break: break-word;
+}
+
+.doc-relations {
+  margin: 0 0 1.5rem;
+}
+.doc-relations-heading {
+  margin: 0 0 0.625rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.relation-group {
+  margin-bottom: 0.75rem;
+}
+.relation-group-label {
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.relation-list {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.relation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.relation-row:last-child {
+  border-bottom: none;
+}
+.relation-dir-icon {
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.relation-link {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--p-text-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relation-link:hover {
+  color: var(--teedy-brand);
+  text-decoration: underline;
+}
+.relation-add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+.relation-add-autocomplete {
+  flex: 1;
+}
+.relation-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  font-size: 0.875rem;
 }
 
 .file-preview-grid {

@@ -207,6 +207,17 @@
       "load_failed": "Failed to load version history",
       "loading": "Loading version history…"
     },
+    "relations": {
+      "title": "Related documents",
+      "links_to": "Links to",
+      "linked_from": "Linked from",
+      "search_placeholder": "Search a document to link…",
+      "saved": "Relations updated",
+      "failed_save": "Failed to update relations",
+      "remove": "Remove relation",
+      "remove_confirm": "Remove the link to \"{title}\"?",
+      "remove_from_source": "Linked from \"{title}\" — remove it from that document"
+    },
     "edit_to_add_files": "Edit document to add files",
     "file_removed": "File removed",
     "failed_remove_file": "Failed to remove file",

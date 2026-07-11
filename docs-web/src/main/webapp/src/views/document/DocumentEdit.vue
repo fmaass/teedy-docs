@@ -191,7 +191,10 @@ async function initFromRoute() {
       form.value.language = data.language || 'eng'
       form.value.create_date = data.create_date ? new Date(data.create_date) : new Date()
       form.value.tags = data.tags?.map((t) => t.id) || []
-      loadedRelations.value = data.relations ?? []
+      // OUTGOING relations only: POST /document/:id reconciles `relations` as this
+      // document's outgoing set, so re-sending an incoming (source=false) relation
+      // would mint a spurious reverse relation on every save.
+      loadedRelations.value = (data.relations ?? []).filter((r) => r.source)
       // The document detail returns every defined field merged with this document's
       // value (value omitted when unset), so it doubles as the definition list.
       metadataDefinitions.value = (data.metadata ?? []).map((m) => ({
@@ -364,6 +367,13 @@ function buildDocParams() {
     params.append('tags_reset', 'true')
   }
   for (const r of loadedRelations.value) params.append('relations', r.id)
+  // The backend preserves relations on an omitted `relations` param, so an edit-save
+  // with zero surviving outgoing relations must send the clear-all sentinel (mirrors
+  // tags_reset above; a create has nothing to reset). Harmless no-op when the document
+  // never had outgoing relations.
+  if (isEdit.value && loadedRelations.value.length === 0) {
+    params.append('relations_reset', 'true')
+  }
   // Only submit fields the user actually set — an unset numeric/date field sent as a
   // blank pair makes the backend reject the whole save; an unset boolean must not
   // silently become "false".
