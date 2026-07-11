@@ -3,7 +3,7 @@
   "info": {
     "title": "Teedy API",
     "description": "REST API for Teedy (sismics/docs). All endpoints are under `/api`. Authenticate with a session cookie (obtained via `POST /user/login`) or an API key sent as `Authorization: Bearer tdapi_<hex>`. Mutations use `application/x-www-form-urlencoded` bodies unless noted (file upload uses `multipart/form-data`).",
-    "version": "3.3.0"
+    "version": "3.4.0"
   },
   "servers": [
     {

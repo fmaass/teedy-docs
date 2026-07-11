@@ -6,6 +6,35 @@ All notable changes to this fork are documented here. The format is based on
 
 Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teedy-docs/releases).
 
+## [3.4.0] - 2026-07-11
+
+Two database migrations this release: db.version moves from 43 to 45 (`dbupdate-044` adds the saved-filters table; `dbupdate-045` widens the config value column).
+
+### Added
+- `/apidoc` serves an interactive API reference again — a hand-authored OpenAPI 3 specification covering every endpoint with a vendored Swagger UI, no runtime dependency added to the WAR, and a CI check that fails the build if the spec drifts from the resources (#15).
+- Tag chips in the document list, overflow popovers, and the document view filter the list when clicked (#34).
+- View-only rotation controls for PDF and image previews; rotation composes with a page's intrinsic orientation and is not persisted (#35).
+- A "Related documents" section on the document view to add and remove document-to-document relations (#36).
+- Per-user saved filters: name a tag/text/workflow filter combination and re-apply it from the search bar (#42).
+- Configurable footer links (imprint, privacy, terms, documentation) shown in the app shell and on the login screen, managed by an admin (#43).
+- An admin screen to manage OIDC provider and claim settings, backed by the database with system-property fallback so existing deployments are unaffected until saved (#44).
+
+### Changed
+- Storage quota is editable after user creation and shown as an explicit field in both the create and edit dialogs (#37).
+- OIDC configuration resolves from the database first, then system properties, then built-in defaults, through a single accessor; a change is picked up by the next login without a restart. See ADR-0016.
+- ESLint now covers TypeScript files, which previously matched no configuration and went unlinted (#45).
+
+### Fixed
+- Editing a document no longer re-submits incoming relations as outgoing ones, which had created a spurious reverse relation on every save (#36).
+- Assorted test-infrastructure papercuts from the v3.3 cycle: temp-file leak checks, an embedded-LDAP port race, GreenMail teardown, and a UserInfo response byte cap (#45).
+
+### Security
+- OIDC configuration is read as a single consistent per-request snapshot on login, callback, and logout, so a concurrent settings change cannot produce a mixed configuration or send the logout token hint to the wrong provider. The client secret is write-only through the admin API. Identity binding, username derivation, the eligibility check, and fail-closed rules remain non-editable behavior, per ADR-0015.
+- Footer-link URLs are validated as http(s) only, rejecting `javascript:`, `data:`, and scheme-relative values.
+
+### Documentation
+- A full `docs/` tree covering installation, configuration, all authentication flows, workflows, vocabulary, tags and filtering, documents, sharing and permissions, the admin surface, and the REST API — illustrated with real screenshots and a cookbook of end-to-end recipes, and mirrored to the GitHub wiki on release.
+
 ## [3.3.0] - 2026-07-11
 
 No database migration this release: db.version stays at 43.
@@ -124,7 +153,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[3.3.0]: https://github.com/fmaass/teedy-docs/compare/v3.2.2...HEAD
+[3.4.0]: https://github.com/fmaass/teedy-docs/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.3.0
 [3.2.2]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.2
 [3.2.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.1
 [3.1.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.1.0
