@@ -1,5 +1,6 @@
 package com.sismics.docs.rest.resource;
 
+import com.sismics.docs.core.dao.DocumentMetadataDao;
 import com.sismics.docs.core.dao.VocabularyDao;
 import com.sismics.docs.core.model.jpa.Vocabulary;
 import com.sismics.docs.rest.constant.BaseFunction;
@@ -92,6 +93,48 @@ public class VocabularyResource extends BaseResource {
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("entries", entries);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Get the usage count of a vocabulary entry.
+     *
+     * @api {get} /vocabulary/:id/usage Count documents referencing a vocabulary entry
+     * @apiName GetVocabularyIdUsage
+     * @apiGroup Vocabulary
+     * @apiParam {String} id Entry ID
+     * @apiSuccess {Number} document_count Number of distinct active documents whose VOCABULARY
+     * metadata value equals this entry's value (across every definition referencing this entry's
+     * vocabulary; a document is counted once). A warning-time snapshot, not an atomic guarantee.
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) NotFound Vocabulary not found
+     * @apiPermission admin
+     * @apiVersion 1.13.0
+     *
+     * @param id ID
+     * @return Response
+     */
+    @GET
+    @Path("{id: [a-z0-9\\-]+}/usage")
+    public Response usage(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Resolve the entry to its current vocabulary name and value.
+        VocabularyDao vocabularyDao = new VocabularyDao();
+        Vocabulary vocabulary = vocabularyDao.getById(id);
+        if (vocabulary == null) {
+            throw new NotFoundException();
+        }
+
+        // Count the distinct active documents referencing this entry's value.
+        long documentCount = new DocumentMetadataDao()
+                .getVocabularyValueUsageCount(vocabulary.getName(), vocabulary.getValue());
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("document_count", documentCount);
         return Response.ok().entity(response.build()).build();
     }
 

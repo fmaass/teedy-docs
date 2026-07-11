@@ -16,8 +16,17 @@ const apiMock = vi.hoisted(() => ({
   createVocabularyEntry: vi.fn(),
   updateVocabularyEntry: vi.fn(),
   deleteVocabularyEntry: vi.fn(),
+  getVocabularyUsage: vi.fn(),
 }))
 vi.mock('../../api/vocabulary', () => apiMock)
+
+// Capture the options passed into confirmDanger so the reference-warning tests can
+// assert on the exact confirm message (count text vs. plain) without driving the
+// PrimeVue overlay DOM.
+const confirmDangerSpy = vi.hoisted(() => vi.fn())
+vi.mock('../../composables/useConfirmDanger', () => ({
+  useConfirmDanger: () => ({ confirmDanger: confirmDangerSpy }),
+}))
 
 // PrimeVue overlays probe window.matchMedia, absent under jsdom.
 beforeAll(() => {
@@ -100,5 +109,141 @@ describe('SettingsVocabulary — create new namespace flow', () => {
 
     expect(apiMock.createVocabularyEntry).toHaveBeenCalledTimes(1)
     expect(apiMock.createVocabularyEntry).toHaveBeenCalledWith('license', 'Public Domain', 0)
+  })
+})
+
+describe('SettingsVocabulary — reference-count warning on rename/delete', () => {
+  beforeEach(() => {
+    confirmDangerSpy.mockReset()
+    apiMock.listVocabularyNames.mockReset().mockResolvedValue({ data: { names: ['license'] } })
+    apiMock.getVocabulary.mockReset().mockResolvedValue({
+      data: {
+        entries: [
+          { id: 'v1', name: 'license', value: 'Public Domain', order: 0 },
+          { id: 'v2', name: 'license', value: 'All rights reserved', order: 1 },
+        ],
+      },
+    })
+    apiMock.updateVocabularyEntry.mockReset().mockResolvedValue({ data: {} })
+    apiMock.deleteVocabularyEntry.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+    apiMock.getVocabularyUsage.mockReset()
+  })
+
+  it('DELETE with references: fetches usage then confirms with the count, and proceeds only on accept', async () => {
+    apiMock.getVocabularyUsage.mockResolvedValue({ data: { document_count: 3 } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      entries: { id: string; value: string; order: number }[]
+      confirmDelete: (e: { id: string; value: string; order: number }) => void
+    }
+    vm.confirmDelete(vm.entries[0])
+    await flushPromises()
+
+    // Usage was checked against the entry being deleted.
+    expect(apiMock.getVocabularyUsage).toHaveBeenCalledWith('v1')
+    // The confirm dialog was opened with a message carrying the true count.
+    expect(confirmDangerSpy).toHaveBeenCalledTimes(1)
+    const opts = confirmDangerSpy.mock.calls[0][0]
+    expect(opts.message).toContain('3')
+
+    // Nothing is deleted until the user accepts.
+    expect(apiMock.deleteVocabularyEntry).not.toHaveBeenCalled()
+    await opts.accept()
+    await flushPromises()
+    expect(apiMock.deleteVocabularyEntry).toHaveBeenCalledWith('v1')
+  })
+
+  it('DELETE with zero references: keeps the existing plain confirmation (no count text)', async () => {
+    apiMock.getVocabularyUsage.mockResolvedValue({ data: { document_count: 0 } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      entries: { id: string; value: string; order: number }[]
+      confirmDelete: (e: { id: string; value: string; order: number }) => void
+    }
+    // Delete the SECOND entry (not last) so the plain (non-last) confirm path is used.
+    vm.confirmDelete(vm.entries[1])
+    await flushPromises()
+
+    expect(apiMock.getVocabularyUsage).toHaveBeenCalledWith('v2')
+    const opts = confirmDangerSpy.mock.calls[0][0]
+    // Existing plain delete_confirm message quotes the value, not a count.
+    expect(opts.message).toContain('All rights reserved')
+    expect(opts.message).not.toMatch(/\b\d+\b/)
+  })
+
+  it('RENAME (value change) with references: warns with the count before committing', async () => {
+    apiMock.getVocabularyUsage.mockResolvedValue({ data: { document_count: 5 } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      entries: { id: string; value: string; order: number }[]
+      startEdit: (e: { id: string; value: string; order: number }) => void
+      editValue: string
+      commitEdit: (id: string) => void
+    }
+    vm.startEdit(vm.entries[0])
+    vm.editValue = 'Renamed value'
+    vm.commitEdit('v1')
+    await flushPromises()
+
+    expect(apiMock.getVocabularyUsage).toHaveBeenCalledWith('v1')
+    expect(confirmDangerSpy).toHaveBeenCalledTimes(1)
+    const opts = confirmDangerSpy.mock.calls[0][0]
+    expect(opts.message).toContain('5')
+
+    // Rename is deferred until confirmation.
+    expect(apiMock.updateVocabularyEntry).not.toHaveBeenCalled()
+    await opts.accept()
+    await flushPromises()
+    expect(apiMock.updateVocabularyEntry).toHaveBeenCalledWith('v1', { value: 'Renamed value' })
+  })
+
+  it('RENAME (value change) with zero references: commits directly, no confirm dialog', async () => {
+    apiMock.getVocabularyUsage.mockResolvedValue({ data: { document_count: 0 } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      entries: { id: string; value: string; order: number }[]
+      startEdit: (e: { id: string; value: string; order: number }) => void
+      editValue: string
+      commitEdit: (id: string) => void
+    }
+    vm.startEdit(vm.entries[0])
+    vm.editValue = 'New value'
+    vm.commitEdit('v1')
+    await flushPromises()
+
+    expect(apiMock.getVocabularyUsage).toHaveBeenCalledWith('v1')
+    // Zero references -> exact existing behaviour: rename proceeds with no confirmation.
+    expect(confirmDangerSpy).not.toHaveBeenCalled()
+    expect(apiMock.updateVocabularyEntry).toHaveBeenCalledWith('v1', { value: 'New value' })
+  })
+
+  it('RENAME with an unchanged value: no usage lookup, no confirm, direct no-op commit', async () => {
+    apiMock.getVocabularyUsage.mockResolvedValue({ data: { document_count: 9 } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      entries: { id: string; value: string; order: number }[]
+      startEdit: (e: { id: string; value: string; order: number }) => void
+      editValue: string
+      commitEdit: (id: string) => void
+    }
+    vm.startEdit(vm.entries[0])
+    // Same value -> not a value change; must not fetch usage or warn.
+    vm.editValue = 'Public Domain'
+    vm.commitEdit('v1')
+    await flushPromises()
+
+    expect(apiMock.getVocabularyUsage).not.toHaveBeenCalled()
+    expect(confirmDangerSpy).not.toHaveBeenCalled()
+    expect(apiMock.updateVocabularyEntry).toHaveBeenCalledWith('v1', { value: 'Public Domain' })
   })
 })

@@ -8,6 +8,7 @@ import {
   createVocabularyEntry,
   updateVocabularyEntry,
   deleteVocabularyEntry,
+  getVocabularyUsage,
   type VocabularyEntry,
 } from '../../api/vocabulary'
 import DataTable from 'primevue/datatable'
@@ -133,15 +134,18 @@ function doCreateVocabulary() {
 // Inline edit of an entry value
 const editingId = ref<string | null>(null)
 const editValue = ref('')
+const editOriginalValue = ref('')
 
 function startEdit(entry: VocabularyEntry) {
   editingId.value = entry.id
   editValue.value = entry.value
+  editOriginalValue.value = entry.value
 }
 
 function cancelEdit() {
   editingId.value = null
   editValue.value = ''
+  editOriginalValue.value = ''
 }
 
 const editMutation = useMutation({
@@ -157,10 +161,43 @@ const editMutation = useMutation({
   onSettled: () => cancelEdit(),
 })
 
-function commitEdit(id: string) {
+// Best-effort reference count for a warning snapshot. On failure return 0 so the
+// destructive action is never blocked by a transient usage-lookup error.
+async function fetchUsageCount(id: string): Promise<number> {
+  try {
+    const res = await getVocabularyUsage(id)
+    return res.data.document_count
+  } catch {
+    return 0
+  }
+}
+
+async function commitEdit(id: string) {
   const value = editValue.value.trim()
   if (!value) return cancelEdit()
-  editMutation.mutate({ id, value })
+
+  // No value change: nothing references anything new — commit directly.
+  if (value === editOriginalValue.value) {
+    editMutation.mutate({ id, value })
+    return
+  }
+
+  // A value change may strand existing document metadata values pointing at the old
+  // value. Warn with a reference-count snapshot before committing.
+  const count = await fetchUsageCount(id)
+  if (count > 0) {
+    confirmDanger({
+      header: t('ui.vocabulary.rename_title'),
+      message: t('ui.vocabulary.rename_referenced_confirm', count, {
+        named: { count, value: editOriginalValue.value },
+      }),
+      icon: 'pi pi-exclamation-triangle',
+      accept: () => editMutation.mutate({ id, value }),
+      reject: () => cancelEdit(),
+    })
+  } else {
+    editMutation.mutate({ id, value })
+  }
 }
 
 // Reorder: swap the order values of the entry with its neighbour.
@@ -204,13 +241,26 @@ const deleteMutation = useMutation({
   },
 })
 
-function confirmDelete(entry: VocabularyEntry) {
+async function confirmDelete(entry: VocabularyEntry) {
   const wasLast = entries.value.length === 1
-  // Deleting the last entry removes the whole vocabulary — warn explicitly.
+
+  // A referenced entry strands the document metadata values pointing at it — surface
+  // a reference-count snapshot so the admin deletes with eyes open.
+  const count = await fetchUsageCount(entry.id)
+  let message: string
+  if (count > 0) {
+    message = t('ui.vocabulary.delete_referenced_confirm', count, {
+      named: { count, value: entry.value },
+    })
+  } else if (wasLast) {
+    // Deleting the last entry removes the whole vocabulary — warn explicitly.
+    message = t('ui.vocabulary.delete_last_confirm', { name: selectedName.value ?? '' })
+  } else {
+    message = t('ui.vocabulary.delete_confirm', { value: entry.value })
+  }
+
   confirmDanger({
-    message: wasLast
-      ? t('ui.vocabulary.delete_last_confirm', { name: selectedName.value ?? '' })
-      : t('ui.vocabulary.delete_confirm', { value: entry.value }),
+    message,
     header: t('ui.vocabulary.delete_title'),
     accept: () => deleteMutation.mutate({ id: entry.id, wasLast }),
   })

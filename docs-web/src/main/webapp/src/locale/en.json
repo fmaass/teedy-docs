@@ -643,7 +643,10 @@
       "failed_create": "Failed to create vocabulary",
       "delete_title": "Delete vocabulary entry",
       "delete_confirm": "Delete the entry \"{value}\"?",
-      "delete_last_confirm": "This is the last entry of \"{name}\". Deleting it removes the whole vocabulary."
+      "delete_last_confirm": "This is the last entry of \"{name}\". Deleting it removes the whole vocabulary.",
+      "rename_title": "Rename vocabulary entry",
+      "delete_referenced_confirm": "The value \"{value}\" is currently used by about {count} document. Deleting the entry leaves that value stranded on the document. Delete it anyway? | The value \"{value}\" is currently used by about {count} documents. Deleting the entry leaves that value stranded on those documents. Delete it anyway?",
+      "rename_referenced_confirm": "The value \"{value}\" is currently used by about {count} document, which will not be updated to the new value. Rename it anyway? | The value \"{value}\" is currently used by about {count} documents, which will not be updated to the new value. Rename it anyway?"
     },
     "monitoring": {
       "title": "Monitoring",

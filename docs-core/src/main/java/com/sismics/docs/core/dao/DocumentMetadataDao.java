@@ -55,6 +55,36 @@ public class DocumentMetadataDao {
     }
 
     /**
+     * Counts the distinct active documents that reference a vocabulary entry value.
+     * A document is counted when it carries a VOCABULARY metadata value equal to
+     * {@code value} on any non-deleted metadata definition whose referenced
+     * vocabulary is {@code vocabularyName}. A document carrying the same value under
+     * several such definitions is counted once (distinct-document semantics), and
+     * soft-deleted documents are excluded (active documents only).
+     *
+     * @param vocabularyName Referenced vocabulary name
+     * @param value Vocabulary entry value
+     * @return Distinct active-document reference count
+     */
+    public long getVocabularyValueUsageCount(String vocabularyName, String value) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        StringBuilder sb = new StringBuilder("select count(distinct dm.DME_IDDOCUMENT_C)");
+        sb.append(" from T_DOCUMENT_METADATA dm");
+        sb.append(" join T_METADATA m on m.MET_ID_C = dm.DME_IDMETADATA_C");
+        sb.append("   and m.MET_DELETEDATE_D is null");
+        sb.append("   and m.MET_TYPE_C = 'VOCABULARY'");
+        sb.append("   and m.MET_VOCABULARY_C = :vocabularyName");
+        sb.append(" join T_DOCUMENT d on d.DOC_ID_C = dm.DME_IDDOCUMENT_C");
+        sb.append("   and d.DOC_DELETEDATE_D is null");
+        sb.append(" where dm.DME_VALUE_C = :value");
+
+        Query q = em.createNativeQuery(sb.toString());
+        q.setParameter("vocabularyName", vocabularyName);
+        q.setParameter("value", value);
+        return ((Number) q.getSingleResult()).longValue();
+    }
+
+    /**
      * Returns the list of all metadata values on a document.
      *
      * @param documentId Document ID
