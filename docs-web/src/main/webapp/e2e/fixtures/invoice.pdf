@@ -1,0 +1,83 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1258 >>
+stream
+BT
+/F1 12 Tf
+/F1 24 Tf
+1 0 0 1 72 750 Tm
+(ACME Supplies GmbH) Tj
+/F1 11 Tf
+1 0 0 1 72 725 Tm
+(Musterstrasse 12 - 10115 Berlin - Germany) Tj
+/F1 18 Tf
+1 0 0 1 72 690 Tm
+(INVOICE  #2026-0042) Tj
+/F1 11 Tf
+1 0 0 1 72 665 Tm
+(Date: 2026-07-11        Due: 2026-08-10) Tj
+/F1 12 Tf
+1 0 0 1 72 630 Tm
+(Bill to:  Teedy Demo Account) Tj
+/F1 12 Tf
+1 0 0 1 72 600 Tm
+(Description                         Qty      Amount) Tj
+/F1 12 Tf
+1 0 0 1 72 585 Tm
+(------------------------------------------------) Tj
+/F1 12 Tf
+1 0 0 1 72 565 Tm
+(Document scanning service            10      120.00) Tj
+/F1 12 Tf
+1 0 0 1 72 545 Tm
+(OCR processing \(per page\)           250       75.00) Tj
+/F1 12 Tf
+1 0 0 1 72 525 Tm
+(Cloud storage \(monthly\)               1       19.99) Tj
+/F1 12 Tf
+1 0 0 1 72 505 Tm
+(------------------------------------------------) Tj
+/F1 13 Tf
+1 0 0 1 72 485 Tm
+(Subtotal                                    214.99) Tj
+/F1 13 Tf
+1 0 0 1 72 468 Tm
+(VAT 19%                                      40.85) Tj
+/F1 15 Tf
+1 0 0 1 72 448 Tm
+(TOTAL DUE                              EUR  255.84) Tj
+/F1 11 Tf
+1 0 0 1 72 400 Tm
+(Payment terms: net 30 days. Ref invoice #2026-0042.) Tj
+/F1 10 Tf
+1 0 0 1 72 120 Tm
+(Thank you for your business - ACME Supplies GmbH) Tj
+ET
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001551 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1621
+%%EOF

@@ -11,6 +11,8 @@ A tag has a name and a color. Tags can be **nested**: each tag may have a parent
 tag, forming a hierarchy (e.g. `Finance › Invoices › 2026`). Filtering by a parent
 tag also matches documents under its children.
 
+![The documents list with colored tag chips on each row and the tag filter panel in the left sidebar.](images/document-list-facets.png)
+
 Create and edit tags in the tag sidebar or via the API:
 
 | Action | Request |
@@ -38,7 +40,7 @@ Tag-match rules let an admin apply a tag automatically when a document matches a
 pattern — for example, tag anything whose filename looks like an invoice. Rules are
 managed in **Settings → Tag Rules** (administrator only).
 
-<!-- screenshot: SettingsTagRules showing one rule (a tag, a rule type, and a regex pattern) -->
+![Settings → Auto-tagging rules showing a rule that applies a tag when a document's content matches a regex pattern.](images/tag-rules.png)
 
 Each rule has:
 
@@ -88,7 +90,7 @@ mode, search text, and workflow filter are all query parameters. **Saved filters
 let you name a filter combination and re-apply it in one click, instead of
 bookmarking the URL by hand.
 
-<!-- screenshot: the search bar showing the "Saved filters" dropdown and the "Save filter" button -->
+![The search bar with the "Saved filters" dropdown open, showing a saved "Unpaid invoices" filter alongside the "Save filter" button.](images/saved-filters.png)
 
 From the search bar:
 

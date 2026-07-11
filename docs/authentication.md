@@ -36,7 +36,7 @@ Teedy has a built-in OpenID Connect client using the Authorization Code flow wit
 PKCE and a confidential client. It works with Authelia, Keycloak, Authentik, or any
 standards-compliant provider.
 
-<!-- screenshot: the login page showing the "Login with SSO" button alongside the local login form -->
+![The login page showing the "Login with SSO" button below the local username/password form, with imprint and privacy footer links.](images/login-sso.png)
 
 ### Configuration
 
@@ -57,6 +57,13 @@ OIDC settings are read as JVM **system properties**, passed via `JAVA_TOOL_OPTIO
 | `docs.oidc_userinfo_endpoint` | No | Override the UserInfo endpoint. Consulted only when a configured claim is missing from the ID token. |
 | `docs.oidc_username_claim` | No | Claim used to derive the local username at provisioning (default `preferred_username`) |
 | `docs.oidc_email_claim` | No | Claim used for the user's email at provisioning and profile refresh (default `email`) |
+
+The same settings can also be managed from the admin UI at **Settings → OIDC
+authentication** (a DB-backed configuration overrides the system properties without a
+restart). The client secret is entered as a masked field and is write-only — it is
+never returned to the browser.
+
+![Settings → OIDC authentication with the config enabled, the provider and claim fields filled, and the client secret shown as a masked field.](images/oidc-settings.png)
 
 ### How the flow works
 
@@ -97,7 +104,7 @@ Understanding how OIDC accounts are created prevents surprises:
   verifies the returned `sub` exactly matches the ID-token `sub` before consuming
   any claim.
 
-<!-- screenshot: the admin user list in Settings → Users showing an OIDC-provisioned user -->
+![The admin user list in Settings → Users, listing the built-in and provisioned users with their quotas.](images/users-list.png)
 
 ### Docker networking (split endpoints)
 

@@ -32,13 +32,15 @@ form parameter (a list of related document IDs) on document create/update, and a
 returned on `GET /api/document/{id}` as an array with each related document's `id`,
 `title`, and whether it is the `source` of the relation.
 
+![A document's Related documents section showing a "Links to" entry pointing at a purchase order.](images/document-view-relations.png)
+
 ## Viewing and rotation
 
 The built-in viewer renders PDFs and images inline. When a scan comes in sideways,
 rotate it in the viewer with the rotate-left and rotate-right controls — each press
 turns the view 90°.
 
-<!-- screenshot: the document viewer showing the rotation controls (rotate-left / rotate-right) on a PDF -->
+![The document viewer showing a PDF with the rotate-left and rotate-right controls below the page.](images/document-viewer-rotation.png)
 
 Rotation is a **view-only** adjustment: it changes how the page is displayed in
 your current session and is not written back to the stored file. Reopening the
@@ -50,7 +52,7 @@ The document list supports **multi-select**: tick the checkboxes on several
 documents and a bulk-action bar appears with actions that apply to all selected
 documents at once.
 
-<!-- screenshot: the document list in multi-select mode with the bulk-action bar showing the selected count -->
+![The document list in multi-select mode with two rows checked and the bulk-action bar showing the selected count.](images/document-list-bulk.png)
 
 | Action | Effect |
 |--------|--------|
@@ -124,7 +126,7 @@ dropdown example.
 Deleting a document is a **soft delete** — it moves to the trash, not oblivion, so
 an accidental delete is always recoverable until it is purged.
 
-<!-- screenshot: the trash view listing deleted documents with restore and permanent-delete actions -->
+![The trash view listing a deleted document with its retention countdown and restore / permanent-delete actions.](images/trash.png)
 
 | Action | Request |
 |--------|---------|

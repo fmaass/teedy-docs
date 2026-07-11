@@ -12,7 +12,10 @@ as such.
 
 Manage users in **Settings → Users**. The user list shows each user's storage
 usage against their quota, and you can create, edit, disable/re-enable, and delete
-users.
+users. The create and edit dialogs expose a **quota** field (in bytes) for setting a
+per-user storage limit.
+
+![The Settings → Users edit dialog showing the storage-quota field for a user.](images/users-quota.png)
 
 | Action | Request |
 |--------|---------|
@@ -36,7 +39,7 @@ Webhooks POST a JSON payload to an external URL when something happens in Teedy 
 useful for wiring Teedy into automations. Manage them in **Settings → Webhooks**
 (admin only).
 
-<!-- screenshot: SettingsWebhooks showing a webhook with its event dropdown -->
+![Settings → Webhooks with the Add-webhook dialog open, showing the event dropdown listing the document and file lifecycle events.](images/webhooks.png)
 
 | Action | Request |
 |--------|---------|

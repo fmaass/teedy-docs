@@ -83,7 +83,7 @@ services:
 
 1. Browse to your instance (e.g. `https://docs.example.com`).
 
-   <!-- screenshot: the first-login screen (username / password fields with the Teedy logo) -->
+   ![The first-login screen: the Teedy logo above the username and password fields.](images/login-first.png)
 
 2. Log in with the default credentials:
 

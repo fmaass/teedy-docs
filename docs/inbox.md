@@ -6,7 +6,7 @@ invoice to a dedicated address and it lands in Teedy as a new document, with the
 attachments as files. Scanning is **administrator-configured** and runs on a
 background schedule.
 
-<!-- screenshot: Settings → Inbox showing the enable toggle and the IMAP connection fields -->
+![Settings → Inbox scanning with the enable toggle on, revealing the IMAP hostname and port connection fields.](images/inbox.png)
 
 ## Enabling and configuring
 

@@ -28,7 +28,7 @@ The metadata field types are:
 Vocabularies are edited in **Settings → Vocabulary** (administrator only). Add a
 vocabulary name, then add ordered entries under it.
 
-<!-- screenshot: SettingsVocabulary showing the doc-types vocabulary with the Invoice / Contract / Report entries -->
+![Settings → Vocabularies showing the doc-types vocabulary with its Invoice, Contract, and Report entries.](images/vocabulary.png)
 
 ### API reference
 

@@ -3,12 +3,17 @@
 Teedy exposes a full REST API under `/api/*`. Everything the web UI does is a call
 to this API, so anything you can do in the browser you can automate.
 
-## Interactive API docs (coming in v3.4)
+## Interactive API docs
 
-> **Version note:** A browsable, interactive API reference at `/apidoc` is planned
-> for **v3.4** and is not present in the current release. Until it ships, use the
-> endpoint references embedded throughout this documentation (each feature page
-> lists its endpoints) and the examples below.
+Teedy ships a browsable, interactive API reference (Swagger UI) at `/apidoc`. It is
+served as static assets with no external/CDN dependencies and is reachable without a
+session, so you can explore every endpoint, expand an operation, and use **Try it
+out** to call the live API against your instance.
+
+![The /apidoc Swagger UI listing the Teedy API operations grouped by tag.](images/apidoc.png)
+
+The endpoint references embedded throughout this documentation (each feature page
+lists its endpoints) and the examples below complement the interactive reference.
 
 ## Authentication
 

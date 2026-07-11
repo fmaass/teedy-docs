@@ -82,7 +82,7 @@ Route models are edited in **Settings → Workflows** (administrator only). The
 editor lets you name the model and add an ordered list of steps; each step needs a
 name, a type (`VALIDATE` or `APPROVE`), and a target (a user or a group).
 
-<!-- screenshot: route-model editor filled in per Sample A (Invoice Approval), showing the two ordered steps with their types and targets -->
+![The route-model editor for "Invoice Approval", showing the two ordered steps — an Accounting check (Validate) and a Manager approval (Approve) — each assigned to a group.](images/workflow-editor.png)
 
 ### The steps wire format
 
@@ -144,13 +144,13 @@ A member of `registry` validates the document, and the route completes (`DONE`).
 1. Open a document you can write and go to its **Workflow** tab.
 2. Choose a route model and start the route.
 
-   <!-- screenshot: document Workflow tab showing a route mid-flight, pending on the accounting step -->
+   ![The document Workflow tab showing the Invoice Approval route mid-flight, with the Accounting check step pending and the history listing both steps.](images/workflow-pending.png)
 
 3. The assignee (or a member of the assigned group) opens the same tab and acts on
    the current step: **Validate** for a `VALIDATE` step, or **Approve** / **Reject**
    for an `APPROVE` step, optionally leaving a comment.
 
-   <!-- screenshot: the validate / approve-reject buttons with the comment field on a pending step -->
+   ![The current-step panel with an optional comment field and the Validate button for a VALIDATE step.](images/workflow-actions.png)
 
 ### API reference
 

@@ -24,7 +24,7 @@ notify an external system when approval completes.
 > - A dedicated IMAP mailbox invoices are forwarded to
 > - An external endpoint to receive the completion webhook
 
-<!-- screenshot: an invoice document created from an inbox import, carrying its auto-applied tag -->
+![An invoice document created from an inbox import, carrying its auto-applied "invoice" tag and the invoice PDF as a file.](images/cookbook-invoice.png)
 
 1. **Configure IMAP inbox scanning** so forwarded invoices become documents. In
    **Settings → Inbox**, set the mailbox connection and turn scanning on. See
