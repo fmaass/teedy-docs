@@ -28,13 +28,14 @@ import java.util.function.BooleanSupplier;
  * {@link TestRouteModelIntegrityConcurrency} (which drives the protocol helpers directly), these
  * race REAL REST requests through the actual resource-layer writers, so removing the lock calls
  * from RouteModelResource's shared {@code validateAndLockForWrite} gate or from GroupResource makes
- * them fail (verified during implementation; RED evidence in the session record). Both route-model
+ * them fail (verified by removing the resource-layer lock calls and watching both fail). Both route-model
  * writers (create and update) route through the same shared gate; the two scenarios here pin that
  * gate from both call sites.
  *
  * <p>Coordination: the TEST thread holds a pessimistic lock (the "gate") on a strategically chosen
  * row in its own transaction while the requests are fired, and observes the requests actually
- * parking on locks via H2's {@code INFORMATION_SCHEMA.SESSIONS.BLOCKER_ID} (a deterministic signal,
+ * parking on locks via the database's lock-wait view (H2: {@code SESSIONS.BLOCKER_ID}; PostgreSQL:
+ * {@code pg_blocking_pids} rooted at the gate's own backend PID) — a deterministic signal,
  * not a timing heuristic). Releasing the gate lets H2 serialize the requests on the REAL locks — or
  * lets them race, if the locks were removed, which the authoritative stored-blob assertion catches.
  */
@@ -59,25 +60,49 @@ public class TestRouteModelIntegrityRestConcurrency extends BaseJerseyTest {
 
     /**
      * The test-held gate: its own EntityManager + transaction holding a pessimistic row lock, plus a
-     * deterministic observer for sessions parked on locks (H2's BLOCKER_ID). Always release() in a
+     * deterministic, dialect-aware observer for sessions parked on locks. Always release() in a
      * finally block.
      */
     private static final class Gate {
         private final EntityManager em;
         private final EntityTransaction tx;
+        /** PG only: the gate connection's backend PID — the root of OUR lock queue. -1 on H2. */
+        private final int gatePid;
 
         Gate() {
             em = EMF.get().createEntityManager();
             ThreadLocalContext.get().setEntityManager(em);
             tx = em.getTransaction();
             tx.begin();
+            gatePid = EMF.isDriverPostgresql()
+                    ? ((Number) em.createNativeQuery("select pg_backend_pid()").getSingleResult()).intValue()
+                    : -1;
         }
 
-        /** Number of DB sessions currently blocked waiting on another session's lock. */
+        /**
+         * Number of DB sessions currently parked in THIS test's lock queue. Dialect-aware (dialect
+         * from {@link EMF#isDriverPostgresql()}, the hibernate.properties-driven detector production
+         * DialectUtil uses): H2 exposes parked sessions via
+         * {@code INFORMATION_SCHEMA.SESSIONS.BLOCKER_ID} (that in-memory DB serves only this fork,
+         * so any waiter is ours); PostgreSQL via {@code pg_blocking_pids} rooted at the gate
+         * connection's own backend PID — counting waiters blocked by the gate directly, plus
+         * waiters blocked by those waiters (the create race's second request queues on the FIRST
+         * request's lock, not the gate's). Pinning the signal to our queue keeps an unrelated
+         * lock-waiting session elsewhere in the database (e.g. a background app-pool session) from
+         * satisfying the barrier spuriously; {@code pg_blocking_pids} also absorbs the
+         * transactionid-vs-tuple representation of row-lock waits in pg_locks.
+         */
         long blockedSessions() {
-            return ((Number) em.createNativeQuery(
-                    "select count(*) from information_schema.sessions where blocker_id is not null")
-                    .getSingleResult()).longValue();
+            String sql = EMF.isDriverPostgresql()
+                    ? "with waiters as (" +
+                      "  select pid, pg_blocking_pids(pid) as blockers from pg_stat_activity" +
+                      "  where datname = current_database() and wait_event_type = 'Lock')" +
+                      " select count(*) from waiters w" +
+                      " where w.blockers && array[" + gatePid + "]" +
+                      "    or w.blockers && (select coalesce(array_agg(w2.pid), array[]::integer[])" +
+                      "                        from waiters w2 where w2.blockers && array[" + gatePid + "])"
+                    : "select count(*) from information_schema.sessions where blocker_id is not null";
+            return ((Number) em.createNativeQuery(sql).getSingleResult()).longValue();
         }
 
         /**

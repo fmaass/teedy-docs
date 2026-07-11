@@ -22,9 +22,11 @@ import java.util.function.Supplier;
 
 /**
  * Fast, helper-level two-transaction concurrency tests for the group-first route-model integrity
- * protocol (Phase 2, #30/#31). Each scenario runs two threads, each on its OWN EntityManager +
- * transaction against the shared in-memory H2 database (all EMs from {@link EMF} connect to the same
- * {@code jdbc:h2:mem:docs}), interleaved with latches. These drive the protocol's building blocks
+ * protocol (#30/#31). Each scenario runs two threads, each on its OWN EntityManager +
+ * transaction against the shared test database (all EMs from {@link EMF} connect to the same DB —
+ * H2 {@code mem:docs} locally, real PostgreSQL in CI), interleaved with latches. Dialect-specific
+ * bits (lock-timeout syntax) switch on {@link EMF#isDriverPostgresql()}; the pessimistic row-lock
+ * queueing semantics the interleave relies on are the same on both. These drive the protocol's building blocks
  * (lock helpers + prepare/apply repair) directly; the RESOURCE-layer writers are exercised
  * end-to-end by {@link TestRouteModelIntegrityRestConcurrency}, whose requests go through the real
  * REST endpoints.
@@ -36,7 +38,7 @@ import java.util.function.Supplier;
  * the lock, the writer blocks inside the lock call until the rename commits, so its snapshot
  * correctly sees the group gone and no orphan is written. Verified during implementation by
  * temporarily removing {@code setLockMode} from the two ForUpdate DAO methods: both tests then fail
- * on the authoritative stored-blob assertion (RED evidence in the session record).
+ * on the authoritative stored-blob assertion (verified by removing the locks and watching them fail).
  */
 public class TestRouteModelIntegrityConcurrency {
 
@@ -67,13 +69,18 @@ public class TestRouteModelIntegrityConcurrency {
     }
 
     /**
-     * Raise this session's H2 lock timeout well above the test's coordination windows (H2 default is
-     * 1000ms): the writer legitimately waits on the group lock while the rename runs its bounded
-     * snapshot-await. Session-scoped; applies to the connection the surrounding transaction holds.
+     * Bound this session's lock wait well above the test's coordination windows. Dialect-aware
+     * (dialect from {@link EMF#isDriverPostgresql()}, the same hibernate.properties-driven detector
+     * production DialectUtil uses): H2's default LOCK_TIMEOUT is 1000ms — too short, the writer
+     * legitimately waits on the group lock while the rename runs its bounded snapshot-await;
+     * PostgreSQL's default lock_timeout is 0 (wait forever) — the explicit bound keeps a broken
+     * interleave from hanging to the join timeout. Session-scoped; applies to the connection the
+     * surrounding transaction holds. Note the different SET syntax: H2 takes a bare value, PG
+     * requires {@code = value} (milliseconds in both cases).
      */
     private static void raiseLockTimeout() {
-        ThreadLocalContext.get().getEntityManager()
-                .createNativeQuery("SET LOCK_TIMEOUT 30000").executeUpdate();
+        String sql = EMF.isDriverPostgresql() ? "SET lock_timeout = 30000" : "SET LOCK_TIMEOUT 30000";
+        ThreadLocalContext.get().getEntityManager().createNativeQuery(sql).executeUpdate();
     }
 
     private static String stepsForGroup(String groupName) {
