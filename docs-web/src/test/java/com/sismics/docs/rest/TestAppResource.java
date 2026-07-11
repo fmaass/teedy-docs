@@ -316,15 +316,15 @@ public class TestAppResource extends BaseJerseyTest {
      */
     @Test
     public void testInbox() throws Exception {
-        // Reserve OS-assigned ports for the embedded GreenMail SMTP + IMAP servers (no fixed
-        // 9754/9755, so parallel test runs on one host don't collide with BindException).
-        int smtpPort;
-        int imapPort;
-        try (java.net.ServerSocket smtpSocket = new java.net.ServerSocket(0);
-             java.net.ServerSocket imapSocket = new java.net.ServerSocket(0)) {
-            smtpPort = smtpSocket.getLocalPort();
-            imapPort = imapSocket.getLocalPort();
-        }
+        // Start the embedded GreenMail SMTP + IMAP servers on OS-assigned dynamic ports and read
+        // the real bound ports back only after start — no reserve-then-release window in which
+        // another process could steal a port (BindException race, issue #33).
+        GreenMail greenMail = new GreenMail(new ServerSetup[] {
+                ServerSetup.SMTP.dynamicPort(), ServerSetup.IMAP.dynamicPort() });
+        greenMail.setUser("test@sismics.com", "Test1234");
+        greenMail.start();
+        int smtpPort = greenMail.getSmtp().getPort();
+        int imapPort = greenMail.getImap().getPort();
 
         // Login admin
         String adminToken = adminToken();
@@ -401,11 +401,8 @@ public class TestAppResource extends BaseJerseyTest {
                         .param("deleteImported", "false")
                 ), JsonObject.class);
 
+        // Client-side setup pointing at the port GreenMail actually bound.
         ServerSetup serverSetupSmtp = new ServerSetup(smtpPort, null, ServerSetup.PROTOCOL_SMTP);
-        ServerSetup serverSetupImap = new ServerSetup(imapPort, null, ServerSetup.PROTOCOL_IMAP);
-        GreenMail greenMail = new GreenMail(new ServerSetup[] { serverSetupSmtp, serverSetupImap });
-        greenMail.setUser("test@sismics.com", "Test1234");
-        greenMail.start();
 
         // Test the inbox
         json = target().path("/app/test_inbox").request()

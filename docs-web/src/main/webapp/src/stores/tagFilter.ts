@@ -259,6 +259,15 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     if (excludedTagIds.value.size) query.exclude = [...excludedTagIds.value].join(',')
     if (tagMode.value === 'or') query.mode = 'or'
     if (debouncedText.value.trim()) query.search = debouncedText.value.trim()
+    // `workflow=me` (the "Assigned to me" filter) is owned by DocumentList's
+    // component state, NOT this serializer — but this serializer is the SINGLE
+    // source of the canonical URL every navigation + the syncUrl `router.replace`
+    // build from. If it dropped the key, a tag/text/mode change would silently
+    // strip the active workflow filter from the URL. So we PRESERVE the validated
+    // key present in the current route query. Contract: only the scalar string
+    // "me" activates; arrays/empty/unknown values are inactive and canonicalized
+    // away (never re-emitted).
+    if (route.query.workflow === 'me') query.workflow = 'me'
     return query
   }
 

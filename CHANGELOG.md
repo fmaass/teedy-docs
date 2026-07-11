@@ -6,6 +6,33 @@ All notable changes to this fork are documented here. The format is based on
 
 Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teedy-docs/releases).
 
+## [3.3.0] - 2026-07-11
+
+No database migration this release: db.version stays at 43.
+
+### Added
+- Configurable OIDC claim names via the `docs.oidc_username_claim` and `docs.oidc_email_claim` system properties, plus an optional `docs.oidc_userinfo_endpoint` with UserInfo fallback for providers whose ID tokens carry only minimal claims, such as Authelia 4.38+ (#21).
+- Renaming or deleting a vocabulary entry now warns with the number of documents referencing it (#29).
+
+### Changed
+- Loading placeholders are now content-shaped skeletons instead of generic spinners; the text-processing status keeps an accessible live label (#32).
+
+### Fixed
+- The facet view no longer freezes the browser on trees with hundreds of nested tags: child arrays are capped at 20 entries — the top co-occurrences plus an overflow node when truncated — and the tree build is memoized (#12).
+- Navigating back from a document view no longer loses the "Assigned to me" filter, including when the document view is the cold-load entry point (#28).
+- The route-model validator no longer accepts SHARE step targets (#30).
+- Renaming a group no longer leaves stale names in route-model step targets: existing models are repaired under symmetric row locking, and route-model create and update now share one locked write path (#31).
+- Eliminated a port race in the test SMTP server by switching GreenMail to dynamic ports (#33).
+
+### Security
+- OIDC logins without a `sub` claim are rejected; previously each such login provisioned a new unbound user.
+- An attempted-but-failed UserInfo fetch (including a `sub` mismatch) rejects the OIDC login.
+- Concurrent first OIDC logins for the same identity converge on a single account.
+- A temporarily absent email claim can no longer overwrite a user's stored email address.
+
+### Documentation
+- Rewrote the README's OIDC identity and provisioning section (identity is issuer + `sub` only) and added an oauth2-proxy integration guide.
+
 ## [3.2.2] - 2026-07-10
 
 ### Added
@@ -97,7 +124,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[3.2.2]: https://github.com/fmaass/teedy-docs/compare/v3.2.1...HEAD
+[3.3.0]: https://github.com/fmaass/teedy-docs/compare/v3.2.2...HEAD
+[3.2.2]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.2
 [3.2.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.1
 [3.1.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.1.0
 [3.0.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.0.0

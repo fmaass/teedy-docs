@@ -40,3 +40,9 @@ export function updateVocabularyEntry(
 export function deleteVocabularyEntry(id: string) {
   return api.delete<{ status: string }>(`/vocabulary/${id}`)
 }
+
+// Count the distinct active documents referencing a vocabulary entry's value (admin-only).
+// A warning-time snapshot the admin UI shows before a destructive rename/delete.
+export function getVocabularyUsage(id: string) {
+  return api.get<{ document_count: number }>(`/vocabulary/${id}/usage`)
+}

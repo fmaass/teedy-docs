@@ -203,7 +203,8 @@
       "type": "Typ",
       "view": "Diese Version öffnen",
       "empty": "Diese Datei hat keine früheren Versionen.",
-      "load_failed": "Versionsverlauf konnte nicht geladen werden"
+      "load_failed": "Versionsverlauf konnte nicht geladen werden",
+      "loading": "Versionsverlauf wird geladen …"
     },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
@@ -642,7 +643,10 @@
       "failed_create": "Vokabular konnte nicht erstellt werden",
       "delete_title": "Vokabulareintrag löschen",
       "delete_confirm": "Den Eintrag \"{value}\" löschen?",
-      "delete_last_confirm": "Dies ist der letzte Eintrag von \"{name}\". Beim Löschen wird das gesamte Vokabular entfernt."
+      "delete_last_confirm": "Dies ist der letzte Eintrag von \"{name}\". Beim Löschen wird das gesamte Vokabular entfernt.",
+      "rename_title": "Vokabulareintrag umbenennen",
+      "delete_referenced_confirm": "Der Wert \"{value}\" wird derzeit von etwa {count} Dokument verwendet. Beim Löschen des Eintrags bleibt dieser Wert verwaist auf dem Dokument zurück. Trotzdem löschen? | Der Wert \"{value}\" wird derzeit von etwa {count} Dokumenten verwendet. Beim Löschen des Eintrags bleibt dieser Wert verwaist auf diesen Dokumenten zurück. Trotzdem löschen?",
+      "rename_referenced_confirm": "Der Wert \"{value}\" wird derzeit von etwa {count} Dokument verwendet, das nicht auf den neuen Wert aktualisiert wird. Trotzdem umbenennen? | Der Wert \"{value}\" wird derzeit von etwa {count} Dokumenten verwendet, die nicht auf den neuen Wert aktualisiert werden. Trotzdem umbenennen?"
     },
     "monitoring": {
       "title": "Überwachung",
@@ -831,6 +835,7 @@
     "retry": "Erneut versuchen",
     "tree_view": "Baum",
     "facets_view": "Facetten",
+    "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",
     "mode_or": "ODER",
     "bulk": {

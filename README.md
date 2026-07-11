@@ -67,7 +67,7 @@ A preconfigured Docker image is available, including OCR and media conversion to
 
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.2.2`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.3.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data`. Don't forget to mount a volume on it.
@@ -162,6 +162,9 @@ Configure via `JAVA_TOOL_OPTIONS` environment variable (e.g., `-Ddocs.oidc_enabl
 | `docs.oidc_authorization_endpoint` | No | Override the authorization endpoint (see Docker networking below) |
 | `docs.oidc_token_endpoint` | No | Override the token endpoint (see Docker networking below) |
 | `docs.oidc_jwks_uri` | No | Override the JWKS URI (see Docker networking below) |
+| `docs.oidc_userinfo_endpoint` | No | Override the UserInfo endpoint (see Docker networking below). If unset, it is taken from the discovery document. Consulted only when a configured claim is missing from the ID token. |
+| `docs.oidc_username_claim` | No | Claim used to derive the local username at provisioning time (default: `preferred_username`). |
+| `docs.oidc_email_claim` | No | Claim used for the user's email at provisioning and on profile refresh (default: `email`). |
 
 ### How It Works
 
@@ -169,13 +172,20 @@ Configure via `JAVA_TOOL_OPTIONS` environment variable (e.g., `-Ddocs.oidc_enabl
 2. Teedy redirects to the OIDC provider's authorization endpoint (with PKCE challenge)
 3. After authentication, the provider redirects back to `/api/oidc/callback`
 4. Teedy exchanges the authorization code for tokens (with PKCE verifier), verifies the ID token signature (RSA via JWKS), and validates issuer, audience, and nonce claims
-5. The user is matched by OIDC subject (stable binding), then by `preferred_username`, then by `email`. If no match exists, a new user is auto-provisioned with the `user` role
+5. The user is identified **solely** by the OIDC `(issuer, sub)` pair (stable subject binding). Teedy does **not** match or auto-link to an existing account by username or email — that would allow account takeover, so the first login for a given `sub` always provisions a brand-new user with the `user` role. Claims (`docs.oidc_username_claim`, `docs.oidc_email_claim`) supply the *provisioning* username/email and refresh the stored email on later logins; they never change which account you are logged into.
 6. A session cookie is set and the user is redirected to the application (preserving the original URL if the user followed a deep link)
+
+#### Identity, claims, and provisioning (important)
+
+- **`sub` is the only identity key.** Login requires a `sub` claim; a token without one is rejected. The stored binding is `(issuer, sub)`, enforced unique in the database (`IDX_USER_OIDC`), so repeated logins with the same identity always converge on the same single account — even under concurrent first logins.
+- **Claims affect profile data, never account linking.** `docs.oidc_username_claim` (default `preferred_username`) is sanitized to Teedy's username charset and suffixed with a deterministic hash of the identity, so two providers/subjects that share a display name never collide. `docs.oidc_email_claim` (default `email`) sets the address at provisioning and refreshes it on later logins — but a temporarily absent or invalid email claim never overwrites a previously stored address.
+- **UserInfo is the supported claim source for minimal-ID-token providers.** When a configured claim is absent from the ID token (default Authelia ≥ 4.38 ships a minimal ID token), Teedy fetches the provider's UserInfo endpoint with the access token and verifies the returned `sub` exactly matches the ID-token `sub` before consuming any claim (a mismatched response is rejected). The endpoint is `docs.oidc_userinfo_endpoint` if set, else the discovery document's `userinfo_endpoint`.
 
 ### Security Features
 
 - **PKCE (S256)**: Protects against authorization code interception
-- **Stable subject binding**: After first login, users are bound to their IdP `sub` claim, preventing email-based account takeover
+- **Stable subject binding**: Users are identified only by `(issuer, sub)` — never by username or email — preventing account takeover. A token with no `sub` is rejected, and the binding is enforced unique in the database so re-provisioning is idempotent
+- **Sub-verified UserInfo**: When claims are read from the UserInfo endpoint, its `sub` must exactly match the ID-token `sub` or the response is discarded (fail closed)
 - **JWKS validation**: Keys are filtered by kty/use/alg; cache refreshes automatically on key rotation
 - **Discovery issuer verification**: The OIDC discovery document's issuer is cross-checked against configuration
 - **Nonce verification**: Fail-closed — missing nonce always rejects the login
@@ -195,9 +205,10 @@ JAVA_TOOL_OPTIONS: >-
   -Ddocs.oidc_authorization_endpoint=https://auth.example.com/api/oidc/authorization
   -Ddocs.oidc_token_endpoint=http://authelia:9091/api/oidc/token
   -Ddocs.oidc_jwks_uri=http://authelia:9091/jwks.json
+  -Ddocs.oidc_userinfo_endpoint=http://authelia:9091/api/oidc/userinfo
 ```
 
-The authorization endpoint uses the external URL (browser redirect), while the token endpoint and JWKS URI use internal Docker DNS (server-to-server).
+The authorization endpoint uses the external URL (browser redirect), while the token, JWKS, and UserInfo endpoints use internal Docker DNS (server-to-server). The UserInfo endpoint is only contacted when a configured claim is missing from the ID token.
 
 ### Authelia Setup
 
@@ -234,11 +245,20 @@ identity_providers:
         claims_policy: 'teedy'
 ```
 
-Without the `claims_policy`, the ID token will only contain the `sub` claim (an opaque UUID), and Teedy will be unable to match existing users.
+The `claims_policy` above puts `preferred_username`/`email` directly in the ID token, which is the simplest setup. If you omit it, the ID token carries only the `sub` claim (an opaque UUID); Teedy then falls back to the **UserInfo endpoint** to read the configured claims (see *Identity, claims, and provisioning* above). Either way, login works and the account is bound to `(issuer, sub)` — the claims only determine the provisioning username and the stored email, never which account you sign in to. To use a claim other than `preferred_username`/`email` (for example a Keycloak protocol-mapper claim), set `docs.oidc_username_claim` / `docs.oidc_email_claim` accordingly.
 
 ### Coexistence with Header Auth
 
 OIDC and header-based proxy auth (`-Ddocs.header_authentication=true`) can both be active simultaneously. Header auth is useful as a fallback for API access from the local network, while OIDC provides proper per-user identity for browser sessions.
+
+### Running behind oauth2-proxy
+
+If you put [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) in front of Teedy instead of (or in addition to) using the native OIDC client, four details are commonly misconfigured:
+
+- **Header modes are not interchangeable.** In **nginx `auth_request` mode**, the authenticated identity comes back as *response* headers `X-Auth-Request-User` / `X-Auth-Request-Email` — these require `--set-xauthrequest` (default **false**) and must be surfaced to the upstream via `auth_request_set` in your nginx config. In **reverse-proxy mode**, oauth2-proxy forwards the request itself and injects *request* headers `X-Forwarded-User` / `X-Forwarded-Email` via `--pass-user-headers` (default **true**). Pick one model and wire the matching header names; expecting `X-Auth-Request-*` without `--set-xauthrequest` is the usual cause of "the proxy authenticates but the app sees no user". To feed Teedy's header auth, map the chosen header onto `X-Authenticated-User` and configure `docs.header_authentication_trusted_proxies`.
+- **Uploads.** On the nginx `/oauth2/auth` subrequest location, use the vendor-documented pattern `proxy_pass_request_body off;` + `proxy_set_header Content-Length "";` so request bodies never hit the auth endpoint. Keep `client_max_body_size` on the *application* location, sized to match `DOCS_MAX_UPLOAD_SIZE`.
+- **Logout.** `/oauth2/sign_out?rd=<url-encoded provider logout URL>` clears **only the proxy cookie**; the IdP session ends only if `rd=` redirects on to the provider's logout URL. The redirect target's domain must be listed in `--whitelist-domain` — entries are `domain[:port]` values (not URLs); a leading `.` (e.g. `.example.com`) matches subdomains.
+- **Local-admin escape hatch.** Keep a path to the login form that does not depend on the proxy: the built-in `admin` account authenticates against the local database and is deliberately never authenticated through the proxy header path, so a misconfigured or down IdP/proxy cannot lock you out.
 
 ## Examples
 
@@ -249,7 +269,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.2.2
+    image: ghcr.io/fmaass/teedy-docs:v3.3.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -308,7 +328,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.2.2
+    image: ghcr.io/fmaass/teedy-docs:v3.3.0
     restart: unless-stopped
     ports:
       - 8080:8080

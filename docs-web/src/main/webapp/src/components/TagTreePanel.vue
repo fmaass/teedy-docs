@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type Tag } from '../api/tag'
+import type { FacetTreeNodeData, OverflowNodeData } from '../composables/useCoOccurrenceTree'
 import Tree from 'primevue/tree'
 import SelectButton from 'primevue/selectbutton'
 
@@ -10,8 +11,15 @@ const { t } = useI18n()
 interface TagTreeNode {
   key: string
   label: string
-  data: Tag
+  // Tree/facet nodes carry a tag; facet trees additionally emit a terminal
+  // overflow node whose data is the discriminated overflow shape.
+  data: FacetTreeNodeData
   children: TagTreeNode[]
+}
+
+/** Discriminate the overflow node without extending the "__" key heuristic. */
+function isOverflowNode(node: { data?: unknown }): node is { data: OverflowNodeData } {
+  return !!node.data && (node.data as { kind?: string }).kind === 'overflow'
 }
 
 interface ModeOption {
@@ -83,7 +91,16 @@ function getNodeCount(node: any): number | undefined {
       class="tag-tree"
     >
       <template #default="{ node }">
+        <!-- Terminal "…and K more" overflow node (#12): NON-interactive. No
+             button role, no tabindex, no aria-pressed, no activation handlers —
+             its key is not a real tag id and must never reach tagFilter. -->
+        <div v-if="isOverflowNode(node)" class="tag-tree-node tag-overflow">
+          <span class="tag-name tag-overflow-label">
+            {{ t('ui.facets_overflow', { count: (node.data as OverflowNodeData).hiddenCount }) }}
+          </span>
+        </div>
         <div
+          v-else
           class="tag-tree-node"
           :class="{
             'tag-active': selectedTagIds.has(nodeTagId(node.key)),
@@ -174,6 +191,23 @@ function getNodeCount(node: any): number | undefined {
 }
 
 .tag-tree-node.tag-dimmed { opacity: 0.4; }
+
+.tag-tree-node.tag-overflow {
+  cursor: default;
+  font-style: italic;
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+}
+
+.tag-tree-node.tag-overflow:hover { background: transparent; }
+
+.tag-overflow-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .state-icon { font-size: 0.75rem; flex-shrink: 0; }
 .state-icon.include { color: var(--p-primary-color); }

@@ -1,27 +1,63 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h, computed } from 'vue'
+import { defineComponent, h, computed, watch as vueWatch } from 'vue'
 
 // --- Router under mock: assert the dblclick navigation target + history state ---
 const routerPush = vi.hoisted(() => vi.fn())
-vi.mock('vue-router', () => ({
-  // resolve echoes the query into fullPath so a test can assert returnTo carries
-  // the active filter (buildFilterQuery output), not just a bare route.
-  useRouter: () => ({
-    push: routerPush,
-    resolve: (to: { query?: Record<string, string> }) => ({
-      fullPath: '/documents?' + new URLSearchParams(to.query ?? {}).toString(),
+const routerReplace = vi.hoisted(() => vi.fn())
+// A hoisted holder for the mutable reactive route. The reactive object itself is
+// created inside the (async) vue-router mock factory — where a dynamic import of
+// vue is allowed — and stashed on the holder so tests can drive workflow=me
+// hydration by reassigning `routeHolder.route.query`. `reactive` lets the
+// component's immediate route-query watcher fire on that reassignment, modelling a
+// real Back / cold-load navigation.
+const routeHolder = vi.hoisted(() => ({ route: { query: {} as Record<string, unknown> } }))
+vi.mock('vue-router', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  routeHolder.route = reactive({ query: {} as Record<string, unknown> })
+  return {
+    // resolve echoes the query into fullPath so a test can assert returnTo carries
+    // the active filter (buildFilterQuery output), not just a bare route.
+    useRouter: () => ({
+      push: routerPush,
+      replace: routerReplace,
+      resolve: (to: { query?: Record<string, string> }) => ({
+        fullPath: '/documents?' + new URLSearchParams(to.query ?? {}).toString(),
+      }),
     }),
-  }),
-}))
+    useRoute: () => routeHolder.route,
+  }
+})
+// Always read through the holder — the factory swaps `routeHolder.route` for a
+// reactive object at mock-init time, so a captured reference would go stale.
+const mockRoute = { get query() { return routeHolder.route.query }, set query(v: Record<string, unknown>) { routeHolder.route.query = v } }
 
 // Mutable filter state so a test can switch between "no filters" and "active
 // filter" without a second global mock. Read by the tagFilter store mock below.
-const filterState = vi.hoisted(() => ({
-  selectedTags: [] as { id: string; name: string }[],
-  debouncedText: '',
-  filterQuery: {} as Record<string, string>,
+// `filterQuery` mirrors the real store contract: buildFilterQuery preserves a
+// validated workflow=me present in the route query (component-owned key).
+// Same holder pattern as the route: the store mock factory swaps `state` for a
+// Vue-reactive object so a test mutation of debouncedText propagates through the
+// store's `combinedSearch` getter into the component's reactive queryKey — which
+// makes the mocked list query REFETCH (see the vue-query mock), so a test can
+// assert the params of a genuinely NEW request, not the mount-time one.
+const filterHolder = vi.hoisted(() => ({
+  state: {
+    selectedTags: [] as { id: string; name: string }[],
+    debouncedText: '',
+    filterQuery: {} as Record<string, string>,
+  },
 }))
+// Delegating accessor so tests keep the ergonomic `filterState.x = y` writes while
+// always hitting the (swapped-in) reactive object.
+const filterState = {
+  get selectedTags() { return filterHolder.state.selectedTags },
+  set selectedTags(v: { id: string; name: string }[]) { filterHolder.state.selectedTags = v },
+  get debouncedText() { return filterHolder.state.debouncedText },
+  set debouncedText(v: string) { filterHolder.state.debouncedText = v },
+  get filterQuery() { return filterHolder.state.filterQuery },
+  set filterQuery(v: Record<string, string>) { filterHolder.state.filterQuery = v },
+}
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
 
@@ -50,24 +86,38 @@ vi.mock('../../api/document', () => ({
 }))
 
 // --- Tag filter store: minimal surface the view reads ---
-vi.mock('../../stores/tagFilter', () => ({
-  useTagFilterStore: () => ({
-    combinedSearch: '',
-    tagMode: 'and',
-    selectedTagIds: new Set(),
-    get selectedTags() { return filterState.selectedTags },
-    excludedTags: [],
-    relatedTags: [],
-    allTags: [],
-    get debouncedText() { return filterState.debouncedText },
-    hasActiveFilters: false,
-    searchText: '',
-    clearFilters: vi.fn(),
-    removeTag: vi.fn(),
-    toggleTag: vi.fn(),
-    buildFilterQuery: () => filterState.filterQuery,
-  }),
-}))
+vi.mock('../../stores/tagFilter', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  filterHolder.state = reactive(filterHolder.state)
+  return {
+    useTagFilterStore: () => ({
+      // LIVE getter over the reactive state (like the real store's computed):
+      // a debouncedText mutation changes the component's queryKey and triggers
+      // the mocked query's refetch — required for non-vacuous "params survive a
+      // filter change" assertions.
+      get combinedSearch() { return filterHolder.state.debouncedText },
+      tagMode: 'and',
+      selectedTagIds: new Set(),
+      get selectedTags() { return filterHolder.state.selectedTags },
+      excludedTags: [],
+      relatedTags: [],
+      allTags: [],
+      get debouncedText() { return filterHolder.state.debouncedText },
+      hasActiveFilters: false,
+      searchText: '',
+      clearFilters: vi.fn(),
+      removeTag: vi.fn(),
+      toggleTag: vi.fn(),
+      // Mirrors the real store: the canonical serializer preserves a validated
+      // workflow=me present in the route query (component-owned key), so returnTo
+      // and the syncUrl rewrite never strip it.
+      buildFilterQuery: () => ({
+        ...filterHolder.state.filterQuery,
+        ...(mockRoute.query.workflow === 'me' ? { workflow: 'me' } : {}),
+      }),
+    }),
+  }
+})
 
 vi.mock('../../composables/useDocumentTags', () => ({
   useDocumentTags: () => ({ addTag: vi.fn(), removeTag: vi.fn() }),
@@ -83,6 +133,7 @@ vi.mock('@tanstack/vue-query', () => ({
   useQuery: (opts: {
     queryKey?: { value: unknown }
     enabled?: { value: boolean }
+    queryFn?: () => unknown
   }) => {
     // The slide-over query carries an `enabled` ref; its queryKey is
     // ['document', id]. Reactively derive the currently-open doc from the key so
@@ -102,7 +153,16 @@ vi.mock('@tanstack/vue-query', () => ({
         refetch: vi.fn(),
       }
     }
-    // The list query resolves to our documents.
+    // The list query resolves to our documents. Invoke the real queryFn so the
+    // listDocuments mock records the ACTUAL params the view sends (proving
+    // search[searchworkflow]=me is threaded when the workflow filter is active).
+    // Re-run on every reactive queryKey change to mirror TanStack Query's
+    // refetch-on-key-change — this is what makes a Back-nav (which flips
+    // workflowMe, a queryKey member) re-issue listDocuments with the new params.
+    opts.queryFn?.()
+    if (opts.queryKey && 'value' in opts.queryKey) {
+      vueWatch(() => opts.queryKey!.value, () => opts.queryFn?.())
+    }
     return {
       data: { value: { documents: [doc, docB], total: 2 } },
       isLoading: { value: false },
@@ -132,6 +192,8 @@ const DocumentTableStub = defineComponent({
 const passthrough = defineComponent({ setup: () => () => h('div') })
 
 import DocumentList from './DocumentList.vue'
+import { listDocuments } from '../../api/document'
+const listDocumentsMock = listDocuments as unknown as ReturnType<typeof vi.fn>
 
 function mountView() {
   return mount(DocumentList, {
@@ -158,6 +220,8 @@ function mountView() {
 describe('DocumentList — single vs double click (#25)', () => {
   beforeEach(() => {
     routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
     filterState.selectedTags = []
     filterState.debouncedText = ''
     filterState.filterQuery = {}
@@ -256,5 +320,155 @@ describe('DocumentList — single vs double click (#25)', () => {
     )
     expect(wrapper.find('.slide-over').exists()).toBe(false)
     vi.useRealTimers()
+  })
+})
+
+// --- #28: the "Assigned to me" (workflow=me) filter round-trip. workflowMe lives
+//     in component state, but the returnTo query + the URL rewrite must carry it,
+//     and the documents route must hydrate it on BOTH entry paths (in-app Back via
+//     push(returnTo) AND a cold URL load). The listDocuments call must then send
+//     search[searchworkflow]=me — the authoritative proof the filter is live. ---
+describe('DocumentList — workflow=me returnTo round-trip (#28)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+  })
+
+  it('with workflow=me active, returnTo carries workflow=me (Back restores it)', () => {
+    mockRoute.query = { workflow: 'me' }
+    filterState.filterQuery = { tags: 't1' }
+    const wrapper = mountView()
+    // buildDocumentViewState feeds openDocumentFull's returnTo; drive the dblclick.
+    return wrapper.find('button.double').trigger('click').then(() => {
+      const state = routerPush.mock.calls.at(-1)![0].state as { returnTo: string }
+      expect(state.returnTo).toContain('workflow=me')
+      expect(state.returnTo).toContain('tags=t1')
+    })
+  })
+
+  it('a cold URL load of ?workflow=me activates the filter → listDocuments sends search[searchworkflow]=me', () => {
+    mockRoute.query = { workflow: 'me' }
+    mountView()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params['search[searchworkflow]']).toBe('me')
+  })
+
+  it('without the filter, listDocuments omits search[searchworkflow]', () => {
+    mockRoute.query = {}
+    mountView()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params['search[searchworkflow]']).toBeUndefined()
+  })
+
+  it('an in-app Back (route query changes to workflow=me) re-activates the filter', async () => {
+    const wrapper = mountView()
+    // Cold mount with no workflow: filter off.
+    let params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params['search[searchworkflow]']).toBeUndefined()
+    // Simulate returning to the list with the workflow filter in the URL.
+    mockRoute.query = { workflow: 'me' }
+    await flushPromises()
+    void wrapper
+    params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params['search[searchworkflow]']).toBe('me')
+  })
+
+  it('a free-text/tag change while workflow=me is active does NOT strip it from the NEXT request', async () => {
+    mockRoute.query = { workflow: 'me' }
+    mountView()
+    await flushPromises()
+    // Mount-time request: workflow active, no search yet.
+    const callsAfterMount = listDocumentsMock.mock.calls.length
+    const mountParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(mountParams['search[searchworkflow]']).toBe('me')
+    expect(mountParams.search).toBeUndefined()
+
+    // Change the filter dimension the store owns; workflow stays in the route.
+    // The reactive store state drives the component's queryKey, so this triggers
+    // a REAL refetch through the mocked query (see the vue-query mock's
+    // key-change watcher) — no manual queryFn poking.
+    filterState.debouncedText = 'invoice'
+    filterState.filterQuery = { search: 'invoice' }
+    await flushPromises()
+
+    // Non-vacuous: a NEW request happened, and it is provably the post-change one
+    // (it carries the new search) — a broken component that dropped workflow on a
+    // search change fails the last assertion; one that never refetched fails the
+    // count assertion.
+    expect(listDocumentsMock.mock.calls.length).toBeGreaterThan(callsAfterMount)
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.search).toBe('invoice')
+    expect(params['search[searchworkflow]']).toBe('me')
+  })
+
+  // --- Canonicalization on entry: only the scalar "me" is a valid workflow value.
+  //     Any OTHER present value (unknown scalar, empty, array) must be REWRITTEN
+  //     out of the URL on route-entry evaluation — otherwise ?workflow=them (etc.)
+  //     sits in the URL indefinitely: the hydration watcher only turns the toggle
+  //     off, the toggle watcher early-returns (off == not-'me'), and the store's
+  //     rewrite only fires on tag/text/mode changes. ---
+  it('cold-loading an UNKNOWN workflow value canonicalizes it out of the URL', async () => {
+    mockRoute.query = { workflow: 'them' }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).toHaveBeenCalled()
+    const q = routerReplace.mock.calls.at(-1)![0].query as Record<string, string>
+    expect(q.workflow).toBeUndefined()
+    // And the filter is NOT active.
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params['search[searchworkflow]']).toBeUndefined()
+  })
+
+  it('canonicalizing an invalid workflow does NOT drop not-yet-hydrated dimensions (cold-load race)', async () => {
+    // Cold load of ?tags=t1&workflow=them: the tag store DEFERS tag-ID hydration
+    // until the tags request settles, so buildFilterQuery() returns {} at the
+    // moment the canonicalizing replace fires. The replace must therefore be
+    // SURGICAL — the current route query minus the workflow key — never a rebuild
+    // from the (still-empty) serializer, or the valid raw tags=t1 is dropped from
+    // the URL before it can hydrate.
+    mockRoute.query = { tags: 't1', workflow: 'them' }
+    filterState.filterQuery = {} // hydration unresolved: the serializer has nothing yet
+    mountView()
+    await flushPromises()
+    expect(routerReplace).toHaveBeenCalled()
+    const q = routerReplace.mock.calls.at(-1)![0].query as Record<string, string>
+    expect(q.workflow).toBeUndefined()
+    expect(q.tags).toBe('t1') // raw, not-yet-hydrated param preserved verbatim
+  })
+
+  it('empty and array workflow values are canonicalized away too', async () => {
+    mockRoute.query = { workflow: '' }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).toHaveBeenCalled()
+    expect(
+      (routerReplace.mock.calls.at(-1)![0].query as Record<string, string>).workflow,
+    ).toBeUndefined()
+
+    routerReplace.mockClear()
+    mockRoute.query = { workflow: ['me', 'me'] }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).toHaveBeenCalled()
+    expect(
+      (routerReplace.mock.calls.at(-1)![0].query as Record<string, string>).workflow,
+    ).toBeUndefined()
+  })
+
+  it('a VALID workflow=me (and an absent key) triggers NO canonicalizing replace on entry', async () => {
+    mockRoute.query = { workflow: 'me' }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).not.toHaveBeenCalled()
+
+    mockRoute.query = {}
+    mountView()
+    await flushPromises()
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 })

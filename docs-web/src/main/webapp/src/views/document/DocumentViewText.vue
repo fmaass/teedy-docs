@@ -5,7 +5,6 @@ import { getFileContent, getFileList, reprocessFile } from '../../api/file'
 import { shouldPoll } from '../../utils/fileProcessing'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
-import ProgressSpinner from 'primevue/progressspinner'
 import EmptyState from '../../components/EmptyState.vue'
 import { useToast } from 'primevue/usetoast'
 import { injectDocument } from './documentKey'
@@ -171,9 +170,11 @@ function fileIcon(mime: string) {
           <span
             v-if="ft.processing"
             class="status-badge status-processing"
+            role="status"
+            aria-live="polite"
             v-tooltip="t('ui.processing_tooltip')"
           >
-            <ProgressSpinner class="processing-spinner" stroke-width="6" />
+            <i class="pi pi-spin pi-spinner processing-icon" aria-hidden="true" />
             {{ t('ui.processing') }}
           </span>
           <span
@@ -197,9 +198,14 @@ function fileIcon(mime: string) {
         />
       </div>
 
-      <div v-if="ft.processing" class="file-text-processing">
-        <ProgressSpinner class="processing-spinner-lg" stroke-width="5" />
-        <span>{{ t('ui.processing') }}</span>
+      <div v-if="ft.processing" class="file-text-processing" role="status" aria-live="polite">
+        <span class="file-text-processing-label">
+          <i class="pi pi-spin pi-spinner processing-icon" aria-hidden="true" />
+          {{ t('ui.processing') }}
+        </span>
+        <Skeleton height="1rem" class="mb-2" />
+        <Skeleton height="1rem" width="80%" class="mb-2" />
+        <Skeleton height="1rem" width="60%" />
       </div>
       <div v-else-if="ft.loading" class="file-text-loading">
         <Skeleton height="1rem" class="mb-2" />
@@ -288,31 +294,25 @@ function fileIcon(mime: string) {
   background: var(--p-primary-100, var(--p-content-hover-background));
   color: var(--p-primary-color);
 }
-.processing-spinner {
-  width: 0.85rem;
-  height: 0.85rem;
-}
-.processing-spinner :deep(.p-progressspinner-circle) {
-  stroke: var(--p-primary-color);
-  animation-duration: 1.4s;
+.processing-icon {
+  font-size: 0.75rem;
+  color: var(--p-primary-color);
 }
 
 .file-text-processing {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 1.5rem;
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
 }
-.processing-spinner-lg {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-.processing-spinner-lg :deep(.p-progressspinner-circle) {
-  stroke: var(--p-primary-color);
-  animation-duration: 1.4s;
+.file-text-processing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--p-primary-color);
+  font-weight: 500;
 }
 
 .file-text-loading {

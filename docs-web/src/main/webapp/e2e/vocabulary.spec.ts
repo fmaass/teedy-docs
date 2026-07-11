@@ -92,6 +92,63 @@ test('admin vocabulary CRUD: create namespace, entries, rename, reorder, delete'
   }
 })
 
+test('deleting a referenced vocabulary entry warns with the usage count and proceeds on confirm', async ({ page, request }) => {
+  // A namespace name must match ^[a-z0-9-]+$.
+  const ns = unique('vocref').replace(/[^a-z0-9]/gi, '-').toLowerCase()
+  const value = `ref-${Date.now()}`
+  let metadataId: string | undefined
+  let docId: string | undefined
+
+  try {
+    // --- Seed a referenced value entirely via the admin API ---
+    // 1) Create the vocabulary entry (a namespace with one value).
+    const vocRes = await request.put('/api/vocabulary', {
+      form: { name: ns, value, order: '0' },
+    })
+    expect(vocRes.ok()).toBeTruthy()
+    const entryId = (await vocRes.json()).id as string
+
+    // 2) A VOCABULARY metadata field referencing that namespace.
+    const metaRes = await request.put('/api/metadata', {
+      form: { name: `${ns}-field`, type: 'VOCABULARY', vocabulary: ns },
+    })
+    expect(metaRes.ok()).toBeTruthy()
+    metadataId = (await metaRes.json()).id as string
+
+    // 3) A document carrying that value under the field — this is the reference.
+    const docRes = await request.put('/api/document', {
+      form: { title: unique('vocref-doc'), language: 'eng', metadata_id: metadataId, metadata_value: value },
+    })
+    expect(docRes.ok()).toBeTruthy()
+    docId = (await docRes.json()).id as string
+
+    // --- Delete the entry through the admin UI; the confirm must carry the count ---
+    await page.goto('/#/settings/vocabulary')
+    await page.locator('#vocabulary-name').click()
+    await page.getByRole('option', { name: ns, exact: true }).click()
+
+    await page.getByRole('row', { name: new RegExp(value) })
+      .getByRole('button', { name: 'Delete vocabulary entry' }).click()
+
+    // The reference-count confirm dialog names the value and the (single) document.
+    const dialog = page.getByRole('alertdialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(value)
+    await expect(dialog).toContainText('1 document')
+
+    // Proceeds only on confirm.
+    await dialog.getByRole('button', { name: 'Yes' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(page.getByText('Entry deleted')).toBeVisible()
+    await expect(page.getByRole('cell', { name: value, exact: true })).toHaveCount(0)
+  } finally {
+    // Teardown: remove the document, the metadata field, and any surviving vocab entry.
+    if (docId) await request.delete(`/api/document/${docId}`).catch(() => {})
+    if (metadataId) await request.delete(`/api/metadata/${metadataId}`).catch(() => {})
+    await purgeVocabulary(request, ns)
+  }
+})
+
 test('a vocabulary value backs the document Type dropdown', async ({ page }) => {
   // Add a unique value to the built-in `type` namespace, then confirm the document
   // editor's Type Select offers it as an option. Cleaned up afterwards.
