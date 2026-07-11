@@ -15,8 +15,8 @@ import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS } from './aboutHighlights'
 // bump, which is exactly how the 3.1.0 bullets survived unchanged to 3.4.0.
 
 describe('AboutDialog highlights', () => {
-  it('pins the What\'s-new heading to the 3.4.0 highlights', () => {
-    expect(HIGHLIGHTS_VERSION).toBe('3.4.0')
+  it('pins the What\'s-new heading to the 3.4 highlights', () => {
+    expect(HIGHLIGHTS_VERSION).toBe('3.4.1')
   })
 
   it('surfaces concrete 3.4.0 highlights in both locales', () => {

@@ -6,6 +6,25 @@ All notable changes to this fork are documented here. The format is based on
 
 Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teedy-docs/releases).
 
+## [3.4.1] - 2026-07-12
+
+No database migration this release: db.version stays at 46. A patch release folding in five fixes surfaced by the post-3.4.0 audit, plus extended end-to-end coverage and a hardened test harness.
+
+### Added
+- End-to-end coverage for four previously unexercised surfaces: API keys are proven to authenticate requests (bearer accepted; anonymous, garbage, and revoked rejected), webhook delivery is observed end-to-end (registration must succeed and the delivery is asserted as a POST carrying the created document id), the German language switch renders real `de.json` strings and persists, and the dark-mode toggle is verified by computed style rather than class name.
+- Security overrides on six provably-anonymous API operations so the OpenAPI spec and Swagger UI stop misrepresenting the public surface.
+
+### Changed
+- The e2e harness rejects a reused WAR whose version mismatches the pom (`E2E_ALLOW_STALE_WAR=1` overrides) — a stale WAR had silently produced bogus failures under newer specs; screenshot regeneration is gated behind `E2E_UPDATE_SCREENSHOTS=1` so verification runs no longer dirty the tree.
+
+### Fixed
+- Storage purge no longer aborts wholesale: `T_SAVED_FILTER`'s `ON DELETE RESTRICT` foreign key made `/app/batch/clean_storage` stop all reclaim once any soft-deleted user had ever saved a filter; the purge now deletes those filters in the same transaction before the user hard-delete.
+- The OIDC settings admin form clears the entered client secret after a successful save instead of keeping it revealable and resendable.
+- The About dialog's "What's new" highlights, frozen at 3.1.0 while the app shipped 3.4.0, now reflect the 3.4 release in English and German, with a guard test pinning the highlights version to the pom so they can never silently go stale again.
+
+### Security
+- OIDC logout now binds the stored ID token to the configured client: `resolveLogoutUrl` requires the token's audience to contain the configured `client_id` in addition to matching the pinned issuer, falling back to local-only logout on a mismatch exactly like an issuer mismatch — closing the advertised provider-binding contract.
+
 ## [3.4.0] - 2026-07-11
 
 Three database migrations this release: db.version moves from 43 to 46 (`dbupdate-044` adds the saved-filters table; `dbupdate-045` widens the config value column; `dbupdate-046` pins the OIDC provider on in-flight login state).
@@ -153,6 +172,7 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
+[3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1
 [3.4.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.0
 [3.3.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.3.0
 [3.2.2]: https://github.com/fmaass/teedy-docs/releases/tag/v3.2.2

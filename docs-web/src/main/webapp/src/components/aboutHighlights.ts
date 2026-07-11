@@ -5,7 +5,7 @@
 // The What's-New bullets are hand-curated for a SPECIFIC release, so the heading
 // is pinned to that release — NOT the live server version, which drifts ahead of
 // the bullets on every patch. The v{version} brand badge shows the live version.
-export const HIGHLIGHTS_VERSION = '3.4.0'
+export const HIGHLIGHTS_VERSION = '3.4.1'
 
 // Each entry is an i18n key so the bullets translate. The list is intentionally
 // short and accurate to the 3.4.0 line (clickable tag chips, saved filters,
