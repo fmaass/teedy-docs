@@ -18,8 +18,10 @@ import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
+import jakarta.persistence.TypedQuery;
 import java.io.StringReader;
 import java.sql.Timestamp;
 import java.util.*;
@@ -98,6 +100,46 @@ public class RouteModelDao {
         } catch (NoResultException e) {
             return null;
         }
+    }
+
+    /**
+     * Gets an active route model by its ID, acquiring a pessimistic write lock (SELECT ... FOR UPDATE,
+     * dialect-portable via LockModeType.PESSIMISTIC_WRITE) on the row for the remainder of the
+     * caller's transaction. Used by the group-rename repair path to serialize its read-modify-write of
+     * the {@code RTM_STEPS_C} blob against a concurrent route-model update (which locks the referenced
+     * GROUP rows first, so the two orders compose into the group-first protocol).
+     *
+     * @param id Route model ID
+     * @return The locked active route model, or null if it does not exist or is deleted
+     */
+    public RouteModel getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<RouteModel> q = em.createQuery("select r from RouteModel r where r.id = :id and r.deleteDate is null", RouteModel.class);
+        q.setParameter("id", id);
+        q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Overwrites only the steps blob of a route model (and re-syncs its derived target index),
+     * without touching its name. Used by the group-rename repair path, which has already locked the
+     * row via {@link #getActiveByIdForUpdate}. No audit log is written here — the enclosing group
+     * rename is the audited operation.
+     *
+     * @param id Route model ID
+     * @param steps New steps JSON blob
+     */
+    public void updateSteps(String id, String steps) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select r from RouteModel r where r.id = :id and r.deleteDate is null");
+        q.setParameter("id", id);
+        RouteModel routeModelDb = (RouteModel) q.getSingleResult();
+        routeModelDb.setSteps(steps);
+        syncTargets(routeModelDb.getId(), steps);
     }
 
     /**

@@ -13,6 +13,7 @@ import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.model.jpa.UserGroup;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
+import com.sismics.docs.core.util.RouteModelStepUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
@@ -127,19 +128,23 @@ public class GroupResource extends BaseResource {
         name = ValidationUtil.validateLength(name, "name", 1, 50, false);
         ValidationUtil.validateAlphanumeric(name, "name");
         
-        // Get the group (by its old name)
+        // Get the group (by its old name), locking the row FOR UPDATE. This is the first step of the
+        // group-first route-model integrity protocol: any concurrent route-model create/update that
+        // references this group locks the same row before it validates/writes, so its blob write and
+        // this rename+repair cannot interleave.
         GroupDao groupDao = new GroupDao();
-        Group group = groupDao.getActiveByName(groupName);
+        Group group = groupDao.getActiveByNameForUpdate(groupName);
         if (group == null) {
             throw new NotFoundException();
         }
-        
+        String oldName = group.getName();
+
         // Avoid duplicates
         Group existingGroup = groupDao.getActiveByName(name);
         if (existingGroup != null && !existingGroup.getId().equals(group.getId())) {
             throw new ClientException("GroupAlreadyExists", MessageFormat.format("This group already exists: {0}", name));
         }
-        
+
         // Validate parent
         String parentId = null;
         if (!Strings.isNullOrEmpty(parentName)) {
@@ -150,16 +155,32 @@ public class GroupResource extends BaseResource {
             parentId = parentGroup.getId();
         }
 
-        // Route models resolve their step targets by name, so a rename orphans any model that
-        // referenced this group (its blob still names the old group). Collect the affected models
-        // before the rename to warn the operator; the blob is intentionally left untouched.
+        // Prior observable contract: EVERY group update (renaming or not) reports the route models
+        // referencing this group in the route_models_affected warning payload.
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(group.getId());
 
-        // Update the group
+        // Route models resolve their step targets by name. On a real rename, repair every affected
+        // model's stored blob in-transaction so the rename does not orphan the reference: PREPARE
+        // locks each referencing route-model row (deterministic order), re-reads its blob fresh,
+        // rewrites the GROUP target to the new name, and preflights ALL repaired blob lengths against
+        // the column limit BEFORE anything is mutated — an overflow aborts the whole rename with a
+        // ValidationError naming the offending models (nothing written, group name unchanged).
+        // Same-name updates produce an empty plan (no repair).
+        RouteModelStepUtil.GroupRenameRepairPlan repairPlan;
+        try {
+            repairPlan = RouteModelStepUtil.prepareGroupRenameRepair(oldName, name);
+        } catch (RouteModelStepUtil.RouteModelStepOverflowException e) {
+            throw new ClientException("ValidationError", e.getMessage());
+        }
+
+        // Update the group FIRST, then apply the repair: applying re-syncs the derived
+        // T_ROUTE_MODEL_TARGET index from the repaired blob, whose new group name only resolves once
+        // the rename is visible to this transaction.
         groupDao.update(group.setName(name)
                 .setParentId(parentId), principal.getId());
+        RouteModelStepUtil.applyGroupRenameRepair(repairPlan);
 
-        // Return OK plus a warning payload naming any route models that referenced this group.
+        // Return OK plus the warning payload naming any route models that referenced this group.
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
         UserResource.addRouteModelsAffected(response, affectedRouteModels);

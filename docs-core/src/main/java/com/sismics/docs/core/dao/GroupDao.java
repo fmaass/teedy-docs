@@ -13,8 +13,10 @@ import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
+import jakarta.persistence.TypedQuery;
 import java.util.*;
 
 /**
@@ -41,8 +43,33 @@ public class GroupDao {
     }
     
     /**
+     * Returns a group by name, acquiring a pessimistic write lock (SELECT ... FOR UPDATE,
+     * dialect-portable via LockModeType.PESSIMISTIC_WRITE — H2 and Postgres both emit FOR UPDATE) on
+     * the group row for the remainder of the caller's transaction. This is the serialization point of
+     * the group-first route-model integrity protocol: every writer of the {@code RTM_STEPS_C} step
+     * blob (route-model create/update, group rename repair) locks each referenced GROUP row before it
+     * validates group existence or writes the blob, so a route-model write naming a group and a rename
+     * of that group cannot interleave. Returns null (without locking anything) if no active group has
+     * the given name.
+     *
+     * @param name Group name
+     * @return The locked active group, or null if none exists
+     */
+    public Group getActiveByNameForUpdate(String name) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Group> q = em.createQuery("select g from Group g where g.name = :name and g.deleteDate is null", Group.class);
+        q.setParameter("name", name);
+        q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
      * Returns a group by ID.
-     * 
+     *
      * @param id Group ID
      * @return Group
      */

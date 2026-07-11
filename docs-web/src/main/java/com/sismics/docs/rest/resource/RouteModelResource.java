@@ -13,6 +13,7 @@ import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.RouteModel;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.ActionUtil;
+import com.sismics.docs.core.util.RouteModelStepUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
@@ -110,7 +111,9 @@ public class RouteModelResource extends BaseResource {
         // Validate input
         name = ValidationUtil.validateLength(name, "name", 1, 50, false);
         steps = ValidationUtil.validateLength(steps, "steps", 1, 5000, false);
-        validateRouteModelSteps(steps);
+
+        // Shared integrity gate (validate -> lock groups -> re-validate under locks)
+        validateAndLockForWrite(steps, null);
 
         // Create the route model
         RouteModelDao routeModelDao = new RouteModelDao();
@@ -139,6 +142,41 @@ public class RouteModelResource extends BaseResource {
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("id", id);
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Shared step-target integrity gate for BOTH route-model writers (create and update): validate
+     * the blob (rejecting malformed content and unsupported target types BEFORE contending on any
+     * lock), acquire the group-first locks — every referenced GROUP row in deterministic order, then
+     * (update only) the route-model row — and RE-validate under the held locks, so a concurrent
+     * group rename can no longer slip between validation and the caller's write and orphan the name
+     * about to be persisted. Every write path MUST route through this method; it is the single
+     * resource-layer serialization point against GroupResource's rename repair.
+     *
+     * @param steps Steps JSON blob about to be written
+     * @param routeModelId Route model ID to lock for update, or null for a create
+     * @return The locked route model (update), or null (create)
+     */
+    private RouteModel validateAndLockForWrite(String steps, String routeModelId) {
+        // Reject malformed blobs and unsupported target types (SHARE, unknown) BEFORE taking any
+        // lock — a doomed request should not contend on group rows.
+        validateRouteModelSteps(steps);
+
+        // Group-first lock protocol: lock every referenced GROUP row (deterministic order), then the
+        // target route-model row when updating.
+        RouteModelStepUtil.lockGroupsByName(RouteModelStepUtil.parseGroupTargetNames(steps));
+        RouteModel routeModel = null;
+        if (routeModelId != null) {
+            routeModel = new RouteModelDao().getActiveByIdForUpdate(routeModelId);
+            if (routeModel == null) {
+                throw new NotFoundException();
+            }
+        }
+
+        // RE-validate step targets under the held locks: a group renamed before we locked it now
+        // fails existence here rather than being written back as an orphaned name.
+        validateRouteModelSteps(steps);
+        return routeModel;
     }
 
     /**
@@ -201,6 +239,15 @@ public class RouteModelResource extends BaseResource {
                             throw new ClientException("ValidationError", targetName + " is not a valid group");
                         }
                         break;
+                    case SHARE:
+                        // A step target can only be a USER or a GROUP: a SHARE is an anonymous,
+                        // link-scoped grant with no principal to route work to. Accepting it would
+                        // silently produce an unstartable model (the derived index cannot resolve it).
+                        throw new ClientException("ValidationError", "SHARE is not a valid step target type");
+                    default:
+                        // Fail closed on any future AclTargetType value rather than silently skipping
+                        // the switch and accepting an unvalidated target.
+                        throw new ClientException("ValidationError", targetTypeStr + " is not a valid step target type");
                 }
 
                 // Transitions
@@ -298,17 +345,12 @@ public class RouteModelResource extends BaseResource {
         // Validate input
         name = ValidationUtil.validateLength(name, "name", 1, 50, false);
         steps = ValidationUtil.validateLength(steps, "steps", 1, 5000, false);
-        validateRouteModelSteps(steps);
 
-        // Get the route model
-        RouteModelDao routeModelDao = new RouteModelDao();
-        RouteModel routeModel = routeModelDao.getActiveById(id);
-        if (routeModel == null) {
-            throw new NotFoundException();
-        }
+        // Shared integrity gate (validate -> lock groups -> lock model row -> re-validate under locks)
+        RouteModel routeModel = validateAndLockForWrite(steps, id);
 
         // Update the route model
-        routeModelDao.update(routeModel.setName(name)
+        new RouteModelDao().update(routeModel.setName(name)
                 .setSteps(steps), principal.getId());
 
         // Always return OK

@@ -287,15 +287,20 @@ public class TestGroupResource extends BaseJerseyTest {
     }
 
     /**
-     * Renaming a group referenced by a route model succeeds and returns the warning payload (the
-     * model's blob names the old group, so the rename orphans it). The blob is not rewritten.
+     * Renaming a group referenced by a route model rewrites the matching GROUP step targets in every
+     * affected model's stored blob to the new name (repair-on-rename, #31), still returns the warning
+     * payload, keeps the derived T_ROUTE_MODEL_TARGET index intact, and leaves the repaired model
+     * REALLY startable: a post-rename POST /route/start succeeds and the created step targets the
+     * renamed group.
      */
     @Test
     public void testRenameGroupReferencedByRouteModel() {
         String adminToken = adminToken();
         clientUtil.createGroup("wfrenamegroup");
 
+        String[] groupId = new String[1];
         String modelId = TestUserResource.inTx(() -> {
+            groupId[0] = new GroupDao().getActiveByName("wfrenamegroup").getId();
             String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"wfrenamegroup\",\"type\":\"GROUP\"},\"name\":\"Step 1\"}]";
             return new RouteModelDao().create(new RouteModel().setName("Rename model").setSteps(steps), "admin");
         });
@@ -306,11 +311,148 @@ public class TestGroupResource extends BaseJerseyTest {
                 .post(Entity.form(new Form().param("name", "wfrenamedgroup")), JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
         JsonArray affected = json.getJsonArray("route_models_affected");
-        Assertions.assertNotNull(affected, "Rename must warn about the orphaned route model");
+        Assertions.assertNotNull(affected, "Rename must warn about the affected route model");
         Assertions.assertTrue(TestUserResource.containsString(affected, "Rename model"));
 
-        // The model blob was left untouched (still names the old group).
+        // The stored blob was repaired: it now names the NEW group and no longer the old one.
         String steps = TestUserResource.inTx(() -> new RouteModelDao().getActiveById(modelId).getSteps());
-        Assertions.assertTrue(steps.contains("wfrenamegroup"), "Blob must not be rewritten on rename");
+        Assertions.assertTrue(steps.contains("wfrenamedgroup"), "Blob must be repaired to the new group name");
+        Assertions.assertFalse(steps.contains("wfrenamegroup"), "Old group name must be gone from the blob");
+
+        // The derived principal->model index survives the repair (same group ID — a rename does not
+        // change it). Without this, a SECOND rename or a group delete would silently miss the model.
+        Boolean stillIndexed = TestUserResource.inTx(() ->
+                new RouteModelDao().findModelsReferencingTarget(groupId[0]).contains(modelId));
+        Assertions.assertTrue(stillIndexed,
+                "T_ROUTE_MODEL_TARGET index must still reference the model after repair");
+
+        // REAL startability: a post-rename route start on the repaired model succeeds and the created
+        // step targets the renamed group (start resolves the blob's target names live).
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Rename route doc")
+                        .param("language", "eng")), JsonObject.class);
+        String documentId = json.getString("id");
+
+        json = target().path("/route/start").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("documentId", documentId)
+                        .param("routeModelId", modelId)), JsonObject.class);
+        JsonObject routeStep = json.getJsonObject("route_step");
+        Assertions.assertNotNull(routeStep, "Post-rename route start must create a current step");
+        Assertions.assertEquals("Step 1", routeStep.getString("name"));
+
+        // The created step targets the renamed group's ID (resolved live from the repaired blob).
+        String stepTargetId = TestUserResource.inTx(() ->
+                new RouteStepDao().getCurrentStep(documentId).getTargetId());
+        Assertions.assertEquals(groupId[0], stepTargetId, "The started step must target the renamed group");
+    }
+
+    /**
+     * A group rename that would push a near-limit RTM_STEPS_C blob over its varchar(5000) ceiling is
+     * rejected with a ValidationError naming the offending route model, and NEITHER the group name
+     * NOR the blob is mutated (all-or-nothing preflight, #31).
+     */
+    @Test
+    public void testRenameGroupRejectedWhenBlobWouldOverflow() {
+        String adminToken = adminToken();
+        clientUtil.createGroup("shortgrp");
+
+        // Old group name is "shortgrp" (8 chars); the new name is longer so the repaired blob (which
+        // rewrites the target name) grows. The new name is also longer than the alphanumeric group
+        // name limit reach... it must satisfy validateAlphanumeric (letters/digits only) and length
+        // <= 50. Use a 40-char alphanumeric name (+32 over "shortgrp").
+        String longName = "shortgrpAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 8 + 32 = 40 chars, +32 vs old
+        int nameGrowth = longName.length() - "shortgrp".length();
+
+        // Build a valid single-step blob whose length, after the target name grows by nameGrowth,
+        // crosses 5000. Pad the step "name" so the STORED blob sits just under 5000 and the repaired
+        // blob would exceed it. Note: the repaired blob is re-serialized (jakarta rebuilds it), so we
+        // size against the stored form and leave margin for serialization differences.
+        String modelId = TestUserResource.inTx(() -> {
+            String prefix = "[{\"type\":\"VALIDATE\",\"transitions\":[{\"name\":\"VALIDATED\",\"actions\":[]}]," +
+                    "\"target\":{\"name\":\"shortgrp\",\"type\":\"GROUP\"},\"name\":\"";
+            String suffix = "\"}]";
+            // Target a stored length of 5000 - (nameGrowth/2) so growth pushes it over 5000.
+            int targetLen = 5000 - (nameGrowth / 2);
+            int padLen = targetLen - prefix.length() - suffix.length();
+            StringBuilder pad = new StringBuilder();
+            while (pad.length() < padLen) {
+                pad.append('p');
+            }
+            String steps = prefix + pad + suffix;
+            Assertions.assertTrue(steps.length() <= 5000, "Fixture blob must start within the 5000 limit");
+            Assertions.assertTrue(steps.length() + nameGrowth > 5000,
+                    "Fixture must overflow once the group name grows");
+            return new RouteModelDao().create(new RouteModel().setName("Overflow model").setSteps(steps), "admin");
+        });
+
+        // The rename is rejected.
+        Response resp = target().path("/group/shortgrp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("name", longName)));
+        Assertions.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), resp.getStatus());
+        JsonObject error = resp.readEntity(JsonObject.class);
+        Assertions.assertEquals("ValidationError", error.getString("type"));
+        Assertions.assertTrue(error.getString("message").contains("Overflow model"),
+                "Rejection must name the offending route model");
+
+        // The group name is unchanged (still resolvable by its old name, and the new name never took).
+        String groupStillOld = TestUserResource.inTx(() ->
+                com.sismics.docs.core.util.SecurityUtil.getTargetIdFromName("shortgrp",
+                        com.sismics.docs.core.constant.AclTargetType.GROUP));
+        Assertions.assertNotNull(groupStillOld, "Group name must be unchanged after a rejected rename");
+        String groupNewAbsent = TestUserResource.inTx(() ->
+                com.sismics.docs.core.util.SecurityUtil.getTargetIdFromName(longName,
+                        com.sismics.docs.core.constant.AclTargetType.GROUP));
+        Assertions.assertNull(groupNewAbsent, "The new group name must not exist after a rejected rename");
+
+        // The blob still names the old group (untouched).
+        String steps = TestUserResource.inTx(() -> new RouteModelDao().getActiveById(modelId).getSteps());
+        Assertions.assertTrue(steps.contains("shortgrp"), "Blob must be untouched after a rejected rename");
+
+        // Clean up the group so its lingering presence does not pollute the shared-DB group count
+        // asserted by testGroupResource (the H2 mem DB persists across tests in the JVM).
+        target().path("/group/shortgrp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * A same-name group update (e.g. a parent change) skips the repair path (old == new) but KEEPS
+     * the pre-existing observable warning contract: route_models_affected still names the models
+     * referencing the group, exactly as any group update did before repair-on-rename existed.
+     */
+    @Test
+    public void testRenameGroupToSameNameSkipsRepair() {
+        String adminToken = adminToken();
+        clientUtil.createGroup("samegrp");
+
+        String modelId = TestUserResource.inTx(() -> {
+            String steps = "[{\"type\":\"VALIDATE\",\"target\":{\"name\":\"samegrp\",\"type\":\"GROUP\"},\"name\":\"Step 1\"}]";
+            return new RouteModelDao().create(new RouteModel().setName("Same name model").setSteps(steps), "admin");
+        });
+
+        JsonObject json = target().path("/group/samegrp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("name", "samegrp")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // Prior observable contract preserved: the warning payload still names the affected models
+        // on a same-name update, even though no repair ran.
+        JsonArray affected = json.getJsonArray("route_models_affected");
+        Assertions.assertNotNull(affected, "Same-name update must still report affected route models");
+        Assertions.assertTrue(TestUserResource.containsString(affected, "Same name model"),
+                "Warning must name the referencing route model");
+
+        String steps = TestUserResource.inTx(() -> new RouteModelDao().getActiveById(modelId).getSteps());
+        Assertions.assertTrue(steps.contains("samegrp"), "Blob unchanged on a same-name rename");
+
+        // Clean up (see testRenameGroupRejectedWhenBlobWouldOverflow).
+        target().path("/group/samegrp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
     }
 }
