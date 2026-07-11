@@ -1,5 +1,7 @@
 package com.sismics.docs.rest;
 
+import com.icegreen.greenmail.util.GreenMail;
+import com.icegreen.greenmail.util.ServerSetup;
 import com.sismics.docs.rest.util.ClientUtil;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
@@ -16,8 +18,6 @@ import org.glassfish.jersey.test.spi.TestContainerException;
 import org.glassfish.jersey.test.spi.TestContainerFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.subethamail.wiser.Wiser;
-import org.subethamail.wiser.WiserMessage;
 
 import javax.mail.MessagingException;
 import javax.mail.internet.MimeMessage;
@@ -31,8 +31,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Base class of integration tests with Jersey.
@@ -66,7 +67,18 @@ public abstract class BaseJerseyTest extends JerseyTest {
     /**
      * Test mail server.
      */
-    private Wiser wiser;
+    private GreenMail greenMail;
+
+    /**
+     * Store indices of the messages already consumed by {@link #popEmail()} — GreenMail's
+     * {@code getReceivedMessages()} is non-destructive, so consumption is tracked here.
+     */
+    private final Set<Integer> consumedEmailIndices = new HashSet<>();
+
+    /**
+     * Upper bound for waiting on GreenMail's asynchronous delivery to its message store.
+     */
+    private static final long EMAIL_DELIVERY_TIMEOUT_MS = 5000;
 
     /**
      * HTTP port for the Grizzly server, assigned by the OS (ephemeral) so parallel
@@ -75,10 +87,11 @@ public abstract class BaseJerseyTest extends JerseyTest {
     private final int httpPort = findFreePort();
 
     /**
-     * SMTP port for the Wiser mail server, assigned by the OS (ephemeral) for the same reason.
-     * Exposed to subclasses so mail tests can point the app's SMTP config at the running Wiser.
+     * SMTP port the GreenMail server is bound to. Assigned in {@link #setUp()} by reading the
+     * real bound port back after start — never reserved up front, so there is no
+     * reserve-then-release window in which another process can steal the port.
      */
-    private final int smtpPort = findFreePort();
+    private int smtpPort;
 
     /**
      * Find a free TCP port by binding to port 0 and letting the OS assign one.
@@ -95,10 +108,10 @@ public abstract class BaseJerseyTest extends JerseyTest {
     }
 
     /**
-     * Returns the SMTP port the embedded Wiser mail server is listening on. Mail-sending tests
+     * Returns the SMTP port the embedded GreenMail mail server is listening on. Mail-sending tests
      * must propagate this into the app's SMTP configuration so the app connects to the test server.
      *
-     * @return The Wiser SMTP port
+     * @return The GreenMail SMTP port
      */
     protected int getSmtpPort() {
         return smtpPort;
@@ -162,29 +175,34 @@ public abstract class BaseJerseyTest extends JerseyTest {
         context.deploy(httpServer);
         httpServer.start();
 
-        wiser = new Wiser();
-        wiser.setPort(smtpPort);
-        wiser.start();
+        consumedEmailIndices.clear();
+        greenMail = new GreenMail(ServerSetup.SMTP.dynamicPort());
+        greenMail.start();
+        // Read the real bound port back only after start; injection into the app's SMTP
+        // config (via getSmtpPort()) can therefore never race another port consumer.
+        smtpPort = greenMail.getSmtp().getPort();
     }
 
     /**
-     * Extract an email from the list and consume it.
+     * Extract the newest unconsumed email and consume it. Returns null when there is none.
      *
      * @return Email content
      * @throws MessagingException e
      * @throws IOException e
      */
     protected String popEmail() throws MessagingException, IOException {
-        List<WiserMessage> wiserMessageList = wiser.getMessages();
-        if (wiserMessageList.isEmpty()) {
-            return null;
+        // GreenMail acknowledges SMTP DATA before the message reaches its store — a bounded
+        // wait keeps a just-sent email visible without racing the server thread.
+        greenMail.waitForIncomingEmail(EMAIL_DELIVERY_TIMEOUT_MS, consumedEmailIndices.size() + 1);
+        MimeMessage[] messages = greenMail.getReceivedMessages();
+        for (int i = messages.length - 1; i >= 0; i--) {
+            if (consumedEmailIndices.add(i)) {
+                ByteArrayOutputStream os = new ByteArrayOutputStream();
+                messages[i].writeTo(os);
+                return os.toString();
+            }
         }
-        WiserMessage wiserMessage = wiserMessageList.get(wiserMessageList.size() - 1);
-        wiserMessageList.remove(wiserMessageList.size() - 1);
-        MimeMessage message = wiserMessage.getMimeMessage();
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
-        message.writeTo(os);
-        return os.toString();
+        return null;
     }
 
     @Override
@@ -193,8 +211,8 @@ public abstract class BaseJerseyTest extends JerseyTest {
         super.tearDown();
         System.clearProperty("docs.header_authentication");
         System.clearProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY);
-        if (wiser != null) {
-            wiser.stop();
+        if (greenMail != null) {
+            greenMail.stop();
         }
         if (httpServer != null) {
             httpServer.shutdownNow();

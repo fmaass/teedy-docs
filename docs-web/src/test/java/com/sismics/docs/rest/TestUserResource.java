@@ -544,7 +544,7 @@ public class TestUserResource extends BaseJerseyTest {
         // Login admin
         String adminToken = adminToken();
 
-        // Change SMTP configuration to target Wiser
+        // Change SMTP configuration to target the embedded GreenMail server
         target().path("/app/config_smtp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .post(Entity.form(new Form()

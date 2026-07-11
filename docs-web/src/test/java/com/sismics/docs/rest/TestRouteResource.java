@@ -36,7 +36,7 @@ public class TestRouteResource extends BaseJerseyTest {
     }
 
     /**
-     * Point the app's SMTP config at the embedded Wiser so route emails are captured by popEmail().
+     * Point the app's SMTP config at the embedded GreenMail server so route emails are captured by popEmail().
      *
      * @param adminToken Admin token
      */
