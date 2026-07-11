@@ -1,0 +1,138 @@
+name: Wiki Sync
+
+# Mirrors docs/ to the GitHub wiki (teedy-docs.wiki.git) so the user documentation
+# is also browsable as a wiki, without hand-maintaining two copies.
+#
+# ONE-TIME MANUAL PREREQUISITE (required, not optional): GitHub does not create a
+# repository's .wiki.git object until a human creates the first page through the
+# wiki web UI (Settings -> Features -> Wikis must be on, then open the "Wiki" tab
+# and click "Create the first page" and save anything, e.g. a single word). Until
+# that happens, ANY push to the wiki — with any token — fails with "repository
+# not found", because the repo genuinely does not exist server-side yet; it is
+# not an auth problem and this workflow cannot work around it from Actions alone
+# (see github.com/orgs/community/discussions/175621). After that one-time click,
+# every run of this workflow (including the very first) pushes normally using
+# the default GITHUB_TOKEN — no PAT needed, since wiki push rides the ordinary
+# `contents: write` permission for same-repo pushes (github-wiki-action README;
+# github.com/orgs/community/discussions/56893).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+  workflow_dispatch:
+
+# Only one sync should ever be in flight — a second push landing mid-sync could
+# race the wiki git history (concurrent clone/push against the same ref).
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Build wiki tree from docs/
+        run: |
+          set -euo pipefail
+          SRC="docs"
+          OUT="${{ runner.temp }}/wiki-content"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+
+          # Carry images if the docs tree ever grows one (none exist today).
+          if [ -d "$SRC/images" ]; then
+            cp -r "$SRC/images" "$OUT/images"
+          fi
+
+          # Rewrite intra-docs relative markdown links so they resolve in the wiki's
+          # flat page namespace: strip ".md" from link TARGETS of the form
+          # (page.md) or (page.md#anchor). Deliberately restricted to a bare
+          # "word.md" target (no "/"), so:
+          #   - links within docs/ (e.g. (workflows.md), (documents.md#trash)) ARE rewritten
+          #   - links out of docs/ (e.g. (../RECOVERY.md)) are rewritten to their GitHub
+          #     blob URL (see below) — those pages don't exist in the flat wiki namespace
+          #   - external http(s) URLs never match ".md)" as a link target and pass through
+          #   - pure in-page anchors "(#anchor)" never match and pass through
+          # Links that escape docs/ (e.g. (../RECOVERY.md), (../docs-importer/README.md))
+          # point at files that don't exist in the wiki at all. Left as relative paths
+          # they'd be dead links (wiki pages are flat, no "..") — point them at the
+          # file's GitHub blob view instead so they still resolve.
+          BLOB_BASE="https://github.com/${{ github.repository }}/blob/main"
+          rewrite_links() {
+            sed -E "s#\\(\\.\\./([A-Za-z0-9_./-]+)\\)#(${BLOB_BASE}/\\1)#g" |
+              sed -E 's/\(([A-Za-z0-9_-]+)\.md(#[A-Za-z0-9_-]*)?\)/(\1\2)/g'
+          }
+
+          for f in "$SRC"/*.md; do
+            base="$(basename "$f")"
+            if [ "$base" = "README.md" ]; then
+              # GitHub wiki's landing page is always "Home".
+              target="$OUT/Home.md"
+            else
+              target="$OUT/${base%.md}.md"
+            fi
+            rewrite_links < "$f" > "$target"
+          done
+
+          # Generate _Sidebar.md navigation from docs/README.md's "Contents" TOC table,
+          # so the wiki has a persistent nav pane instead of relying on the page list.
+          {
+            echo "**[Home](Home)**"
+            echo
+            grep -E '^\| \[.+\]\(.+\.md\)' "$SRC/README.md" | while IFS= read -r line; do
+              label=$(echo "$line" | sed -E 's/^\| \[([^]]+)\]\(([^)]+)\.md\).*/\1/')
+              target=$(echo "$line" | sed -E 's/^\| \[([^]]+)\]\(([^)]+)\.md\).*/\2/')
+              echo "- [$label]($target)"
+            done
+          } > "$OUT/_Sidebar.md"
+
+          echo "WIKI_CONTENT_DIR=$OUT" >> "$GITHUB_ENV"
+
+      - name: Push to wiki repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.wiki.git"
+          WORKDIR="${{ runner.temp }}/wiki-repo"
+          rm -rf "$WORKDIR"
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # GitHub only creates the .wiki.git object after a human saves the first
+          # page through the web UI — before that, the repo does not exist server-side
+          # and no push (with any token) can succeed. Fail with a clear, actionable
+          # message rather than an opaque "repository not found" from git.
+          CLONE_ERR="${{ runner.temp }}/wiki-clone.err"
+          if ! git clone --depth 1 "$WIKI_URL" "$WORKDIR" 2>"$CLONE_ERR"; then
+            echo "::error::Could not clone the wiki repo. If this is the very first" \
+                 "run, the wiki has probably not been initialized yet: GitHub only" \
+                 "creates .wiki.git after a human opens the repo's Wiki tab and saves" \
+                 "one page (e.g. a single word on the default Home page). Do that once," \
+                 "then re-run this workflow."
+            cat "$CLONE_ERR" >&2
+            exit 1
+          fi
+          WIKI_BRANCH="$(git -C "$WORKDIR" rev-parse --abbrev-ref HEAD)"
+          find "$WORKDIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          cp -r "${WIKI_CONTENT_DIR}"/. "$WORKDIR"/
+
+          cd "$WORKDIR"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No content changes — skipping push."
+            exit 0
+          fi
+
+          git commit -m "Sync wiki from docs/ (${GITHUB_SHA})"
+          git push origin "HEAD:${WIKI_BRANCH}"
