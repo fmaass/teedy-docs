@@ -54,6 +54,7 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
     private RSAPrivateKey privateKey;
     private final AtomicReference<String> userInfoBody = new AtomicReference<>();
     private final AtomicReference<Boolean> userInfoCalled = new AtomicReference<>(false);
+    private final AtomicReference<Boolean> tokenCalled = new AtomicReference<>(false);
     private Client noRedirectClient;
     private WebTarget noRedirectTarget;
 
@@ -306,6 +307,40 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
         deleteUser(user.getUsername());
     }
 
+    /**
+     * Provider-binding guard (#44, same class as the logout binding): an admin
+     * may switch the OIDC provider LIVE between the login request (which mints the state, PKCE, and
+     * nonce under provider A) and the callback (a FRESH snapshot). If the provider changed, provider
+     * A's authorization CODE must NOT be exchanged with provider B's token endpoint. The state pins
+     * the login-time provider fingerprint (issuer + client_id); the callback rejects (fail closed,
+     * error redirect) when the CURRENT provider no longer matches — BEFORE any token exchange.
+     */
+    @Test
+    public void callbackRejectsWhenProviderChangedSinceLogin() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+        String nonce = UUID.randomUUID().toString();
+        // State pinned to a DIFFERENT provider (A) than the current config (B = iss.mock.example /
+        // test-client): this models an admin switching the provider after login() ran.
+        String state = seedStateWithFingerprint(nonce,
+                "https://provider-a.example", "client-a");
+
+        // A well-formed, correctly-signed token for the CURRENT provider would otherwise succeed —
+        // proving the rejection is due to the provider-binding check, not a malformed token.
+        startTokenEndpoint(signIdToken(subject, nonce, "eve", "eve@example.com"), "at-x");
+
+        Response resp = doCallback("code-switch", state);
+        Assertions.assertEquals(Response.Status.TEMPORARY_REDIRECT.getStatusCode(), resp.getStatus());
+        Assertions.assertTrue(resp.getHeaderString("Location").endsWith("/#/login?error=oidc"),
+                "a provider switch between login and callback must reject, got: "
+                        + resp.getHeaderString("Location"));
+        Assertions.assertFalse(resp.getCookies().containsKey("auth_token"),
+                "no session cookie may be set when the provider changed since login");
+        Assertions.assertFalse(tokenCalled.get(),
+                "the authorization code must NOT be exchanged with the switched-to provider");
+        Assertions.assertEquals(0, countBySub("https://iss.mock.example", subject),
+                "nothing may be provisioned when the provider changed since login");
+    }
+
     // --- mock IdP plumbing -----------------------------------------------------------------
 
     private Algorithm rsa() {
@@ -333,7 +368,10 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
         } catch (IllegalArgumentException ignored) {
             // no prior context
         }
-        idp.createContext("/token", exchange -> respondJson(exchange, body));
+        idp.createContext("/token", exchange -> {
+            tokenCalled.set(true);
+            respondJson(exchange, body);
+        });
         System.setProperty("docs.oidc_token_endpoint", idpBase + "/token");
     }
 
@@ -378,6 +416,17 @@ public class TestOidcCallbackFlow extends BaseJerseyTest {
         return inTx(() -> {
             String id = UUID.randomUUID().toString();
             OidcState st = new OidcState().setId(id).setNonce(nonce).setCodeVerifier("verifier").setReturnUrl(null);
+            new OidcStateDao().create(st);
+            return id;
+        });
+    }
+
+    /** Seeds a state pinning a specific login-time provider fingerprint (issuer + client_id). */
+    private String seedStateWithFingerprint(String nonce, String issuer, String clientId) {
+        return inTx(() -> {
+            String id = UUID.randomUUID().toString();
+            OidcState st = new OidcState().setId(id).setNonce(nonce).setCodeVerifier("verifier")
+                    .setReturnUrl(null).setIssuer(issuer).setClientId(clientId);
             new OidcStateDao().create(st);
             return id;
         });

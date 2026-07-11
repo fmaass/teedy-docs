@@ -8,7 +8,7 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [3.4.0] - 2026-07-11
 
-Two database migrations this release: db.version moves from 43 to 45 (`dbupdate-044` adds the saved-filters table; `dbupdate-045` widens the config value column).
+Three database migrations this release: db.version moves from 43 to 46 (`dbupdate-044` adds the saved-filters table; `dbupdate-045` widens the config value column; `dbupdate-046` pins the OIDC provider on in-flight login state).
 
 ### Added
 - `/apidoc` serves an interactive API reference again — a hand-authored OpenAPI 3 specification covering every endpoint with a vendored Swagger UI, no runtime dependency added to the WAR, and a CI check that fails the build if the spec drifts from the resources (#15).
@@ -29,7 +29,7 @@ Two database migrations this release: db.version moves from 43 to 45 (`dbupdate-
 - Assorted test-infrastructure papercuts from the v3.3 cycle: temp-file leak checks, an embedded-LDAP port race, GreenMail teardown, and a UserInfo response byte cap (#45).
 
 ### Security
-- OIDC configuration is read as a single consistent per-request snapshot on login, callback, and logout, so a concurrent settings change cannot produce a mixed configuration or send the logout token hint to the wrong provider. The client secret is write-only through the admin API. Identity binding, username derivation, the eligibility check, and fail-closed rules remain non-editable behavior, per ADR-0015.
+- OIDC configuration is read as a single consistent per-request snapshot on login, callback, and logout. The OIDC flow is bound to the provider that started it: logout only sends the stored ID token to a provider whose issuer matches the token, and a callback whose provider changed since login is rejected before the code is exchanged — so a live provider switch cannot disclose a token or authorization code to a different provider. The client secret is write-only through the admin API. Identity binding, username derivation, the eligibility check, and fail-closed rules remain non-editable behavior, per ADR-0015.
 - Footer-link URLs are validated as http(s) only, rejecting `javascript:`, `data:`, and scheme-relative values.
 
 ### Documentation

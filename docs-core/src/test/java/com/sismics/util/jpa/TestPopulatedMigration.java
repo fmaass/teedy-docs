@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045). */
-    private static final int TARGET_VERSION = 45;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046). */
+    private static final int TARGET_VERSION = 46;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -101,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 45).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 46).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,11 +118,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-045 must run cleanly on a populated database");
+                "migrations 037-046 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 45 after the full upgrade path");
+                "DB_VERSION must be 46 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),

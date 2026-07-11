@@ -28,6 +28,22 @@ public class OidcState {
     @Column(name = "OIS_RETURNURL_C", length = 2000)
     private String returnUrl;
 
+    /**
+     * Provider fingerprint pinned at login: the effective OIDC issuer that started this flow.
+     * The callback rejects the flow if the CURRENT effective issuer no longer matches, so an
+     * authorization code minted for one provider is never exchanged with another after a live
+     * provider switch. Nullable for states created before this column existed (legacy drain).
+     */
+    @Column(name = "OIS_ISSUER_C", length = 500)
+    private String issuer;
+
+    /**
+     * Provider fingerprint pinned at login: the effective OIDC client_id that started this flow.
+     * Paired with {@link #issuer} in the callback's provider-binding check.
+     */
+    @Column(name = "OIS_CLIENTID_C", length = 500)
+    private String clientId;
+
     @Column(name = "OIS_CREATEDATE_D", nullable = false)
     private Date createDate;
 
@@ -64,6 +80,24 @@ public class OidcState {
 
     public OidcState setReturnUrl(String returnUrl) {
         this.returnUrl = returnUrl;
+        return this;
+    }
+
+    public String getIssuer() {
+        return issuer;
+    }
+
+    public OidcState setIssuer(String issuer) {
+        this.issuer = issuer;
+        return this;
+    }
+
+    public String getClientId() {
+        return clientId;
+    }
+
+    public OidcState setClientId(String clientId) {
+        this.clientId = clientId;
         return this;
     }
 

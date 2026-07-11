@@ -372,11 +372,17 @@ public class OidcResource extends BaseResource {
                 safeReturnUrl = returnUrl;
             }
 
+            // Pin the provider fingerprint (issuer + client_id) that STARTED this login. The callback
+            // rejects the flow if the CURRENT effective provider no longer matches, so an admin
+            // switching the OIDC provider live (no restart) between login and callback can never
+            // cause provider A's authorization code to be exchanged with provider B's token endpoint.
             OidcState oidcState = new OidcState()
                     .setId(state)
                     .setNonce(nonce)
                     .setCodeVerifier(codeVerifier)
-                    .setReturnUrl(safeReturnUrl);
+                    .setReturnUrl(safeReturnUrl)
+                    .setIssuer(cfg.get(OidcKey.ISSUER))
+                    .setClientId(clientId);
             oidcStateDao.create(oidcState);
 
             String authorizeUrl = authorizationEndpoint
@@ -428,6 +434,18 @@ public class OidcResource extends BaseResource {
         if (System.currentTimeMillis() - oidcState.getCreateDate().getTime() > STATE_TTL_MS) {
             log.warn("OIDC callback with expired state");
             return Response.status(Response.Status.BAD_REQUEST).build();
+        }
+
+        // Provider binding (fail closed): the state pinned the effective provider fingerprint
+        // (issuer + client_id) at login. If an admin switched the OIDC provider live in between,
+        // this authorization CODE was minted by the login-time provider and MUST NOT be exchanged
+        // with the switched-to provider's token endpoint. Reject BEFORE the token exchange. A null
+        // pinned fingerprint is a legacy state from before this column existed (drains within the
+        // 10-minute TTL): it predates the feature, keeps its full nonce/PKCE/issuer/audience
+        // protection, and is not subject to this check.
+        if (!providerFingerprintMatches(cfg, oidcState)) {
+            log.warn("OIDC provider changed between login and callback; rejecting (fail closed)");
+            return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
         }
         String expectedNonce = oidcState.getNonce();
 
@@ -1299,9 +1317,13 @@ public class OidcResource extends BaseResource {
      * snapshot's discovery cache key), and the {@code post_logout_redirect_uri} (from the snapshot's
      * redirect URI) all read from the SAME snapshot, so a provider change landing mid-logout can
      * never send the stored {@code id_token_hint} to one provider's endpoint with another provider's
-     * redirect. Returns null when OIDC is disabled, no id_token is stored, discovery has not been
-     * fetched, or the provider advertises no {@code end_session_endpoint} (the caller then omits the
-     * external logout redirect).
+     * redirect. The stored token is additionally BOUND to its issuer: if an admin switched the OIDC
+     * provider live since the login that minted this token, the token's {@code iss} no longer equals
+     * the current effective issuer and the method returns null (so provider A's token is never
+     * disclosed to provider B's endpoint). Returns null when OIDC is disabled, no id_token is stored,
+     * the stored token's issuer does not match the current provider (or cannot be parsed), discovery
+     * has not been fetched, or the provider advertises no {@code end_session_endpoint} (the caller
+     * then omits the external logout redirect and just clears the local session).
      *
      * @param oidcIdToken The stored OIDC id_token to pass as {@code id_token_hint} (may be null)
      * @return The composed logout URL, or null when no OIDC logout redirect applies
@@ -1311,6 +1333,18 @@ public class OidcResource extends BaseResource {
             return null;
         }
         OidcConfigSnapshot cfg = snapshot();
+
+        // Provider binding: the stored id_token was minted by the provider configured at LOGIN.
+        // If an admin switched the OIDC provider LIVE since then, sending this token as
+        // id_token_hint to the CURRENT provider's end_session_endpoint would disclose provider A's
+        // token to provider B. Bind the token to its issuer: only proceed when the token's iss
+        // equals the current effective issuer. Fail safe (skip the external redirect) when the
+        // token has no iss or cannot be parsed — the caller still clears the local session.
+        String tokenIssuer = readIdTokenIssuer(oidcIdToken);
+        if (tokenIssuer == null || !tokenIssuer.equals(cfg.get(OidcKey.ISSUER))) {
+            return null;
+        }
+
         String endSessionEndpoint = getEndSessionEndpoint(cfg);
         if (endSessionEndpoint == null) {
             return null;
@@ -1342,6 +1376,46 @@ public class OidcResource extends BaseResource {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Reads the {@code iss} claim from a stored id_token WITHOUT verifying its signature. This is
+     * our own previously-verified stored token (verified at callback via {@link #verifyIdToken}) —
+     * we only need to know which provider minted it so a logout binds the token to that provider.
+     * Reuses the same {@link JWT#decode} the verification path uses (no signature check here).
+     *
+     * @param idToken The stored id_token (a JWT)
+     * @return The {@code iss} claim, or null when the token cannot be parsed or carries no issuer
+     */
+    static String readIdTokenIssuer(String idToken) {
+        try {
+            String issuer = JWT.decode(idToken).getIssuer();
+            return StringUtils.isBlank(issuer) ? null : issuer;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * True when the provider fingerprint pinned on the login state still matches the CURRENT
+     * effective provider (from the callback's snapshot). The fingerprint is the login-time issuer +
+     * client_id. A state with NO pinned fingerprint (both null — a legacy state from before the
+     * pinning column existed) is treated as matching: it predates the feature and drains within the
+     * state TTL; it still carries its full nonce/PKCE/issuer/audience protection.
+     *
+     * @param cfg   The callback's request-scoped config snapshot (the current effective provider)
+     * @param state The in-flight login state (carries the pinned login-time fingerprint)
+     * @return True when the current provider matches the pinned one (or none was pinned)
+     */
+    static boolean providerFingerprintMatches(OidcConfigSnapshot cfg, OidcState state) {
+        String pinnedIssuer = state.getIssuer();
+        String pinnedClientId = state.getClientId();
+        // Legacy state with no pinned fingerprint (pre-migration drain): not subject to this check.
+        if (pinnedIssuer == null && pinnedClientId == null) {
+            return true;
+        }
+        return StringUtils.equals(pinnedIssuer, cfg.get(OidcKey.ISSUER))
+                && StringUtils.equals(pinnedClientId, cfg.get(OidcKey.CLIENT_ID));
     }
 
     /** True when OIDC login is enabled per the effective config (DB override, else property). */
