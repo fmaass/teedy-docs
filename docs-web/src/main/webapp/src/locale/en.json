@@ -203,7 +203,8 @@
       "type": "Type",
       "view": "Open this version",
       "empty": "This file has no previous versions.",
-      "load_failed": "Failed to load version history"
+      "load_failed": "Failed to load version history",
+      "loading": "Loading version history…"
     },
     "edit_to_add_files": "Edit document to add files",
     "file_removed": "File removed",

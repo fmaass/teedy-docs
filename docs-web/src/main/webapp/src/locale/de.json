@@ -203,7 +203,8 @@
       "type": "Typ",
       "view": "Diese Version öffnen",
       "empty": "Diese Datei hat keine früheren Versionen.",
-      "load_failed": "Versionsverlauf konnte nicht geladen werden"
+      "load_failed": "Versionsverlauf konnte nicht geladen werden",
+      "loading": "Versionsverlauf wird geladen …"
     },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",

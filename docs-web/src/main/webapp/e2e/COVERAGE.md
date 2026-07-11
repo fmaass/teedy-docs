@@ -27,6 +27,7 @@ of it per-test.
 | `acl.spec.ts` | **Document permissions**: admin creates a 2nd user, grants READ on a doc (DocumentViewPermissions), sees it listed, revokes it. |
 | `activity.spec.ts` | **Per-document activity** (DocumentViewActivity → `/auditlog?document=<id>`): the tab shows audit rows scoped to that document, growing after a mutation, attributed to admin. |
 | `guest.spec.ts` | **Guest login**: admin enables guest login via the API (`POST /app/guest_login`), the real guest button works in a clean cookie-less context (session becomes user `guest`), then guest login is disabled again in teardown. |
+| `workflow-filter.spec.ts` | **"Assigned to me" filter round-trip (v3.3.0 #28)**: toggling the workflow filter puts `workflow=me` in the URL (toggle `aria-pressed=true`); opening a document and navigating Back restores the filter (URL still carries `workflow=me`, toggle still pressed) — proves the returnTo-carries-workflow serialization + route hydration path. |
 
 ## Not covered by Playwright (by design)
 

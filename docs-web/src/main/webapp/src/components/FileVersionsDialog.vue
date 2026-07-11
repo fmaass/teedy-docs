@@ -5,7 +5,7 @@ import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
-import ProgressSpinner from 'primevue/progressspinner'
+import Skeleton from 'primevue/skeleton'
 import EmptyState from './EmptyState.vue'
 import ErrorState from './ErrorState.vue'
 import { getFileVersions, getFileUrl, type FileVersion } from '../api/file'
@@ -75,8 +75,8 @@ function versionUrl(version: FileVersion) {
     :style="{ width: '40rem' }"
     :breakpoints="{ '640px': '95vw' }"
   >
-    <div v-if="loading" class="versions-loading">
-      <ProgressSpinner style="width: 2.5rem; height: 2.5rem" strokeWidth="4" />
+    <div v-if="loading" class="versions-loading" role="status" :aria-label="t('ui.versions.loading')">
+      <Skeleton v-for="n in 3" :key="n" height="2.25rem" class="version-row-skeleton" />
     </div>
 
     <ErrorState v-else-if="error" :message="t('ui.versions.load_failed')" @retry="fileId && load(fileId)" />
@@ -130,8 +130,12 @@ function versionUrl(version: FileVersion) {
 <style scoped>
 .versions-loading {
   display: flex;
-  justify-content: center;
-  padding: 2rem 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+.version-row-skeleton {
+  width: 100%;
 }
 .versions-hint {
   margin: 0 0 0.75rem;

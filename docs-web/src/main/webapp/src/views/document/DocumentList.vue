@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
 import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
@@ -31,6 +31,7 @@ import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
@@ -46,7 +47,53 @@ const sortOrder = ref<number>(-1)
 
 // "Assigned to me" workflow filter — sent as the typed search[searchworkflow]=me param, NOT folded
 // into the free-text search. Restricts the list to documents whose current step targets the viewer.
+//
+// The toggle lives in component state (not the tagFilter store), but it MUST round-trip through the
+// URL like every other filter dimension: the returnTo query carries `workflow=me`, and the documents
+// route re-hydrates it on BOTH entry paths — an in-app Back (push(returnTo) changes route.query) and
+// a cold URL load. Hydration is an immediate route-query watcher; only the scalar string "me"
+// activates (arrays/empty/unknown are inactive), matching the store's canonicalization contract.
 const workflowMe = ref(false)
+
+watch(
+  () => route.query.workflow,
+  (v) => {
+    workflowMe.value = v === 'me'
+    // Canonicalize INVALID values away on entry: only the scalar "me" is valid.
+    // Any other PRESENT value (unknown scalar, empty string, array, bare ?workflow)
+    // must be rewritten out of the URL here — the toggle watcher below early-returns
+    // for it (off == not-'me') and the store's rewrite only fires on tag/text/mode
+    // changes, so without this replace an invalid value would sit in the URL
+    // indefinitely.
+    //
+    // The replace is SURGICAL: the current route query minus the workflow key —
+    // NEVER a rebuild from tf.buildFilterQuery(). On a cold load the tag store
+    // defers tag-ID hydration until the tags request settles, so the serializer
+    // is still empty at this moment; rebuilding from it would drop valid raw
+    // params (?tags=a&workflow=them would lose tags=a). The store's own
+    // hydration/canonicalization machinery handles the other dimensions on its
+    // own schedule.
+    if (v !== undefined && v !== 'me') {
+      const rest = { ...route.query }
+      delete rest.workflow
+      router.replace({ name: 'documents', query: rest })
+    }
+  },
+  { immediate: true },
+)
+
+// A user toggle drives the canonical URL: replace with the store's full query
+// (which now preserves/omits `workflow=me` per the current route) plus this
+// toggle's desired state. The guard keeps this from re-firing on hydration —
+// only write when the URL doesn't already reflect the toggle.
+watch(workflowMe, (on) => {
+  const active = route.query.workflow === 'me'
+  if (on === active) return
+  const query = { ...tf.buildFilterQuery() }
+  if (on) query.workflow = 'me'
+  else delete query.workflow
+  router.replace({ name: 'documents', query })
+})
 
 const SORT_FIELD_MAP: Record<string, number> = { title: 1, create_date: 3 }
 
@@ -173,8 +220,13 @@ function buildFilterLabel(): string {
 // slide-over "open full view" and the row double-click paths so double-click never
 // drops the filter context.
 function buildDocumentViewState() {
+  // Merge the component-owned workflow key onto the store's canonical query so the
+  // document view's Back returns to the list with the "Assigned to me" filter still
+  // active — the store serializer preserves it too, but merging here keeps returnTo
+  // correct even if the route query lags the toggle by a tick.
+  const query = { ...tf.buildFilterQuery(), ...(workflowMe.value ? { workflow: 'me' } : {}) }
   return {
-    returnTo: router.resolve({ name: 'documents', query: tf.buildFilterQuery() }).fullPath,
+    returnTo: router.resolve({ name: 'documents', query }).fullPath,
     filterLabel: buildFilterLabel() || undefined,
   }
 }
