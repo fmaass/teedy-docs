@@ -707,7 +707,16 @@
       "clean_storage_confirm": "Dadurch werden verwaiste Dateien dauerhaft von der Festplatte gelöscht und die Datenbank bereinigt. Dokumente und ihre Dateien sind davon nicht betroffen. Fortfahren?",
       "clean_storage_header": "Speicher bereinigen",
       "clean_storage_done": "Speicherbereinigung abgeschlossen",
-      "clean_storage_failed": "Speicherbereinigung fehlgeschlagen"
+      "clean_storage_failed": "Speicherbereinigung fehlgeschlagen",
+      "footer_links_title": "Fußzeilen-Links",
+      "footer_links_hint": "Fügen Sie bis zu 5 Links hinzu (zum Beispiel Impressum oder Datenschutzerklärung), die in der App-Fußzeile und auf der Anmeldeseite angezeigt werden. Nur http(s)-URLs sind erlaubt.",
+      "footer_links_label": "Bezeichnung",
+      "footer_links_url": "URL",
+      "footer_links_add": "Link hinzufügen",
+      "footer_links_remove": "Link entfernen",
+      "footer_links_empty": "Keine Fußzeilen-Links konfiguriert.",
+      "footer_links_saved": "Fußzeilen-Links gespeichert",
+      "footer_links_failed": "Fußzeilen-Links konnten nicht gespeichert werden"
     },
     "smtp": {
       "title": "E-Mail (SMTP)",

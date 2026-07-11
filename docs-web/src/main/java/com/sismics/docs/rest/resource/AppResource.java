@@ -28,8 +28,12 @@ import com.sismics.util.log4j.LogCriteria;
 import com.sismics.util.log4j.LogEntry;
 import com.sismics.util.log4j.MemoryAppender;
 import jakarta.json.Json;
+import jakarta.json.JsonArray;
 import jakarta.json.JsonArrayBuilder;
+import jakarta.json.JsonObject;
 import jakarta.json.JsonObjectBuilder;
+import jakarta.json.JsonReader;
+import jakarta.json.JsonValue;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import jakarta.ws.rs.*;
@@ -41,6 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.text.MessageFormat;
@@ -135,7 +140,109 @@ public class AppResource extends BaseResource {
             response.add("global_storage_quota", globalQuota);
         }
 
+        // Configurable footer/imprint links (public chrome like guest_login). Anonymous
+        // callers get these so EU imprint links can render on the login screen BEFORE
+        // login. Absent when unset or empty, so today's chrome (nothing) is unchanged.
+        JsonArray footerLinks = getFooterLinks();
+        if (!footerLinks.isEmpty()) {
+            response.add("footer_links", footerLinks);
+        }
+
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Reads the stored footer-links JSON array (the ThemeResource JSON-blob-in-one-key
+     * precedent). Returns an empty array when unset or the stored value is not a JSON
+     * array, so callers never have to null-check.
+     *
+     * @return Footer links as a JSON array (possibly empty)
+     */
+    private JsonArray getFooterLinks() {
+        ConfigDao configDao = new ConfigDao();
+        Config config = configDao.getById(ConfigType.FOOTER_LINKS);
+        if (config == null || Strings.isNullOrEmpty(config.getValue())) {
+            return Json.createArrayBuilder().build();
+        }
+        try (JsonReader reader = Json.createReader(new StringReader(config.getValue()))) {
+            JsonValue value = reader.readValue();
+            if (value.getValueType() == JsonValue.ValueType.ARRAY) {
+                return value.asJsonArray();
+            }
+        } catch (Exception e) {
+            log.warn("Stored FOOTER_LINKS value is not valid JSON; treating as empty", e);
+        }
+        return Json.createArrayBuilder().build();
+    }
+
+    /**
+     * Update the configurable footer/imprint links.
+     *
+     * @api {post} /app/footer_links Set the footer/imprint links
+     * @apiName PostAppFooterLinks
+     * @apiGroup App
+     * @apiParam {String} links JSON array of {label, url} objects (max 5, http(s) URLs only)
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError A link entry is invalid or the cap is exceeded
+     * @apiPermission admin
+     * @apiVersion 1.12.0
+     *
+     * @param links JSON array of footer-link objects
+     * @return Response
+     */
+    @POST
+    @Path("footer_links")
+    public Response footerLinks(@FormParam("links") String links) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Parse and validate the submitted JSON array, then store the RE-SERIALIZED,
+        // normalised array (never the raw input) so only well-formed {label, url}
+        // entries — trimmed, scheme-checked, capped — are ever persisted.
+        JsonArray parsed;
+        try (JsonReader reader = Json.createReader(new StringReader(Strings.nullToEmpty(links)))) {
+            JsonValue value = reader.readValue();
+            if (value.getValueType() != JsonValue.ValueType.ARRAY) {
+                throw new ClientException("ValidationError", "links must be a JSON array");
+            }
+            parsed = value.asJsonArray();
+        } catch (ClientException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ClientException("ValidationError", "links must be a valid JSON array");
+        }
+
+        if (parsed.size() > 5) {
+            throw new ClientException("ValidationError", "A maximum of 5 footer links is allowed");
+        }
+
+        JsonArrayBuilder normalized = Json.createArrayBuilder();
+        for (int i = 0; i < parsed.size(); i++) {
+            JsonValue entryValue = parsed.get(i);
+            if (entryValue.getValueType() != JsonValue.ValueType.OBJECT) {
+                throw new ClientException("ValidationError", "Each footer link must be an object with a label and a url");
+            }
+            JsonObject entry = entryValue.asJsonObject();
+            String label = entry.containsKey("label") && entry.get("label").getValueType() == JsonValue.ValueType.STRING
+                    ? entry.getString("label") : null;
+            String url = entry.containsKey("url") && entry.get("url").getValueType() == JsonValue.ValueType.STRING
+                    ? entry.getString("url") : null;
+            label = ValidationUtil.validateStringNotBlank(label, "label");
+            label = ValidationUtil.validateLength(label, "label", 1, 40);
+            url = ValidationUtil.validateLength(url, "url", 1, 500);
+            // http(s) scheme only — validateHttpUrl rejects javascript:, data:, etc.
+            url = ValidationUtil.validateHttpUrl(url, "url");
+            normalized.add(Json.createObjectBuilder()
+                    .add("label", label)
+                    .add("url", url));
+        }
+
+        ConfigDao configDao = new ConfigDao();
+        configDao.update(ConfigType.FOOTER_LINKS, normalized.build().toString());
+
+        return Response.ok().build();
     }
 
     /**

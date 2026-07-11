@@ -707,7 +707,16 @@
       "clean_storage_confirm": "This will permanently delete orphaned files from disk and clean up the database. Documents and their files are not affected. Continue?",
       "clean_storage_header": "Clean storage",
       "clean_storage_done": "Storage cleanup finished",
-      "clean_storage_failed": "Storage cleanup failed"
+      "clean_storage_failed": "Storage cleanup failed",
+      "footer_links_title": "Footer links",
+      "footer_links_hint": "Add up to 5 links (for example an imprint or privacy policy) shown in the app footer and on the login screen. Only http(s) URLs are allowed.",
+      "footer_links_label": "Label",
+      "footer_links_url": "URL",
+      "footer_links_add": "Add link",
+      "footer_links_remove": "Remove link",
+      "footer_links_empty": "No footer links configured.",
+      "footer_links_saved": "Footer links saved",
+      "footer_links_failed": "Failed to save footer links"
     },
     "smtp": {
       "title": "Email (SMTP)",

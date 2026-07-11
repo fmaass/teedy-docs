@@ -71,5 +71,11 @@ public enum ConfigType {
      * Tag search mode: "PREFIX" (default, case-insensitive startsWith)
      * or "EXACT" (case-insensitive equals).
      */
-    TAG_SEARCH_MODE
+    TAG_SEARCH_MODE,
+
+    /**
+     * Configurable footer/imprint links, stored as a JSON array of
+     * {label, url} objects (validated server-side: <= 5 entries, http(s) only).
+     */
+    FOOTER_LINKS
 }

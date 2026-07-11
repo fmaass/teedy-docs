@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==44, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==45, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044). */
-    private static final int TARGET_VERSION = 44;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045). */
+    private static final int TARGET_VERSION = 45;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -101,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 44).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 45).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,11 +118,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-044 must run cleanly on a populated database");
+                "migrations 037-045 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 44 after the full upgrade path");
+                "DB_VERSION must be 45 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -224,6 +224,27 @@ public class TestPopulatedMigration {
         }
         Assertions.assertTrue(duplicateRejected,
                 "044 unique index IDX_SFL_USER_NAME must reject a duplicate (user, name) saved filter");
+
+        // 5g. Migration 045 widened T_CONFIG.CFG_VALUE_C from varchar(250) to varchar(4000)
+        //     so a footer-links JSON blob (or any long config value) fits. Prove a value
+        //     LONGER than the old 250-char limit now inserts AND round-trips unchanged on
+        //     BOTH dialects. Pre-045 this insert would have failed the length constraint.
+        connection.commit();
+        String longValue = "x".repeat(300);
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "insert into T_CONFIG (CFG_ID_C, CFG_VALUE_C) values ('LONG_CONFIG_PROBE', ?)")) {
+            ps.setString(1, longValue);
+            ps.executeUpdate();
+        }
+        connection.commit();
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "select CFG_VALUE_C from T_CONFIG where CFG_ID_C = 'LONG_CONFIG_PROBE'");
+             ResultSet rs = ps.executeQuery()) {
+            Assertions.assertTrue(rs.next(), "045 widened column: the long-value probe row must exist");
+            Assertions.assertEquals(longValue, rs.getString(1),
+                    "045 must widen CFG_VALUE_C so a >250-char value round-trips unchanged");
+        }
+
         // NOTE ON CASE: the index column comparison is dialect-dependent. The base schema
         // runs `SET IGNORECASE TRUE` on H2 (dbupdate-000-0.sql), so on H2 the index is
         // effectively case-INSENSITIVE; PostgreSQL is case-SENSITIVE (the exact-case

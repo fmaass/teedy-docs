@@ -1,5 +1,12 @@
 import api from './client'
 
+// One configurable footer/imprint link. Both fields are validated server-side
+// (label <= 40 chars non-blank; url http(s) only, <= 500 chars).
+export interface FooterLink {
+  label: string
+  url: string
+}
+
 export interface AppInfo {
   current_version: string
   min_version?: string
@@ -12,6 +19,17 @@ export interface AppInfo {
   tag_search_mode?: string
   ocr_enabled?: boolean
   max_upload_size?: number
+  // Configurable footer/imprint links (public chrome). ABSENT when none configured,
+  // so an empty/legacy server renders today's chrome (nothing).
+  footer_links?: FooterLink[]
+}
+
+// POST /api/app/footer_links (ADMIN). Persists the whole list; an empty array
+// clears the config. The backend re-serializes normalised {label, url} entries.
+export function saveFooterLinks(links: FooterLink[]) {
+  const params = new URLSearchParams()
+  params.set('links', JSON.stringify(links))
+  return api.post('/app/footer_links', params)
 }
 
 // GET /api/app carries the running server version in `current_version`

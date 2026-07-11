@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
-import { getAppInfo } from '../api/app'
+import { getAppInfo, type FooterLink } from '../api/app'
 import { queryKeys } from '../api/queryKeys'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
@@ -37,6 +37,9 @@ const error = ref('')
 const oidcEnabled = ref(false)
 const guestLogin = ref(false)
 const oidcError = ref(false)
+// Configurable footer/imprint links, rendered beneath the login card so EU imprint
+// links are reachable BEFORE login (GET /app is anonymous). Empty by default.
+const footerLinks = ref<FooterLink[]>([])
 
 interface ApiError {
   response?: {
@@ -85,6 +88,7 @@ onMounted(async () => {
     const data = await queryClient.fetchQuery({ queryKey: queryKeys.app(), queryFn: () => getAppInfo() })
     oidcEnabled.value = !!data.oidc_enabled
     guestLogin.value = !!data.guest_login
+    footerLinks.value = data.footer_links ?? []
   } catch { /* non-critical — buttons just stay hidden */ }
 
   if (route.query.error) {
@@ -275,6 +279,16 @@ async function handleForgot() {
       </button>
     </div>
 
+    <div v-if="footerLinks.length" class="teedy-login-footer">
+      <a
+        v-for="(link, index) in footerLinks"
+        :key="index"
+        :href="link.url"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{{ link.label }}</a>
+    </div>
+
     <!-- Forgot password dialog -->
     <Dialog v-model:visible="showForgot" :header="t('ui.forgot_password.title')" :style="{ width: '360px' }" modal>
       <p class="text-sm text-muted mb-3">
@@ -336,6 +350,22 @@ async function handleForgot() {
   text-align: center;
 }
 .local-account-link:hover {
+  text-decoration: underline;
+}
+
+.teedy-login-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1rem;
+  margin-top: 1.25rem;
+}
+.teedy-login-footer a {
+  font-size: 0.75rem;
+  color: var(--teedy-brand);
+  text-decoration: none;
+}
+.teedy-login-footer a:hover {
   text-decoration: underline;
 }
 </style>
