@@ -190,6 +190,14 @@ const router = createRouter({
               meta: { requiresAdmin: true },
             },
             {
+              path: 'oidc',
+              name: 'settings-oidc',
+              component: () => import('../views/settings/SettingsOidc.vue'),
+              // Admin-only: SettingsOidc fires the admin-gated GET /app/config_oidc on
+              // mount. Direct-URL hits are backstopped by the backend 403.
+              meta: { requiresAdmin: true },
+            },
+            {
               path: 'metadata',
               name: 'settings-metadata',
               component: () => import('../views/settings/SettingsMetadata.vue'),

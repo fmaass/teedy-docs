@@ -77,7 +77,8 @@
     }
   },
   "tag": {
-    "remove_tag": "Tag {name} entfernen"
+    "remove_tag": "Tag {name} entfernen",
+    "filter_by_tag": "Nach Tag {name} filtern"
   },
   "settings": {
     "menu_two_factor_auth": "Zwei-Faktor-Authentifizierung",
@@ -206,6 +207,17 @@
       "load_failed": "Versionsverlauf konnte nicht geladen werden",
       "loading": "Versionsverlauf wird geladen …"
     },
+    "relations": {
+      "title": "Verknüpfte Dokumente",
+      "links_to": "Verweist auf",
+      "linked_from": "Verwiesen von",
+      "search_placeholder": "Dokument zum Verknüpfen suchen …",
+      "saved": "Verknüpfungen aktualisiert",
+      "failed_save": "Verknüpfungen konnten nicht aktualisiert werden",
+      "remove": "Verknüpfung entfernen",
+      "remove_confirm": "Verknüpfung zu „{title}“ entfernen?",
+      "remove_from_source": "Verwiesen von „{title}“ – dort entfernen"
+    },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
     "failed_remove_file": "Datei konnte nicht entfernt werden",
@@ -218,6 +230,8 @@
     "open_new_tab": "In neuem Tab öffnen",
     "previous_page": "Vorherige Seite",
     "next_page": "Nächste Seite",
+    "rotate_left": "Nach links drehen",
+    "rotate_right": "Nach rechts drehen",
     "delete_document": "Dokument löschen",
     "delete_document_confirm": "Möchten Sie dieses Dokument wirklich löschen?",
     "document_deleted": "Dokument gelöscht",
@@ -403,7 +417,9 @@
       "user_enabled": "Konto aktiviert",
       "failed_disable_user": "Konto konnte nicht deaktiviert werden",
       "failed_enable_user": "Konto konnte nicht aktiviert werden",
-      "disable_hint": "Beim Deaktivieren bleiben die Dokumente des Benutzers erhalten (beim Löschen werden sie in den Papierkorb verschoben). Es ist eine weiche Sperre pro Anfrage: Beim erneuten Aktivieren werden alte Sitzungen und API-Schlüssel wiederhergestellt."
+      "disable_hint": "Beim Deaktivieren bleiben die Dokumente des Benutzers erhalten (beim Löschen werden sie in den Papierkorb verschoben). Es ist eine weiche Sperre pro Anfrage: Beim erneuten Aktivieren werden alte Sitzungen und API-Schlüssel wiederhergestellt.",
+      "storage_quota": "Speicherkontingent (Bytes)",
+      "storage_quota_hint": "Maximaler Speicher für dieses Konto ({human})."
     },
     "groups": {
       "title": "Gruppen",
@@ -693,7 +709,16 @@
       "clean_storage_confirm": "Dadurch werden verwaiste Dateien dauerhaft von der Festplatte gelöscht und die Datenbank bereinigt. Dokumente und ihre Dateien sind davon nicht betroffen. Fortfahren?",
       "clean_storage_header": "Speicher bereinigen",
       "clean_storage_done": "Speicherbereinigung abgeschlossen",
-      "clean_storage_failed": "Speicherbereinigung fehlgeschlagen"
+      "clean_storage_failed": "Speicherbereinigung fehlgeschlagen",
+      "footer_links_title": "Fußzeilen-Links",
+      "footer_links_hint": "Fügen Sie bis zu 5 Links hinzu (zum Beispiel Impressum oder Datenschutzerklärung), die in der App-Fußzeile und auf der Anmeldeseite angezeigt werden. Nur http(s)-URLs sind erlaubt.",
+      "footer_links_label": "Bezeichnung",
+      "footer_links_url": "URL",
+      "footer_links_add": "Link hinzufügen",
+      "footer_links_remove": "Link entfernen",
+      "footer_links_empty": "Keine Fußzeilen-Links konfiguriert.",
+      "footer_links_saved": "Fußzeilen-Links gespeichert",
+      "footer_links_failed": "Fußzeilen-Links konnten nicht gespeichert werden"
     },
     "smtp": {
       "title": "E-Mail (SMTP)",
@@ -762,6 +787,39 @@
       "default_storage_required": "Standard-Speicherkontingent ist erforderlich.",
       "config_saved": "LDAP-Konfiguration gespeichert",
       "failed_save": "LDAP-Konfiguration konnte nicht gespeichert werden",
+      "validation_failed": "Bitte korrigieren Sie die markierten Felder."
+    },
+    "oidc": {
+      "title": "OIDC-Authentifizierung",
+      "description": "Wenn aktiviert, können sich Benutzer mit einem OpenID-Connect-Anbieter anmelden. Beim ersten Anmelden wird automatisch ein Konto angelegt. Auf dieser Seite werden Anbieter- und Claim-Einstellungen konfiguriert; die Identitätsbindung und Kontoregeln sind festes Verhalten und hier nicht änderbar.",
+      "enabled": "OIDC-Authentifizierung ist aktiviert",
+      "disabled": "OIDC-Authentifizierung ist deaktiviert",
+      "issuer": "Issuer-URL",
+      "client_id": "Client-ID",
+      "client_secret": "Client-Geheimnis",
+      "client_secret_keep": "Ein Client-Geheimnis ist gesetzt — leer lassen, um es beizubehalten.",
+      "client_secret_clear": "Gespeichertes Geheimnis löschen",
+      "redirect_uri": "Redirect-URI",
+      "redirect_uri_hint": "Die beim Anbieter registrierte Callback-URL (endet auf /api/oidc/callback).",
+      "scope": "Scope",
+      "endpoints_hint": "Die Endpunkte werden aus der Well-Known-Konfiguration des Issuers ermittelt. Nur setzen, um die Ermittlung zu überschreiben.",
+      "authorization_endpoint": "Autorisierungs-Endpunkt",
+      "token_endpoint": "Token-Endpunkt",
+      "jwks_uri": "JWKS-URI",
+      "userinfo_endpoint": "UserInfo-Endpunkt",
+      "username_claim": "Benutzernamen-Claim",
+      "email_claim": "E-Mail-Claim",
+      "from_property": "Derzeit über eine JVM-Eigenschaft gesetzt — beim Speichern wird eine Datenbank-Überschreibung angelegt.",
+      "url_invalid": "Muss eine http(s)-URL sein.",
+      "issuer_required": "Issuer-URL ist erforderlich.",
+      "client_id_required": "Client-ID ist erforderlich.",
+      "client_secret_required": "Client-Geheimnis ist erforderlich.",
+      "redirect_uri_required": "Redirect-URI ist erforderlich.",
+      "scope_required": "Scope ist erforderlich.",
+      "username_claim_required": "Benutzernamen-Claim ist erforderlich.",
+      "email_claim_required": "E-Mail-Claim ist erforderlich.",
+      "config_saved": "OIDC-Konfiguration gespeichert",
+      "failed_save": "OIDC-Konfiguration konnte nicht gespeichert werden",
       "validation_failed": "Bitte korrigieren Sie die markierten Felder."
     },
     "tag_rules": {
@@ -853,6 +911,21 @@
       "summary_ok": "{count} Dokument(e) aktualisiert",
       "summary_partial": "{ok} erfolgreich, {failed} fehlgeschlagen",
       "delete_confirm": "{count} Dokument(e) löschen? Sie werden in den Papierkorb verschoben."
+    },
+    "saved_filters": {
+      "saved_label": "Gespeicherte Filter",
+      "save_current": "Filter speichern",
+      "empty": "Noch keine gespeicherten Filter",
+      "name_label": "Filtername",
+      "name_required": "Namen eingeben",
+      "name_exists": "Ein gespeicherter Filter mit diesem Namen existiert bereits",
+      "saved": "Filter gespeichert",
+      "save_failed": "Filter konnte nicht gespeichert werden",
+      "deleted": "Filter gelöscht",
+      "delete_failed": "Filter konnte nicht gelöscht werden",
+      "delete_title": "Gespeicherten Filter löschen",
+      "delete_button": "Gespeicherten Filter \"{name}\" löschen",
+      "delete_confirm": "Den gespeicherten Filter \"{name}\" löschen?"
     }
   }
 }

@@ -43,12 +43,16 @@ const coOccurrenceRef = ref<Array<{ tagA: string; tagB: string; count: number }>
 )
 // Captured options of the `tagFacets` useQuery call so tests can inspect its
 // (reactive) query key and invoke its queryFn to observe the params it sends.
-let facetsQueryOpts: any = null
+// The captured tagFacets useQuery options: queryKey is a computed ref of the reactive
+// key array, queryFn runs the facet fetch. Typed narrowly so tests avoid `any`.
+type QueryOpts = { queryKey: { value: unknown[] }; queryFn: () => unknown }
+let facetsQueryOpts: QueryOpts | null = null
 vi.mock('@tanstack/vue-query', () => ({
-  useQuery: (opts: any) => {
-    const key = opts.queryKey
+  useQuery: (opts: QueryOpts) => {
+    const key: unknown = opts.queryKey
     // queryKey may be an array or a computed ref of an array.
-    const resolved = typeof key === 'object' && 'value' in key ? key.value : key
+    const resolved =
+      key && typeof key === 'object' && 'value' in key ? (key as { value: unknown }).value : key
     const name = Array.isArray(resolved) ? resolved[0] : resolved
     if (name === 'tags') return { data: tagsRef, isSuccess: tagsFetchedRef }
     if (name === 'tagStats') return { data: statsRef }
@@ -65,7 +69,7 @@ vi.mock('@tanstack/vue-query', () => ({
 const getTagFacetsMock = vi.fn(() => Promise.resolve({ data: { facets: {}, total: 0 } }))
 vi.mock('../api/tag', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/tag')>()
-  return { ...actual, getTagFacets: (...args: any[]) => getTagFacetsMock(...(args as [])) }
+  return { ...actual, getTagFacets: (...args: unknown[]) => getTagFacetsMock(...(args as [])) }
 })
 
 import { useTagFilterStore } from './tagFilter'
@@ -151,6 +155,75 @@ describe('tagFilter store', () => {
     })
   })
 
+  // --- #34: clickable tag chips apply IDEMPOTENT positive filtering ----------
+  // A chip's selectTag is the select-only sibling of toggleTag: it selects an
+  // unselected tag (with ancestors in tree mode), leaves an ALREADY-selected tag
+  // untouched (NO exclude cycle — that would be the wrong semantic for a chip),
+  // and navigates to the documents list in BOTH cases so clicking a chip from a
+  // document view always lands on the filtered list.
+  describe('selectTag (#34, idempotent positive filter)', () => {
+    it('selects an unselected tag and pulls in ancestors in tree mode', () => {
+      const store = useTagFilterStore()
+      store.selectTag('b') // b has parent a
+      expect(store.selectedTagIds.has('b')).toBe(true)
+      expect(store.selectedTagIds.has('a')).toBe(true)
+    })
+
+    it('leaves an ALREADY-selected tag untouched (no exclude cycle)', () => {
+      const store = useTagFilterStore()
+      store.selectTag('c')
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      // Clicking the chip again must NOT exclude it (that is toggleTag's cycle).
+      store.selectTag('c')
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      expect(store.excludedTagIds.has('c')).toBe(false)
+    })
+
+    it('does NOT pull in ancestors in facets mode', () => {
+      tagsRef.value = TAGS // b has parent a
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.selectTag('b')
+      expect([...store.selectedTagIds]).toEqual(['b'])
+      expect(store.selectedTagIds.has('a')).toBe(false)
+    })
+
+    it('resolves a compound "parent__child" key to the child tag', () => {
+      const store = useTagFilterStore()
+      store.selectTag('a__b') // b under a
+      expect(store.selectedTagIds.has('b')).toBe(true)
+    })
+
+    it('selecting a currently-EXCLUDED tag clears the exclusion and selects it (no tags+exclude double state)', () => {
+      const store = useTagFilterStore()
+      store.excludedTagIds = new Set(['c'])
+      store.selectTag('c')
+      // A chip click means "filter BY this tag": the exclusion must be lifted,
+      // never combined with the selection into tags=<id>&exclude=<id>.
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      expect(store.excludedTagIds.has('c')).toBe(false)
+      const query = store.buildFilterQuery()
+      expect(query.tags).toBe('c')
+      expect(query.exclude).toBeUndefined()
+    })
+
+    it('navigates to documents when selecting from a NON-document route', () => {
+      mockRoute.path = '/document/view/xyz'
+      const store = useTagFilterStore()
+      store.selectTag('c')
+      expect(push).toHaveBeenCalled()
+    })
+
+    it('STILL navigates when the tag is already selected (chip from a doc view lands on the list)', () => {
+      mockRoute.path = '/document/view/xyz'
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['c'])
+      push.mockClear()
+      store.selectTag('c') // already selected → no state change, but navigation must run
+      expect(push).toHaveBeenCalled()
+    })
+  })
+
   describe('removeTag', () => {
     it('removes a tag from both selected and excluded sets', () => {
       const store = useTagFilterStore()
@@ -230,8 +303,8 @@ describe('tagFilter store', () => {
       store.viewMode = 'facets'
       const beta = store.activeTreeNodes.find((n) => n.key === 'b')!
       // beta co-occurs with alpha and gamma
-      expect(beta.children.map((c: any) => c.key).sort()).toEqual(['b__a', 'b__c'])
-      const childA = beta.children.find((c: any) => c.key === 'b__a')!
+      expect(beta.children.map((c) => c.key).sort()).toEqual(['b__a', 'b__c'])
+      const childA = beta.children.find((c) => c.key === 'b__a')!
       expect(childA.label).toBe('alpha')
     })
 
@@ -333,7 +406,7 @@ describe('tagFilter store', () => {
       store.selectedTagIds = new Set(['a'])
       store.excludedTagIds = new Set(['c'])
       // facetsQueryOpts.queryKey is a computed ref of the reactive key.
-      const key = facetsQueryOpts.queryKey.value
+      const key = facetsQueryOpts!.queryKey.value
       expect(key[0]).toBe('tagFacets')
       // selected array, mode, then the excluded array.
       expect(key).toContainEqual(['c'])
@@ -345,7 +418,7 @@ describe('tagFilter store', () => {
       store.selectedTagIds = new Set(['a'])
       store.excludedTagIds = new Set(['c'])
       // Invoke the captured queryFn (vue-query is mocked, so it never auto-runs).
-      facetsQueryOpts.queryFn()
+      facetsQueryOpts!.queryFn()
       expect(getTagFacetsMock).toHaveBeenCalledWith(['a'], 'and', ['c'])
     })
   })

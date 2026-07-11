@@ -18,7 +18,7 @@ handling) has a second chance to surface.
 
 | Feature area | Playwright spec (E1) | Browser-harness check (E2) | Relationship |
 |---|---|---|---|
-| Release identity / version | `smoke.spec.ts` (app shell renders) | **check 1** — `/api/app current_version == 3.3.0` (hard gate) | **Complement** — only E2 asserts the exact release version and fails a stale image. |
+| Release identity / version | `smoke.spec.ts` (app shell renders) | **check 1** — `/api/app current_version == 3.4.0` (hard gate) | **Complement** — only E2 asserts the exact release version and fails a stale image. |
 | Native login | `auth.spec.ts` (login / bad creds / logout) | **check 2** — form login admin/admin enters the shell | **Overlap** — both verify the login form; E1 is deeper (error paths, logout). |
 | Deep-link / URL hydration | `tags.spec.ts` ("URL round-trips included + excluded tag") | **check 3** — cold-load deep link retains search+tags+exclude | **Overlap** — E1 asserts filter *behavior*; E2 asserts *URL retention* after a real reload in a second engine. |
 | Documents CRUD | `documents.spec.ts` (create → list → open) | **check 4** — list search surfaces the seeded document row | **Overlap** — E1 owns full CRUD; E2 re-verifies list search + render in real Chrome. |

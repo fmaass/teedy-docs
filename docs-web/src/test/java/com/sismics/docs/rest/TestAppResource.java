@@ -105,6 +105,145 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
+     * Test the configurable footer links: admin write + validation + anonymous read.
+     */
+    @Test
+    public void testFooterLinks() {
+        String adminToken = adminToken();
+
+        // Anonymous GET /app carries NO footer_links key when none configured (unchanged chrome).
+        JsonObject json = target().path("/app").request().get(JsonObject.class);
+        Assertions.assertFalse(json.containsKey("footer_links"), "footer_links must be absent when unset");
+
+        // Configure two valid links as admin.
+        String links = "[{\"label\":\"Imprint\",\"url\":\"https://example.com/imprint\"},"
+                + "{\"label\":\"Privacy\",\"url\":\"http://example.com/privacy\"}]";
+        Response response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links", links)));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // Anonymous GET /app now returns them (public chrome, no auth cookie).
+        json = target().path("/app").request().get(JsonObject.class);
+        JsonArray footerLinks = json.getJsonArray("footer_links");
+        Assertions.assertEquals(2, footerLinks.size());
+        Assertions.assertEquals("Imprint", footerLinks.getJsonObject(0).getString("label"));
+        Assertions.assertEquals("https://example.com/imprint", footerLinks.getJsonObject(0).getString("url"));
+        Assertions.assertEquals("Privacy", footerLinks.getJsonObject(1).getString("label"));
+
+        // --- Scheme-evasion rejection (open-redirect / XSS guard) ---
+        // Every non-http(s) scheme and every whitespace/case-obfuscated variant must be
+        // rejected by validateHttpUrl. If any of these were ACCEPTED it would be a real
+        // open-redirect/XSS defect; these cases pin the fail-closed behaviour.
+        String[] evasionUrls = {
+                "javascript:alert(1)",                       // bare javascript:
+                "  javascript:alert(1)",                     // whitespace-prefixed (strip must not un-hide it)
+                "JavaScript:alert(1)",                       // mixed-case scheme
+                "data:text/html,<script>alert(1)</script>",  // data: URI
+                "//evil.com",                                // protocol-relative
+                "  //evil.com",                              // protocol-relative, whitespace-prefixed
+                "ftp://example.com",                         // non-http(s) scheme
+        };
+        for (String evil : evasionUrls) {
+            Response r = target().path("/app/footer_links").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .post(Entity.form(new Form().param("links",
+                            "[{\"label\":\"Evil\",\"url\":\"" + jsonEscape(evil) + "\"}]")));
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(r.getStatus()),
+                    "a non-http(s) / obfuscated URL must be rejected: " + evil);
+        }
+
+        // Reject an entry missing its label.
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"url\":\"https://example.com\"}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a link without a label must be rejected");
+
+        // Reject a blank / whitespace-only label (validateStringNotBlank).
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":\"   \",\"url\":\"https://example.com\"}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a whitespace-only label must be rejected");
+
+        // Reject a non-string label (JSON number where a string is required).
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":42,\"url\":\"https://example.com\"}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a non-string label must be rejected");
+
+        // Reject a non-string url (JSON boolean where a string is required).
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":\"Ok\",\"url\":true}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a non-string url must be rejected");
+
+        // Reject a label longer than 40 characters.
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":\"" + "a".repeat(41) + "\",\"url\":\"https://example.com\"}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a label longer than 40 characters must be rejected");
+
+        // Reject a url longer than 500 characters.
+        String longUrl = "https://example.com/" + "a".repeat(500);
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":\"Ok\",\"url\":\"" + longUrl + "\"}]")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a url longer than 500 characters must be rejected");
+
+        // Reject more than 5 entries, and the error names the limit.
+        StringBuilder tooMany = new StringBuilder("[");
+        for (int i = 0; i < 6; i++) {
+            if (i > 0) tooMany.append(',');
+            tooMany.append("{\"label\":\"L").append(i).append("\",\"url\":\"https://example.com/").append(i).append("\"}");
+        }
+        tooMany.append(']');
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links", tooMany.toString())));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "more than 5 footer links must be rejected");
+        Assertions.assertTrue(response.readEntity(String.class).contains("5"),
+                "the cap-exceeded error must name the 5-link limit");
+
+        // An anonymous caller must not be able to write footer links.
+        response = target().path("/app/footer_links").request()
+                .post(Entity.form(new Form().param("links", "[]")));
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
+                "an anonymous caller must not write footer links");
+
+        // An AUTHENTICATED non-admin caller must not be able to write footer links either
+        // (checkBaseFunction(ADMIN) — a valid session without the admin function is 403).
+        clientUtil.createUser("footer_links_user");
+        String userToken = clientUtil.login("footer_links_user");
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .post(Entity.form(new Form().param("links",
+                        "[{\"label\":\"X\",\"url\":\"https://example.com\"}]")));
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
+                "a non-admin authenticated caller must not write footer links");
+
+        // An empty array clears the config: footer_links is absent again on GET /app.
+        response = target().path("/app/footer_links").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("links", "[]")));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        json = target().path("/app").request().get(JsonObject.class);
+        Assertions.assertFalse(json.containsKey("footer_links"), "an empty array must clear footer_links");
+    }
+
+    /**
      * Test the log resource.
      */
     @Test
@@ -323,6 +462,7 @@ public class TestAppResource extends BaseJerseyTest {
                 ServerSetup.SMTP.dynamicPort(), ServerSetup.IMAP.dynamicPort() });
         greenMail.setUser("test@sismics.com", "Test1234");
         greenMail.start();
+        try {
         int smtpPort = greenMail.getSmtp().getPort();
         int imapPort = greenMail.getImap().getPort();
 
@@ -452,8 +592,11 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertFalse(lastSync.isNull("date"));
         Assertions.assertTrue(lastSync.isNull("error"));
         Assertions.assertEquals(0, lastSync.getJsonNumber("count").intValue());
-
-        greenMail.stop();
+        } finally {
+            // Stop in a finally so an assertion failure above cannot leak the embedded
+            // SMTP/IMAP server (and its bound ports) into the rest of the suite.
+            greenMail.stop();
+        }
     }
 
     /**
@@ -461,13 +604,6 @@ public class TestAppResource extends BaseJerseyTest {
      */
     @Test
     public void testLdapAuthentication() throws Exception {
-        // Reserve an OS-assigned port for the embedded LDAP server (no fixed port,
-        // so parallel test runs on one host don't collide with BindException).
-        int ldapPort;
-        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
-            ldapPort = socket.getLocalPort();
-        }
-
         // Start LDAP server
         final DirectoryServiceFactory factory = new DefaultDirectoryServiceFactory();
         factory.init("Test");
@@ -482,12 +618,18 @@ public class TestAppResource extends BaseJerseyTest {
         partition.initialize();
         directoryService.addPartition(partition);
 
+        // Bind to port 0 and read the REAL bound port back from MINA's acceptor after start —
+        // no ServerSocket(0) reserve-then-release window in which another process could steal
+        // the port (BindException race, issue #33). Transport.getPort()/LdapServer.getPort()
+        // still report the configured 0, so we must read the acceptor's local address instead.
+        final TcpTransport transport = new TcpTransport("localhost", 0);
         final LdapServer ldapServer = new LdapServer();
-        ldapServer.setTransports(new TcpTransport("localhost", ldapPort));
+        ldapServer.setTransports(transport);
         ldapServer.setDirectoryService(directoryService);
 
         directoryService.startup();
         ldapServer.start();
+        int ldapPort = ((java.net.InetSocketAddress) transport.getAcceptor().getLocalAddress()).getPort();
 
         // Load test data in LDAP
         new LdifFileLoader(directoryService.getAdminSession(), new File(Resources.getResource("test.ldif").getFile()), null).execute();
@@ -685,6 +827,15 @@ public class TestAppResource extends BaseJerseyTest {
         // Stop LDAP server
         ldapServer.stop();
         directoryService.shutdown();
+    }
+
+    /**
+     * Minimal JSON string-content escaping for embedding a raw URL inside a JSON
+     * literal in the footer-links test payloads (backslash and double-quote only —
+     * the evasion URLs contain neither, but this keeps the payloads well-formed).
+     */
+    private static String jsonEscape(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
 }

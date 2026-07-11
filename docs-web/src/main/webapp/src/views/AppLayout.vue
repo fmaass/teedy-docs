@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useTagFilterStore } from '../stores/tagFilter'
 import { useResizablePanel } from '../composables/useResizablePanel'
+import { useAppInfo } from '../composables/useAppInfo'
 import AppHeader from '../components/AppHeader.vue'
 import DefaultPasswordBanner from '../components/DefaultPasswordBanner.vue'
 import AdminNavPanel from '../components/AdminNavPanel.vue'
@@ -22,6 +23,11 @@ const modeOptions = computed<Array<{ label: string; value: 'and' | 'or' }>>(() =
   { label: t('ui.mode_and'), value: 'and' },
   { label: t('ui.mode_or'), value: 'or' },
 ])
+
+// Configurable footer/imprint links (public chrome). Empty by default so the footer
+// renders today's exact chrome (nothing) when none are configured.
+const { data: appInfo } = useAppInfo()
+const footerLinks = computed(() => appInfo.value?.footer_links ?? [])
 
 const isMobile = ref(false)
 const drawerOpen = ref(false)
@@ -65,6 +71,7 @@ const settingsAdminItems = computed(() => [
   { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
   { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
   { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
+  { label: t('ui.oidc.title'), icon: 'pi pi-id-card', to: '/settings/oidc', name: 'settings-oidc' },
   { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
   { label: t('ui.workflow_admin.title'), icon: 'pi pi-sitemap', to: '/settings/workflow', name: 'settings-workflow' },
   { label: t('ui.vocabulary.title'), icon: 'pi pi-list', to: '/settings/vocabulary', name: 'settings-vocabulary' },
@@ -162,6 +169,16 @@ function handleMobileTagSelect(tagId: string) {
             <i class="pi pi-cog" />
             <span>{{ t('ui.nav.settings') }}</span>
           </router-link>
+          <div v-if="footerLinks.length" class="footer-external-links">
+            <a
+              v-for="(link, index) in footerLinks"
+              :key="index"
+              :href="link.url"
+              class="footer-external-link"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ link.label }}</a>
+          </div>
         </div>
 
         <!-- Resize handle (desktop only) -->
@@ -224,6 +241,17 @@ function handleMobileTagSelect(tagId: string) {
             <router-link to="/settings" class="footer-link" @click="drawerOpen = false">
               <i class="pi pi-cog" /><span>{{ t('ui.nav.settings') }}</span>
             </router-link>
+            <div v-if="footerLinks.length" class="footer-external-links">
+              <a
+                v-for="(link, index) in footerLinks"
+                :key="index"
+                :href="link.url"
+                class="footer-external-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="drawerOpen = false"
+              >{{ link.label }}</a>
+            </div>
           </div>
         </div>
       </Drawer>
@@ -363,6 +391,24 @@ function handleMobileTagSelect(tagId: string) {
   font-size: 0.875rem;
   width: 1.125rem;
   text-align: center;
+}
+
+.footer-external-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.375rem 0.5rem 0.125rem;
+  margin-top: 0.125rem;
+  border-top: 1px solid var(--p-content-border-color);
+}
+.footer-external-link {
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+  text-decoration: none;
+}
+.footer-external-link:hover {
+  color: var(--p-text-color);
+  text-decoration: underline;
 }
 
 /* --- Main content --- */

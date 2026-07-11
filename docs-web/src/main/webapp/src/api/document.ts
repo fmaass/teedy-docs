@@ -97,6 +97,36 @@ export function updateDocument(id: string, params: URLSearchParams) {
 }
 
 /**
+ * Build the form body for an outgoing-relations edit via POST /document/:id.
+ *
+ * The update endpoint validates `title` and `language` as REQUIRED before it processes
+ * relations (DocumentResource#update), so both are always sent — omitting them would
+ * fail the whole request. Only relation fields are otherwise included, so a relations-only
+ * edit never touches the document's other fields (tags, description, metadata): the backend
+ * partial-update contract preserves any param not present in the body.
+ *
+ * `outgoingIds` is the FULL surviving list of outgoing (source=true) relation targets. When
+ * it is empty, the `relations_reset=true` sentinel is sent so the backend clears the last
+ * outgoing relation (an empty `relations` list is otherwise indistinguishable from "omitted"
+ * and would preserve the existing relations).
+ */
+export function buildRelationsParams(
+  title: string,
+  language: string,
+  outgoingIds: string[],
+): URLSearchParams {
+  const params = new URLSearchParams()
+  params.append('title', title)
+  params.append('language', language)
+  if (outgoingIds.length === 0) {
+    params.append('relations_reset', 'true')
+  } else {
+    for (const id of outgoingIds) params.append('relations', id)
+  }
+  return params
+}
+
+/**
  * Import a new document from an .eml email file via PUT /api/document/eml
  * (multipart/form-data, param `file`). The backend parses the email, uses its
  * subject as the title, and attaches the body + attachments as files; it returns

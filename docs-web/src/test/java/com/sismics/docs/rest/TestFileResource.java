@@ -644,7 +644,7 @@ public class TestFileResource extends BaseJerseyTest {
         clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
         clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, null);
 
-        long before = countSismicsTempFiles();
+        java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         // The fourth upload breaches the 1MB quota: createFile throws QuotaReached after
         // writing the temp, before queuing the async event.
@@ -654,9 +654,9 @@ public class TestFileResource extends BaseJerseyTest {
         } catch (jakarta.ws.rs.BadRequestException ignored) {
         }
 
-        long after = countSismicsTempFiles();
-        Assertions.assertTrue(after <= before,
-                "Plaintext temp file leaked on failed upload: before=" + before + " after=" + after);
+        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
+        Assertions.assertTrue(leaked.isEmpty(),
+                "Plaintext temp file leaked on failed upload: " + leaked);
     }
 
     /**
@@ -671,7 +671,7 @@ public class TestFileResource extends BaseJerseyTest {
         clientUtil.createUser("file_copy_err");
         String token = clientUtil.login("file_copy_err");
 
-        long before = countSismicsTempFiles();
+        java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         // Force the oversize path to trip during the server-side copy loop: the real file
         // (292KB) exceeds this 1KB cap, so the resource writes the temp, then throws
@@ -691,16 +691,49 @@ public class TestFileResource extends BaseJerseyTest {
             System.clearProperty("docs.max_upload_size");
         }
 
-        long after = countSismicsTempFiles();
-        Assertions.assertTrue(after <= before,
-                "Plaintext temp file leaked on oversize copy failure: before=" + before + " after=" + after);
+        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
+        Assertions.assertTrue(leaked.isEmpty(),
+                "Plaintext temp file leaked on oversize copy failure: " + leaked);
     }
 
-    private long countSismicsTempFiles() throws Exception {
+    /**
+     * Snapshots the {@code sismics_docs*} temp files currently present in the shared system
+     * tmpdir. The leak assertions work on the DELTA between two snapshots ({@link
+     * #leakedSismicsTempFiles(java.util.Set)}), never on a raw count: a raw count races with
+     * concurrent JVMs (parallel worktree suites) whose long-lived temps inflate the number.
+     * Every file that pre-exists this test — including every other JVM's — appears in BOTH
+     * snapshots and cancels out. The guarantee is asymmetric: a FALSE PASS is impossible (a
+     * file this test leaks always lands in the delta), but a concurrent JVM CAN still inject
+     * a matching file between the snapshots, producing a spurious FAILURE — a loud,
+     * investigable outcome, never a silently missed leak.
+     */
+    private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
         Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
         try (java.util.stream.Stream<Path> files = Files.list(tmpDir)) {
-            return files.filter(p -> p.getFileName().toString().startsWith("sismics_docs")).count();
+            return files.filter(p -> p.getFileName().toString().startsWith("sismics_docs"))
+                    .collect(java.util.stream.Collectors.toSet());
         }
+    }
+
+    /**
+     * The {@code sismics_docs*} temp files that appeared AFTER {@code before} and REMAIN
+     * present. Transient temps (a concurrent suite's in-flight upload, straggler async
+     * processing) are deleted by their owner shortly after; the check polls briefly until
+     * the delta drains. A GENUINE leak has no deleter and survives the full window, failing
+     * loudly. Polling narrows the spurious-failure window without weakening detection.
+     */
+    private java.util.Set<Path> leakedSismicsTempFiles(java.util.Set<Path> before) throws Exception {
+        java.util.Set<Path> leaked;
+        long deadline = System.currentTimeMillis() + 15000;
+        do {
+            leaked = new java.util.HashSet<>(snapshotSismicsTempFiles());
+            leaked.removeAll(before);
+            if (leaked.isEmpty()) {
+                return leaked;
+            }
+            Thread.sleep(250);
+        } while (System.currentTimeMillis() < deadline);
+        return leaked;
     }
 
     /**

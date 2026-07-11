@@ -20,6 +20,7 @@ import {
   saveInboxConfig,
   testInbox,
   cleanStorage,
+  saveFooterLinks,
 } from './app'
 
 describe('app api module', () => {
@@ -226,5 +227,32 @@ describe('clean storage api', () => {
     await cleanStorage()
     expect(clientMock.post).toHaveBeenCalledWith('/app/batch/clean_storage')
     expect(clientMock.post.mock.calls[0].length).toBe(1)
+  })
+})
+
+describe('footer links api', () => {
+  beforeEach(() => {
+    clientMock.post.mockReset().mockResolvedValue({ data: {} })
+  })
+
+  it('saveFooterLinks POSTs /app/footer_links with the list JSON-encoded under `links`', async () => {
+    await saveFooterLinks([
+      { label: 'Imprint', url: 'https://example.com/imprint' },
+      { label: 'Privacy', url: 'https://example.com/privacy' },
+    ])
+    expect(clientMock.post).toHaveBeenCalledOnce()
+    const [url, body] = clientMock.post.mock.calls[0]
+    expect(url).toBe('/app/footer_links')
+    expect(body).toBeInstanceOf(URLSearchParams)
+    expect(JSON.parse((body as URLSearchParams).get('links')!)).toEqual([
+      { label: 'Imprint', url: 'https://example.com/imprint' },
+      { label: 'Privacy', url: 'https://example.com/privacy' },
+    ])
+  })
+
+  it('saveFooterLinks sends an empty array to clear the config', async () => {
+    await saveFooterLinks([])
+    const body = clientMock.post.mock.calls[0][1] as URLSearchParams
+    expect(body.get('links')).toBe('[]')
   })
 })

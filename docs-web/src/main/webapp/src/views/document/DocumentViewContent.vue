@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { getFileUrl, deleteFile, renameFile, uploadFile } from '../../api/file'
+import {
+  listDocuments,
+  updateDocument,
+  buildRelationsParams,
+  type DocumentListItem,
+} from '../../api/document'
 import PdfViewer from '../../components/PdfViewer.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import AutoComplete from 'primevue/autocomplete'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
@@ -41,6 +48,93 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
     return formatDate(Number(field.value))
   }
   return String(field.value)
+}
+
+// --- Related documents ---
+// getDocument returns BOTH directions in `relations`: source=true is an outgoing relation
+// this document owns (removable here); source=false is incoming, owned by the OTHER document
+// (shown read-only — it must be removed from its source document's view).
+const outgoingRelations = computed(() =>
+  (doc.value?.relations ?? []).filter((r) => r.source),
+)
+const incomingRelations = computed(() =>
+  (doc.value?.relations ?? []).filter((r) => !r.source),
+)
+
+const relationSearchResults = ref<DocumentListItem[]>([])
+const selectedRelationTarget = ref<DocumentListItem | null>(null)
+const savingRelation = ref(false)
+
+async function completeRelationSearch(event: { query: string }) {
+  const query = event.query.trim()
+  if (!query || !doc.value) {
+    relationSearchResults.value = []
+    return
+  }
+  try {
+    const { data } = await listDocuments({ search: query, limit: 10 })
+    // Exclude self and any document already related (either direction).
+    const relatedIds = new Set((doc.value.relations ?? []).map((r) => r.id))
+    relationSearchResults.value = data.documents.filter(
+      (d) => d.id !== doc.value!.id && !relatedIds.has(d.id),
+    )
+  } catch {
+    relationSearchResults.value = []
+  }
+}
+
+// Submit the FULL surviving outgoing id list (buildRelationsParams sends title + language,
+// which the backend requires, and relations_reset=true when the list is empty). Only outgoing
+// relations are reconciled by the backend — incoming ones are untouched.
+async function saveOutgoing(outgoingIds: string[]) {
+  if (!doc.value) return
+  const sourceId = doc.value.id
+  // Delta of affected TARGETS, captured before the refetch replaces doc.value: an added
+  // or removed target's own detail (its incoming list) changes with this mutation, so a
+  // cached target view would render stale relations on in-app navigation if only the
+  // source were invalidated.
+  const prevIds = new Set(outgoingRelations.value.map((r) => r.id))
+  const nextIds = new Set(outgoingIds)
+  const affectedTargetIds = [
+    ...outgoingIds.filter((id) => !prevIds.has(id)),
+    ...[...prevIds].filter((id) => !nextIds.has(id)),
+  ]
+  savingRelation.value = true
+  try {
+    await updateDocument(
+      sourceId,
+      buildRelationsParams(doc.value.title, doc.value.language, outgoingIds),
+    )
+    queryClient.invalidateQueries({ queryKey: ['document', sourceId] })
+    for (const id of affectedTargetIds) {
+      queryClient.invalidateQueries({ queryKey: ['document', id] })
+    }
+    toast.add({ severity: 'success', summary: t('ui.relations.saved'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.relations.failed_save'), life: 3000 })
+  } finally {
+    savingRelation.value = false
+  }
+}
+
+async function handleAddRelation() {
+  if (!selectedRelationTarget.value) return
+  const ids = [...outgoingRelations.value.map((r) => r.id), selectedRelationTarget.value.id]
+  await saveOutgoing(ids)
+  selectedRelationTarget.value = null
+  relationSearchResults.value = []
+}
+
+function confirmRemoveRelation(relation: { id: string; title: string }) {
+  confirmDanger({
+    message: t('ui.relations.remove_confirm', { title: relation.title }),
+    header: t('ui.relations.remove'),
+    icon: 'pi pi-link',
+    accept: async () => {
+      const ids = outgoingRelations.value.map((r) => r.id).filter((id) => id !== relation.id)
+      await saveOutgoing(ids)
+    },
+  })
 }
 
 const renamingId = ref<string | null>(null)
@@ -99,6 +193,102 @@ async function handleUpload(event: FileUploadUploaderEvent) {
 // real PUT /api/file path.
 async function onCameraCapture(captured: File[]) {
   await uploadAll(captured)
+}
+
+// View-only image rotation, per file card. Nothing is persisted — this is a
+// display transform only; file bytes and the API are never touched. State resets
+// when the document changes (a new set of files).
+const imageRotations = ref<Record<string, number>>({})
+
+// Measured stage boxes, per file card. A CSS transform does NOT change the
+// element's layout box, so the sideways (90/270) image must be constrained
+// against the stage's REAL dimensions — the preview column can be narrower than
+// the 400px stage height, and any fixed cap would let a near-square image clip.
+// Measured on ref attach and on every rotate; kept fresh via ResizeObserver.
+const stageBoxes = ref<Record<string, { w: number; h: number }>>({})
+const stageEls = new Map<string, HTMLElement>()
+const stageElToId = new Map<Element, string>()
+
+const stageObserver =
+  typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const id = stageElToId.get(entry.target)
+          if (id) {
+            stageBoxes.value[id] = {
+              w: (entry.target as HTMLElement).clientWidth,
+              h: (entry.target as HTMLElement).clientHeight,
+            }
+          }
+        }
+      })
+    : null
+
+onUnmounted(() => stageObserver?.disconnect())
+
+function setStageRef(fileId: string, el: Element | ComponentPublicInstance | null) {
+  const prev = stageEls.get(fileId)
+  if (el instanceof HTMLElement) {
+    if (prev === el) return
+    if (prev) {
+      stageObserver?.unobserve(prev)
+      stageElToId.delete(prev)
+    }
+    stageEls.set(fileId, el)
+    stageElToId.set(el, fileId)
+    stageObserver?.observe(el)
+    measureStage(fileId)
+  } else if (prev) {
+    stageObserver?.unobserve(prev)
+    stageElToId.delete(prev)
+    stageEls.delete(fileId)
+  }
+}
+
+function measureStage(fileId: string) {
+  const el = stageEls.get(fileId)
+  if (el) stageBoxes.value[fileId] = { w: el.clientWidth, h: el.clientHeight }
+}
+
+watch(
+  () => doc.value?.id,
+  () => {
+    imageRotations.value = {}
+    stageBoxes.value = {}
+  },
+)
+
+function imageRotation(fileId: string): number {
+  return imageRotations.value[fileId] ?? 0
+}
+
+function rotateImageLeft(fileId: string) {
+  measureStage(fileId)
+  imageRotations.value[fileId] = (imageRotation(fileId) + 270) % 360
+}
+
+function rotateImageRight(fileId: string) {
+  measureStage(fileId)
+  imageRotations.value[fileId] = (imageRotation(fileId) + 90) % 360
+}
+
+// Inline style for a preview image: the rotation transform plus, when sideways,
+// pixel caps derived from the MEASURED stage box. Sideways, the on-screen axes
+// swap: pre-rotation width paints as height (cap it to the stage height) and
+// pre-rotation height paints as width (cap it to the stage width). The rotated
+// bounding box then fits the actual stage on both axes — no clipping of an
+// asymmetric image at any rotation, at any column width.
+function imageStyle(fileId: string): Record<string, string> {
+  const deg = imageRotation(fileId)
+  const style: Record<string, string> = { transform: `rotate(${deg}deg)` }
+  if (deg % 180 !== 0) {
+    const box = stageBoxes.value[fileId]
+    if (box && box.w > 0 && box.h > 0) {
+      style.maxWidth = `${box.h}px`
+      style.maxHeight = `${box.w}px`
+    }
+  }
+  return style
 }
 
 function isImage(mime: string) {
@@ -169,11 +359,126 @@ function confirmDelete(file: { id: string; name: string }) {
       </dl>
     </div>
 
+    <!-- Related documents -->
+    <div
+      v-if="outgoingRelations.length || incomingRelations.length || doc.writable"
+      class="doc-relations"
+    >
+      <h3 class="doc-relations-heading">{{ t('ui.relations.title') }}</h3>
+
+      <!-- Outgoing: this document links to these (removable). -->
+      <div v-if="outgoingRelations.length" class="relation-group">
+        <p class="relation-group-label">{{ t('ui.relations.links_to') }}</p>
+        <div class="relation-list">
+          <div v-for="relation in outgoingRelations" :key="relation.id" class="relation-row">
+            <i class="pi pi-arrow-right relation-dir-icon" aria-hidden="true" />
+            <router-link
+              :to="{ name: 'document-view-content', params: { id: relation.id } }"
+              class="relation-link"
+            >
+              {{ relation.title }}
+            </router-link>
+            <Button
+              v-if="doc.writable"
+              icon="pi pi-times"
+              text
+              rounded
+              size="small"
+              severity="danger"
+              :loading="savingRelation"
+              @click="confirmRemoveRelation(relation)"
+              v-tooltip="t('ui.relations.remove')"
+              :aria-label="t('ui.relations.remove')"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Incoming: other documents link here. Read-only — no remove control; the relation
+           is owned by the source document and must be removed from there. -->
+      <div v-if="incomingRelations.length" class="relation-group">
+        <p class="relation-group-label">{{ t('ui.relations.linked_from') }}</p>
+        <div class="relation-list">
+          <div v-for="relation in incomingRelations" :key="relation.id" class="relation-row">
+            <i class="pi pi-arrow-left relation-dir-icon" aria-hidden="true" />
+            <router-link
+              :to="{ name: 'document-view-content', params: { id: relation.id } }"
+              class="relation-link"
+              v-tooltip="t('ui.relations.remove_from_source', { title: relation.title })"
+            >
+              {{ relation.title }}
+            </router-link>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add an outgoing relation. Writable-only. -->
+      <div v-if="doc.writable" class="relation-add">
+        <AutoComplete
+          v-model="selectedRelationTarget"
+          :suggestions="relationSearchResults"
+          optionLabel="title"
+          forceSelection
+          size="small"
+          class="relation-add-autocomplete"
+          :placeholder="t('ui.relations.search_placeholder')"
+          @complete="completeRelationSearch"
+        >
+          <template #option="{ option }">
+            <div class="relation-search-result">
+              <i class="pi pi-file" aria-hidden="true" />
+              <span>{{ option.title }}</span>
+            </div>
+          </template>
+        </AutoComplete>
+        <Button
+          :label="t('add')"
+          icon="pi pi-plus"
+          size="small"
+          :disabled="!selectedRelationTarget"
+          :loading="savingRelation"
+          @click="handleAddRelation"
+        />
+      </div>
+    </div>
+
     <!-- File previews -->
     <div v-if="doc.files?.length" class="file-preview-grid">
       <template v-for="file in doc.files" :key="file.id">
         <div v-if="isImage(file.mimetype)" class="file-preview-card">
-          <img :src="getFileUrl(file.id, 'web')" :alt="file.name" loading="lazy" />
+          <div
+            :ref="(el) => setStageRef(file.id, el)"
+            class="image-preview-stage"
+            :class="{ 'is-sideways': imageRotation(file.id) % 180 !== 0 }"
+          >
+            <img
+              :src="getFileUrl(file.id, 'web')"
+              :alt="file.name"
+              loading="lazy"
+              class="rotatable-image"
+              :style="imageStyle(file.id)"
+            />
+          </div>
+          <div class="image-preview-controls">
+            <Button
+              icon="pi pi-replay"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              @click="rotateImageLeft(file.id)"
+              :aria-label="t('ui.rotate_left')"
+            />
+            <Button
+              icon="pi pi-refresh"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              @click="rotateImageRight(file.id)"
+              :aria-label="t('ui.rotate_right')"
+            />
+          </div>
           <div class="file-preview-label">{{ file.name }}</div>
         </div>
         <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
@@ -329,6 +634,76 @@ function confirmDelete(file: { id: string; name: string }) {
   word-break: break-word;
 }
 
+.doc-relations {
+  margin: 0 0 1.5rem;
+}
+.doc-relations-heading {
+  margin: 0 0 0.625rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.relation-group {
+  margin-bottom: 0.75rem;
+}
+.relation-group-label {
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.relation-list {
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.relation-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+.relation-row:last-child {
+  border-bottom: none;
+}
+.relation-dir-icon {
+  color: var(--p-text-muted-color);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.relation-link {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--p-text-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relation-link:hover {
+  color: var(--teedy-brand);
+  text-decoration: underline;
+}
+.relation-add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+.relation-add-autocomplete {
+  flex: 1;
+}
+.relation-search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  font-size: 0.875rem;
+}
+
 .file-preview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -342,12 +717,42 @@ function confirmDelete(file: { id: string; name: string }) {
   border-radius: var(--p-content-border-radius, 6px);
   background: var(--p-content-background);
 }
-.file-preview-card img {
-  width: 100%;
-  display: block;
-  max-height: 400px;
-  object-fit: contain;
+/* Rotation stage: a fixed-height box that centers the (possibly rotated) image.
+   At 90/270 the image is rotated in place; the stage constrains the image's
+   pre-rotation dimensions so the ROTATED result fits the box on both axes — i.e.
+   an asymmetric image is never clipped at any rotation. transform-origin is the
+   center so the rotation pivots about the box center. */
+.image-preview-stage {
+  height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   background: var(--p-content-hover-background);
+}
+.rotatable-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 0.2s ease;
+}
+/* Sideways (90/270) sizing is NOT handled here: a stylesheet cannot know the
+   stage's live column width, and any fixed pixel cap clips a near-square image
+   in a narrow column. The sideways caps are inline styles computed from the
+   MEASURED stage box (see imageStyle()/setStageRef in the script), which
+   override the 100% caps above. `.is-sideways` remains as a semantic hook for
+   tests/e2e. */
+
+.image-preview-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-top: 1px solid var(--p-content-border-color);
+  background: var(--p-content-background);
 }
 
 .file-preview-label {

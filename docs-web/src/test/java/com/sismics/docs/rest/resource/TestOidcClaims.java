@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -197,6 +196,56 @@ public class TestOidcClaims {
         }
     }
 
+    /**
+     * The size cap is measured in RAW BYTES, not decoded characters. A body whose CHARACTER
+     * count is under the 64 KiB cap but whose UTF-8 BYTE length exceeds it must still be
+     * rejected. Padded with a 3-byte character (U+20AC EURO SIGN): ~32 K chars is well under
+     * the 64 Ki-char boundary but ~96 KiB, over the byte cap. RED against the previous
+     * {@code body.length()} char-count comparison, which would have let this multibyte body
+     * through.
+     */
+    @Test
+    public void userInfoFetchRejectsMultibyteBodyOverByteCapUnderCharCount() throws Exception {
+        String pad = "€".repeat(32 * 1024); // ~32K chars, ~96 KiB in UTF-8
+        String body = "{\"sub\":\"sub-abc\",\"pad\":\"" + pad + "\"}";
+        Assertions.assertTrue(body.length() < 64 * 1024,
+                "precondition: char count must be under the cap so char-count logic would pass");
+        Assertions.assertTrue(body.getBytes(StandardCharsets.UTF_8).length > 64 * 1024,
+                "precondition: UTF-8 byte length must exceed the cap");
+        HttpServer server = startUserInfoServer(exchange -> body);
+        try {
+            System.setProperty("docs.oidc_userinfo_endpoint",
+                    "http://localhost:" + server.getAddress().getPort() + "/userinfo");
+            Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> invokeFetchUserInfo("access-tok-123", "sub-abc"),
+                    "a body over the BYTE cap must be rejected even when its char count is under it");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
+     * A structured {@code +json} suffix media type (RFC 6839), e.g. {@code application/hal+json},
+     * is valid JSON and must be accepted — not rejected like a non-JSON type. RED against the
+     * previous {@code contains("application/json")} check, which matched only the exact base type.
+     */
+    @Test
+    public void userInfoFetchAcceptsHalJsonSuffixContentType() throws Exception {
+        HttpServer server = startUserInfoServer(exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/hal+json; charset=utf-8");
+            return "{\"sub\":\"sub-abc\",\"email\":\"alice@example.com\"}";
+        });
+        try {
+            System.setProperty("docs.oidc_userinfo_endpoint",
+                    "http://localhost:" + server.getAddress().getPort() + "/userinfo");
+            JsonObject result = invokeFetchUserInfo("access-tok-123", "sub-abc");
+            Assertions.assertNotNull(result, "an application/hal+json UserInfo response must be accepted");
+            Assertions.assertEquals("alice@example.com", result.getString("email"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     // --- reflection helpers ----------------------------------------------------------------
 
     private static String invokeSanitize(String raw) throws Exception {
@@ -212,10 +261,15 @@ public class TestOidcClaims {
         return (String) m.invoke(null, stem, issuer, subject, hashLen);
     }
 
+    /**
+     * The claim getters are request-scoped: they read from an {@link OidcResource.OidcConfigSnapshot}.
+     * Build the snapshot from the CURRENT effective config (the test sets the relevant properties),
+     * then invoke the getter with it.
+     */
     private static String invokeStatic(String name) throws Exception {
-        Method m = OidcResource.class.getDeclaredMethod(name);
+        Method m = OidcResource.class.getDeclaredMethod(name, OidcResource.OidcConfigSnapshot.class);
         m.setAccessible(true);
-        return (String) m.invoke(null);
+        return (String) m.invoke(null, OidcResource.snapshot());
     }
 
     private static JsonObject invokeFetchUserInfo(String accessToken, String expectedSub) throws Exception {
@@ -224,18 +278,19 @@ public class TestOidcClaims {
 
     private static JsonObject invokeFetchUserInfoWithDiscovery(String accessToken, String expectedSub,
                                                                JsonObject discovery) throws Exception {
-        // fetchUserInfo is an instance method; give the discoveryCache-less path a config.
+        // fetchUserInfo is an instance method taking the request snapshot; give the discovery-
+        // derived path a config. The discovery document (when supplied) is seeded via the
+        // value-keyed cache test seam, keyed off the effective issuer set here.
         System.setProperty("docs.oidc_issuer", "https://iss.example");
-        Field f = OidcResource.class.getDeclaredField("discoveryCache");
-        f.setAccessible(true);
-        f.set(null, discovery);
+        OidcResource.setDiscoveryCacheForTest(discovery);
         try {
             OidcResource resource = new OidcResource();
-            Method m = OidcResource.class.getDeclaredMethod("fetchUserInfo", String.class, String.class);
+            Method m = OidcResource.class.getDeclaredMethod("fetchUserInfo",
+                    OidcResource.OidcConfigSnapshot.class, String.class, String.class);
             m.setAccessible(true);
-            return (JsonObject) m.invoke(resource, accessToken, expectedSub);
+            return (JsonObject) m.invoke(resource, OidcResource.snapshot(), accessToken, expectedSub);
         } finally {
-            f.set(null, null);
+            OidcResource.setDiscoveryCacheForTest(null);
         }
     }
 

@@ -28,8 +28,12 @@ import com.sismics.util.log4j.LogCriteria;
 import com.sismics.util.log4j.LogEntry;
 import com.sismics.util.log4j.MemoryAppender;
 import jakarta.json.Json;
+import jakarta.json.JsonArray;
 import jakarta.json.JsonArrayBuilder;
+import jakarta.json.JsonObject;
 import jakarta.json.JsonObjectBuilder;
+import jakarta.json.JsonReader;
+import jakarta.json.JsonValue;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import jakarta.ws.rs.*;
@@ -41,6 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.text.MessageFormat;
@@ -104,7 +109,9 @@ public class AppResource extends BaseResource {
         }
 
         boolean headerAuthEnabled = Boolean.parseBoolean(System.getProperty("docs.header_authentication"));
-        boolean oidcEnabled = Boolean.parseBoolean(System.getProperty("docs.oidc_enabled"));
+        // OIDC "enabled" flows through the single OIDC config accessor (DB override, else the
+        // docs.oidc_enabled property) so a DB-configured enable is reflected without a restart.
+        boolean oidcEnabled = OidcResource.isOidcEnabled();
 
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("current_version", currentVersion.replace("-SNAPSHOT", ""))
@@ -135,7 +142,109 @@ public class AppResource extends BaseResource {
             response.add("global_storage_quota", globalQuota);
         }
 
+        // Configurable footer/imprint links (public chrome like guest_login). Anonymous
+        // callers get these so EU imprint links can render on the login screen BEFORE
+        // login. Absent when unset or empty, so today's chrome (nothing) is unchanged.
+        JsonArray footerLinks = getFooterLinks();
+        if (!footerLinks.isEmpty()) {
+            response.add("footer_links", footerLinks);
+        }
+
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Reads the stored footer-links JSON array (the ThemeResource JSON-blob-in-one-key
+     * precedent). Returns an empty array when unset or the stored value is not a JSON
+     * array, so callers never have to null-check.
+     *
+     * @return Footer links as a JSON array (possibly empty)
+     */
+    private JsonArray getFooterLinks() {
+        ConfigDao configDao = new ConfigDao();
+        Config config = configDao.getById(ConfigType.FOOTER_LINKS);
+        if (config == null || Strings.isNullOrEmpty(config.getValue())) {
+            return Json.createArrayBuilder().build();
+        }
+        try (JsonReader reader = Json.createReader(new StringReader(config.getValue()))) {
+            JsonValue value = reader.readValue();
+            if (value.getValueType() == JsonValue.ValueType.ARRAY) {
+                return value.asJsonArray();
+            }
+        } catch (Exception e) {
+            log.warn("Stored FOOTER_LINKS value is not valid JSON; treating as empty", e);
+        }
+        return Json.createArrayBuilder().build();
+    }
+
+    /**
+     * Update the configurable footer/imprint links.
+     *
+     * @api {post} /app/footer_links Set the footer/imprint links
+     * @apiName PostAppFooterLinks
+     * @apiGroup App
+     * @apiParam {String} links JSON array of {label, url} objects (max 5, http(s) URLs only)
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError A link entry is invalid or the cap is exceeded
+     * @apiPermission admin
+     * @apiVersion 1.12.0
+     *
+     * @param links JSON array of footer-link objects
+     * @return Response
+     */
+    @POST
+    @Path("footer_links")
+    public Response footerLinks(@FormParam("links") String links) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Parse and validate the submitted JSON array, then store the RE-SERIALIZED,
+        // normalised array (never the raw input) so only well-formed {label, url}
+        // entries — trimmed, scheme-checked, capped — are ever persisted.
+        JsonArray parsed;
+        try (JsonReader reader = Json.createReader(new StringReader(Strings.nullToEmpty(links)))) {
+            JsonValue value = reader.readValue();
+            if (value.getValueType() != JsonValue.ValueType.ARRAY) {
+                throw new ClientException("ValidationError", "links must be a JSON array");
+            }
+            parsed = value.asJsonArray();
+        } catch (ClientException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ClientException("ValidationError", "links must be a valid JSON array");
+        }
+
+        if (parsed.size() > 5) {
+            throw new ClientException("ValidationError", "A maximum of 5 footer links is allowed");
+        }
+
+        JsonArrayBuilder normalized = Json.createArrayBuilder();
+        for (int i = 0; i < parsed.size(); i++) {
+            JsonValue entryValue = parsed.get(i);
+            if (entryValue.getValueType() != JsonValue.ValueType.OBJECT) {
+                throw new ClientException("ValidationError", "Each footer link must be an object with a label and a url");
+            }
+            JsonObject entry = entryValue.asJsonObject();
+            String label = entry.containsKey("label") && entry.get("label").getValueType() == JsonValue.ValueType.STRING
+                    ? entry.getString("label") : null;
+            String url = entry.containsKey("url") && entry.get("url").getValueType() == JsonValue.ValueType.STRING
+                    ? entry.getString("url") : null;
+            label = ValidationUtil.validateStringNotBlank(label, "label");
+            label = ValidationUtil.validateLength(label, "label", 1, 40);
+            url = ValidationUtil.validateLength(url, "url", 1, 500);
+            // http(s) scheme only — validateHttpUrl rejects javascript:, data:, etc.
+            url = ValidationUtil.validateHttpUrl(url, "url");
+            normalized.add(Json.createObjectBuilder()
+                    .add("label", label)
+                    .add("url", url));
+        }
+
+        ConfigDao configDao = new ConfigDao();
+        configDao.update(ConfigType.FOOTER_LINKS, normalized.build().toString());
+
+        return Response.ok().build();
     }
 
     /**
@@ -928,6 +1037,206 @@ public class AppResource extends BaseResource {
         }
 
         return Response.ok().build();
+    }
+
+    /**
+     * Returns the OIDC (OpenID Connect) authentication configuration for the admin UI.
+     *
+     * <p>ADR-0015 fence: this endpoint exposes ONLY the provider/claim settings (issuer,
+     * client id, endpoints, scope, username/email claim names). It never reads or writes any
+     * identity-binding, username-derivation, disabled-account-eligibility, or fail-closed
+     * behavior — those are non-editable invariants of {@code OidcResource}.
+     *
+     * <p>The client secret is write-only (mirrors the LDAP admin password, BL-028): it is NEVER
+     * echoed back — only a boolean {@code client_secret_set} flag is exposed. Each field also
+     * carries its effective SOURCE ({@code db} | {@code property} | {@code default}) so the UI can
+     * hint "currently from a JVM property — saving overrides it".
+     *
+     * @api {get} /app/config_oidc Get the OIDC authentication configuration
+     * @apiName GetAppConfigOidc
+     * @apiGroup App
+     * @apiSuccess {Boolean} enabled OIDC authentication enabled
+     * @apiSuccess {String} issuer OIDC issuer URL
+     * @apiSuccess {String} client_id OIDC client id
+     * @apiSuccess {Boolean} client_secret_set True if a client secret is stored (the secret itself is write-only and never returned)
+     * @apiSuccess {String} redirect_uri OIDC redirect URI
+     * @apiSuccess {String} scope OIDC scope
+     * @apiSuccess {String} authorization_endpoint Authorization endpoint (empty when derived from discovery)
+     * @apiSuccess {String} token_endpoint Token endpoint (empty when derived from discovery)
+     * @apiSuccess {String} jwks_uri JWKS URI (empty when derived from discovery)
+     * @apiSuccess {String} userinfo_endpoint UserInfo endpoint (empty when derived from discovery)
+     * @apiSuccess {String} username_claim Username claim name
+     * @apiSuccess {String} email_claim Email claim name
+     * @apiSuccess {Object} sources Per-field effective source (db | property | default)
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission admin
+     * @apiVersion 1.12.0
+     *
+     * @return Response
+     */
+    @GET
+    @Path("config_oidc")
+    public Response getConfigOidc() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        String secret = OidcResource.oidcConfig(OidcResource.OidcKey.CLIENT_SECRET);
+
+        // Per-field effective source so the UI can flag "currently from JVM property".
+        JsonObjectBuilder sources = Json.createObjectBuilder();
+        for (OidcResource.OidcKey key : OidcResource.OidcKey.values()) {
+            sources.add(key.name().toLowerCase(), OidcResource.oidcConfigSource(key));
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("enabled", OidcResource.isOidcEnabled())
+                .add("issuer", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.ISSUER)))
+                .add("client_id", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.CLIENT_ID)))
+                // The client secret is write-only: NEVER echoed back, only a boolean flag.
+                .add("client_secret_set", !Strings.isNullOrEmpty(secret))
+                .add("redirect_uri", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.REDIRECT_URI)))
+                .add("scope", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.SCOPE)))
+                .add("authorization_endpoint", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.AUTHORIZATION_ENDPOINT)))
+                .add("token_endpoint", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.TOKEN_ENDPOINT)))
+                .add("jwks_uri", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.JWKS_URI)))
+                .add("userinfo_endpoint", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERINFO_ENDPOINT)))
+                .add("username_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_CLAIM)))
+                .add("email_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.EMAIL_CLAIM)))
+                .add("sources", sources);
+
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Configures the OIDC authentication (provider/claim settings only, per the ADR-0015 fence).
+     *
+     * <p>Writes each of the twelve OIDC config values to T_CONFIG (DB-first precedence: a stored
+     * value overrides the {@code docs.oidc_*} JVM property). The client secret is write-only: an
+     * EMPTY {@code client_secret} preserves the stored secret; an explicit
+     * {@code client_secret_reset=true} clears it (the write-only contract stays intact — the GET
+     * never returns it). Endpoint/issuer URLs must be http(s); the claim names must be non-blank.
+     *
+     * @api {post} /app/config_oidc Configure the OIDC authentication
+     * @apiName PostAppConfigOidc
+     * @apiGroup App
+     * @apiParam {Boolean} enabled OIDC authentication enabled
+     * @apiParam {String} issuer OIDC issuer URL
+     * @apiParam {String} client_id OIDC client id
+     * @apiParam {String} client_secret OIDC client secret (write-only; blank keeps the stored value)
+     * @apiParam {Boolean} client_secret_reset If true, clears the stored client secret
+     * @apiParam {String} redirect_uri OIDC redirect URI
+     * @apiParam {String} scope OIDC scope
+     * @apiParam {String} authorization_endpoint Authorization endpoint (optional; blank = derive from discovery)
+     * @apiParam {String} token_endpoint Token endpoint (optional)
+     * @apiParam {String} jwks_uri JWKS URI (optional)
+     * @apiParam {String} userinfo_endpoint UserInfo endpoint (optional)
+     * @apiParam {String} username_claim Username claim name
+     * @apiParam {String} email_claim Email claim name
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Validation error
+     * @apiPermission admin
+     * @apiVersion 1.12.0
+     *
+     * @return Response
+     */
+    @POST
+    @Path("config_oidc")
+    public Response configOidc(@FormParam("enabled") Boolean enabled,
+                               @FormParam("issuer") String issuer,
+                               @FormParam("client_id") String clientId,
+                               @FormParam("client_secret") String clientSecret,
+                               @FormParam("client_secret_reset") Boolean clientSecretReset,
+                               @FormParam("redirect_uri") String redirectUri,
+                               @FormParam("scope") String scope,
+                               @FormParam("authorization_endpoint") String authorizationEndpoint,
+                               @FormParam("token_endpoint") String tokenEndpoint,
+                               @FormParam("jwks_uri") String jwksUri,
+                               @FormParam("userinfo_endpoint") String userinfoEndpoint,
+                               @FormParam("username_claim") String usernameClaim,
+                               @FormParam("email_claim") String emailClaim) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        ConfigDao configDao = new ConfigDao();
+
+        if (enabled != null && enabled) {
+            // OIDC enabled: validate the provider/claim settings.
+            issuer = ValidationUtil.validateLength(issuer, "issuer", 1, 500);
+            issuer = ValidationUtil.validateHttpUrl(issuer, "issuer");
+            clientId = ValidationUtil.validateLength(clientId, "client_id", 1, 250);
+            redirectUri = ValidationUtil.validateLength(redirectUri, "redirect_uri", 1, 500);
+            redirectUri = ValidationUtil.validateHttpUrl(redirectUri, "redirect_uri");
+            scope = ValidationUtil.validateLength(scope, "scope", 1, 250);
+            usernameClaim = ValidationUtil.validateLength(usernameClaim, "username_claim", 1, 100);
+            emailClaim = ValidationUtil.validateLength(emailClaim, "email_claim", 1, 100);
+            // Optional endpoints: if present they must be http(s); if blank they are cleared so
+            // OidcResource derives them from discovery (the property/default falls through).
+            authorizationEndpoint = validateOptionalHttpUrl(authorizationEndpoint, "authorization_endpoint");
+            tokenEndpoint = validateOptionalHttpUrl(tokenEndpoint, "token_endpoint");
+            jwksUri = validateOptionalHttpUrl(jwksUri, "jwks_uri");
+            userinfoEndpoint = validateOptionalHttpUrl(userinfoEndpoint, "userinfo_endpoint");
+
+            // The client secret is write-only (BL-028 pattern): the GET never echoes it, so the
+            // client sends it blank to KEEP the stored value. On first-time setup (no stored
+            // secret and no override property) a non-empty secret is required.
+            Config storedSecret = configDao.getById(ConfigType.OIDC_CLIENT_SECRET);
+            boolean hasStoredSecret = storedSecret != null && !Strings.isNullOrEmpty(storedSecret.getValue());
+            boolean hasPropertySecret = !Strings.isNullOrEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.CLIENT_SECRET))
+                    && !hasStoredSecret;
+            boolean resetSecret = clientSecretReset != null && clientSecretReset;
+            if (Strings.isNullOrEmpty(clientSecret) && !resetSecret) {
+                if (!hasStoredSecret && !hasPropertySecret) {
+                    throw new ClientException("ValidationError", "client_secret must be set");
+                }
+            } else if (!Strings.isNullOrEmpty(clientSecret)) {
+                ValidationUtil.validateLength(clientSecret, "client_secret", 1, 500);
+            }
+
+            configDao.update(ConfigType.OIDC_ENABLED, Boolean.TRUE.toString());
+            configDao.update(ConfigType.OIDC_ISSUER, issuer);
+            configDao.update(ConfigType.OIDC_CLIENT_ID, clientId);
+            configDao.update(ConfigType.OIDC_REDIRECT_URI, redirectUri);
+            configDao.update(ConfigType.OIDC_SCOPE, scope);
+            configDao.update(ConfigType.OIDC_AUTHORIZATION_ENDPOINT, Strings.nullToEmpty(authorizationEndpoint));
+            configDao.update(ConfigType.OIDC_TOKEN_ENDPOINT, Strings.nullToEmpty(tokenEndpoint));
+            configDao.update(ConfigType.OIDC_JWKS_URI, Strings.nullToEmpty(jwksUri));
+            configDao.update(ConfigType.OIDC_USERINFO_ENDPOINT, Strings.nullToEmpty(userinfoEndpoint));
+            configDao.update(ConfigType.OIDC_USERNAME_CLAIM, usernameClaim);
+            configDao.update(ConfigType.OIDC_EMAIL_CLAIM, emailClaim);
+            // Secret last: an explicit reset clears it; a non-empty value overwrites; a blank
+            // value with no reset leaves the stored secret untouched (write-only keep-on-empty).
+            if (resetSecret) {
+                configDao.update(ConfigType.OIDC_CLIENT_SECRET, "");
+            } else if (!Strings.isNullOrEmpty(clientSecret)) {
+                configDao.update(ConfigType.OIDC_CLIENT_SECRET, clientSecret);
+            }
+        } else {
+            // OIDC disabled: clear the DB enable so the effective value is false. Other stored
+            // values are left as-is (re-enabling restores them without re-entry).
+            configDao.update(ConfigType.OIDC_ENABLED, Boolean.FALSE.toString());
+        }
+
+        return Response.ok().build();
+    }
+
+    /**
+     * Validates an OPTIONAL http(s) URL: a blank value returns empty (the field is cleared so the
+     * value falls through to the discovery-derived endpoint); a non-blank value must be http(s).
+     */
+    private static String validateOptionalHttpUrl(String value, String name) {
+        if (Strings.isNullOrEmpty(value) || value.trim().isEmpty()) {
+            return "";
+        }
+        return ValidationUtil.validateHttpUrl(value, name);
+    }
+
+    /** Null-safe empty string for JSON string fields (Json.add rejects a null value). */
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
 }

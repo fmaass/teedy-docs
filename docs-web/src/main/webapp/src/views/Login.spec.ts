@@ -15,7 +15,9 @@ vi.mock('../stores/auth', () => ({
 
 vi.mock('../api/user', () => ({ requestPasswordReset: vi.fn() }))
 // getAppInfo resolves with no OIDC/guest so onMounted takes the plain local path.
-vi.mock('../api/app', () => ({ getAppInfo: vi.fn(() => Promise.resolve({})) }))
+// appInfoResult lets a test inject footer_links (or other fields) into that resolve.
+const appInfoResult = vi.hoisted(() => ({ value: {} as Record<string, unknown> }))
+vi.mock('../api/app', () => ({ getAppInfo: vi.fn(() => Promise.resolve(appInfoResult.value)) }))
 
 const routerPush = vi.hoisted(() => vi.fn())
 vi.mock('vue-router', () => ({
@@ -76,6 +78,7 @@ describe('Login — TOTP challenge/reveal/resubmit flow', () => {
   beforeEach(() => {
     authLogin.mockReset()
     routerPush.mockReset()
+    appInfoResult.value = {}
   })
 
   it('hides the code field for a normal login and never sends a code', async () => {
@@ -216,5 +219,51 @@ describe('Login — TOTP challenge/reveal/resubmit flow', () => {
     // The code was NOT cleared (this wasn't a wrong-code event).
     expect(vm.validationCode).toBe('123456')
     expect(routerPush).not.toHaveBeenCalled()
+  })
+})
+
+// Configurable footer/imprint links (issue #43) must be reachable BEFORE login on
+// the logged-out login screen (GET /app is anonymous). Empty/absent config renders
+// nothing.
+describe('Login — configurable footer links', () => {
+  beforeEach(() => {
+    authLogin.mockReset()
+    routerPush.mockReset()
+    appInfoResult.value = {}
+  })
+
+  it('renders the configured links with safe rel/target beneath the login card', async () => {
+    appInfoResult.value = {
+      footer_links: [
+        { label: 'Imprint', url: 'https://example.com/imprint' },
+        { label: 'Privacy', url: 'https://example.com/privacy' },
+      ],
+    }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const anchors = wrapper.findAll('.teedy-login-footer a')
+    expect(anchors.length).toBe(2)
+    expect(anchors[0].text()).toBe('Imprint')
+    expect(anchors[0].attributes('href')).toBe('https://example.com/imprint')
+    expect(anchors[0].attributes('target')).toBe('_blank')
+    expect(anchors[0].attributes('rel')).toBe('noopener noreferrer')
+    expect(anchors[1].text()).toBe('Privacy')
+    expect(anchors[1].attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('renders NOTHING when footer_links is absent', async () => {
+    appInfoResult.value = {}
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('.teedy-login-footer').exists()).toBe(false)
+    expect(wrapper.findAll('.teedy-login-footer a').length).toBe(0)
+  })
+
+  it('renders NOTHING when footer_links is an empty array', async () => {
+    appInfoResult.value = { footer_links: [] }
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.find('.teedy-login-footer').exists()).toBe(false)
   })
 })

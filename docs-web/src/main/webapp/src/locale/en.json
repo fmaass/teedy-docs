@@ -77,7 +77,8 @@
     }
   },
   "tag": {
-    "remove_tag": "Remove tag {name}"
+    "remove_tag": "Remove tag {name}",
+    "filter_by_tag": "Filter by tag {name}"
   },
   "settings": {
     "menu_two_factor_auth": "Two-factor authentication",
@@ -206,6 +207,17 @@
       "load_failed": "Failed to load version history",
       "loading": "Loading version history…"
     },
+    "relations": {
+      "title": "Related documents",
+      "links_to": "Links to",
+      "linked_from": "Linked from",
+      "search_placeholder": "Search a document to link…",
+      "saved": "Relations updated",
+      "failed_save": "Failed to update relations",
+      "remove": "Remove relation",
+      "remove_confirm": "Remove the link to \"{title}\"?",
+      "remove_from_source": "Linked from \"{title}\" — remove it from that document"
+    },
     "edit_to_add_files": "Edit document to add files",
     "file_removed": "File removed",
     "failed_remove_file": "Failed to remove file",
@@ -218,6 +230,8 @@
     "open_new_tab": "Open in new tab",
     "previous_page": "Previous page",
     "next_page": "Next page",
+    "rotate_left": "Rotate left",
+    "rotate_right": "Rotate right",
     "delete_document": "Delete document",
     "delete_document_confirm": "Are you sure you want to delete this document?",
     "document_deleted": "Document deleted",
@@ -403,7 +417,9 @@
       "user_enabled": "Account enabled",
       "failed_disable_user": "Failed to disable account",
       "failed_enable_user": "Failed to enable account",
-      "disable_hint": "Disabling preserves the user's documents (deleting trashes them). It is a soft, per-request block: re-enabling resurrects old sessions and API keys."
+      "disable_hint": "Disabling preserves the user's documents (deleting trashes them). It is a soft, per-request block: re-enabling resurrects old sessions and API keys.",
+      "storage_quota": "Storage quota (bytes)",
+      "storage_quota_hint": "Maximum storage for this account ({human})."
     },
     "groups": {
       "title": "Groups",
@@ -693,7 +709,16 @@
       "clean_storage_confirm": "This will permanently delete orphaned files from disk and clean up the database. Documents and their files are not affected. Continue?",
       "clean_storage_header": "Clean storage",
       "clean_storage_done": "Storage cleanup finished",
-      "clean_storage_failed": "Storage cleanup failed"
+      "clean_storage_failed": "Storage cleanup failed",
+      "footer_links_title": "Footer links",
+      "footer_links_hint": "Add up to 5 links (for example an imprint or privacy policy) shown in the app footer and on the login screen. Only http(s) URLs are allowed.",
+      "footer_links_label": "Label",
+      "footer_links_url": "URL",
+      "footer_links_add": "Add link",
+      "footer_links_remove": "Remove link",
+      "footer_links_empty": "No footer links configured.",
+      "footer_links_saved": "Footer links saved",
+      "footer_links_failed": "Failed to save footer links"
     },
     "smtp": {
       "title": "Email (SMTP)",
@@ -762,6 +787,39 @@
       "default_storage_required": "Default storage quota is required.",
       "config_saved": "LDAP configuration saved",
       "failed_save": "Failed to save LDAP configuration",
+      "validation_failed": "Please fix the highlighted fields."
+    },
+    "oidc": {
+      "title": "OIDC authentication",
+      "description": "When enabled, users can sign in with an OpenID Connect provider. An account is provisioned automatically on first login. This page configures the provider and claim settings; identity binding and account rules are fixed behavior and are not editable here.",
+      "enabled": "OIDC authentication is enabled",
+      "disabled": "OIDC authentication is disabled",
+      "issuer": "Issuer URL",
+      "client_id": "Client ID",
+      "client_secret": "Client secret",
+      "client_secret_keep": "A client secret is set — leave blank to keep it.",
+      "client_secret_clear": "Clear stored secret",
+      "redirect_uri": "Redirect URI",
+      "redirect_uri_hint": "The callback URL registered with the provider (ends with /api/oidc/callback).",
+      "scope": "Scope",
+      "endpoints_hint": "Endpoints are discovered from the issuer's well-known configuration. Set them explicitly only to override discovery.",
+      "authorization_endpoint": "Authorization endpoint",
+      "token_endpoint": "Token endpoint",
+      "jwks_uri": "JWKS URI",
+      "userinfo_endpoint": "UserInfo endpoint",
+      "username_claim": "Username claim",
+      "email_claim": "Email claim",
+      "from_property": "Currently set from a JVM property — saving stores a database override.",
+      "url_invalid": "Must be an http(s) URL.",
+      "issuer_required": "Issuer URL is required.",
+      "client_id_required": "Client ID is required.",
+      "client_secret_required": "Client secret is required.",
+      "redirect_uri_required": "Redirect URI is required.",
+      "scope_required": "Scope is required.",
+      "username_claim_required": "Username claim is required.",
+      "email_claim_required": "Email claim is required.",
+      "config_saved": "OIDC configuration saved",
+      "failed_save": "Failed to save OIDC configuration",
       "validation_failed": "Please fix the highlighted fields."
     },
     "tag_rules": {
@@ -853,6 +911,21 @@
       "summary_ok": "{count} document(s) updated",
       "summary_partial": "{ok} succeeded, {failed} failed",
       "delete_confirm": "Delete {count} document(s)? They will be moved to the trash."
+    },
+    "saved_filters": {
+      "saved_label": "Saved filters",
+      "save_current": "Save filter",
+      "empty": "No saved filters yet",
+      "name_label": "Filter name",
+      "name_required": "Enter a name",
+      "name_exists": "A saved filter with this name already exists",
+      "saved": "Filter saved",
+      "save_failed": "Failed to save the filter",
+      "deleted": "Filter deleted",
+      "delete_failed": "Failed to delete the filter",
+      "delete_title": "Delete saved filter",
+      "delete_button": "Delete saved filter \"{name}\"",
+      "delete_confirm": "Delete the saved filter \"{name}\"?"
     }
   }
 }

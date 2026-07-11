@@ -15,6 +15,19 @@ const mockGetCurrentUser = vi.mocked(getCurrentUser)
 const mockApiLogin = vi.mocked(apiLogin)
 const mockApiLogout = vi.mocked(apiLogout)
 
+// Wrap a mock body in the minimal axios-response shape each API returns. We only care
+// about `.data`; the rest of the AxiosResponse envelope is irrelevant to the store, so
+// cast through `unknown` to the mock's own resolved type rather than reaching for `any`.
+function userResp(data: unknown) {
+  return { data } as unknown as Awaited<ReturnType<typeof getCurrentUser>>
+}
+function loginResp(data: unknown = {}) {
+  return { data } as unknown as Awaited<ReturnType<typeof apiLogin>>
+}
+function logoutResp(data: unknown = {}) {
+  return { data } as unknown as Awaited<ReturnType<typeof apiLogout>>
+}
+
 function userInfo(overrides: Record<string, unknown> = {}) {
   return {
     anonymous: false,
@@ -49,7 +62,7 @@ describe('auth store', () => {
 
   describe('fetchCurrentUser', () => {
     it('stores the user and sets initialized on success', async () => {
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ username: 'bob' }) } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'bob' })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -73,7 +86,7 @@ describe('auth store', () => {
 
   describe('isAnonymous getter', () => {
     it('is true when the fetched user is flagged anonymous', async () => {
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ anonymous: true }) } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ anonymous: true })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -82,7 +95,7 @@ describe('auth store', () => {
     })
 
     it('is false for a real, non-anonymous user', async () => {
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ anonymous: false }) } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ anonymous: false })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -93,7 +106,7 @@ describe('auth store', () => {
 
   describe('isAdmin getter', () => {
     it('is true only when base_functions includes ADMIN', async () => {
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ base_functions: ['ADMIN', 'WRITE'] }) } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ base_functions: ['ADMIN', 'WRITE'] })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -102,7 +115,7 @@ describe('auth store', () => {
     })
 
     it('is false when base_functions lacks ADMIN', async () => {
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ base_functions: ['WRITE'] }) } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ base_functions: ['WRITE'] })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -121,9 +134,7 @@ describe('auth store', () => {
     })
 
     it('is true when a signed-in user carries is_default_password', async () => {
-      mockGetCurrentUser.mockResolvedValue({
-        data: userInfo({ is_default_password: true, base_functions: ['ADMIN'] }),
-      } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ is_default_password: true, base_functions: ['ADMIN'] })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -132,9 +143,7 @@ describe('auth store', () => {
     })
 
     it('is false when is_default_password is not set', async () => {
-      mockGetCurrentUser.mockResolvedValue({
-        data: userInfo({ is_default_password: false, base_functions: ['ADMIN'] }),
-      } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ is_default_password: false, base_functions: ['ADMIN'] })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -143,9 +152,7 @@ describe('auth store', () => {
     })
 
     it('is false for an anonymous session even if the flag were set', async () => {
-      mockGetCurrentUser.mockResolvedValue({
-        data: userInfo({ anonymous: true, is_default_password: true }),
-      } as any)
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ anonymous: true, is_default_password: true })))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
@@ -156,8 +163,8 @@ describe('auth store', () => {
 
   describe('login', () => {
     it('calls the login API then re-fetches the current user', async () => {
-      mockApiLogin.mockResolvedValue({} as any)
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ username: 'carol' }) } as any)
+      mockApiLogin.mockResolvedValue(loginResp())
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'carol' })))
       const store = useAuthStore()
 
       await store.login('carol', 'pw', true)
@@ -171,8 +178,8 @@ describe('auth store', () => {
     // TOTP 2FA: the store must forward the optional validation code to the API so a
     // challenged login (ValidationCodeRequired) can be re-submitted with the code.
     it('forwards the optional TOTP code to the login API', async () => {
-      mockApiLogin.mockResolvedValue({} as any)
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ username: 'carol' }) } as any)
+      mockApiLogin.mockResolvedValue(loginResp())
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'carol' })))
       const store = useAuthStore()
 
       await store.login('carol', 'pw', false, '654321')
@@ -195,9 +202,9 @@ describe('auth store', () => {
 
   describe('logout', () => {
     it('calls the logout API and resets user + initialized', async () => {
-      mockApiLogin.mockResolvedValue({} as any)
-      mockGetCurrentUser.mockResolvedValue({ data: userInfo({ username: 'dave' }) } as any)
-      mockApiLogout.mockResolvedValue({} as any)
+      mockApiLogin.mockResolvedValue(loginResp())
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'dave' })))
+      mockApiLogout.mockResolvedValue(logoutResp())
       const store = useAuthStore()
       await store.login('dave', 'pw', false)
       expect(store.user).not.toBeNull()
@@ -213,7 +220,7 @@ describe('auth store', () => {
     // R-020: RP-initiated logout — the store surfaces the provider logout_url so
     // the UI can hand the browser off to end the IdP session.
     it('returns the logout_url when the backend supplies one', async () => {
-      mockApiLogout.mockResolvedValue({ data: { logout_url: 'https://idp.example.com/logout' } } as any)
+      mockApiLogout.mockResolvedValue(logoutResp({ logout_url: 'https://idp.example.com/logout' }))
       const store = useAuthStore()
 
       const result = await store.logout()
@@ -223,7 +230,7 @@ describe('auth store', () => {
     })
 
     it('returns null when the backend supplies no logout_url', async () => {
-      mockApiLogout.mockResolvedValue({ data: {} } as any)
+      mockApiLogout.mockResolvedValue(logoutResp({}))
       const store = useAuthStore()
 
       const result = await store.logout()

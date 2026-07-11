@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==43, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==46, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043). */
-    private static final int TARGET_VERSION = 43;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046). */
+    private static final int TARGET_VERSION = 46;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -101,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 43).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 46).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,15 +118,26 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-043 must run cleanly on a populated database");
+                "migrations 037-046 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 43 after the full upgrade path");
+                "DB_VERSION must be 46 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
                 "040 must create the IDX_DOT_TAG index on T_DOCUMENT_TAG");
+
+        // 5a''. Migration 044 created the per-user saved-filter table + its unique
+        //       (user, name) index. Prove the table exists and is empty (a new table
+        //       never carries seed rows). The FK-resolvability and unique-index
+        //       enforcement are exercised at the very end (5f) so a PostgreSQL
+        //       duplicate-key error — which poisons the current transaction — cannot
+        //       corrupt the intervening retained-data assertions.
+        Assertions.assertTrue(tableExists(connection, "T_SAVED_FILTER"),
+                "044 must create the T_SAVED_FILTER table");
+        Assertions.assertEquals(0, count(connection, "T_SAVED_FILTER", "1 = 1"),
+                "044 must not seed any saved-filter rows");
 
         // 5b. The workflow/vocabulary tables were dropped by 037/038 (wiping the old rows) and then
         //     REINSTATED empty by 042. The data-loss guardrail is that the OLD seed rows did not
@@ -182,6 +193,66 @@ public class TestPopulatedMigration {
                         "select count(*) from T_DOCUMENT_TAG dt join T_TAG t on dt.DOT_IDTAG_C = t.TAG_ID_C "
                                 + "join T_DOCUMENT d on dt.DOT_IDDOCUMENT_C = d.DOC_ID_C where dt.DOT_ID_C = 'dt-1'"),
                 "retained document-tag->tag/document FKs must remain resolvable");
+
+        // 5f. Saved-filter table (044) end-to-end constraint check — LAST because a
+        //     PostgreSQL duplicate-key error aborts the whole transaction. A row
+        //     referencing a retained user inserts (FK to T_USER resolvable); a second
+        //     row with the SAME (user, name) is rejected by IDX_SFL_USER_NAME. This is
+        //     the concurrency backstop the DAO's flush-translation depends on, proven
+        //     on BOTH dialects. Guard with a savepoint so the poisoned txn is recovered
+        //     to a clean point on PostgreSQL before the final commit; H2 tolerates it too.
+        connection.commit();
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_SAVED_FILTER (SFL_ID_C, SFL_IDUSER_C, SFL_NAME_C, SFL_QUERY_C, SFL_CREATEDATE_D) "
+                    + "values ('sfl-1','u-alice','Invoices','tags=t1&search=acme',NOW())");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_SAVED_FILTER", "SFL_ID_C = 'sfl-1'"),
+                "044 table must accept a saved filter referencing a retained user");
+        Assertions.assertEquals(1, scalarCount(connection,
+                        "select count(*) from T_SAVED_FILTER f join T_USER u on f.SFL_IDUSER_C = u.USE_ID_C where f.SFL_ID_C = 'sfl-1'"),
+                "saved-filter -> user FK must be resolvable");
+
+        boolean duplicateRejected = false;
+        java.sql.Savepoint sp = connection.setSavepoint("beforeDup");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_SAVED_FILTER (SFL_ID_C, SFL_IDUSER_C, SFL_NAME_C, SFL_QUERY_C, SFL_CREATEDATE_D) "
+                    + "values ('sfl-dup','u-alice','Invoices','search=other',NOW())");
+        } catch (java.sql.SQLException e) {
+            duplicateRejected = true;
+            connection.rollback(sp);
+        }
+        Assertions.assertTrue(duplicateRejected,
+                "044 unique index IDX_SFL_USER_NAME must reject a duplicate (user, name) saved filter");
+
+        // 5g. Migration 045 widened T_CONFIG.CFG_VALUE_C from varchar(250) to varchar(4000)
+        //     so a footer-links JSON blob (or any long config value) fits. Prove a value
+        //     LONGER than the old 250-char limit now inserts AND round-trips unchanged on
+        //     BOTH dialects. Pre-045 this insert would have failed the length constraint.
+        connection.commit();
+        String longValue = "x".repeat(300);
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "insert into T_CONFIG (CFG_ID_C, CFG_VALUE_C) values ('LONG_CONFIG_PROBE', ?)")) {
+            ps.setString(1, longValue);
+            ps.executeUpdate();
+        }
+        connection.commit();
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "select CFG_VALUE_C from T_CONFIG where CFG_ID_C = 'LONG_CONFIG_PROBE'");
+             ResultSet rs = ps.executeQuery()) {
+            Assertions.assertTrue(rs.next(), "045 widened column: the long-value probe row must exist");
+            Assertions.assertEquals(longValue, rs.getString(1),
+                    "045 must widen CFG_VALUE_C so a >250-char value round-trips unchanged");
+        }
+
+        // NOTE ON CASE: the index column comparison is dialect-dependent. The base schema
+        // runs `SET IGNORECASE TRUE` on H2 (dbupdate-000-0.sql), so on H2 the index is
+        // effectively case-INSENSITIVE; PostgreSQL is case-SENSITIVE (the exact-case
+        // contract). Rather than assert dialect-divergent behaviour here, the case
+        // contract is verified at the resource layer (TestSavedFilterResource), whose
+        // case-insensitive precheck gives users identical behaviour on both dialects. A
+        // true-race differently-cased duplicate is only possible on PostgreSQL and is
+        // documented as acceptable.
 
         connection.commit();
     }

@@ -199,6 +199,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: bash scripts/check-version-consistency.sh "${GITHUB_REF_NAME}"
 
+      - name: Check OpenAPI spec parity (/apidoc)
+        run: node scripts/check-openapi-parity.mjs
+
       - name: Install frontend dependencies
         run: cd docs-web/src/main/webapp && npm ci
 

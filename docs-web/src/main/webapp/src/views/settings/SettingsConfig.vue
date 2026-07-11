@@ -3,7 +3,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import api from '../../api/client'
-import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, type SmtpConfig, type SmtpEnvManagedField } from '../../api/app'
+import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, saveFooterLinks, type SmtpConfig, type SmtpEnvManagedField, type FooterLink } from '../../api/app'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { formatFileSize } from '../../utils/formatters'
 import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
@@ -143,6 +143,45 @@ const { mutate: saveSmtp, isPending: savingSmtp } = useMutation({
   },
 })
 
+// --- Footer / imprint links ---
+// A configurable list (max 5) of {label, url} links rendered in the app shell footer
+// AND on the login screen (EU imprint reachability). Seeded once from app-info so the
+// invalidation-triggered refetch does not clobber unsaved edits.
+const MAX_FOOTER_LINKS = 5
+const footerLinks = ref<FooterLink[]>([])
+let footerSeeded = false
+watch(appConfig, (config) => {
+  if (!config || footerSeeded) return
+  footerLinks.value = (config.footer_links ?? []).map((l) => ({ label: l.label, url: l.url }))
+  footerSeeded = true
+}, { immediate: true })
+
+function addFooterLink() {
+  if (footerLinks.value.length >= MAX_FOOTER_LINKS) return
+  footerLinks.value.push({ label: '', url: '' })
+}
+function removeFooterLink(index: number) {
+  footerLinks.value.splice(index, 1)
+}
+
+const { mutate: saveFooter, isPending: savingFooter } = useMutation({
+  // Persist only fully-filled rows so a half-typed row does not trip server validation;
+  // an all-empty list clears the config.
+  mutationFn: () =>
+    saveFooterLinks(
+      footerLinks.value
+        .map((l) => ({ label: l.label.trim(), url: l.url.trim() }))
+        .filter((l) => l.label !== '' || l.url !== ''),
+    ),
+  onSuccess: () => {
+    invalidateAppInfo()
+    toast.add({ severity: 'success', summary: t('ui.config.footer_links_saved'), life: 2000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: t('ui.config.footer_links_failed'), life: 3000 })
+  },
+})
+
 const reindexing = ref(false)
 const cleaningStorage = ref(false)
 
@@ -253,6 +292,46 @@ function handleReindex() {
     </template></Card>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>
+      <h3>{{ t('ui.config.footer_links_title') }}</h3>
+      <p class="section-hint">{{ t('ui.config.footer_links_hint') }}</p>
+      <div v-for="(link, index) in footerLinks" :key="index" class="footer-link-row">
+        <InputText
+          v-model="link.label"
+          :placeholder="t('ui.config.footer_links_label')"
+          :maxlength="40"
+          class="footer-link-label"
+        />
+        <InputText
+          v-model="link.url"
+          :placeholder="t('ui.config.footer_links_url')"
+          :maxlength="500"
+          class="footer-link-url"
+        />
+        <Button
+          icon="pi pi-trash"
+          severity="danger"
+          text
+          :aria-label="t('ui.config.footer_links_remove')"
+          @click="removeFooterLink(index)"
+        />
+      </div>
+      <p v-if="footerLinks.length === 0" class="section-hint footer-links-empty">
+        {{ t('ui.config.footer_links_empty') }}
+      </p>
+      <div class="footer-links-actions">
+        <Button
+          :label="t('ui.config.footer_links_add')"
+          icon="pi pi-plus"
+          severity="secondary"
+          outlined
+          :disabled="footerLinks.length >= MAX_FOOTER_LINKS"
+          @click="addFooterLink"
+        />
+        <Button :label="t('save')" icon="pi pi-check" :loading="savingFooter" @click="saveFooter()" />
+      </div>
+    </template></Card>
+
+    <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>{{ t('ui.config.maintenance') }}</h3>
       <p class="section-hint">
         {{ t('ui.config.maintenance_hint') }}
@@ -329,6 +408,28 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
 }
 .clean-storage-hint {
   margin: 0.75rem 0 0;
+}
+.footer-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.footer-link-label {
+  flex: 0 0 35%;
+  min-width: 0;
+}
+.footer-link-url {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.footer-links-empty {
+  margin: 0 0 0.75rem;
+}
+.footer-links-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 .w-full {
   width: 100%;

@@ -855,7 +855,7 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_leak", 100000);
         String token = clientUtil.login("document_eml_leak");
 
-        long before = countSismicsTempFiles();
+        java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
             StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("file", is, "test_mail.eml");
@@ -871,17 +871,18 @@ public class TestDocumentResource extends BaseJerseyTest {
             }
         }
 
-        long after = countSismicsTempFiles();
-        Assertions.assertTrue(after <= before,
-                "EML attachment temp file(s) leaked on failed import: before=" + before + " after=" + after);
+        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
+        Assertions.assertTrue(leaked.isEmpty(),
+                "EML attachment temp file(s) leaked on failed import: " + leaked);
     }
 
     /**
      * SEC A3-04b: the ORIGINAL EML temp (created at the top of importEml, now inside the
      * cleanup scope) must be deleted on a failed import, not just the attachment temps.
-     * With the quota below the first attachment, the import fails and the temp count must
-     * return EXACTLY to baseline — proving the EML temp AND both attachment temps are all
-     * removed. A regression that drops the EML-temp delete leaves a residual (count > baseline).
+     * With the quota below the first attachment, the import fails and NO temp file created
+     * during the import may survive — proving the EML temp AND both attachment temps are
+     * all removed. A regression that drops the EML-temp delete leaves a residual in the
+     * snapshot delta.
      *
      * @throws Exception e
      */
@@ -891,7 +892,7 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_temp", 100000);
         String token = clientUtil.login("document_eml_temp");
 
-        long before = countSismicsTempFiles();
+        java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
             StreamDataBodyPart part = new StreamDataBodyPart("file", is, "test_mail.eml");
@@ -905,17 +906,52 @@ public class TestDocumentResource extends BaseJerseyTest {
             }
         }
 
-        long after = countSismicsTempFiles();
-        // Exact return to baseline: EML temp + both attachment temps all deleted.
-        Assertions.assertEquals(before, after,
-                "EML/attachment temp(s) leaked on failed import: before=" + before + " after=" + after);
+        // No new temp may survive: EML temp + both attachment temps all deleted.
+        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
+        Assertions.assertTrue(leaked.isEmpty(),
+                "EML/attachment temp(s) leaked on failed import: " + leaked);
     }
 
-    private long countSismicsTempFiles() throws Exception {
+    /**
+     * Snapshots the {@code sismics_docs*} temp files currently present in the shared system
+     * tmpdir. The leak assertions work on the DELTA between two snapshots ({@link
+     * #leakedSismicsTempFiles(java.util.Set)}), never on a raw count: a raw count races with
+     * concurrent JVMs (parallel worktree suites) and with straggler async file-processing
+     * from earlier tests in this class (e.g. testEmlImport's attachment OCR), whose temps
+     * inflate the number mid-window. Every file that pre-exists this test appears in BOTH
+     * snapshots and cancels out. The guarantee is asymmetric: a FALSE PASS is impossible (a
+     * file this test leaks always lands in the delta), but a concurrent writer CAN still
+     * inject a matching file between the snapshots, producing a spurious FAILURE — a loud,
+     * investigable outcome, never a silently missed leak. (Same mechanism as
+     * TestFileResource.)
+     */
+    private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
         Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
         try (java.util.stream.Stream<Path> f = Files.list(tmpDir)) {
-            return f.filter(p -> p.getFileName().toString().startsWith("sismics_docs")).count();
+            return f.filter(p -> p.getFileName().toString().startsWith("sismics_docs"))
+                    .collect(java.util.stream.Collectors.toSet());
         }
+    }
+
+    /**
+     * The {@code sismics_docs*} temp files that appeared AFTER {@code before} and REMAIN
+     * present. Transient temps from straggler async processing (queued by earlier tests in
+     * this class) are deleted when their task completes, so the check polls briefly until
+     * the delta drains; a GENUINE leak has no deleter and survives the full window, failing
+     * loudly. Polling narrows the spurious-failure window without weakening detection.
+     */
+    private java.util.Set<Path> leakedSismicsTempFiles(java.util.Set<Path> before) throws Exception {
+        java.util.Set<Path> leaked;
+        long deadline = System.currentTimeMillis() + 15000;
+        do {
+            leaked = new java.util.HashSet<>(snapshotSismicsTempFiles());
+            leaked.removeAll(before);
+            if (leaked.isEmpty()) {
+                return leaked;
+            }
+            Thread.sleep(250);
+        } while (System.currentTimeMillis() < deadline);
+        return leaked;
     }
 
     /**
@@ -1412,6 +1448,139 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .get(JsonObject.class);
         meta = findMetadata(json.getJsonArray("metadata"), metaId);
         Assertions.assertEquals("again", meta.getString("value"), "omitted metadata must be preserved");
+    }
+
+    /**
+     * Relations reset contract: {@code relations_reset=true} with no relations supplied clears
+     * ALL OUTGOING relations (including the last one) while PRESERVING incoming relations
+     * (which are owned by the source document). Omitting the sentinel preserves outgoing
+     * relations for backward compatibility.
+     */
+    @Test
+    public void testUpdateDocumentRelationsReset() {
+        clientUtil.createUser("relreset1");
+        String token = clientUtil.login("relreset1");
+
+        // Hub document
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")), JsonObject.class);
+        String hubId = json.getString("id");
+
+        // Outgoing target: hub -> out
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations Out")
+                        .param("language", "eng")), JsonObject.class);
+        String outId = json.getString("id");
+
+        // Add the outgoing relation from the hub
+        target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")
+                        .param("relations", outId)), JsonObject.class);
+
+        // Incoming source: in -> hub (relation owned by the source document "in")
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Relations In")
+                        .param("language", "eng")
+                        .param("relations", hubId)), JsonObject.class);
+        String inId = json.getString("id");
+
+        // Sanity: the hub sees BOTH relations (one outgoing source=true, one incoming source=false)
+        json = target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray relations = json.getJsonArray("relations");
+        Assertions.assertEquals(2, relations.size());
+        JsonObject outRel = findRelation(relations, outId);
+        JsonObject inRel = findRelation(relations, inId);
+        Assertions.assertTrue(outRel.getBoolean("source"), "hub -> out is outgoing (source=true)");
+        Assertions.assertFalse(inRel.getBoolean("source"), "in -> hub is incoming (source=false)");
+
+        // Explicit clear of all outgoing relations: no relations param, relations_reset=true
+        target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Relations Hub")
+                        .param("language", "eng")
+                        .param("relations_reset", "true")), JsonObject.class);
+
+        // The outgoing relation is gone; the incoming relation is PRESERVED
+        json = target().path("/document/" + hubId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size(), "reset clears every outgoing relation");
+        Assertions.assertEquals(inId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertFalse(relations.getJsonObject(0).getBoolean("source"),
+                "the surviving relation is the incoming one");
+
+        // The source document "in" still owns its outgoing relation to the hub
+        json = target().path("/document/" + inId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size());
+        Assertions.assertEquals(hubId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertTrue(relations.getJsonObject(0).getBoolean("source"));
+    }
+
+    /**
+     * Relations reset contract: omitting the {@code relations} param (no relations_reset)
+     * preserves the existing outgoing relation. Guards the backward-compatible path.
+     */
+    @Test
+    public void testUpdateDocumentRelationsOmittedPreserves() {
+        clientUtil.createUser("relreset2");
+        String token = clientUtil.login("relreset2");
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Keep Relation Target")
+                        .param("language", "eng")), JsonObject.class);
+        String targetId = json.getString("id");
+
+        json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Keep Relation Source")
+                        .param("language", "eng")
+                        .param("relations", targetId)), JsonObject.class);
+        String sourceId = json.getString("id");
+
+        // Update title only: the outgoing relation must be preserved
+        target().path("/document/" + sourceId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("title", "Keep Relation Source 2")
+                        .param("language", "eng")), JsonObject.class);
+
+        json = target().path("/document/" + sourceId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray relations = json.getJsonArray("relations");
+        Assertions.assertEquals(1, relations.size(), "omitted relations must be preserved");
+        Assertions.assertEquals(targetId, relations.getJsonObject(0).getString("id"));
+        Assertions.assertTrue(relations.getJsonObject(0).getBoolean("source"));
+    }
+
+    private static JsonObject findRelation(JsonArray relations, String relatedId) {
+        for (int i = 0; i < relations.size(); i++) {
+            JsonObject r = relations.getJsonObject(i);
+            if (relatedId.equals(r.getString("id"))) {
+                return r;
+            }
+        }
+        throw new AssertionError("relation not found: " + relatedId);
     }
 
     private static JsonObject findMetadata(JsonArray metadata, String metaId) {

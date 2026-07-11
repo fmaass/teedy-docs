@@ -1,5 +1,10 @@
 # Teedy 3.0.0
 
+> **Historical note:** The features these v3.0.0 notes describe as removed were
+> later **reinstated** — LDAP authentication in v3.1, and workflows and vocabulary
+> in v3.2. These notes are preserved as the v3.0.0 release record; for current
+> behavior see [CHANGELOG.md](CHANGELOG.md) and the [`docs/`](docs/README.md) tree.
+
 This is a **breaking release**. It permanently removes three features from
 the database (workflow/routes, vocabulary, LDAP authentication) and retires
 a legacy authentication filter. Read the full migration guide —

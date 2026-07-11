@@ -29,7 +29,7 @@ public class Config {
     /**
      * Configuration parameter value.
      */
-    @Column(name = "CFG_VALUE_C", length = 250)
+    @Column(name = "CFG_VALUE_C", length = 4000)
     private String value;
 
     public ConfigType getId() {

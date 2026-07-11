@@ -14,8 +14,6 @@ import_test
 teedy-importer-linux
 teedy-importer-macos
 teedy-importer-win.exe
-docs/*
-!docs/.gitkeep
 
 # Environment files with secrets
 .env
@@ -42,3 +40,10 @@ teedy-docs-specification.pdf
 # Browser-harness e2e artifacts (scripts/e2e-browser-harness.sh)
 /e2e-artifacts/
 docs/plans/
+
+# Documentation working files (NOT the published doc pages under docs/*.md)
+docs/db/
+docs/data/
+docs/exports/
+docs/FRONTEND_UI_REVIEW_HANDOVER_2026-06-11.md
+docs/v2.8.0-release-notes.md

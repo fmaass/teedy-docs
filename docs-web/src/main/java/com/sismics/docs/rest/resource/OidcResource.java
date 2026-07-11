@@ -4,11 +4,14 @@ import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.auth0.jwt.interfaces.JWTVerifier;
+import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.AuthenticationTokenDao;
+import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.OidcStateDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.AuthenticationToken;
+import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.OidcState;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
@@ -44,7 +47,9 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static java.util.Optional.ofNullable;
 
@@ -71,20 +76,59 @@ public class OidcResource extends BaseResource {
 
     private static final long STATE_TTL_MS = 10 * 60 * 1000;
 
-    private static volatile JsonObject discoveryCache;
-    private static volatile JsonObject jwksCache;
-    private static volatile long jwksLastRefreshMs = 0;
+    /**
+     * VALUE-KEYED caches (not invalidated on config save): a config change is picked up by the
+     * NEXT login with no restart and no invalidation hook, and a concurrent login DURING a save
+     * cannot pin stale config. Save-time invalidation would race the request-transaction commit
+     * — a reader between the property write and the DB commit could refill a cache under the old
+     * effective config — so instead every entry is keyed by the EFFECTIVE value it was derived
+     * from. When the effective config changes, the derived keys change and the old entries are
+     * simply never read again (bounded: one entry per distinct discovery URL / jwks URI seen).
+     */
+    private static final Map<String, JsonObject> discoveryCache = new ConcurrentHashMap<>();
+    private static final Map<String, JsonObject> jwksCache = new ConcurrentHashMap<>();
+    private static final Map<String, Long> jwksLastRefreshMs = new ConcurrentHashMap<>();
     private static final long JWKS_MIN_REFRESH_INTERVAL_MS = 60 * 1000;
-    private static volatile boolean configValidated = false;
 
     /**
-     * Test seam: clears cached config/discovery so a test can exercise the
-     * misconfiguration path after a valid config has already been validated.
+     * Validation memo keyed by a hash of all 12 effective config values. {@code validateConfig}
+     * records the hash of the config it last validated OK; a login whose effective config hashes
+     * to the same value skips re-validation, but ANY change (a DB override saved, a property
+     * flipped) yields a new hash and forces a fresh validation. Replaces the old
+     * process-lifetime {@code configValidated} boolean, which could never see a config change.
+     */
+    private static volatile String validatedConfigHash;
+
+    /**
+     * Test seam: clears the value-keyed caches and the validation memo. Retained with the same
+     * name/signature for existing tests; with value-keyed caches this is no longer required for
+     * correctness across a config change (the keys change on their own), but it keeps a test's
+     * process-global state isolated from the next test.
      */
     static void resetConfigCacheForTest() {
-        configValidated = false;
-        discoveryCache = null;
-        jwksCache = null;
+        validatedConfigHash = null;
+        discoveryCache.clear();
+        jwksCache.clear();
+        jwksLastRefreshMs.clear();
+    }
+
+    /**
+     * Test seam: seeds (or clears, when {@code discovery} is null) the value-keyed discovery cache
+     * under the CURRENT effective discovery URL, so a test can inject a discovery document without
+     * a live IdP. A null argument clears the whole cache. Replaces direct reflection on the old
+     * scalar {@code discoveryCache} field (the cache is now a value-keyed map).
+     */
+    static void setDiscoveryCacheForTest(JsonObject discovery) {
+        if (discovery == null) {
+            discoveryCache.clear();
+            return;
+        }
+        // Key the injected discovery under the current effective discovery URL (a snapshot read of
+        // the issuer), matching how the request paths look it up.
+        String discoveryUrl = snapshot().discoveryUrl();
+        if (discoveryUrl != null) {
+            discoveryCache.put(discoveryUrl, discovery);
+        }
     }
 
     /**
@@ -100,21 +144,183 @@ public class OidcResource extends BaseResource {
         return user != null && !user.isDisabled();
     }
 
-    private static final String PROP_ENABLED = "docs.oidc_enabled";
-    private static final String PROP_ISSUER = "docs.oidc_issuer";
-    private static final String PROP_CLIENT_ID = "docs.oidc_client_id";
-    private static final String PROP_CLIENT_SECRET = "docs.oidc_client_secret";
-    private static final String PROP_REDIRECT_URI = "docs.oidc_redirect_uri";
-    private static final String PROP_SCOPE = "docs.oidc_scope";
-    private static final String PROP_AUTH_ENDPOINT = "docs.oidc_authorization_endpoint";
-    private static final String PROP_TOKEN_ENDPOINT = "docs.oidc_token_endpoint";
-    private static final String PROP_JWKS_URI = "docs.oidc_jwks_uri";
-    private static final String PROP_USERINFO_ENDPOINT = "docs.oidc_userinfo_endpoint";
-    private static final String PROP_USERNAME_CLAIM = "docs.oidc_username_claim";
-    private static final String PROP_EMAIL_CLAIM = "docs.oidc_email_claim";
-
     private static final String DEFAULT_USERNAME_CLAIM = "preferred_username";
     private static final String DEFAULT_EMAIL_CLAIM = "email";
+    private static final String DEFAULT_SCOPE = "openid profile email";
+
+    /**
+     * The twelve OIDC configuration keys. Each binds a {@link ConfigType} (DB-backed value),
+     * the legacy {@code docs.oidc_*} system property, and a built-in default (nullable). This
+     * is the SINGLE source of truth for the key set — the accessor, the endpoints, the caches,
+     * and the source-scan completeness guard all enumerate it.
+     */
+    enum OidcKey {
+        ENABLED(ConfigType.OIDC_ENABLED, "docs.oidc_enabled", "false"),
+        ISSUER(ConfigType.OIDC_ISSUER, "docs.oidc_issuer", null),
+        CLIENT_ID(ConfigType.OIDC_CLIENT_ID, "docs.oidc_client_id", null),
+        CLIENT_SECRET(ConfigType.OIDC_CLIENT_SECRET, "docs.oidc_client_secret", null),
+        REDIRECT_URI(ConfigType.OIDC_REDIRECT_URI, "docs.oidc_redirect_uri", null),
+        SCOPE(ConfigType.OIDC_SCOPE, "docs.oidc_scope", DEFAULT_SCOPE),
+        AUTHORIZATION_ENDPOINT(ConfigType.OIDC_AUTHORIZATION_ENDPOINT, "docs.oidc_authorization_endpoint", null),
+        TOKEN_ENDPOINT(ConfigType.OIDC_TOKEN_ENDPOINT, "docs.oidc_token_endpoint", null),
+        JWKS_URI(ConfigType.OIDC_JWKS_URI, "docs.oidc_jwks_uri", null),
+        USERINFO_ENDPOINT(ConfigType.OIDC_USERINFO_ENDPOINT, "docs.oidc_userinfo_endpoint", null),
+        USERNAME_CLAIM(ConfigType.OIDC_USERNAME_CLAIM, "docs.oidc_username_claim", DEFAULT_USERNAME_CLAIM),
+        EMAIL_CLAIM(ConfigType.OIDC_EMAIL_CLAIM, "docs.oidc_email_claim", DEFAULT_EMAIL_CLAIM);
+
+        private final ConfigType configType;
+        private final String propertyName;
+        private final String defaultValue;
+
+        OidcKey(ConfigType configType, String propertyName, String defaultValue) {
+            this.configType = configType;
+            this.propertyName = propertyName;
+            this.defaultValue = defaultValue;
+        }
+
+        ConfigType configType() {
+            return configType;
+        }
+
+        String propertyName() {
+            return propertyName;
+        }
+    }
+
+    /**
+     * The SINGLE accessor for every OIDC configuration value (the one chokepoint). Precedence:
+     * a non-blank DB value (T_CONFIG) wins; else the {@code docs.oidc_*} system property; else the
+     * built-in default. A BLANK/empty DB value is UNSET — it falls through to the property tier
+     * and never overrides with emptiness. This is the ONLY method in this class permitted to read
+     * a {@code docs.oidc_*} property; {@link com.sismics.docs.rest.resource.TestOidcAccessorGuard}
+     * fails the build on any other {@code System.getProperty("docs.oidc_...")} read.
+     *
+     * @param key The configuration key
+     * @return The effective value, or null when unset with no default
+     */
+    static String oidcConfig(OidcKey key) {
+        ConfigDao configDao = new ConfigDao();
+        Config config = configDao.getById(key.configType());
+        String dbValue = config == null ? null : config.getValue();
+        return resolveEffective(key, dbValue);
+    }
+
+    /**
+     * Applies the DB → property → default precedence to a key given its ALREADY-READ DB value
+     * (null when absent). Kept as the single place the property tier is read (guard-enforced), so a
+     * blank DB value falls through to the property, then the default. Used both by
+     * {@link #oidcConfig(OidcKey)} (per-key read) and by {@link #snapshot()} (which supplies DB
+     * values from ONE atomic batch read).
+     */
+    private static String resolveEffective(OidcKey key, String dbValue) {
+        if (dbValue != null && !StringUtils.isBlank(dbValue)) {
+            return dbValue;
+        }
+        String property = System.getProperty(key.propertyName());
+        if (property != null) {
+            return property;
+        }
+        return key.defaultValue;
+    }
+
+    /** The effective source tier of a key, so the admin UI can hint "currently from JVM property". */
+    static String oidcConfigSource(OidcKey key) {
+        ConfigDao configDao = new ConfigDao();
+        Config config = configDao.getById(key.configType());
+        if (config != null && !StringUtils.isBlank(config.getValue())) {
+            return "db";
+        }
+        if (System.getProperty(key.propertyName()) != null) {
+            return "property";
+        }
+        return "default";
+    }
+
+    /**
+     * An immutable, request-scoped snapshot of all twelve effective OIDC values, read ONCE via
+     * {@link #oidcConfig(OidcKey)} at the start of a request that needs OIDC config (login,
+     * callback). Every read for the rest of that request goes through the snapshot, so a config
+     * save landing mid-request can never produce a torn config (issuer=old but client_id=new)
+     * within a single login/callback. A config change BETWEEN requests (login → callback) is
+     * fine and unavoidable — the guarantee is that no SINGLE request sees a mixed old/new config.
+     */
+    static final class OidcConfigSnapshot {
+        private final Map<OidcKey, String> values;
+
+        private OidcConfigSnapshot(Map<OidcKey, String> values) {
+            this.values = values;
+        }
+
+        /** The snapshotted effective value for a key (null when unset with no default). */
+        String get(OidcKey key) {
+            return values.get(key);
+        }
+
+        boolean enabled() {
+            return Boolean.parseBoolean(get(OidcKey.ENABLED));
+        }
+
+        /** The discovery-document URL derived from the snapshotted issuer (the discovery cache key). */
+        String discoveryUrl() {
+            String issuer = get(OidcKey.ISSUER);
+            if (issuer == null) {
+                return null;
+            }
+            return issuer.replaceAll("/+$", "") + "/.well-known/openid-configuration";
+        }
+
+        /** SHA-256 hex of the twelve snapshotted values (NUL-delimited, enum order) — the memo key. */
+        String hash() {
+            StringBuilder sb = new StringBuilder();
+            for (OidcKey key : OidcKey.values()) {
+                sb.append(ofNullable(get(key)).orElse("")).append('\0');
+            }
+            return sha256Hex(sb.toString());
+        }
+    }
+
+    /**
+     * Builds a request-scoped snapshot of all twelve effective values. The DB tier is read in ONE
+     * atomic query (a single {@code SELECT ... WHERE CFG_ID_C IN (...)}), so the snapshot cannot be
+     * torn by a save that commits between two per-key reads — every DB value in the snapshot is from
+     * the same committed instant. The property/default tiers are then applied per key via the single
+     * {@link #resolveEffective} chokepoint. Every subsequent read in the request uses this immutable
+     * snapshot.
+     */
+    static OidcConfigSnapshot snapshot() {
+        Map<ConfigType, String> dbValues = readOidcConfigRows();
+        java.util.EnumMap<OidcKey, String> values = new java.util.EnumMap<>(OidcKey.class);
+        for (OidcKey key : OidcKey.values()) {
+            values.put(key, resolveEffective(key, dbValues.get(key.configType())));
+        }
+        return new OidcConfigSnapshot(values);
+    }
+
+    /**
+     * Reads all twelve OIDC {@code T_CONFIG} rows in ONE query, so the DB tier of a snapshot is a
+     * single atomic read (no interleaved commit can split it). Returns an empty map outside a
+     * transactional context (e.g. a unit test with no EM), matching {@link ConfigDao}'s null-safe
+     * behavior — the property/default tiers then apply.
+     */
+    private static Map<ConfigType, String> readOidcConfigRows() {
+        jakarta.persistence.EntityManager em = ThreadLocalContext.get() == null
+                ? null : ThreadLocalContext.get().getEntityManager();
+        Map<ConfigType, String> result = new java.util.EnumMap<>(ConfigType.class);
+        if (em == null) {
+            return result;
+        }
+        List<ConfigType> ids = new ArrayList<>();
+        for (OidcKey key : OidcKey.values()) {
+            ids.add(key.configType());
+        }
+        List<Config> rows = em.createQuery("select c from Config c where c.id in :ids", Config.class)
+                .setParameter("ids", ids)
+                .getResultList();
+        for (Config row : rows) {
+            result.put(row.getId(), row.getValue());
+        }
+        return result;
+    }
 
     private static final String USERNAME_PATTERN = "^[a-zA-Z0-9_]{3,50}$";
 
@@ -132,11 +338,14 @@ public class OidcResource extends BaseResource {
     @GET
     @Path("login")
     public Response login(@QueryParam("returnUrl") String returnUrl) {
-        if (!isOidcEnabled()) {
+        // Read the whole effective config ONCE for this request (torn-read guard): every value
+        // used below comes from this snapshot, never a fresh per-key accessor call.
+        OidcConfigSnapshot cfg = snapshot();
+        if (!cfg.enabled()) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
-        String configError = validateConfig();
+        String configError = validateConfig(cfg);
         if (configError != null) {
             // Redirect to the SPA login error page instead of a raw 500. A 500 at the
             // login entry point auto-redirects the browser back into a loop; the error
@@ -146,10 +355,10 @@ public class OidcResource extends BaseResource {
         }
 
         try {
-            String authorizationEndpoint = getAuthorizationEndpoint();
-            String clientId = System.getProperty(PROP_CLIENT_ID);
-            String redirectUri = System.getProperty(PROP_REDIRECT_URI);
-            String scope = ofNullable(System.getProperty(PROP_SCOPE)).orElse("openid profile email");
+            String authorizationEndpoint = getAuthorizationEndpoint(cfg);
+            String clientId = cfg.get(OidcKey.CLIENT_ID);
+            String redirectUri = cfg.get(OidcKey.REDIRECT_URI);
+            String scope = cfg.get(OidcKey.SCOPE);
 
             String state = UUID.randomUUID().toString();
             String nonce = UUID.randomUUID().toString();
@@ -163,11 +372,17 @@ public class OidcResource extends BaseResource {
                 safeReturnUrl = returnUrl;
             }
 
+            // Pin the provider fingerprint (issuer + client_id) that STARTED this login. The callback
+            // rejects the flow if the CURRENT effective provider no longer matches, so an admin
+            // switching the OIDC provider live (no restart) between login and callback can never
+            // cause provider A's authorization code to be exchanged with provider B's token endpoint.
             OidcState oidcState = new OidcState()
                     .setId(state)
                     .setNonce(nonce)
                     .setCodeVerifier(codeVerifier)
-                    .setReturnUrl(safeReturnUrl);
+                    .setReturnUrl(safeReturnUrl)
+                    .setIssuer(cfg.get(OidcKey.ISSUER))
+                    .setClientId(clientId);
             oidcStateDao.create(oidcState);
 
             String authorizeUrl = authorizationEndpoint
@@ -192,7 +407,11 @@ public class OidcResource extends BaseResource {
     public Response callback(@QueryParam("code") String code,
                              @QueryParam("state") String state,
                              @QueryParam("error") String error) {
-        if (!isOidcEnabled()) {
+        // Read the whole effective config ONCE for this request (torn-read guard): the token
+        // exchange, JWKS verification, issuer/audience, claims and UserInfo below all use this
+        // one snapshot, so a config save landing mid-callback cannot mix old and new values.
+        OidcConfigSnapshot cfg = snapshot();
+        if (!cfg.enabled()) {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
@@ -216,17 +435,29 @@ public class OidcResource extends BaseResource {
             log.warn("OIDC callback with expired state");
             return Response.status(Response.Status.BAD_REQUEST).build();
         }
+
+        // Provider binding (fail closed): the state pinned the effective provider fingerprint
+        // (issuer + client_id) at login. If an admin switched the OIDC provider live in between,
+        // this authorization CODE was minted by the login-time provider and MUST NOT be exchanged
+        // with the switched-to provider's token endpoint. Reject BEFORE the token exchange. A null
+        // pinned fingerprint (a legacy state from before dbupdate-046) is ALSO rejected — fail
+        // closed on ambiguity; the only cost is a one-time retry for a login in-flight across the
+        // deploy moment (see providerFingerprintMatches).
+        if (!providerFingerprintMatches(cfg, oidcState)) {
+            log.warn("OIDC provider changed between login and callback; rejecting (fail closed)");
+            return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
+        }
         String expectedNonce = oidcState.getNonce();
 
         try {
-            JsonObject tokenResponse = exchangeCodeForTokens(code, oidcState.getCodeVerifier());
+            JsonObject tokenResponse = exchangeCodeForTokens(cfg, code, oidcState.getCodeVerifier());
             String idTokenStr = tokenResponse.getString("id_token", null);
             if (idTokenStr == null) {
                 log.error("OIDC token response missing id_token");
                 return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
-            DecodedJWT idToken = verifyIdToken(idTokenStr);
+            DecodedJWT idToken = verifyIdToken(cfg, idTokenStr);
 
             // Verify nonce matches what we sent in the authorization request (fail closed).
             // Never log the nonce values themselves (session-linking secret).
@@ -237,7 +468,7 @@ public class OidcResource extends BaseResource {
             }
 
             String subject = idToken.getSubject();
-            String issuer = System.getProperty(PROP_ISSUER);
+            String issuer = cfg.get(OidcKey.ISSUER);
 
             // `sub` is REQUIRED by OIDC Core §2. Fail closed on a missing subject: without it
             // the identity lookup by (issuer, subject) is impossible, and provisioning an
@@ -249,8 +480,8 @@ public class OidcResource extends BaseResource {
             }
 
             String accessToken = tokenResponse.getString("access_token", null);
-            String usernameClaimName = getUsernameClaim();
-            String emailClaimName = getEmailClaim();
+            String usernameClaimName = getUsernameClaim(cfg);
+            String emailClaimName = getEmailClaim(cfg);
 
             // Read the configured claims from the ID token first; a provider that ships a
             // minimal ID token (default Authelia >=4.38) delivers them via UserInfo instead,
@@ -263,7 +494,7 @@ public class OidcResource extends BaseResource {
             if (usernameClaim == null || email == null) {
                 JsonObject userInfo;
                 try {
-                    userInfo = fetchUserInfo(accessToken, subject);
+                    userInfo = fetchUserInfo(cfg, accessToken, subject);
                 } catch (UserInfoException e) {
                     log.error("OIDC UserInfo fetch failed; rejecting login (fail closed): {}", e.getMessage());
                     return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
@@ -364,7 +595,7 @@ public class OidcResource extends BaseResource {
     /**
      * Verifies the ID token signature using the provider's JWKS, and validates issuer + audience.
      */
-    private DecodedJWT verifyIdToken(String idTokenStr) throws Exception {
+    private DecodedJWT verifyIdToken(OidcConfigSnapshot cfg, String idTokenStr) throws Exception {
         DecodedJWT unverified = JWT.decode(idTokenStr);
         String kid = unverified.getKeyId();
 
@@ -375,16 +606,16 @@ public class OidcResource extends BaseResource {
             throw new Exception("ID token missing required exp claim");
         }
 
-        List<RSAPublicKey> candidates = getSigningKeys(kid);
+        List<RSAPublicKey> candidates = getSigningKeys(cfg, kid);
         if (candidates.isEmpty()) {
-            candidates = refreshJwksAndRetry(kid);
+            candidates = refreshJwksAndRetry(cfg, kid);
         }
         if (candidates.isEmpty()) {
             throw new Exception("No matching key found in JWKS for kid=" + kid);
         }
 
-        String issuer = System.getProperty(PROP_ISSUER);
-        String audience = System.getProperty(PROP_CLIENT_ID);
+        String issuer = cfg.get(OidcKey.ISSUER);
+        String audience = cfg.get(OidcKey.CLIENT_ID);
 
         Exception lastException = null;
         for (RSAPublicKey publicKey : candidates) {
@@ -402,7 +633,7 @@ public class OidcResource extends BaseResource {
         }
 
         // All cached keys failed -- try one JWKS refresh before giving up
-        candidates = refreshJwksAndRetry(kid);
+        candidates = refreshJwksAndRetry(cfg, kid);
         for (RSAPublicKey publicKey : candidates) {
             try {
                 Algorithm algo = Algorithm.RSA256(publicKey, null);
@@ -424,16 +655,18 @@ public class OidcResource extends BaseResource {
     /**
      * Clears the JWKS cache and re-fetches, rate-limited to once per minute.
      */
-    private List<RSAPublicKey> refreshJwksAndRetry(String kid) throws Exception {
+    private List<RSAPublicKey> refreshJwksAndRetry(OidcConfigSnapshot cfg, String kid) throws Exception {
+        String jwksUri = getJwksUri(cfg);
         long now = System.currentTimeMillis();
-        if (now - jwksLastRefreshMs < JWKS_MIN_REFRESH_INTERVAL_MS) {
+        long last = jwksLastRefreshMs.getOrDefault(jwksUri, 0L);
+        if (now - last < JWKS_MIN_REFRESH_INTERVAL_MS) {
             log.debug("JWKS refresh skipped (rate limited)");
             return List.of();
         }
         log.info("Refreshing JWKS cache (kid={} not found or verification failed)", kid);
-        jwksCache = null;
-        jwksLastRefreshMs = now;
-        return getSigningKeys(kid);
+        jwksCache.remove(jwksUri);
+        jwksLastRefreshMs.put(jwksUri, now);
+        return getSigningKeys(cfg, kid);
     }
 
     /**
@@ -441,8 +674,8 @@ public class OidcResource extends BaseResource {
      * When kid is non-null, returns at most one key matching that kid.
      * When kid is null, returns all eligible RSA signing keys.
      */
-    private List<RSAPublicKey> getSigningKeys(String kid) throws Exception {
-        JsonObject jwks = getJwks();
+    private List<RSAPublicKey> getSigningKeys(OidcConfigSnapshot cfg, String kid) throws Exception {
+        JsonObject jwks = getJwks(cfg);
         JsonArray keys = jwks.getJsonArray("keys");
         List<RSAPublicKey> result = new ArrayList<>();
 
@@ -483,11 +716,11 @@ public class OidcResource extends BaseResource {
         return result;
     }
 
-    private JsonObject exchangeCodeForTokens(String code, String codeVerifier) throws Exception {
-        String tokenEndpoint = getTokenEndpoint();
-        String clientId = System.getProperty(PROP_CLIENT_ID);
-        String clientSecret = System.getProperty(PROP_CLIENT_SECRET);
-        String redirectUri = System.getProperty(PROP_REDIRECT_URI);
+    private JsonObject exchangeCodeForTokens(OidcConfigSnapshot cfg, String code, String codeVerifier) throws Exception {
+        String tokenEndpoint = getTokenEndpoint(cfg);
+        String clientId = cfg.get(OidcKey.CLIENT_ID);
+        String clientSecret = cfg.get(OidcKey.CLIENT_SECRET);
+        String redirectUri = cfg.get(OidcKey.REDIRECT_URI);
 
         FormBody.Builder bodyBuilder = new FormBody.Builder()
                 .add("grant_type", "authorization_code")
@@ -520,15 +753,15 @@ public class OidcResource extends BaseResource {
     // Claim configuration
     // ---------------------------------------------------------------------------------------------
 
-    /** The configured username claim name, defaulting to {@code preferred_username}. */
-    private static String getUsernameClaim() {
-        return ofNullable(System.getProperty(PROP_USERNAME_CLAIM))
+    /** The configured username claim name (from the snapshot), defaulting to {@code preferred_username}. */
+    private static String getUsernameClaim(OidcConfigSnapshot cfg) {
+        return ofNullable(cfg.get(OidcKey.USERNAME_CLAIM))
                 .filter(s -> !s.isBlank()).orElse(DEFAULT_USERNAME_CLAIM);
     }
 
-    /** The configured email claim name, defaulting to {@code email}. */
-    private static String getEmailClaim() {
-        return ofNullable(System.getProperty(PROP_EMAIL_CLAIM))
+    /** The configured email claim name (from the snapshot), defaulting to {@code email}. */
+    private static String getEmailClaim(OidcConfigSnapshot cfg) {
+        return ofNullable(cfg.get(OidcKey.EMAIL_CLAIM))
                 .filter(s -> !s.isBlank()).orElse(DEFAULT_EMAIL_CLAIM);
     }
 
@@ -576,14 +809,14 @@ public class OidcResource extends BaseResource {
      * @return The UserInfo JSON object, or null when no endpoint is known (WARN fallback)
      * @throws UserInfoException When the fetch was attempted (or required) and failed
      */
-    private JsonObject fetchUserInfo(String accessToken, String expectedSub) throws UserInfoException {
+    private JsonObject fetchUserInfo(OidcConfigSnapshot cfg, String accessToken, String expectedSub) throws UserInfoException {
         String endpoint;
-        String explicit = System.getProperty(PROP_USERINFO_ENDPOINT);
+        String explicit = cfg.get(OidcKey.USERINFO_ENDPOINT);
         if (explicit != null && !explicit.isBlank()) {
             endpoint = explicit;
         } else {
             try {
-                endpoint = getDiscovery().getString("userinfo_endpoint", null);
+                endpoint = getDiscovery(cfg).getString("userinfo_endpoint", null);
             } catch (Exception e) {
                 throw new UserInfoException("could not resolve the UserInfo endpoint from discovery", e);
             }
@@ -606,15 +839,19 @@ public class OidcResource extends BaseResource {
             if (!resp.isSuccessful() || resp.body() == null) {
                 throw new UserInfoException("UserInfo fetch failed: HTTP " + resp.code());
             }
-            String contentType = resp.header("Content-Type", "");
-            if (contentType == null || !contentType.toLowerCase().contains("application/json")) {
-                throw new UserInfoException("UserInfo response has unsupported Content-Type: " + contentType);
+            if (!isJsonContentType(resp.header("Content-Type"))) {
+                throw new UserInfoException("UserInfo response has unsupported Content-Type: "
+                        + resp.header("Content-Type"));
             }
-            // Bound the body BEFORE parsing (peek one byte past the cap to detect overflow).
-            String body = resp.peekBody(MAX_USERINFO_RESPONSE_BYTES + 1L).string();
-            if (body.length() > MAX_USERINFO_RESPONSE_BYTES) {
+            // Bound the body in RAW BYTES before decoding (peek one byte past the cap to detect
+            // overflow). Comparing decoded char count would under-count a multibyte body and let
+            // an oversized response through, so measure the encoded byte length instead.
+            okhttp3.ResponseBody peeked = resp.peekBody(MAX_USERINFO_RESPONSE_BYTES + 1L);
+            byte[] bytes = peeked.bytes();
+            if (bytes.length > MAX_USERINFO_RESPONSE_BYTES) {
                 throw new UserInfoException("UserInfo response exceeds " + MAX_USERINFO_RESPONSE_BYTES + " bytes");
             }
+            String body = new String(bytes, StandardCharsets.UTF_8);
             JsonObject userInfo;
             try (JsonReader reader = Json.createReader(new StringReader(body))) {
                 userInfo = reader.readObject();
@@ -632,6 +869,24 @@ public class OidcResource extends BaseResource {
         } catch (Exception e) {
             throw new UserInfoException("UserInfo fetch failed", e);
         }
+    }
+
+    /**
+     * True when the response Content-Type is JSON: the {@code application/json} media type or
+     * any {@code +json}-suffixed structured type (RFC 6839), e.g. {@code application/hal+json}.
+     * The media type is parsed by stripping any parameters ({@code ; charset=...}) and matching
+     * on the bare type, rather than a substring {@code contains} that would also accept
+     * unrelated types such as {@code text/notapplication/json-ish}.
+     *
+     * @param contentType Raw Content-Type header value (may be null)
+     * @return true when the media type is JSON or a +json suffix type
+     */
+    static boolean isJsonContentType(String contentType) {
+        if (StringUtils.isBlank(contentType)) {
+            return false;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase();
+        return mediaType.equals("application/json") || mediaType.endsWith("+json");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -942,141 +1197,237 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Validates OIDC configuration on first use. Returns an error message if invalid, null if OK.
+     * Validates OIDC configuration from a request snapshot. Returns an error message if invalid,
+     * null if OK. Memoized by the snapshot's hash of the twelve EFFECTIVE values: a repeat login on
+     * the same config skips the work, but any config change (a DB override saved, a property
+     * flipped) yields a new hash and forces a fresh validation on the NEXT login — no restart and
+     * no invalidation hook. Because the whole request reads from ONE snapshot, the config validated
+     * here is exactly the config the rest of this request acts on (no torn read).
      */
-    private String validateConfig() {
-        if (configValidated) {
+    private String validateConfig(OidcConfigSnapshot cfg) {
+        String hash = cfg.hash();
+        if (hash.equals(validatedConfigHash)) {
             return null;
         }
 
-        synchronized (OidcResource.class) {
-            if (configValidated) {
-                return null;
-            }
+        String issuer = cfg.get(OidcKey.ISSUER);
+        String clientId = cfg.get(OidcKey.CLIENT_ID);
+        String clientSecret = cfg.get(OidcKey.CLIENT_SECRET);
+        String redirectUri = cfg.get(OidcKey.REDIRECT_URI);
 
-            String issuer = System.getProperty(PROP_ISSUER);
-            String clientId = System.getProperty(PROP_CLIENT_ID);
-            String clientSecret = System.getProperty(PROP_CLIENT_SECRET);
-            String redirectUri = System.getProperty(PROP_REDIRECT_URI);
+        if (StringUtils.isBlank(issuer)) return OidcKey.ISSUER.propertyName() + " is required";
+        if (StringUtils.isBlank(clientId)) return OidcKey.CLIENT_ID.propertyName() + " is required";
+        if (StringUtils.isBlank(clientSecret)) return OidcKey.CLIENT_SECRET.propertyName() + " is required";
+        if (StringUtils.isBlank(redirectUri)) return OidcKey.REDIRECT_URI.propertyName() + " is required";
 
-            if (StringUtils.isBlank(issuer)) return PROP_ISSUER + " is required";
-            if (StringUtils.isBlank(clientId)) return PROP_CLIENT_ID + " is required";
-            if (StringUtils.isBlank(clientSecret)) return PROP_CLIENT_SECRET + " is required";
-            if (StringUtils.isBlank(redirectUri)) return PROP_REDIRECT_URI + " is required";
+        log.info("OIDC configuration: issuer={}, client_id={}, redirect_uri={}, secret=[REDACTED]",
+                issuer, clientId, redirectUri);
 
-            log.info("OIDC configuration: issuer={}, client_id={}, redirect_uri={}, secret=[REDACTED]",
-                    issuer, clientId, redirectUri);
-
-            configValidated = true;
-            return null;
-        }
+        validatedConfigHash = hash;
+        return null;
     }
 
-    private String getAuthorizationEndpoint() throws Exception {
-        String explicit = System.getProperty(PROP_AUTH_ENDPOINT);
+    private String getAuthorizationEndpoint(OidcConfigSnapshot cfg) throws Exception {
+        String explicit = cfg.get(OidcKey.AUTHORIZATION_ENDPOINT);
         if (explicit != null) {
             return explicit;
         }
-        return getDiscovery().getString("authorization_endpoint");
+        return getDiscovery(cfg).getString("authorization_endpoint");
     }
 
-    private String getTokenEndpoint() throws Exception {
-        String explicit = System.getProperty(PROP_TOKEN_ENDPOINT);
+    private String getTokenEndpoint(OidcConfigSnapshot cfg) throws Exception {
+        String explicit = cfg.get(OidcKey.TOKEN_ENDPOINT);
         if (explicit != null) {
             return explicit;
         }
-        return getDiscovery().getString("token_endpoint");
+        return getDiscovery(cfg).getString("token_endpoint");
     }
 
-    private String getJwksUri() throws Exception {
-        String explicit = System.getProperty(PROP_JWKS_URI);
+    private String getJwksUri(OidcConfigSnapshot cfg) throws Exception {
+        String explicit = cfg.get(OidcKey.JWKS_URI);
         if (explicit != null) {
             return explicit;
         }
-        return getDiscovery().getString("jwks_uri");
+        return getDiscovery(cfg).getString("jwks_uri");
     }
 
-    private JsonObject getDiscovery() throws Exception {
-        if (discoveryCache != null) {
-            return discoveryCache;
+    private JsonObject getDiscovery(OidcConfigSnapshot cfg) throws Exception {
+        String discoveryUrl = cfg.discoveryUrl();
+        if (discoveryUrl == null) {
+            throw new Exception("OIDC issuer is not configured");
+        }
+        JsonObject cached = discoveryCache.get(discoveryUrl);
+        if (cached != null) {
+            return cached;
         }
 
-        synchronized (OidcResource.class) {
-            if (discoveryCache != null) {
-                return discoveryCache;
+        String issuer = cfg.get(OidcKey.ISSUER);
+        Request req = new Request.Builder().url(discoveryUrl).get().build();
+        try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
+            if (!resp.isSuccessful() || resp.body() == null) {
+                throw new Exception("Failed to fetch OIDC discovery: HTTP " + resp.code());
+            }
+            String body = resp.body().string();
+            JsonObject discovery;
+            try (JsonReader reader = Json.createReader(new StringReader(body))) {
+                discovery = reader.readObject();
             }
 
-            String issuer = System.getProperty(PROP_ISSUER);
-            String discoveryUrl = issuer.replaceAll("/+$", "") + "/.well-known/openid-configuration";
-
-            Request req = new Request.Builder().url(discoveryUrl).get().build();
-            try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) {
-                    throw new Exception("Failed to fetch OIDC discovery: HTTP " + resp.code());
-                }
-                String body = resp.body().string();
-                JsonObject discovery;
-                try (JsonReader reader = Json.createReader(new StringReader(body))) {
-                    discovery = reader.readObject();
-                }
-
-                String discoveredIssuer = discovery.getString("issuer", null);
-                if (!issuer.equals(discoveredIssuer)) {
-                    throw new Exception("OIDC discovery issuer mismatch: configured="
-                            + issuer + ", discovered=" + discoveredIssuer);
-                }
-
-                discoveryCache = discovery;
+            String discoveredIssuer = discovery.getString("issuer", null);
+            if (!issuer.equals(discoveredIssuer)) {
+                throw new Exception("OIDC discovery issuer mismatch: configured="
+                        + issuer + ", discovered=" + discoveredIssuer);
             }
 
+            // Keyed by the effective discovery URL: a change of issuer keys a fresh fetch, and a
+            // concurrent reader under the old issuer still reads its own (old-keyed) entry.
+            discoveryCache.put(discoveryUrl, discovery);
             log.info("OIDC discovery loaded from {}", discoveryUrl);
-            return discoveryCache;
+            return discovery;
         }
     }
 
-    private JsonObject getJwks() throws Exception {
-        if (jwksCache != null) {
-            return jwksCache;
+    private JsonObject getJwks(OidcConfigSnapshot cfg) throws Exception {
+        String jwksUri = getJwksUri(cfg);
+        JsonObject cached = jwksCache.get(jwksUri);
+        if (cached != null) {
+            return cached;
         }
 
-        synchronized (OidcResource.class) {
-            if (jwksCache != null) {
-                return jwksCache;
+        Request req = new Request.Builder().url(jwksUri).get().build();
+        try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
+            if (!resp.isSuccessful() || resp.body() == null) {
+                throw new Exception("Failed to fetch JWKS: HTTP " + resp.code());
             }
-
-            String jwksUri = getJwksUri();
-            Request req = new Request.Builder().url(jwksUri).get().build();
-            try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) {
-                    throw new Exception("Failed to fetch JWKS: HTTP " + resp.code());
-                }
-                String body = resp.body().string();
-                try (JsonReader reader = Json.createReader(new StringReader(body))) {
-                    jwksCache = reader.readObject();
-                }
+            String body = resp.body().string();
+            JsonObject jwks;
+            try (JsonReader reader = Json.createReader(new StringReader(body))) {
+                jwks = reader.readObject();
             }
-
+            // Keyed by the effective JWKS URI so a jwks_uri change is picked up on the next login.
+            jwksCache.put(jwksUri, jwks);
             log.info("OIDC JWKS loaded from {}", jwksUri);
-            return jwksCache;
+            return jwks;
         }
     }
 
     /**
-     * Returns the end_session_endpoint from discovery, or null if not supported.
+     * Composes the full OIDC RP-initiated logout URL from ONE request snapshot (torn-read guard for
+     * the logout path): the enabled check, the {@code end_session_endpoint} resolution (via the
+     * snapshot's discovery cache key), and the {@code post_logout_redirect_uri} (from the snapshot's
+     * redirect URI) all read from the SAME snapshot, so a provider change landing mid-logout can
+     * never send the stored {@code id_token_hint} to one provider's endpoint with another provider's
+     * redirect. The stored token is additionally BOUND to its issuer: if an admin switched the OIDC
+     * provider live since the login that minted this token, the token's {@code iss} no longer equals
+     * the current effective issuer and the method returns null (so provider A's token is never
+     * disclosed to provider B's endpoint). Returns null when OIDC is disabled, no id_token is stored,
+     * the stored token's issuer does not match the current provider (or cannot be parsed), discovery
+     * has not been fetched, or the provider advertises no {@code end_session_endpoint} (the caller
+     * then omits the external logout redirect and just clears the local session).
+     *
+     * @param oidcIdToken The stored OIDC id_token to pass as {@code id_token_hint} (may be null)
+     * @return The composed logout URL, or null when no OIDC logout redirect applies
      */
-    static String getEndSessionEndpoint() {
+    public static String resolveLogoutUrl(String oidcIdToken) {
+        if (oidcIdToken == null) {
+            return null;
+        }
+        OidcConfigSnapshot cfg = snapshot();
+
+        // Provider binding: the stored id_token was minted by the provider configured at LOGIN.
+        // If an admin switched the OIDC provider LIVE since then, sending this token as
+        // id_token_hint to the CURRENT provider's end_session_endpoint would disclose provider A's
+        // token to provider B. Bind the token to its issuer: only proceed when the token's iss
+        // equals the current effective issuer. Fail safe (skip the external redirect) when the
+        // token has no iss or cannot be parsed — the caller still clears the local session.
+        String tokenIssuer = readIdTokenIssuer(oidcIdToken);
+        if (tokenIssuer == null || !tokenIssuer.equals(cfg.get(OidcKey.ISSUER))) {
+            return null;
+        }
+
+        String endSessionEndpoint = getEndSessionEndpoint(cfg);
+        if (endSessionEndpoint == null) {
+            return null;
+        }
+        String redirectUri = ofNullable(cfg.get(OidcKey.REDIRECT_URI)).orElse("");
+        String baseUrl = redirectUri.replaceAll("/api/oidc/callback$", "");
+        return endSessionEndpoint
+                + "?id_token_hint=" + urlEncode(oidcIdToken)
+                + "&post_logout_redirect_uri=" + urlEncode(baseUrl);
+    }
+
+    /**
+     * Returns the {@code end_session_endpoint} from the cached discovery document for the SNAPSHOT's
+     * issuer, or null if OIDC is disabled (per the snapshot), discovery has not been fetched, or the
+     * provider does not advertise one. Reads the value-keyed discovery cache under the snapshot's
+     * discovery URL, so it is consistent with every other value that logout request uses.
+     */
+    static String getEndSessionEndpoint(OidcConfigSnapshot cfg) {
         try {
-            if (!isOidcEnabled() || discoveryCache == null) {
+            if (!cfg.enabled()) {
                 return null;
             }
-            return discoveryCache.getString("end_session_endpoint", null);
+            String discoveryUrl = cfg.discoveryUrl();
+            JsonObject discovery = discoveryUrl == null ? null : discoveryCache.get(discoveryUrl);
+            if (discovery == null) {
+                return null;
+            }
+            return discovery.getString("end_session_endpoint", null);
         } catch (Exception e) {
             return null;
         }
     }
 
-    private static boolean isOidcEnabled() {
-        return Boolean.parseBoolean(System.getProperty(PROP_ENABLED));
+    /**
+     * Reads the {@code iss} claim from a stored id_token WITHOUT verifying its signature. This is
+     * our own previously-verified stored token (verified at callback via {@link #verifyIdToken}) —
+     * we only need to know which provider minted it so a logout binds the token to that provider.
+     * Reuses the same {@link JWT#decode} the verification path uses (no signature check here).
+     *
+     * @param idToken The stored id_token (a JWT)
+     * @return The {@code iss} claim, or null when the token cannot be parsed or carries no issuer
+     */
+    static String readIdTokenIssuer(String idToken) {
+        try {
+            String issuer = JWT.decode(idToken).getIssuer();
+            return StringUtils.isBlank(issuer) ? null : issuer;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * True when the provider fingerprint pinned on the login state still matches the CURRENT
+     * effective provider (from the callback's snapshot). The fingerprint is the login-time issuer +
+     * client_id.
+     *
+     * <p>Fail closed on ambiguity: a state with NO pinned fingerprint (issuer/client_id null) is
+     * REJECTED (returns false), NOT treated as matching. After {@code dbupdate-046}, {@link #login}
+     * always writes the fingerprint, so a null fingerprint can only be a legacy state created before
+     * this deploy — the sole cost of rejecting it is that a login literally in-flight across the
+     * deploy moment retries once (a benign UX blip), which is the correct trade for a security
+     * invariant. No new legitimate login produces a null fingerprint. Treating null as a match would
+     * be fail-open: a pre-migration state plus a live A→B provider switch within the state TTL would
+     * exchange provider A's code with provider B.
+     *
+     * @param cfg   The callback's request-scoped config snapshot (the current effective provider)
+     * @param state The in-flight login state (carries the pinned login-time fingerprint)
+     * @return True only when a non-null pinned fingerprint equals the current provider
+     */
+    static boolean providerFingerprintMatches(OidcConfigSnapshot cfg, OidcState state) {
+        String pinnedIssuer = state.getIssuer();
+        String pinnedClientId = state.getClientId();
+        // Fail closed: an unpinned (pre-migration) state is rejected, never accepted on ambiguity.
+        if (StringUtils.isBlank(pinnedIssuer) || StringUtils.isBlank(pinnedClientId)) {
+            return false;
+        }
+        return StringUtils.equals(pinnedIssuer, cfg.get(OidcKey.ISSUER))
+                && StringUtils.equals(pinnedClientId, cfg.get(OidcKey.CLIENT_ID));
+    }
+
+    /** True when OIDC login is enabled per the effective config (DB override, else property). */
+    public static boolean isOidcEnabled() {
+        return Boolean.parseBoolean(oidcConfig(OidcKey.ENABLED));
     }
 
     private static String getClaimAsString(DecodedJWT jwt, String claim) {

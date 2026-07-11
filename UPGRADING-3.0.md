@@ -1,5 +1,11 @@
 # Upgrading to Teedy 3.0.0
 
+> **Historical note:** The three features this v3.0.0 guide describes as removed
+> were later **reinstated** — workflows and vocabulary returned in v3.2, and LDAP
+> authentication returned in v3.1. This document is preserved as the v3.0.0
+> upgrade record; for current behavior see [CHANGELOG.md](CHANGELOG.md) and the
+> [`docs/`](docs/README.md) documentation.
+
 Teedy 3.0.0 is a **breaking release**. It removes three features end-to-end
 (database tables included) and retires one authentication method. If you run
 a downstream fork of `fmaass/teedy-docs`, or maintain patches against a

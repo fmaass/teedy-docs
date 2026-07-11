@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { listUsers, createUser, updateUser, deleteUser, disableUserTotp, type UserListItem } from '../../api/user'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import InputNumber from 'primevue/inputnumber'
 import Password from 'primevue/password'
 import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
@@ -59,12 +60,14 @@ async function handleAdd() {
 // Edit user dialog
 const showEditDialog = ref(false)
 const editTarget = ref<UserListItem | null>(null)
-const editForm = ref({ email: '', password: '' })
+const editForm = ref({ email: '', password: '', storage_quota: 0 })
 const editLoading = ref(false)
 
 function openEditDialog(user: UserListItem) {
   editTarget.value = user
-  editForm.value = { email: user.email, password: '' }
+  // Pre-fill the quota from the user's current storage_quota so a save without a change
+  // is a no-op on the stored value.
+  editForm.value = { email: user.email, password: '', storage_quota: user.storage_quota }
   showEditDialog.value = true
 }
 
@@ -72,7 +75,10 @@ async function handleEdit() {
   if (!editTarget.value) return
   editLoading.value = true
   try {
-    const data: { email?: string; password?: string } = { email: editForm.value.email }
+    const data: { email?: string; password?: string; storage_quota?: number } = {
+      email: editForm.value.email,
+      storage_quota: editForm.value.storage_quota,
+    }
     if (editForm.value.password) data.password = editForm.value.password
     await updateUser(editTarget.value.username, data)
     queryClient.invalidateQueries({ queryKey: ['users'] })
@@ -254,6 +260,11 @@ function canToggleDisabled(data: UserListItem): boolean {
           <label for="add-user-pass">{{ t('ui.users.password') }} *</label>
           <Password v-model="addForm.password" inputId="add-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
         </div>
+        <div class="form-field">
+          <label for="add-user-quota">{{ t('ui.users.storage_quota') }}</label>
+          <InputNumber inputId="add-user-quota" v-model="addForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(addForm.storage_quota) }) }}</small>
+        </div>
       </div>
       <template #footer>
         <Button :label="t('cancel')" severity="secondary" text @click="showAddDialog = false" />
@@ -271,6 +282,11 @@ function canToggleDisabled(data: UserListItem): boolean {
         <div class="form-field">
           <label for="edit-user-pass">{{ t('ui.account.new_password') }} <span class="text-muted">({{ t('ui.users.new_password_hint') }})</span></label>
           <Password v-model="editForm.password" inputId="edit-user-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'new-password', name: 'new-password' }" inputClass="w-full" class="w-full" />
+        </div>
+        <div class="form-field">
+          <label for="edit-user-quota">{{ t('ui.users.storage_quota') }}</label>
+          <InputNumber inputId="edit-user-quota" v-model="editForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(editForm.storage_quota) }) }}</small>
         </div>
       </div>
       <template #footer>

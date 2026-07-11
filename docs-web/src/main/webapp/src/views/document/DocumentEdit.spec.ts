@@ -81,6 +81,7 @@ beforeAll(() => {
 })
 
 import DocumentEdit from './DocumentEdit.vue'
+import { getDocument } from '../../api/document'
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -90,13 +91,14 @@ const router = createRouter({
   ],
 })
 
-async function mountEdit() {
+async function mountEdit(props: { id?: string } = {}) {
   setActivePinia(createPinia())
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   router.push('/')
   await router.isReady()
   const wrapper = mount(DocumentEdit, {
+    props,
     global: {
       plugins: [i18n, router, PrimeVue, ToastService, ConfirmationService, [VueQueryPlugin, { queryClient }]],
     },
@@ -104,6 +106,35 @@ async function mountEdit() {
   await flushPromises()
   return wrapper
 }
+
+// Minimal document-detail payload for edit-mode hydration; `relations` varies per test.
+function docDetail(relations: Array<{ id: string; title: string; source: boolean }>) {
+  return {
+    data: {
+      id: 'doc-1',
+      title: 'Edited Doc',
+      description: '',
+      subject: '',
+      identifier: '',
+      publisher: '',
+      format: '',
+      source: '',
+      type: '',
+      coverage: '',
+      rights: '',
+      language: 'eng',
+      create_date: 1700000000000,
+      tags: [],
+      relations,
+      metadata: [],
+      files: [],
+    },
+  }
+}
+
+// buildDocParams is the REAL save-payload builder the update/create flows submit;
+// script-setup bindings are reachable on wrapper.vm in dev mode (as the tag tests above rely on).
+type EditVm = { buildDocParams: () => URLSearchParams }
 
 describe('DocumentEdit — tag picker (#14 filter, #23 colored chips)', () => {
   beforeEach(() => {
@@ -178,5 +209,50 @@ describe('DocumentEdit — tag picker (#14 filter, #23 colored chips)', () => {
     await firstBadge.find('.tag-remove-btn').trigger('click')
     await flushPromises()
     expect((wrapper.vm as unknown as { form: { tags: string[] } }).form.tags).toEqual(['tag-blue'])
+  })
+})
+
+describe('DocumentEdit — relations save payload (#36 spurious-reverse fix)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: [] } })
+    tagApiMock.getTagFacets.mockReset().mockResolvedValue({ data: { tags: [] } })
+    tagApiMock.getTagCoOccurrence.mockReset().mockResolvedValue({ data: { pairs: [] } })
+    vi.mocked(getDocument).mockReset()
+  })
+
+  it('does NOT re-send an incoming relation as `relations` (would mint a spurious reverse relation)', async () => {
+    // The document has one outgoing (source=true) and one incoming (source=false) relation.
+    // POST /document/:id `relations` params are reconciled as OUTGOING only, so re-sending
+    // the incoming id would CREATE a new reverse relation on every save.
+    vi.mocked(getDocument).mockResolvedValue(
+      docDetail([
+        { id: 'rel-out', title: 'Out', source: true },
+        { id: 'rel-in', title: 'In', source: false },
+      ]) as never,
+    )
+    const wrapper = await mountEdit({ id: 'doc-1' })
+    const params = (wrapper.vm as unknown as EditVm).buildDocParams()
+    expect(params.getAll('relations')).toEqual(['rel-out'])
+    expect(params.get('relations_reset')).toBeNull()
+  })
+
+  it('sends relations_reset=true (and no relations) when the document has no outgoing relations on edit', async () => {
+    // Only an incoming relation: zero outgoing survive, so the explicit clear sentinel is
+    // sent (an omitted `relations` param would silently preserve a stale outgoing set).
+    vi.mocked(getDocument).mockResolvedValue(
+      docDetail([{ id: 'rel-in', title: 'In', source: false }]) as never,
+    )
+    const wrapper = await mountEdit({ id: 'doc-1' })
+    const params = (wrapper.vm as unknown as EditVm).buildDocParams()
+    expect(params.getAll('relations')).toEqual([])
+    expect(params.get('relations_reset')).toBe('true')
+  })
+
+  it('a create (no id) never emits the relations_reset sentinel', async () => {
+    const wrapper = await mountEdit()
+    const params = (wrapper.vm as unknown as EditVm).buildDocParams()
+    expect(params.getAll('relations')).toEqual([])
+    expect(params.get('relations_reset')).toBeNull()
   })
 })

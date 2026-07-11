@@ -142,3 +142,59 @@ describe('SettingsUsers — disable/enable toggle', () => {
     expect(apiMock.updateUser).toHaveBeenCalledWith('alice', { disabled: true })
   })
 })
+
+describe('SettingsUsers — storage quota field', () => {
+  beforeEach(() => {
+    apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [ENABLED_USER] } })
+    apiMock.createUser.mockReset().mockResolvedValue({ data: {} })
+    apiMock.updateUser.mockReset().mockResolvedValue({ data: {} })
+    confirmDangerSpy.mockReset()
+  })
+
+  it('the create dialog sends storage_quota (defaulting to ~1GB) on create', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openAddDialog: () => void
+      addForm: { username: string; email: string; password: string; storage_quota: number }
+      handleAdd: () => Promise<void>
+    }
+    vm.openAddDialog()
+    // The create default is the current ~1GB hardcoded value, now surfaced as a field.
+    expect(vm.addForm.storage_quota).toBe(1000000000)
+    vm.addForm.username = 'carol'
+    vm.addForm.email = 'carol@x.com'
+    vm.addForm.password = 'Password1'
+    vm.addForm.storage_quota = 2000000000
+    await vm.handleAdd()
+    await flushPromises()
+
+    expect(apiMock.createUser).toHaveBeenCalledTimes(1)
+    // createUser(username, password, email, storageQuota)
+    expect(apiMock.createUser).toHaveBeenCalledWith('carol', 'Password1', 'carol@x.com', 2000000000)
+  })
+
+  it('the edit dialog pre-fills the current quota and sends it on save', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openEditDialog: (u: UserListItem) => void
+      editForm: { email: string; password: string; storage_quota: number }
+      handleEdit: () => Promise<void>
+    }
+    vm.openEditDialog(ENABLED_USER)
+    // Pre-filled from the user's current storage_quota.
+    expect(vm.editForm.storage_quota).toBe(ENABLED_USER.storage_quota)
+    vm.editForm.storage_quota = 5000000000
+    await vm.handleEdit()
+    await flushPromises()
+
+    expect(apiMock.updateUser).toHaveBeenCalledTimes(1)
+    expect(apiMock.updateUser).toHaveBeenCalledWith('alice', {
+      email: 'alice@x.com',
+      storage_quota: 5000000000,
+    })
+  })
+})
