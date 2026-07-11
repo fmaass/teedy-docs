@@ -1,62 +1,113 @@
-import { test, expect } from '@playwright/test'
-import { unique, createDocument } from './helpers'
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { unique } from './helpers'
 
 // #28: the "Assigned to me" (workflow=me) document-list filter must round-trip
 // through the URL — toggling it activates the filter and puts `workflow=me` in the
-// URL; opening a document and navigating Back restores the filter (toggle stays on,
-// URL still carries workflow=me). Proves the returnTo-carries-workflow + route
-// hydration path end to end against the real app.
+// URL; opening a document and using the IN-APP Back affordance (the returnTo
+// history-state mechanism under test, NOT browser history) restores the filter.
 //
-// REALNESS: the toggle is a PrimeVue ToggleButton labelled "Assigned to me"; its
-// pressed state (aria-pressed / .p-togglebutton-checked) and the `workflow=me` URL
-// param are the assertions. If returnTo dropped the key or the route never hydrated
-// it, the Back navigation would land on a bare /document with the toggle OFF.
+// DETERMINISM (this spec was previously guard-raced): the document under test IS
+// assigned to the logged-in admin — a single-step VALIDATE workflow targeting USER
+// "admin" is started on it via the API, so the filter KEEPS its row visible. A
+// second, unassigned document proves the filter actually filters. After toggling,
+// the spec waits for the POST-refresh list state (unassigned row detached AND
+// assigned row still present) before interacting with any row: the pre-refresh
+// render shows BOTH rows, so the "unassigned hidden" assertion can only pass once
+// the filtered response has rendered — no interaction can race the refresh.
+//
+// REALNESS: aria-pressed on the PrimeVue ToggleButton, the workflow=me URL param,
+// and the row set are the assertions; the Back step clicks the document view's
+// own back-link (router.push(returnTo)), so a dropped workflow key in returnTo or
+// a missing route hydration fails the spec.
 
-test('the "Assigned to me" filter round-trips through open + Back (#28)', async ({ page }) => {
-  // A document to open (so there is a row to navigate into and Back from).
-  const doc = await createDocument(page, unique('wf-filter'))
+function rowFor(page: Page, title: string) {
+  return page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+}
+
+// Create a document via the API (fast seeding; the UI form is not under test here).
+async function apiCreateDocument(request: APIRequestContext, title: string): Promise<string> {
+  const res = await request.put('/api/document', { form: { title, language: 'eng' } })
+  expect(res.ok(), `create document ${title}`).toBeTruthy()
+  return (await res.json()).id as string
+}
+
+// A minimal single-step VALIDATE workflow whose step targets USER admin directly —
+// the strict wire shape RouteModelResource.validateRouteModelSteps requires.
+async function apiCreateRouteModel(request: APIRequestContext, name: string): Promise<string> {
+  const steps = JSON.stringify([
+    {
+      name: 'Review',
+      type: 'VALIDATE',
+      target: { type: 'USER', name: 'admin' },
+      transitions: [{ name: 'VALIDATED', actions: [] }],
+    },
+  ])
+  const res = await request.put('/api/routemodel', { form: { name, steps } })
+  expect(res.ok(), 'create route model').toBeTruthy()
+  return (await res.json()).id as string
+}
+
+test('the "Assigned to me" filter round-trips through open + in-app Back (#28)', async ({ page, request }) => {
+  const assignedTitle = unique('wf-assigned')
+  const otherTitle = unique('wf-other')
+  const modelName = unique('wfm')
+  let assignedId: string | undefined
+  let otherId: string | undefined
+  let modelId: string | undefined
 
   try {
-    await page.goto('/#/document')
+    // Seed: two docs; a workflow targeting USER admin started on the first, so it
+    // is "assigned to me" for the logged-in admin and the filter keeps it visible.
+    assignedId = await apiCreateDocument(request, assignedTitle)
+    otherId = await apiCreateDocument(request, otherTitle)
+    modelId = await apiCreateRouteModel(request, modelName)
+    const startRes = await request.post('/api/route/start', {
+      form: { routeModelId: modelId, documentId: assignedId },
+    })
+    expect(startRes.ok(), 'start route on assigned doc').toBeTruthy()
 
-    const toggle = page.getByRole('button', { name: 'Assigned to me' })
-    await expect(toggle).toBeVisible()
+    await page.goto('/#/document')
+    const assignedRow = rowFor(page, assignedTitle)
+    const otherRow = rowFor(page, otherTitle)
+    // Unfiltered list: both rows render.
+    await expect(assignedRow).toBeVisible()
+    await expect(otherRow).toBeVisible()
 
     // Activate the filter — the URL gains workflow=me.
+    const toggle = page.getByRole('button', { name: 'Assigned to me' })
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
     await expect(page).toHaveURL(/workflow=me/)
 
-    // Open a document (full view via double-click on its row).
-    const row = page.getByRole('row', {
-      name: new RegExp(doc.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-    })
-    // The filter may hide the row (admin isn't assigned) — navigate to the view
-    // directly to exercise the Back path deterministically, carrying the filtered
-    // list as the referrer via the app's in-router history.
-    if (await row.count()) {
-      await row.dblclick()
-    } else {
-      await page.goto(`/#/document/view/${doc.id}`)
-    }
+    // POST-refresh barrier: the unassigned row is only detached once the FILTERED
+    // response has rendered (pre-refresh it is visible), and the assigned row
+    // must survive it. Only after this settles do we touch a row.
+    await expect(otherRow).toBeHidden()
+    await expect(assignedRow).toBeVisible()
+
+    // Open the assigned document — its row is in the filtered set, so no pending
+    // refresh can detach it mid-dblclick.
+    await assignedRow.dblclick()
     await expect(page).toHaveURL(/#\/document\/view\//)
 
-    // Navigate Back to the list — the filter must be restored.
-    await page.goBack()
-    await expect(page).toHaveURL(/#\/document/)
+    // IN-APP Back: the document view's back-link pushes history.state.returnTo —
+    // the exact #28 mechanism (browser goBack would bypass it).
+    await page.locator('.back-link').click()
     await expect(page).toHaveURL(/workflow=me/)
     await expect(page.getByRole('button', { name: 'Assigned to me' })).toHaveAttribute(
       'aria-pressed',
       'true',
     )
+    // And the restored filter is LIVE, not just cosmetic: the filtered row set holds.
+    await expect(rowFor(page, assignedTitle)).toBeVisible()
+    await expect(rowFor(page, otherTitle)).toBeHidden()
   } finally {
-    // Cleanup: remove the document.
-    await page.goto(`/#/document/view/${doc.id}`).catch(() => {})
-    const del = page.getByRole('button', { name: 'Delete', exact: true })
-    if (await del.isVisible().catch(() => false)) {
-      await del.click()
-      const dialog = page.getByRole('alertdialog')
-      await dialog.getByRole('button', { name: 'Yes' }).click().catch(() => {})
+    // Cleanup via API (delete cancels the doc's route steps server-side).
+    for (const id of [assignedId, otherId]) {
+      if (id) await request.delete(`/api/document/${id}`).catch(() => {})
     }
+    if (modelId) await request.delete(`/api/routemodel/${modelId}`).catch(() => {})
   }
 })

@@ -36,11 +36,28 @@ const mockRoute = { get query() { return routeHolder.route.query }, set query(v:
 // filter" without a second global mock. Read by the tagFilter store mock below.
 // `filterQuery` mirrors the real store contract: buildFilterQuery preserves a
 // validated workflow=me present in the route query (component-owned key).
-const filterState = vi.hoisted(() => ({
-  selectedTags: [] as { id: string; name: string }[],
-  debouncedText: '',
-  filterQuery: {} as Record<string, string>,
+// Same holder pattern as the route: the store mock factory swaps `state` for a
+// Vue-reactive object so a test mutation of debouncedText propagates through the
+// store's `combinedSearch` getter into the component's reactive queryKey — which
+// makes the mocked list query REFETCH (see the vue-query mock), so a test can
+// assert the params of a genuinely NEW request, not the mount-time one.
+const filterHolder = vi.hoisted(() => ({
+  state: {
+    selectedTags: [] as { id: string; name: string }[],
+    debouncedText: '',
+    filterQuery: {} as Record<string, string>,
+  },
 }))
+// Delegating accessor so tests keep the ergonomic `filterState.x = y` writes while
+// always hitting the (swapped-in) reactive object.
+const filterState = {
+  get selectedTags() { return filterHolder.state.selectedTags },
+  set selectedTags(v: { id: string; name: string }[]) { filterHolder.state.selectedTags = v },
+  get debouncedText() { return filterHolder.state.debouncedText },
+  set debouncedText(v: string) { filterHolder.state.debouncedText = v },
+  get filterQuery() { return filterHolder.state.filterQuery },
+  set filterQuery(v: Record<string, string>) { filterHolder.state.filterQuery = v },
+}
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
 
@@ -69,30 +86,38 @@ vi.mock('../../api/document', () => ({
 }))
 
 // --- Tag filter store: minimal surface the view reads ---
-vi.mock('../../stores/tagFilter', () => ({
-  useTagFilterStore: () => ({
-    combinedSearch: '',
-    tagMode: 'and',
-    selectedTagIds: new Set(),
-    get selectedTags() { return filterState.selectedTags },
-    excludedTags: [],
-    relatedTags: [],
-    allTags: [],
-    get debouncedText() { return filterState.debouncedText },
-    hasActiveFilters: false,
-    searchText: '',
-    clearFilters: vi.fn(),
-    removeTag: vi.fn(),
-    toggleTag: vi.fn(),
-    // Mirrors the real store: the canonical serializer preserves a validated
-    // workflow=me present in the route query (component-owned key), so returnTo
-    // and the syncUrl rewrite never strip it.
-    buildFilterQuery: () => ({
-      ...filterState.filterQuery,
-      ...(mockRoute.query.workflow === 'me' ? { workflow: 'me' } : {}),
+vi.mock('../../stores/tagFilter', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  filterHolder.state = reactive(filterHolder.state)
+  return {
+    useTagFilterStore: () => ({
+      // LIVE getter over the reactive state (like the real store's computed):
+      // a debouncedText mutation changes the component's queryKey and triggers
+      // the mocked query's refetch — required for non-vacuous "params survive a
+      // filter change" assertions.
+      get combinedSearch() { return filterHolder.state.debouncedText },
+      tagMode: 'and',
+      selectedTagIds: new Set(),
+      get selectedTags() { return filterHolder.state.selectedTags },
+      excludedTags: [],
+      relatedTags: [],
+      allTags: [],
+      get debouncedText() { return filterHolder.state.debouncedText },
+      hasActiveFilters: false,
+      searchText: '',
+      clearFilters: vi.fn(),
+      removeTag: vi.fn(),
+      toggleTag: vi.fn(),
+      // Mirrors the real store: the canonical serializer preserves a validated
+      // workflow=me present in the route query (component-owned key), so returnTo
+      // and the syncUrl rewrite never strip it.
+      buildFilterQuery: () => ({
+        ...filterHolder.state.filterQuery,
+        ...(mockRoute.query.workflow === 'me' ? { workflow: 'me' } : {}),
+      }),
     }),
-  }),
-}))
+  }
+})
 
 vi.mock('../../composables/useDocumentTags', () => ({
   useDocumentTags: () => ({ addTag: vi.fn(), removeTag: vi.fn() }),
@@ -353,16 +378,31 @@ describe('DocumentList — workflow=me returnTo round-trip (#28)', () => {
     expect(params['search[searchworkflow]']).toBe('me')
   })
 
-  it('a free-text/tag change while workflow=me is active does NOT strip it from the request', async () => {
+  it('a free-text/tag change while workflow=me is active does NOT strip it from the NEXT request', async () => {
     mockRoute.query = { workflow: 'me' }
-    const wrapper = mountView()
+    mountView()
+    await flushPromises()
+    // Mount-time request: workflow active, no search yet.
+    const callsAfterMount = listDocumentsMock.mock.calls.length
+    const mountParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(mountParams['search[searchworkflow]']).toBe('me')
+    expect(mountParams.search).toBeUndefined()
+
     // Change the filter dimension the store owns; workflow stays in the route.
+    // The reactive store state drives the component's queryKey, so this triggers
+    // a REAL refetch through the mocked query (see the vue-query mock's
+    // key-change watcher) — no manual queryFn poking.
     filterState.debouncedText = 'invoice'
     filterState.filterQuery = { search: 'invoice' }
-    // Force a re-render/refetch (the store change would drive the query key).
-    void wrapper
     await flushPromises()
+
+    // Non-vacuous: a NEW request happened, and it is provably the post-change one
+    // (it carries the new search) — a broken component that dropped workflow on a
+    // search change fails the last assertion; one that never refetched fails the
+    // count assertion.
+    expect(listDocumentsMock.mock.calls.length).toBeGreaterThan(callsAfterMount)
     const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.search).toBe('invoice')
     expect(params['search[searchworkflow]']).toBe('me')
   })
 
