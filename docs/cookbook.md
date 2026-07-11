@@ -78,8 +78,9 @@ quotas and no anonymous access.
    restoring into a scratch environment. See
    [data directory and backup](configuration.md#data-directory-and-backup).
 
-> **Footer links** for a data-retention / imprint page in the UI footer are
-> *coming in v3.4* and are not present in the current release.
+> **Footer links** for imprint, privacy, terms, or documentation pages can be
+> configured by an admin and appear in the application footer and on the login
+> screen — see [Footer links](admin-guide.md#footer-links).
 
 Cross-links: [Authentication](authentication.md) · [Admin guide](admin-guide.md) ·
 [Sharing & permissions](sharing-and-permissions.md) · [Configuration](configuration.md)

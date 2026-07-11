@@ -97,6 +97,29 @@ Teedy's appearance is customized through a custom-CSS injection endpoint — the
 - `color` — a hex accent color applied to the navbar (default `#ffffff`).
 - `css` — arbitrary custom CSS appended to the generated stylesheet.
 
+## Footer links
+
+Self-hosted and organizational deployments often need imprint, privacy, terms, or
+documentation links reachable from the application — common EU compliance
+requirements. An admin can configure up to five label-and-URL pairs that render in
+the application footer (desktop and mobile) and, because they are public chrome,
+on the login screen before authentication.
+
+| Action | Request |
+|--------|---------|
+| Read the configured links | `GET /api/app` → the `footer_links` array (anonymous) |
+| Set the links | `POST /api/app/footer_links` with form param `links` — a JSON array of `{label, url}` objects (admin) |
+
+- Each entry is a `{ "label": "…", "url": "…" }` pair; up to five entries.
+- `label` — free text, up to 40 characters.
+- `url` — must be an absolute `http(s)` URL (up to 500 chars); other schemes such
+  as `javascript:` or `data:` are rejected.
+- An empty list clears the footer (the default — nothing renders).
+
+Links open in a new tab with `rel="noopener noreferrer"`.
+
+![Footer links on the login screen](images/login-sso.png)
+
 ## SMTP and OCR
 
 These are configured through the server environment, not a settings page:
