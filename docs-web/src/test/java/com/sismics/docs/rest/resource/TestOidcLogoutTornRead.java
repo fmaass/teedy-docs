@@ -43,6 +43,7 @@ public class TestOidcLogoutTornRead extends BaseJerseyTest {
     private static final String END_SESSION_B = "https://provider-b.example/logout";
     private static final String REDIRECT_A = "https://app-a.example/api/oidc/callback";
     private static final String REDIRECT_B = "https://app-b.example/api/oidc/callback";
+    private static final String CLIENT_ID = "teedy-client";
 
     @Override
     @BeforeEach
@@ -172,6 +173,36 @@ public class TestOidcLogoutTornRead extends BaseJerseyTest {
     }
 
     /**
+     * Provider-binding guard, audience half: the callback validates BOTH iss and aud, so logout
+     * must too. A token whose iss matches the current provider but whose {@code aud} is no longer
+     * the current {@code client_id} must NOT be disclosed to the provider's end_session_endpoint —
+     * resolveLogoutUrl falls back to local-only logout (returns null). An {@code aud} array that
+     * still CONTAINS the current client_id remains valid.
+     */
+    @Test
+    public void logoutBindsIdTokenToClientIdAudience() {
+        // iss matches provider A (the current provider) but aud is a stale/foreign client_id.
+        String staleAudToken = unsignedIdToken(ISSUER_A, "\"some-other-client\"");
+        String mismatched = inTx(() -> OidcResource.resolveLogoutUrl(staleAudToken));
+        Assertions.assertNull(mismatched,
+                "a token whose aud is not the current client_id must fall back to local logout "
+                        + "(no id_token_hint); got: " + mismatched);
+
+        // aud as an ARRAY that still contains the current client_id is a valid match.
+        String arrayAudToken = unsignedIdToken(ISSUER_A, "[\"another-client\",\"" + CLIENT_ID + "\"]");
+        String matched = inTx(() -> OidcResource.resolveLogoutUrl(arrayAudToken));
+        Assertions.assertNotNull(matched,
+                "an aud array containing the current client_id must build the RP-logout URL");
+        Assertions.assertTrue(matched.startsWith(END_SESSION_A), matched);
+        Assertions.assertTrue(matched.contains("id_token_hint=" + enc(arrayAudToken)), matched);
+
+        // A token with no aud claim at all must likewise fall back to local logout.
+        String noAudToken = unsignedIdToken(ISSUER_A, null);
+        String noAud = inTx(() -> OidcResource.resolveLogoutUrl(noAudToken));
+        Assertions.assertNull(noAud, "a token with no aud claim must fall back to local logout");
+    }
+
+    /**
      * Fail-safe: a stored token that carries no {@code iss} claim (or cannot be parsed) must not be
      * disclosed to any provider — resolveLogoutUrl returns null (skip the external redirect).
      */
@@ -194,10 +225,24 @@ public class TestOidcLogoutTornRead extends BaseJerseyTest {
      * signature segment is sufficient for this probe.
      */
     private static String unsignedIdToken(String issuer) {
+        return unsignedIdToken(issuer, "\"" + CLIENT_ID + "\"");
+    }
+
+    /**
+     * As {@link #unsignedIdToken(String)} but with an explicit {@code aud} JSON fragment (a quoted
+     * string like {@code "client"} or an array like {@code ["a","client"]}), or null to omit aud.
+     */
+    private static String unsignedIdToken(String issuer, String audJson) {
         String header = b64url("{\"alg\":\"RS256\",\"typ\":\"JWT\"}");
-        String payload = issuer == null
-                ? b64url("{\"sub\":\"user-1\"}")
-                : b64url("{\"iss\":\"" + issuer + "\",\"sub\":\"user-1\"}");
+        StringBuilder claims = new StringBuilder("{\"sub\":\"user-1\"");
+        if (issuer != null) {
+            claims.append(",\"iss\":\"").append(issuer).append("\"");
+        }
+        if (audJson != null) {
+            claims.append(",\"aud\":").append(audJson);
+        }
+        claims.append("}");
+        String payload = b64url(claims.toString());
         return header + "." + payload + ".c2ln";
     }
 
@@ -231,6 +276,7 @@ public class TestOidcLogoutTornRead extends BaseJerseyTest {
             dao.update(ConfigType.OIDC_ENABLED, "true");
             dao.update(ConfigType.OIDC_ISSUER, issuer);
             dao.update(ConfigType.OIDC_REDIRECT_URI, redirect);
+            dao.update(ConfigType.OIDC_CLIENT_ID, CLIENT_ID);
             return null;
         });
     }

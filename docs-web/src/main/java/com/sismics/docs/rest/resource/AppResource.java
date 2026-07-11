@@ -864,6 +864,11 @@ public class AppResource extends BaseResource {
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan files", q.executeUpdate());
 
+        // Hard delete saved filters owned by soft-deleted users before the user hard-delete
+        // (T_SAVED_FILTER.FK_SFL_IDUSER_C is ON DELETE RESTRICT, so a lingering filter would abort the purge)
+        q = em.createNativeQuery("delete from T_SAVED_FILTER where SFL_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
+        log.info("Deleting {} saved filters of soft deleted users", q.executeUpdate());
+
         // Hard delete softly deleted data
         log.info("Deleting {} soft deleted document tag links", em.createQuery("delete DocumentTag where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted ACLs", em.createQuery("delete Acl where deleteDate is not null").executeUpdate());

@@ -1317,13 +1317,15 @@ public class OidcResource extends BaseResource {
      * snapshot's discovery cache key), and the {@code post_logout_redirect_uri} (from the snapshot's
      * redirect URI) all read from the SAME snapshot, so a provider change landing mid-logout can
      * never send the stored {@code id_token_hint} to one provider's endpoint with another provider's
-     * redirect. The stored token is additionally BOUND to its issuer: if an admin switched the OIDC
-     * provider live since the login that minted this token, the token's {@code iss} no longer equals
-     * the current effective issuer and the method returns null (so provider A's token is never
-     * disclosed to provider B's endpoint). Returns null when OIDC is disabled, no id_token is stored,
-     * the stored token's issuer does not match the current provider (or cannot be parsed), discovery
-     * has not been fetched, or the provider advertises no {@code end_session_endpoint} (the caller
-     * then omits the external logout redirect and just clears the local session).
+     * redirect. The stored token is additionally BOUND to its provider fingerprint, mirroring the
+     * callback validation: its {@code iss} must equal the current effective issuer AND its {@code aud}
+     * must contain the current client_id. If an admin switched the OIDC provider (or client
+     * registration) live since the login that minted this token, either half no longer matches and
+     * the method returns null (so provider A's token is never disclosed to provider B's endpoint).
+     * Returns null when OIDC is disabled, no id_token is stored, the stored token's issuer or
+     * audience does not match the current provider (or cannot be parsed), discovery has not been
+     * fetched, or the provider advertises no {@code end_session_endpoint} (the caller then omits
+     * the external logout redirect and just clears the local session).
      *
      * @param oidcIdToken The stored OIDC id_token to pass as {@code id_token_hint} (may be null)
      * @return The composed logout URL, or null when no OIDC logout redirect applies
@@ -1342,6 +1344,17 @@ public class OidcResource extends BaseResource {
         // token has no iss or cannot be parsed — the caller still clears the local session.
         String tokenIssuer = readIdTokenIssuer(oidcIdToken);
         if (tokenIssuer == null || !tokenIssuer.equals(cfg.get(OidcKey.ISSUER))) {
+            return null;
+        }
+
+        // Provider binding, audience half: the callback path validates BOTH iss and aud
+        // (verifyIdToken .withIssuer/.withAudience). Mirror that here so a token whose aud is
+        // no longer the current client_id is likewise not disclosed to the current provider's
+        // end_session_endpoint. aud may be a single string or an array; treat a membership match
+        // as valid. Fail safe (skip the external redirect, local logout only) on any mismatch or
+        // an unparseable/empty aud — identical to the issuer-mismatch path above.
+        List<String> tokenAudiences = readIdTokenAudiences(oidcIdToken);
+        if (tokenAudiences == null || !tokenAudiences.contains(cfg.get(OidcKey.CLIENT_ID))) {
             return null;
         }
 
@@ -1391,6 +1404,24 @@ public class OidcResource extends BaseResource {
         try {
             String issuer = JWT.decode(idToken).getIssuer();
             return StringUtils.isBlank(issuer) ? null : issuer;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Reads the {@code aud} claim from a stored id_token WITHOUT verifying its signature (same
+     * rationale as {@link #readIdTokenIssuer}: our own previously-verified token, we only need the
+     * bound client_id for the logout provider-binding check). {@code aud} may be a single string or
+     * an array; both are returned as a list.
+     *
+     * @param idToken The stored id_token (a JWT)
+     * @return The list of audiences, or null when the token cannot be parsed or carries no audience
+     */
+    static List<String> readIdTokenAudiences(String idToken) {
+        try {
+            List<String> audiences = JWT.decode(idToken).getAudience();
+            return audiences == null || audiences.isEmpty() ? null : audiences;
         } catch (Exception e) {
             return null;
         }

@@ -5,9 +5,13 @@ import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetup;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
+import com.sismics.util.jpa.EMF;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityTransaction;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
@@ -102,6 +106,76 @@ public class TestAppResource extends BaseJerseyTest {
         json = target().path("/app").request()
                 .get(JsonObject.class);
         Assertions.assertEquals("eng", json.getString("default_language"));
+    }
+
+    /**
+     * A soft-deleted user who still owns a saved filter must not wedge the storage purge.
+     *
+     * T_SAVED_FILTER.FK_SFL_IDUSER_C is ON DELETE RESTRICT, so unless clean_storage first
+     * removes those filters the user hard-delete throws a constraint violation and aborts the
+     * whole transaction. Reproduce the ownership, delete the user, purge, and assert both the
+     * user row and the filter are gone.
+     */
+    @Test
+    public void testCleanStoragePurgesSavedFiltersOfDeletedUsers() {
+        String adminToken = adminToken();
+
+        // Create a regular user and log in as them
+        clientUtil.createUser("clean_storage_filter_user");
+        String userToken = clientUtil.login("clean_storage_filter_user");
+
+        // The user owns a saved filter
+        JsonObject filterJson = target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .put(Entity.form(new Form()
+                        .param("name", "clean_storage_filter")
+                        .param("query", "search=example")), JsonObject.class);
+        String filterId = filterJson.getString("id");
+        Assertions.assertNotNull(filterId);
+        Assertions.assertEquals(1L, countSavedFilters(filterId));
+
+        // Admin soft-deletes the user (row stays until the storage purge)
+        Response response = target().path("/user/clean_storage_filter_user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // Purge storage: this hard-deletes soft-deleted users and must not abort on the filter FK
+        response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // The user row is gone and its saved filter was removed
+        Assertions.assertEquals(0L, countUsersByName("clean_storage_filter_user"));
+        Assertions.assertEquals(0L, countSavedFilters(filterId));
+    }
+
+    private long countSavedFilters(String filterId) {
+        return readCount("select count(*) from T_SAVED_FILTER where SFL_ID_C = :id", "id", filterId);
+    }
+
+    private long countUsersByName(String username) {
+        return readCount("select count(*) from T_USER where USE_USERNAME_C = :id", "id", username);
+    }
+
+    private long readCount(String sql, String paramName, String paramValue) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            Object n = em.createNativeQuery(sql).setParameter(paramName, paramValue).getSingleResult();
+            tx.commit();
+            return ((Number) n).longValue();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
     }
 
     /**

@@ -101,4 +101,28 @@ describe('SettingsOidc', () => {
     expect(sent.issuer).toBe('https://iss.example')
     expect(sent.client_secret).toBe('')
   })
+
+  it('clears the entered secret from the field after a successful save', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    // The admin types a new client secret, then saves.
+    const secretInput = wrapper.find('#oidc-client-secret')
+    await secretInput.setValue('super-secret-value')
+    const form = (wrapper.vm as unknown as { form: OidcConfig }).form
+    expect(form.client_secret).toBe('super-secret-value')
+
+    ;(wrapper.vm as unknown as { onSave: () => void }).onSave()
+    await flushPromises()
+
+    // It went out on the save request...
+    expect(apiMock.saveOidcConfig).toHaveBeenCalledTimes(1)
+    expect((apiMock.saveOidcConfig.mock.calls[0][0] as OidcConfig).client_secret)
+      .toBe('super-secret-value')
+
+    // ...but must NOT linger in the reactive form (revealable via the toggle / resent next save).
+    expect(form.client_secret).toBe('')
+    const secretEl = wrapper.find('#oidc-client-secret').element as HTMLInputElement
+    expect(secretEl.value).toBe('')
+  })
 })

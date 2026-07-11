@@ -33,7 +33,7 @@ const form = reactive<OidcConfig>({
 
 const sources = ref<Record<string, OidcSource>>({})
 
-const { data: oidcConfig, isLoading } = useQuery({
+const { data: oidcConfig, isLoading, refetch } = useQuery({
   queryKey: ['oidc-config'],
   queryFn: () => getOidcConfig(),
 })
@@ -71,8 +71,14 @@ function isFromProperty(key: string): boolean {
 const { mutate: save, isPending: saving } = useMutation({
   mutationFn: () => saveOidcConfig({ ...form }),
   onSuccess: () => {
-    // A save may flip a field's source to db; the next open reflects it.
+    // Never keep the entered secret in the reactive form after a successful save: it would be
+    // revealable via the toggle and resent verbatim on the next save. Clear it and re-seed from
+    // the server so client_secret_set drives the masked "leave blank to keep" placeholder again.
+    form.client_secret = ''
+    form.client_secret_reset = false
+    // A save may flip a field's source to db; re-seed from the refreshed server config.
     seeded = false
+    refetch()
     toast.add({ severity: 'success', summary: t('ui.oidc.config_saved'), life: 2000 })
   },
   onError: () => {

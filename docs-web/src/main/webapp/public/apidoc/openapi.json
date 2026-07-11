@@ -246,6 +246,7 @@
         ],
         "summary": "Get application information",
         "operationId": "get_app",
+        "security": [],
         "responses": {
           "200": {
             "description": "Success"
@@ -3014,6 +3015,7 @@
         ],
         "summary": "Get the CSS stylesheet",
         "operationId": "get_theme_stylesheet",
+        "security": [],
         "responses": {
           "200": {
             "description": "Success"
@@ -3028,6 +3030,7 @@
         ],
         "summary": "Get the theme configuration",
         "operationId": "get_theme",
+        "security": [],
         "responses": {
           "200": {
             "description": "Success"
@@ -3110,6 +3113,7 @@
         ],
         "summary": "Get a theme image",
         "operationId": "get_theme_image_type",
+        "security": [],
         "parameters": [
           {
             "name": "type",
@@ -3213,6 +3217,7 @@
         ],
         "summary": "Get the current user",
         "operationId": "get_user",
+        "security": [],
         "responses": {
           "200": {
             "description": "Success"
@@ -3318,6 +3323,7 @@
         ],
         "summary": "Login a user",
         "operationId": "post_user_login",
+        "security": [],
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {

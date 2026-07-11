@@ -871,11 +871,12 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "retirements": "Retired the legacy workflow/routes and vocabulary features to slim down the app.",
-        "ldap": "LDAP authentication is back — reinstated and hardened, with a dedicated admin settings page.",
-        "bulk_ops": "Bulk document actions: tag, delete, and export multiple documents at once.",
-        "capture": "Capture documents straight from your device camera.",
-        "new_ui": "New surfaces: comments, groups, sharing, custom metadata, and file version history."
+        "tag_chips": "Click a tag chip in the document list or document view to filter by it instantly.",
+        "saved_filters": "Save a tag, text, and workflow filter combination by name and re-apply it from the search bar.",
+        "relations": "Link related documents together from a new \"Related documents\" section on the document view.",
+        "rotation": "Rotate PDF and image previews on the fly, on top of a page's intrinsic orientation.",
+        "admin_ui": "New admin screens to manage OIDC provider settings and to edit a user's storage quota after creation.",
+        "apidoc_docs": "An interactive API reference at /apidoc, plus a full documentation site covering setup, authentication, and everyday use."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",
