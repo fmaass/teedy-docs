@@ -81,15 +81,64 @@ precise filtering. Prefix a term with an operator and a colon:
 Operators combine — `tag:invoice after:2026-01-01 !tag:paid` finds unpaid invoices
 created this year. Multiple `tag:`/`!tag:` terms are ANDed together.
 
-## Saved filters (coming in v3.4)
+## Saved filters
 
-> **Version note:** Per-user *saved* filters are planned for **v3.4** and are not
-> present in the current release. Today, a filter lives in the URL — the active
-> tags, exclusions, view mode, and search text are all query parameters — so you
-> can **bookmark a filtered view** to return to it. The tree-vs-facet view mode is
-> remembered in your browser between visits.
+A filter in Teedy lives entirely in the URL — the active tags, exclusions, view
+mode, search text, and workflow filter are all query parameters. **Saved filters**
+let you name a filter combination and re-apply it in one click, instead of
+bookmarking the URL by hand.
 
-<!-- screenshot: the saved-filters UI (available after the v3.4 merge) -->
+<!-- screenshot: the search bar showing the "Saved filters" dropdown and the "Save filter" button -->
+
+From the search bar:
+
+- **Save the current filter** — when any filter dimension is active, a **Save
+  filter** button appears. Give the combination a name and it is stored against
+  your account.
+- **Re-apply a saved filter** — open the **Saved filters** dropdown and click a
+  name; the document list navigates to exactly that filter combination.
+- **Delete a saved filter** — click the trash icon next to a name in the dropdown.
+  Deletion is permanent (there is no trash for saved filters).
+
+### What gets saved
+
+Only the document-list filter dimensions are stored, captured verbatim from the
+URL query — the URL is the source of truth:
+
+| Query key | Filter |
+|-----------|--------|
+| `tags` | Included tags |
+| `exclude` | Excluded tags |
+| `mode` | Tree-vs-facet view mode |
+| `search` | Search-box text |
+| `workflow` | Pending-workflow filter |
+
+Any other query parameter is dropped. A workflow-only filter is saveable.
+
+### Constraints
+
+- Saved filters are **per-user** — they are never shared between accounts, and one
+  user can never see or delete another's.
+- The name must be **1–100 characters** and **unique per user** (case-insensitive):
+  saving a duplicate name returns an `AlreadyExistingFilter` error.
+- The stored query string is **1–2000 characters**; it must contain only the five
+  keys above, with no repeated key and no empty query component (a leading,
+  trailing, or doubled `&`); empty *values* such as `search=` are accepted.
+  Otherwise the save is rejected
+  with a `ValidationError`.
+
+### API
+
+| Action | Request |
+|--------|---------|
+| List your saved filters | `GET /api/savedfilter` |
+| Create a saved filter | `PUT /api/savedfilter` with form params `name`, `query` |
+| Delete a saved filter | `DELETE /api/savedfilter/{id}` |
+
+`query` is the URL-encoded filter query string (e.g. `tags=<id>&mode=facet`).
+Listing returns each filter's `id`, `name`, `query`, and `create_date`. A `DELETE`
+for an unknown or another user's filter returns `404` — the API never confirms the
+existence of a filter you do not own.
 
 ## See also
 

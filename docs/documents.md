@@ -44,6 +44,60 @@ Rotation is a **view-only** adjustment: it changes how the page is displayed in
 your current session and is not written back to the stored file. Reopening the
 document shows it in its original orientation.
 
+## Bulk operations
+
+The document list supports **multi-select**: tick the checkboxes on several
+documents and a bulk-action bar appears with actions that apply to all selected
+documents at once.
+
+<!-- screenshot: the document list in multi-select mode with the bulk-action bar showing the selected count -->
+
+| Action | Effect |
+|--------|--------|
+| **Add tag** | Adds one tag to every selected document, preserving each document's existing tags |
+| **Set language** | Sets the OCR/display language on every selected document |
+| **Delete** | Moves every selected document to the [trash](#trash--recycle-bin) |
+| **Clear selection** | Deselects everything |
+
+Teedy has **no server-side bulk endpoint** — each bulk action **fans out into one
+API call per document** against the ordinary single-document endpoints. A progress
+bar shows how many of the selected documents have been processed, and one failing
+document (for example one you lack `WRITE` on) does not abort the rest: the failures
+are reported separately from the successes.
+
+## Exporting documents
+
+Teedy can export documents in two ways.
+
+### One document to PDF
+
+`GET /api/document/{id}/pdf` renders a single document — its files combined — into a
+PDF. It requires `READ` permission on the document (or a valid share link via the
+`share` query parameter). Optional query parameters:
+
+| Parameter | Effect |
+|-----------|--------|
+| `metadata` | If `true`, includes the document's metadata in the PDF |
+| `fitimagetopage` | If `true`, scales images to fit the page |
+| `margin` | Page margin in millimetres |
+
+### Whole account to ZIP
+
+`GET /api/document/export` streams a ZIP archive of **every active document you
+own** (scoped by creator, so it never includes another user's documents; trashed
+documents are excluded — restore anything that must be included first), with each
+document's files in a per-document folder plus a `manifest.json` describing them.
+It requires an authenticated user and is subject to server-side guardrails:
+
+| Env variable | Effect | Default |
+|--------------|--------|---------|
+| `DOCS_EXPORT_ENABLED` | Master switch; `false` disables the endpoint (returns `ExportDisabled`) | `true` |
+| `DOCS_EXPORT_MAX_DOCUMENTS` | Rejects the export up front if you own more than this many documents (`ExportTooLarge`) | `10000` |
+| `DOCS_EXPORT_MAX_CONCURRENT` | Caps simultaneous exports; over the cap returns `503` with a `Retry-After` hint | `2` |
+
+See [configuration](configuration.md#export) for these knobs. Each export is
+recorded in the [audit log](admin-guide.md#audit-log).
+
 ## Metadata
 
 Every document carries Dublin Core metadata plus any **custom metadata fields** an
@@ -84,6 +138,14 @@ Trashed documents are also **auto-purged** after a retention window. Set
 `DOCS_TRASH_RETENTION_DAYS` (default `30`) to control it; `0` disables auto-purge
 so nothing is ever purged automatically. A background service checks roughly every
 hour and purges anything older than the window.
+
+## Activity
+
+Each document has an **Activity** tab showing that document's history — the
+audit-log entries scoped to it. Each row lists the timestamp, the user who acted,
+and a description of the action (created, updated, ACL changed, and so on). It reads
+from `GET /api/auditlog?document={id}`, giving a per-document view of the same trail
+the admin-wide [audit log](admin-guide.md#audit-log) records globally.
 
 ## See also
 
