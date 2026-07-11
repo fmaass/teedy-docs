@@ -11,6 +11,7 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.AuthenticationToken;
 import com.sismics.docs.core.model.jpa.OidcState;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import jakarta.json.Json;
 import jakarta.json.JsonArray;
@@ -108,8 +109,25 @@ public class OidcResource extends BaseResource {
     private static final String PROP_AUTH_ENDPOINT = "docs.oidc_authorization_endpoint";
     private static final String PROP_TOKEN_ENDPOINT = "docs.oidc_token_endpoint";
     private static final String PROP_JWKS_URI = "docs.oidc_jwks_uri";
+    private static final String PROP_USERINFO_ENDPOINT = "docs.oidc_userinfo_endpoint";
+    private static final String PROP_USERNAME_CLAIM = "docs.oidc_username_claim";
+    private static final String PROP_EMAIL_CLAIM = "docs.oidc_email_claim";
+
+    private static final String DEFAULT_USERNAME_CLAIM = "preferred_username";
+    private static final String DEFAULT_EMAIL_CLAIM = "email";
 
     private static final String USERNAME_PATTERN = "^[a-zA-Z0-9_]{3,50}$";
+
+    /**
+     * Allowed characters in the pre-hash username stem before non-conforming runs are
+     * collapsed to {@code _}. {@code preferred_username} may legitimately carry
+     * {@code @}, {@code /}, whitespace or Unicode (OIDC Core §5.1), none of which
+     * Teedy's username charset ({@link #USERNAME_PATTERN}) permits, so the stem is
+     * sanitized to this set and then suffixed with a deterministic hash.
+     */
+    private static final int USERNAME_MAX_LENGTH = 50;
+    /** Length of the lowercase-hex SHA-256 disambiguation suffix appended to every OIDC username. */
+    private static final int USERNAME_HASH_LEN = 12;
 
     @GET
     @Path("login")
@@ -218,30 +236,70 @@ public class OidcResource extends BaseResource {
                 return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
             }
 
-            String preferredUsername = getClaimAsString(idToken, "preferred_username");
-            String email = getClaimAsString(idToken, "email");
             String subject = idToken.getSubject();
             String issuer = System.getProperty(PROP_ISSUER);
 
-            // Per-login PII (sub/email/preferred_username) is DEBUG-only.
-            log.debug("OIDC login: sub={}, preferred_username={}, email={}", subject, preferredUsername, email);
+            // `sub` is REQUIRED by OIDC Core §2. Fail closed on a missing subject: without it
+            // the identity lookup by (issuer, subject) is impossible, and provisioning an
+            // unbound user (oidc_subject NULL) never collides in IDX_USER_OIDC (NULLs don't
+            // collide), so every such login would mint yet another orphan account.
+            if (StringUtils.isBlank(subject)) {
+                log.error("OIDC token carries no sub claim; rejecting login (sub is REQUIRED per OIDC Core §2)");
+                return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
+            }
+
+            String accessToken = tokenResponse.getString("access_token", null);
+            String usernameClaimName = getUsernameClaim();
+            String emailClaimName = getEmailClaim();
+
+            // Read the configured claims from the ID token first; a provider that ships a
+            // minimal ID token (default Authelia >=4.38) delivers them via UserInfo instead,
+            // so fall back to a sub-verified UserInfo call when a configured claim is absent.
+            // Fail closed: an ATTEMPTED UserInfo fetch that fails (HTTP error, bad content,
+            // sub mismatch) rejects the login — only "no endpoint known" (null) or a
+            // sub-verified response without the claim proceed on the WARN fallback.
+            String usernameClaim = getClaimAsString(idToken, usernameClaimName);
+            String email = getClaimAsString(idToken, emailClaimName);
+            if (usernameClaim == null || email == null) {
+                JsonObject userInfo;
+                try {
+                    userInfo = fetchUserInfo(accessToken, subject);
+                } catch (UserInfoException e) {
+                    log.error("OIDC UserInfo fetch failed; rejecting login (fail closed): {}", e.getMessage());
+                    return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
+                }
+                if (userInfo != null) {
+                    if (usernameClaim == null) {
+                        usernameClaim = getJsonString(userInfo, usernameClaimName);
+                    }
+                    if (email == null) {
+                        email = getJsonString(userInfo, emailClaimName);
+                    }
+                }
+            }
+
+            // Per-login PII (sub/email/username claim) is DEBUG-only.
+            log.debug("OIDC login: sub={}, usernameClaim={}, email={}", subject, usernameClaim, email);
 
             UserDao userDao = new UserDao();
-            User user = null;
 
             // First: stable lookup by OIDC subject (prevents email-based account takeover)
-            if (subject != null) {
-                user = userDao.getByOidcSubject(issuer, subject);
-            }
+            User user = userDao.getByOidcSubject(issuer, subject);
 
             // Security: do NOT auto-link to existing local accounts by username/email.
             // First OIDC login always provisions a new user to prevent account takeover.
             if (user == null) {
-                user = provisionUser(userDao, preferredUsername, email, subject, issuer);
+                user = provisionOrRecover(userDao, usernameClaim, email, subject, issuer);
                 if (user == null) {
                     log.error("Failed to provision OIDC user: sub={}", subject);
                     return Response.temporaryRedirect(URI.create("/#/login?error=oidc")).build();
                 }
+            } else {
+                // Repeat login: refresh the stored email from a fresh, valid claim. Username is
+                // immutable (workflow blobs store USER targets by username). The synthetic
+                // <username>@oidc.local fallback is provisioning-only and must never overwrite a
+                // real stored address when the claim is temporarily absent (profile-data-loss guard).
+                maybeUpdateEmail(userDao, user, email);
             }
 
             // Reject an administratively disabled account BEFORE minting a token or setting a
@@ -451,37 +509,423 @@ public class OidcResource extends BaseResource {
         }
     }
 
-    private User provisionUser(UserDao userDao, String preferredUsername, String email, String subject, String issuer) {
-        String username = preferredUsername != null ? preferredUsername : (email != null ? email : subject);
-        String userEmail = email != null ? email : username + "@oidc.local";
+    // ---------------------------------------------------------------------------------------------
+    // Claim configuration
+    // ---------------------------------------------------------------------------------------------
 
-        if (!username.matches(USERNAME_PATTERN)) {
-            log.warn("OIDC provisioning rejected: username '{}' does not match required pattern", username);
-            return null;
+    /** The configured username claim name, defaulting to {@code preferred_username}. */
+    private static String getUsernameClaim() {
+        return ofNullable(System.getProperty(PROP_USERNAME_CLAIM))
+                .filter(s -> !s.isBlank()).orElse(DEFAULT_USERNAME_CLAIM);
+    }
+
+    /** The configured email claim name, defaulting to {@code email}. */
+    private static String getEmailClaim() {
+        return ofNullable(System.getProperty(PROP_EMAIL_CLAIM))
+                .filter(s -> !s.isBlank()).orElse(DEFAULT_EMAIL_CLAIM);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // UserInfo fallback (Authelia >=4.38 minimal-ID-token case)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Upper bound on an accepted UserInfo response body: real UserInfo documents are a few
+     * hundred bytes; anything larger is either a misdirected endpoint or abuse.
+     */
+    static final int MAX_USERINFO_RESPONSE_BYTES = 64 * 1024;
+
+    /**
+     * Signals that a required UserInfo fetch was ATTEMPTED and failed — endpoint resolution
+     * error, HTTP/transport failure, unsupported content type, oversized or unparseable
+     * body, missing access token, or a {@code sub} mismatch. The callback treats this as a
+     * hard login rejection (fail closed): claims the flow needs could not be obtained
+     * trustworthily, so no session may be minted and nothing provisioned/updated.
+     */
+    static final class UserInfoException extends Exception {
+        UserInfoException(String message) {
+            super(message);
         }
 
-        if (userEmail.indexOf('@') < 1) {
-            log.warn("OIDC provisioning rejected: invalid email '{}'", userEmail);
+        UserInfoException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * Fetches the UserInfo document with the access token and verifies its {@code sub}
+     * exactly equals the verified ID-token {@code sub} (OIDC Core §5.3.2).
+     *
+     * <p>Contract (fail closed): only two outcomes let the login proceed — a successful,
+     * sub-verified response (returned), or NO UserInfo endpoint being known at all (returns
+     * null; the caller falls back with a WARN). Every ATTEMPTED-but-failed path — endpoint
+     * resolution failure, missing access token with a known endpoint, HTTP error, wrong
+     * content type, oversized body, parse failure, or {@code sub} mismatch — throws
+     * {@link UserInfoException} and MUST reject the login: proceeding after a failed fetch
+     * would mint a session on unverified or another subject's profile data.
+     *
+     * @param accessToken Access token from the token response
+     * @param expectedSub The verified ID-token subject the UserInfo sub MUST equal
+     * @return The UserInfo JSON object, or null when no endpoint is known (WARN fallback)
+     * @throws UserInfoException When the fetch was attempted (or required) and failed
+     */
+    private JsonObject fetchUserInfo(String accessToken, String expectedSub) throws UserInfoException {
+        String endpoint;
+        String explicit = System.getProperty(PROP_USERINFO_ENDPOINT);
+        if (explicit != null && !explicit.isBlank()) {
+            endpoint = explicit;
+        } else {
+            try {
+                endpoint = getDiscovery().getString("userinfo_endpoint", null);
+            } catch (Exception e) {
+                throw new UserInfoException("could not resolve the UserInfo endpoint from discovery", e);
+            }
+        }
+        if (StringUtils.isBlank(endpoint)) {
+            // The only WARN-fallback case: no endpoint is known (no property, no discovery entry).
+            log.warn("OIDC UserInfo fallback unavailable: provider advertises no userinfo_endpoint");
             return null;
         }
+        if (StringUtils.isBlank(accessToken)) {
+            throw new UserInfoException("token response carried no access_token for the required UserInfo fetch");
+        }
 
-        User user = new User();
-        user.setRoleId(Constants.DEFAULT_USER_ROLE);
-        user.setUsername(username);
-        user.setEmail(userEmail);
-        user.setOidcIssuer(issuer);
-        user.setOidcSubject(subject);
-        user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
-                .orElse("1073741824")));
-        user.setPassword(UUID.randomUUID().toString());
-        user.setOnboarding(true);
+        Request req = new Request.Builder()
+                .url(endpoint)
+                .header("Authorization", "Bearer " + accessToken)
+                .get()
+                .build();
+        try (okhttp3.Response resp = httpClient.newCall(req).execute()) {
+            if (!resp.isSuccessful() || resp.body() == null) {
+                throw new UserInfoException("UserInfo fetch failed: HTTP " + resp.code());
+            }
+            String contentType = resp.header("Content-Type", "");
+            if (contentType == null || !contentType.toLowerCase().contains("application/json")) {
+                throw new UserInfoException("UserInfo response has unsupported Content-Type: " + contentType);
+            }
+            // Bound the body BEFORE parsing (peek one byte past the cap to detect overflow).
+            String body = resp.peekBody(MAX_USERINFO_RESPONSE_BYTES + 1L).string();
+            if (body.length() > MAX_USERINFO_RESPONSE_BYTES) {
+                throw new UserInfoException("UserInfo response exceeds " + MAX_USERINFO_RESPONSE_BYTES + " bytes");
+            }
+            JsonObject userInfo;
+            try (JsonReader reader = Json.createReader(new StringReader(body))) {
+                userInfo = reader.readObject();
+            } catch (Exception e) {
+                throw new UserInfoException("UserInfo response is not a valid JSON object", e);
+            }
+            // Fail closed: the UserInfo sub MUST match the verified ID-token sub.
+            String userInfoSub = getJsonString(userInfo, "sub");
+            if (userInfoSub == null || !userInfoSub.equals(expectedSub)) {
+                throw new UserInfoException("UserInfo sub mismatch (fail closed)");
+            }
+            return userInfo;
+        } catch (UserInfoException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new UserInfoException("UserInfo fetch failed", e);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Username derivation
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Normalizes a raw claim value into a Teedy username stem: NFKC-normalize, trim, and
+     * collapse every run of characters outside {@code [A-Za-z0-9_@.-]} into a single
+     * {@code _}, then reduce the {@code @ . -} to {@code _} so the stem only carries the
+     * final {@link #USERNAME_PATTERN} charset ({@code [A-Za-z0-9_]}). Returns null when the
+     * result would be empty. The stem is truncated so the mandatory hash suffix fits within
+     * {@link #USERNAME_MAX_LENGTH}.
+     *
+     * @param raw Raw claim value (may contain {@code @ /} whitespace, Unicode — Core §5.1)
+     * @return A sanitized stem in the username charset, or null when nothing survives
+     */
+    static String sanitizeUsernameStem(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String normalized = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFKC).trim();
+        // Collapse anything outside the username charset into '_'.
+        String stem = normalized.replaceAll("[^A-Za-z0-9_]+", "_");
+        // Trim leading/trailing underscores introduced by the collapse.
+        stem = stem.replaceAll("^_+", "").replaceAll("_+$", "");
+        if (stem.isEmpty()) {
+            return null;
+        }
+        // Reserve room for the '_' separator + hash suffix.
+        int stemBudget = USERNAME_MAX_LENGTH - 1 - USERNAME_HASH_LEN;
+        if (stem.length() > stemBudget) {
+            stem = stem.substring(0, stemBudget);
+        }
+        return stem;
+    }
+
+    /**
+     * Derives a deterministic, collision-resistant username: the sanitized stem plus an
+     * underscore and a lowercase-hex SHA-256 prefix of {@code issuer + NUL + subject}. The
+     * hash makes the username a function of the stable OIDC identity, so two different
+     * subjects that sanitize to the same stem never contend for one username (no
+     * order-dependent ownership of a popular name), and the same identity always derives
+     * the same username. On a residual hash-prefix collision the prefix is extended.
+     *
+     * @param stem Sanitized username stem (never null/empty)
+     * @param issuer OIDC issuer
+     * @param subject OIDC subject
+     * @param hashLen Length of the hash prefix to append
+     * @return The derived username, or null if it cannot fit the pattern
+     */
+    static String deriveUsername(String stem, String issuer, String subject, int hashLen) {
+        String fullHash = sha256Hex(issuer + "\0" + subject);
+        int len = Math.min(hashLen, fullHash.length());
+        String suffix = fullHash.substring(0, len);
+        // Truncate the stem so stem + '_' + suffix fits USERNAME_MAX_LENGTH.
+        int stemBudget = USERNAME_MAX_LENGTH - 1 - suffix.length();
+        String s = stem;
+        if (s.length() > stemBudget) {
+            s = s.substring(0, Math.max(0, stemBudget));
+        }
+        // A pathological all-collapse stem could be empty after truncation; fall back to "u".
+        if (s.isEmpty()) {
+            s = "u";
+        }
+        String candidate = s + "_" + suffix;
+        return candidate.matches(USERNAME_PATTERN) ? candidate : null;
+    }
+
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("SHA-256 unavailable", e);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Provisioning + concurrent-first-login recovery
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Provisions a new OIDC user, recovering from a concurrent first login. The provisioning
+     * runs on a FRESH transaction ({@link #provisionUserFreshTx}) because the unique-index
+     * violation on {@code IDX_USER_OIDC} surfaces at flush and marks that transaction
+     * rollback-only (PostgreSQL aborts it), so an in-transaction re-read cannot recover.
+     * On the loser side we re-read {@code (issuer, subject)} on ANOTHER clean transaction and
+     * continue with the winner row — never retrying the whole callback (whose single-use code
+     * would fail the repeated token exchange with {@code invalid_grant}).
+     */
+    private User provisionOrRecover(UserDao userDao, String usernameClaim, String email, String subject, String issuer) {
+        String stem = sanitizeUsernameStem(usernameClaim);
+        if (stem == null) {
+            stem = sanitizeUsernameStem(email);
+        }
+        if (stem == null) {
+            stem = sanitizeUsernameStem(subject);
+        }
+        if (stem == null) {
+            stem = "user";
+        }
+
+        String userEmail = (email != null && isValidEmail(email)) ? email : stem + "@oidc.local";
+        if (!isValidEmail(userEmail)) {
+            log.warn("OIDC provisioning rejected: invalid email");
+            return null;
+        }
 
         try {
-            userDao.create(user, username);
-            log.info("Provisioned new OIDC user: {} (issuer={}, sub={})", username, issuer, subject);
-            return user;
+            return provisionUserFreshTx(stem, userEmail, subject, issuer);
+        } catch (ConstraintViolationRetry retry) {
+            // A concurrent first login won the IDX_USER_OIDC insert. Re-read on a clean
+            // transaction and continue with the winner.
+            User winner = readOidcUserFreshTx(issuer, subject);
+            if (winner != null) {
+                log.info("OIDC concurrent first-login converged on the winner row (sub={})", subject);
+                return winner;
+            }
+            log.error("OIDC unique-conflict recovery found no winner row (sub={})", subject);
+            return null;
         } catch (Exception e) {
-            log.error("Error creating OIDC user: {}", username, e);
+            log.error("Error creating OIDC user", e);
+            return null;
+        }
+    }
+
+    /**
+     * Marker used to signal a {@code (issuer, subject)} unique-index conflict up to the
+     * recovery path without leaking the persistence exception type.
+     */
+    private static final class ConstraintViolationRetry extends RuntimeException {
+        ConstraintViolationRetry(Throwable cause) {
+            super(cause);
+        }
+    }
+
+    /**
+     * Runs {@code work} on a NEW EntityManager + resource-local transaction, installed in
+     * ThreadLocalContext for the duration and then restored to the request EntityManager.
+     * The request transaction stays open across this (it is needed afterwards for token
+     * creation), so we do NOT use {@link com.sismics.docs.core.util.TransactionUtil#handle}
+     * (which reuses the request EM) nor {@link ThreadLocalContext#cleanup} (which would
+     * discard the request context and its queued events).
+     */
+    private <T> T runOnFreshTransaction(java.util.function.Function<jakarta.persistence.EntityManager, T> work) {
+        ThreadLocalContext context = ThreadLocalContext.get();
+        jakarta.persistence.EntityManager requestEm = context.getEntityManager();
+        jakarta.persistence.EntityManager freshEm = com.sismics.util.jpa.EMF.get().createEntityManager();
+        // Everything after creation runs under the finally: a failure in getTransaction()
+        // or begin() must still close the fresh EM and restore the request EM (no leak).
+        jakarta.persistence.EntityTransaction tx = null;
+        try {
+            context.setEntityManager(freshEm);
+            tx = freshEm.getTransaction();
+            tx.begin();
+            T result = work.apply(freshEm);
+            tx.commit();
+            return result;
+        } finally {
+            try {
+                if (tx != null && tx.isActive()) {
+                    tx.rollback();
+                }
+            } catch (Exception e) {
+                log.error("Error rolling back OIDC provisioning transaction", e);
+            }
+            try {
+                freshEm.close();
+            } catch (Exception e) {
+                log.error("Error closing OIDC provisioning entity manager", e);
+            }
+            context.setEntityManager(requestEm);
+        }
+    }
+
+    /**
+     * Provisions the user on a fresh transaction. The commit is where a concurrent insert
+     * of the same {@code (issuer, subject)} surfaces the {@code IDX_USER_OIDC} violation; we
+     * detect it and translate to {@link ConstraintViolationRetry} for the recovery path.
+     * On a residual username collision (distinct subjects sanitizing to the same stem AND
+     * the same hash prefix) the hash suffix is extended deterministically before retrying.
+     */
+    private User provisionUserFreshTx(String stem, String userEmail, String subject, String issuer) {
+        int hashLen = USERNAME_HASH_LEN;
+        while (hashLen <= 64) {
+            String username = deriveUsername(stem, issuer, subject, hashLen);
+            if (username == null) {
+                log.warn("OIDC provisioning rejected: could not derive a valid username");
+                return null;
+            }
+            try {
+                final String finalUsername = username;
+                return runOnFreshTransaction(em -> {
+                    User user = new User();
+                    user.setRoleId(Constants.DEFAULT_USER_ROLE);
+                    user.setUsername(finalUsername);
+                    user.setEmail(userEmail);
+                    user.setOidcIssuer(issuer);
+                    user.setOidcSubject(subject);
+                    user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
+                            .orElse("1073741824")));
+                    user.setPassword(UUID.randomUUID().toString());
+                    user.setOnboarding(true);
+                    try {
+                        new UserDao().create(user, finalUsername);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                    log.info("Provisioned new OIDC user: {} (issuer={}, sub={})", finalUsername, issuer, subject);
+                    return user;
+                });
+            } catch (RuntimeException e) {
+                if (isOidcSubjectConflict(e)) {
+                    throw new ConstraintViolationRetry(e);
+                }
+                if (isUsernameConflict(e)) {
+                    // Distinct subject hashed to the same stem+prefix: lengthen and retry.
+                    hashLen += 4;
+                    log.warn("OIDC username collision on '{}', extending hash prefix", username);
+                    continue;
+                }
+                throw e;
+            }
+        }
+        log.error("OIDC provisioning exhausted username disambiguation for sub={}", subject);
+        return null;
+    }
+
+    private User readOidcUserFreshTx(String issuer, String subject) {
+        try {
+            return runOnFreshTransaction(em -> new UserDao().getByOidcSubject(issuer, subject));
+        } catch (Exception e) {
+            log.error("Error re-reading OIDC user during conflict recovery", e);
+            return null;
+        }
+    }
+
+    /**
+     * True when the throwable chain indicates a violation of the {@code IDX_USER_OIDC}
+     * unique index on {@code (USE_OIDC_ISSUER_C, USE_OIDC_SUBJECT_C)}.
+     */
+    private static boolean isOidcSubjectConflict(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            String msg = c.getMessage();
+            if (msg != null && msg.toUpperCase().contains("IDX_USER_OIDC")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True when the throwable chain is the username-unicity precheck from {@link UserDao#create}. */
+    private static boolean isUsernameConflict(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if ("AlreadyExistingUsername".equals(c.getMessage())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Refreshes a stored user's email from a fresh, valid claim on repeat login. A blank or
+     * invalid claim (or an absent one, arriving here as null) leaves the stored address
+     * untouched — the synthetic {@code <stem>@oidc.local} fallback is provisioning-only and
+     * must never overwrite a real address when the claim is temporarily absent.
+     *
+     * <p>A genuine persistence failure PROPAGATES and fails the callback (error redirect):
+     * the pre-write guard above already decided the claim is valid, so a failed write must
+     * not be swallowed into a session carrying a silently-stale profile.
+     */
+    private void maybeUpdateEmail(UserDao userDao, User user, String email) {
+        if (email == null || !isValidEmail(email)) {
+            return;
+        }
+        if (email.equals(user.getEmail())) {
+            return;
+        }
+        user.setEmail(email);
+        userDao.update(user, user.getId());
+        log.info("Updated OIDC user email on repeat login (username={})", user.getUsername());
+    }
+
+    private static boolean isValidEmail(String email) {
+        return email != null && email.indexOf('@') >= 1 && email.indexOf('@') < email.length() - 1;
+    }
+
+    private static String getJsonString(JsonObject obj, String key) {
+        if (obj == null || !obj.containsKey(key) || obj.isNull(key)) {
+            return null;
+        }
+        try {
+            return obj.getString(key);
+        } catch (ClassCastException e) {
             return null;
         }
     }
