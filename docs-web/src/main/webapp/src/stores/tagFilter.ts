@@ -229,6 +229,43 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     }
   }
 
+  // #34: clickable tag chips apply IDEMPOTENT positive filtering. Unlike
+  // toggleTag's 3-state cycle, selectTag ONLY ever selects: an unselected tag is
+  // added (with ancestors in tree mode, mirroring toggleTag's select path), a
+  // currently-EXCLUDED tag has its exclusion lifted before being selected (a
+  // chip click means "filter BY this tag" — the state must never combine into
+  // tags=<id>&exclude=<id>), and an already-selected tag is left untouched — a
+  // chip must never exclude the tag it names. Navigation to the documents list
+  // runs in EVERY case so clicking a chip from a document view always lands on
+  // the filtered list, even when the tag was already part of the active filter.
+  function selectTag(tagId: string) {
+    const resolvedId = resolveCompoundKey(tagId)
+
+    if (excludedTagIds.value.has(resolvedId)) {
+      const excl = new Set(excludedTagIds.value)
+      excl.delete(resolvedId)
+      excludedTagIds.value = excl
+    }
+
+    if (!selectedTagIds.value.has(resolvedId)) {
+      const next = new Set(selectedTagIds.value)
+      next.add(resolvedId)
+      // In Tree mode, also include ancestors (mirrors toggleTag's select path).
+      if (viewMode.value === 'tree') {
+        let tag = tagMap.value.get(resolvedId)
+        while (tag?.parent) {
+          next.add(tag.parent)
+          tag = tagMap.value.get(tag.parent)
+        }
+      }
+      selectedTagIds.value = next
+    }
+
+    if (route.path !== '/document') {
+      navigateToDocuments()
+    }
+  }
+
   function removeTag(tagId: string) {
     const sel = new Set(selectedTagIds.value)
     sel.delete(tagId)
@@ -433,6 +470,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     activeExpandedKeys,
     resolveCompoundKey,
     toggleTag,
+    selectTag,
     removeTag,
     clearFilters,
     navigateToDocuments,

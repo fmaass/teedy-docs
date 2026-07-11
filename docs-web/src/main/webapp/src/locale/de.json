@@ -77,7 +77,8 @@
     }
   },
   "tag": {
-    "remove_tag": "Tag {name} entfernen"
+    "remove_tag": "Tag {name} entfernen",
+    "filter_by_tag": "Nach Tag {name} filtern"
   },
   "settings": {
     "menu_two_factor_auth": "Zwei-Faktor-Authentifizierung",

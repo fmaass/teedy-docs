@@ -14,6 +14,7 @@ import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import TagBadge from '../../components/TagBadge.vue'
+import { useTagFilterStore } from '../../stores/tagFilter'
 import { DocumentKey } from './documentKey'
 
 const props = defineProps<{ id: string }>()
@@ -23,6 +24,7 @@ const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 const { t } = useI18n()
+const tagFilter = useTagFilterStore()
 
 const returnTo = computed(() => (history.state?.returnTo as string) || null)
 const filterLabel = computed(() => (history.state?.filterLabel as string) || null)
@@ -125,7 +127,14 @@ function handleDelete() {
             <span v-if="doc.file_count"> · {{ t('ui.n_files', doc.file_count) }}</span>
           </p>
           <div v-if="doc.tags?.length" class="doc-header-tags">
-            <TagBadge v-for="tag in doc.tags" :key="tag.id" :name="tag.name" :color="tag.color" />
+            <TagBadge
+              v-for="tag in doc.tags"
+              :key="tag.id"
+              :name="tag.name"
+              :color="tag.color"
+              clickable
+              @select="tagFilter.selectTag(tag.id)"
+            />
           </div>
         </div>
 

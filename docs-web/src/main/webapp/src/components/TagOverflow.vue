@@ -3,9 +3,11 @@ import { ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Popover from 'primevue/popover'
 import TagBadge from './TagBadge.vue'
+import { useTagFilterStore } from '../stores/tagFilter'
 import type { Tag } from '../api/tag'
 
 const { t } = useI18n()
+const tagFilter = useTagFilterStore()
 
 const props = defineProps<{
   /** The tags that overflow the inline row — shown inside the reveal panel. */
@@ -36,6 +38,14 @@ function onShow() {
 function onHide() {
   open.value = false
 }
+
+// #34: selecting a tag chip from the overflow popover filters by it and closes
+// the popover — selectTag itself navigates to the filtered documents list.
+function selectTag(tagId: string) {
+  tagFilter.selectTag(tagId)
+  open.value = false
+  panel.value?.hide()
+}
 </script>
 
 <template>
@@ -58,6 +68,8 @@ function onHide() {
           :key="tag.id"
           :name="tag.name"
           :color="tag.color"
+          clickable
+          @select="selectTag(tag.id)"
         />
       </div>
     </Popover>

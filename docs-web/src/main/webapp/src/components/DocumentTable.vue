@@ -10,8 +10,10 @@ import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, Da
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
 import TagOverflow from './TagOverflow.vue'
+import { useTagFilterStore } from '../stores/tagFilter'
 
 const { t } = useI18n()
+const tagFilter = useTagFilterStore()
 
 interface RowContextMenuEvent {
   data: DocumentListItem
@@ -104,7 +106,16 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     <Column :header="t('document.tags')" style="width: 200px">
       <template #body="{ data }">
         <div class="doc-tags" v-if="data.tags?.length">
-          <TagBadge v-for="tag in data.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
+          <TagBadge
+            v-for="tag in data.tags.slice(0, 3)"
+            :key="tag.id"
+            :name="tag.name"
+            :color="tag.color"
+            clickable
+            @select="tagFilter.selectTag(tag.id)"
+            @click.stop
+            @dblclick.stop
+          />
           <TagOverflow v-if="data.tags.length > 3" :tags="data.tags.slice(3)" />
         </div>
       </template>
@@ -182,7 +193,16 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     <Column :header="t('document.tags')" style="width: 200px">
       <template #body="{ data }">
         <div class="doc-tags" v-if="data.tags?.length">
-          <TagBadge v-for="tag in data.tags.slice(0, 3)" :key="tag.id" :name="tag.name" :color="tag.color" />
+          <TagBadge
+            v-for="tag in data.tags.slice(0, 3)"
+            :key="tag.id"
+            :name="tag.name"
+            :color="tag.color"
+            clickable
+            @select="tagFilter.selectTag(tag.id)"
+            @click.stop
+            @dblclick.stop
+          />
           <TagOverflow v-if="data.tags.length > 3" :tags="data.tags.slice(3)" />
         </div>
       </template>

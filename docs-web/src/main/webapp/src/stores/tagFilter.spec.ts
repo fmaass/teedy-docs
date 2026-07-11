@@ -151,6 +151,75 @@ describe('tagFilter store', () => {
     })
   })
 
+  // --- #34: clickable tag chips apply IDEMPOTENT positive filtering ----------
+  // A chip's selectTag is the select-only sibling of toggleTag: it selects an
+  // unselected tag (with ancestors in tree mode), leaves an ALREADY-selected tag
+  // untouched (NO exclude cycle — that would be the wrong semantic for a chip),
+  // and navigates to the documents list in BOTH cases so clicking a chip from a
+  // document view always lands on the filtered list.
+  describe('selectTag (#34, idempotent positive filter)', () => {
+    it('selects an unselected tag and pulls in ancestors in tree mode', () => {
+      const store = useTagFilterStore()
+      store.selectTag('b') // b has parent a
+      expect(store.selectedTagIds.has('b')).toBe(true)
+      expect(store.selectedTagIds.has('a')).toBe(true)
+    })
+
+    it('leaves an ALREADY-selected tag untouched (no exclude cycle)', () => {
+      const store = useTagFilterStore()
+      store.selectTag('c')
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      // Clicking the chip again must NOT exclude it (that is toggleTag's cycle).
+      store.selectTag('c')
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      expect(store.excludedTagIds.has('c')).toBe(false)
+    })
+
+    it('does NOT pull in ancestors in facets mode', () => {
+      tagsRef.value = TAGS // b has parent a
+      const store = useTagFilterStore()
+      store.viewMode = 'facets'
+      store.selectTag('b')
+      expect([...store.selectedTagIds]).toEqual(['b'])
+      expect(store.selectedTagIds.has('a')).toBe(false)
+    })
+
+    it('resolves a compound "parent__child" key to the child tag', () => {
+      const store = useTagFilterStore()
+      store.selectTag('a__b') // b under a
+      expect(store.selectedTagIds.has('b')).toBe(true)
+    })
+
+    it('selecting a currently-EXCLUDED tag clears the exclusion and selects it (no tags+exclude double state)', () => {
+      const store = useTagFilterStore()
+      store.excludedTagIds = new Set(['c'])
+      store.selectTag('c')
+      // A chip click means "filter BY this tag": the exclusion must be lifted,
+      // never combined with the selection into tags=<id>&exclude=<id>.
+      expect(store.selectedTagIds.has('c')).toBe(true)
+      expect(store.excludedTagIds.has('c')).toBe(false)
+      const query = store.buildFilterQuery()
+      expect(query.tags).toBe('c')
+      expect(query.exclude).toBeUndefined()
+    })
+
+    it('navigates to documents when selecting from a NON-document route', () => {
+      mockRoute.path = '/document/view/xyz'
+      const store = useTagFilterStore()
+      store.selectTag('c')
+      expect(push).toHaveBeenCalled()
+    })
+
+    it('STILL navigates when the tag is already selected (chip from a doc view lands on the list)', () => {
+      mockRoute.path = '/document/view/xyz'
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['c'])
+      push.mockClear()
+      store.selectTag('c') // already selected → no state change, but navigation must run
+      expect(push).toHaveBeenCalled()
+    })
+  })
+
   describe('removeTag', () => {
     it('removes a tag from both selected and excluded sets', () => {
       const store = useTagFilterStore()
