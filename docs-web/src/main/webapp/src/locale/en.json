@@ -927,6 +927,12 @@
       "delete_title": "Delete saved filter",
       "delete_button": "Delete saved filter \"{name}\"",
       "delete_confirm": "Delete the saved filter \"{name}\"?"
+    },
+    "favorite": {
+      "add": "Add to favorites",
+      "remove": "Remove from favorites",
+      "filter": "Favorites",
+      "toggle_failed": "Could not update your favorites"
     }
   }
 }

@@ -31,6 +31,9 @@
       "name": "document"
     },
     {
+      "name": "favorite"
+    },
+    {
       "name": "file"
     },
     {
@@ -1223,6 +1226,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "favorites",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1304,6 +1315,9 @@
                     "type": "string"
                   },
                   "search[tagMode]": {
+                    "type": "string"
+                  },
+                  "favorites": {
                     "type": "string"
                   }
                 }
@@ -3824,6 +3838,84 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/favorite": {
+      "get": {
+        "tags": [
+          "favorite"
+        ],
+        "summary": "List the current user's favorited documents",
+        "operationId": "get_favorite",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/favorite/{documentId}": {
+      "put": {
+        "tags": [
+          "favorite"
+        ],
+        "summary": "Favorite a document (idempotent)",
+        "operationId": "put_favorite_documentId",
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "favorite"
+        ],
+        "summary": "Remove a document from the current user's favorites",
+        "operationId": "delete_favorite_documentId",
+        "parameters": [
+          {
+            "name": "documentId",
             "in": "path",
             "required": true,
             "schema": {

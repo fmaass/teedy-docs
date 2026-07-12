@@ -78,6 +78,9 @@ async function mountTable(doc: DocumentListItem) {
     global: {
       plugins: [[PrimeVue, { theme: 'none' }], router, [VueQueryPlugin, { queryClient }]],
       directives: { tooltip: Tooltip },
+      // FavoriteStar has its own spec (FavoriteStar.spec.ts) and pulls in Toast/mutation
+      // services this table-focused unit test does not provide; stub it to a marker.
+      stubs: { FavoriteStar: { template: '<button class="fav-star-stub" />' } },
     },
   })
 }

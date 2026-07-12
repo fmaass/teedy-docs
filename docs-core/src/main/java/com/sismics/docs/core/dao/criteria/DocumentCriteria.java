@@ -99,6 +99,12 @@ public class DocumentCriteria {
      */
     private String tagMode = "and";
 
+    /**
+     * When set, restrict the result to documents this user has favorited (via an inner
+     * join on T_FAVORITE). Null means no favorites restriction.
+     */
+    private String favoriteUserId;
+
     public List<String> getTargetIdList() {
         return targetIdList;
     }
@@ -221,5 +227,13 @@ public class DocumentCriteria {
 
     public void setTagMode(String tagMode) {
         this.tagMode = tagMode;
+    }
+
+    public String getFavoriteUserId() {
+        return favoriteUserId;
+    }
+
+    public void setFavoriteUserId(String favoriteUserId) {
+        this.favoriteUserId = favoriteUserId;
     }
 }

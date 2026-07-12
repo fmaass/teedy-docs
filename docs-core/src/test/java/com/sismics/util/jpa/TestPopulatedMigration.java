@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==46, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==47, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046). */
-    private static final int TARGET_VERSION = 46;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047). */
+    private static final int TARGET_VERSION = 47;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -101,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 46).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 47).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,11 +118,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-046 must run cleanly on a populated database");
+                "migrations 037-047 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 46 after the full upgrade path");
+                "DB_VERSION must be 47 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -244,6 +244,39 @@ public class TestPopulatedMigration {
             Assertions.assertEquals(longValue, rs.getString(1),
                     "045 must widen CFG_VALUE_C so a >250-char value round-trips unchanged");
         }
+
+        // 5h. Migration 047 created the per-user favorite table + its unique (user, document)
+        //     index, both FKs resolvable. A favorite referencing a retained user + document
+        //     inserts; a second favorite with the SAME (user, document) is rejected by
+        //     IDX_FAV_USER_DOCUMENT (the concurrency backstop the DAO's idempotent create
+        //     depends on), proven on BOTH dialects. Guarded with a savepoint so PostgreSQL's
+        //     duplicate-key error is recovered before the final commit.
+        connection.commit();
+        Assertions.assertTrue(tableExists(connection, "T_FAVORITE"),
+                "047 must create the T_FAVORITE table");
+        Assertions.assertEquals(0, count(connection, "T_FAVORITE", "1 = 1"),
+                "047 must not seed any favorite rows");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_FAVORITE (FAV_ID_C, FAV_IDUSER_C, FAV_IDDOCUMENT_C, FAV_CREATEDATE_D) "
+                    + "values ('fav-1','u-alice','doc-1',NOW())");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, scalarCount(connection,
+                        "select count(*) from T_FAVORITE f join T_USER u on f.FAV_IDUSER_C = u.USE_ID_C "
+                                + "join T_DOCUMENT d on f.FAV_IDDOCUMENT_C = d.DOC_ID_C where f.FAV_ID_C = 'fav-1'"),
+                "favorite -> user AND document FKs must be resolvable");
+
+        boolean favoriteDuplicateRejected = false;
+        java.sql.Savepoint favSp = connection.setSavepoint("beforeFavDup");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_FAVORITE (FAV_ID_C, FAV_IDUSER_C, FAV_IDDOCUMENT_C, FAV_CREATEDATE_D) "
+                    + "values ('fav-dup','u-alice','doc-1',NOW())");
+        } catch (java.sql.SQLException e) {
+            favoriteDuplicateRejected = true;
+            connection.rollback(favSp);
+        }
+        Assertions.assertTrue(favoriteDuplicateRejected,
+                "047 unique index IDX_FAV_USER_DOCUMENT must reject a duplicate (user, document) favorite");
 
         // NOTE ON CASE: the index column comparison is dialect-dependent. The base schema
         // runs `SET IGNORECASE TRUE` on H2 (dbupdate-000-0.sql), so on H2 the index is

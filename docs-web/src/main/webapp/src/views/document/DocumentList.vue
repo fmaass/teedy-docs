@@ -56,6 +56,36 @@ const sortOrder = ref<number>(-1)
 // activates (arrays/empty/unknown are inactive), matching the store's canonicalization contract.
 const workflowMe = ref(false)
 
+// "Favorites" filter — sent as the typed favorites=me param. Restricts the list to the
+// current user's favorited documents. Round-trips through the URL exactly like the workflow
+// toggle so it composes with search/tags/pagination and survives Back/cold-load.
+const favoritesMe = ref(false)
+
+watch(
+  () => route.query.favorites,
+  (v) => {
+    favoritesMe.value = v === 'me'
+    // Canonicalize any invalid present value out of the URL (only the scalar "me" is valid),
+    // surgically preserving the rest of the query (mirrors the workflow watcher below).
+    if (v !== undefined && v !== 'me') {
+      const rest = { ...route.query }
+      delete rest.favorites
+      router.replace({ name: 'documents', query: rest })
+    }
+  },
+  { immediate: true },
+)
+
+watch(favoritesMe, (on) => {
+  const active = route.query.favorites === 'me'
+  if (on === active) return
+  const query: Record<string, string> = { ...tf.buildFilterQuery() }
+  if (workflowMe.value) query.workflow = 'me'
+  if (on) query.favorites = 'me'
+  else delete query.favorites
+  router.replace({ name: 'documents', query })
+})
+
 watch(
   () => route.query.workflow,
   (v) => {
@@ -90,7 +120,8 @@ watch(
 watch(workflowMe, (on) => {
   const active = route.query.workflow === 'me'
   if (on === active) return
-  const query = { ...tf.buildFilterQuery() }
+  const query: Record<string, string> = { ...tf.buildFilterQuery() }
+  if (favoritesMe.value) query.favorites = 'me'
   if (on) query.workflow = 'me'
   else delete query.workflow
   router.replace({ name: 'documents', query })
@@ -98,7 +129,7 @@ watch(workflowMe, (on) => {
 
 const SORT_FIELD_MAP: Record<string, number> = { title: 1, create_date: 3 }
 
-watch([() => tf.combinedSearch, () => tf.tagMode, workflowMe], () => {
+watch([() => tf.combinedSearch, () => tf.tagMode, workflowMe, favoritesMe], () => {
   pageOffset.value = 0
 })
 
@@ -107,6 +138,7 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
     workflowMe: workflowMe.value,
+    favoritesMe: favoritesMe.value,
     offset: pageOffset.value,
     sortField: sortField.value,
     sortOrder: sortOrder.value,
@@ -120,6 +152,7 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
       search: tf.combinedSearch || undefined,
       'search[tagMode]': tf.selectedTagIds.size > 1 ? tf.tagMode : undefined,
       'search[searchworkflow]': workflowMe.value ? 'me' : undefined,
+      favorites: favoritesMe.value ? 'me' : undefined,
     }).then((r) => r.data),
   placeholderData: keepPreviousData,
 })
@@ -225,7 +258,11 @@ function buildDocumentViewState() {
   // document view's Back returns to the list with the "Assigned to me" filter still
   // active — the store serializer preserves it too, but merging here keeps returnTo
   // correct even if the route query lags the toggle by a tick.
-  const query = { ...tf.buildFilterQuery(), ...(workflowMe.value ? { workflow: 'me' } : {}) }
+  const query = {
+    ...tf.buildFilterQuery(),
+    ...(workflowMe.value ? { workflow: 'me' } : {}),
+    ...(favoritesMe.value ? { favorites: 'me' } : {}),
+  }
   return {
     returnTo: router.resolve({ name: 'documents', query }).fullPath,
     filterLabel: buildFilterLabel() || undefined,
@@ -418,6 +455,14 @@ function bulkDelete() {
           :offLabel="t('ui.workflow.assigned_to_me')"
           onIcon="pi pi-sitemap"
           offIcon="pi pi-sitemap"
+          size="small"
+        />
+        <ToggleButton
+          v-model="favoritesMe"
+          :onLabel="t('ui.favorite.filter')"
+          :offLabel="t('ui.favorite.filter')"
+          onIcon="pi pi-star-fill"
+          offIcon="pi pi-star"
           size="small"
         />
         <SavedFilters />

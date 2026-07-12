@@ -473,3 +473,87 @@ describe('DocumentList — workflow=me returnTo round-trip (#28)', () => {
     expect(routerReplace).not.toHaveBeenCalled()
   })
 })
+
+// --- #41: the favorites=me filter round-trip. favoritesMe lives in component state
+//     (mirroring workflowMe), but the returnTo query + the URL rewrite must carry it,
+//     and the documents route must hydrate it on BOTH entry paths. The listDocuments
+//     call must then send favorites=me — the authoritative proof the filter is live. ---
+describe('DocumentList — favorites=me filter round-trip (#41)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+  })
+
+  it('a cold URL load of ?favorites=me activates the filter → listDocuments sends favorites=me', () => {
+    mockRoute.query = { favorites: 'me' }
+    mountView()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBe('me')
+  })
+
+  it('without the filter, listDocuments omits favorites', () => {
+    mockRoute.query = {}
+    mountView()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBeUndefined()
+  })
+
+  it('an in-app Back (route query changes to favorites=me) re-activates the filter', async () => {
+    const wrapper = mountView()
+    let params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBeUndefined()
+    mockRoute.query = { favorites: 'me' }
+    await flushPromises()
+    void wrapper
+    params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBe('me')
+  })
+
+  it('with favorites=me active, returnTo carries favorites=me (Back restores it)', () => {
+    mockRoute.query = { favorites: 'me' }
+    filterState.filterQuery = { tags: 't1' }
+    const wrapper = mountView()
+    return wrapper.find('button.double').trigger('click').then(() => {
+      const state = routerPush.mock.calls.at(-1)![0].state as { returnTo: string }
+      expect(state.returnTo).toContain('favorites=me')
+      expect(state.returnTo).toContain('tags=t1')
+    })
+  })
+
+  it('favorites=me composes with workflow=me: both survive in the same request and returnTo', () => {
+    mockRoute.query = { favorites: 'me', workflow: 'me' }
+    filterState.filterQuery = { tags: 't1' }
+    const wrapper = mountView()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBe('me')
+    expect(params['search[searchworkflow]']).toBe('me')
+    return wrapper.find('button.double').trigger('click').then(() => {
+      const state = routerPush.mock.calls.at(-1)![0].state as { returnTo: string }
+      expect(state.returnTo).toContain('favorites=me')
+      expect(state.returnTo).toContain('workflow=me')
+    })
+  })
+
+  it('cold-loading an UNKNOWN favorites value canonicalizes it out of the URL', async () => {
+    mockRoute.query = { favorites: 'them' }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).toHaveBeenCalled()
+    const q = routerReplace.mock.calls.at(-1)![0].query as Record<string, string>
+    expect(q.favorites).toBeUndefined()
+    const params = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(params.favorites).toBeUndefined()
+  })
+
+  it('a VALID favorites=me (and an absent key) triggers NO canonicalizing replace on entry', async () => {
+    mockRoute.query = { favorites: 'me' }
+    mountView()
+    await flushPromises()
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+})

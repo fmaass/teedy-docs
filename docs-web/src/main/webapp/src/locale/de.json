@@ -927,6 +927,12 @@
       "delete_title": "Gespeicherten Filter löschen",
       "delete_button": "Gespeicherten Filter \"{name}\" löschen",
       "delete_confirm": "Den gespeicherten Filter \"{name}\" löschen?"
+    },
+    "favorite": {
+      "add": "Zu Favoriten hinzufügen",
+      "remove": "Aus Favoriten entfernen",
+      "filter": "Favoriten",
+      "toggle_failed": "Favoriten konnten nicht aktualisiert werden"
     }
   }
 }

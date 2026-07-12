@@ -428,6 +428,7 @@ public class DocumentDao {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
 
         em.createNativeQuery("delete from T_DOCUMENT_TAG where DOT_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_FAVORITE where FAV_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_DOCUMENT_METADATA where DME_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_CONTRIBUTOR where CTR_IDDOC_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_ACL where ACL_SOURCEID_C = :id").setParameter("id", id).executeUpdate();

@@ -10,6 +10,7 @@ import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, Da
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
 import TagOverflow from './TagOverflow.vue'
+import FavoriteStar from './FavoriteStar.vue'
 import { useTagFilterStore } from '../stores/tagFilter'
 
 const { t } = useI18n()
@@ -87,6 +88,11 @@ function onRowSelect(event: DataTableRowSelectEvent) {
           />
           <i v-else class="pi pi-file" />
         </div>
+      </template>
+    </Column>
+    <Column header="" style="width: 44px" :exportable="false" class="star-cell">
+      <template #body="{ data }">
+        <FavoriteStar :document-id="data.id" :favorite="!!data.favorite" @click.stop />
       </template>
     </Column>
     <Column field="title" :header="t('document.title')" sortable>
@@ -174,6 +180,11 @@ function onRowSelect(event: DataTableRowSelectEvent) {
           />
           <i v-else class="pi pi-file" />
         </div>
+      </template>
+    </Column>
+    <Column header="" style="width: 44px" :exportable="false" class="star-cell">
+      <template #body="{ data }">
+        <FavoriteStar :document-id="data.id" :favorite="!!data.favorite" @click.stop />
       </template>
     </Column>
     <Column field="title" :header="t('document.title')" sortable>

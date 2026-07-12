@@ -399,6 +399,14 @@ public class LuceneIndexingHandler implements IndexingHandler {
         if (criteria.getActiveRoute() != null && criteria.getActiveRoute()) {
             criteriaList.add("rs2.RTP_ID_C is not null");
         }
+        if (criteria.getFavoriteUserId() != null) {
+            // Inner join to T_FAVORITE restricts the result to documents the given user has
+            // favorited. Plain inner join (H2 + PostgreSQL portable); the (user, document) pair
+            // is unique so it never multiplies rows. The ACL join above still gates readability,
+            // so a favorite of a document the user can no longer read is filtered out here too.
+            sb.append("join T_FAVORITE fav on fav.FAV_IDDOCUMENT_C = d.DOC_ID_C and fav.FAV_IDUSER_C = :favoriteUserId ");
+            parameterMap.put("favoriteUserId", criteria.getFavoriteUserId());
+        }
 
         criteriaList.add(trashQuery ? "d.DOC_DELETEDATE_D is not null" : "d.DOC_DELETEDATE_D is null");
 

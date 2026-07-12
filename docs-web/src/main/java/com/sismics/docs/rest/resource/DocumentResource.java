@@ -10,6 +10,7 @@ import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.AuditLogDao;
 import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.FavoriteDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.RelationDao;
 import com.sismics.docs.core.dao.RouteStepDao;
@@ -144,6 +145,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {String} rights Rights
      * @apiSuccess {String} creator Username of the creator
      * @apiSuccess {String} file_id Main file ID
+     * @apiSuccess {Boolean} favorite True if the current user has favorited this document
      * @apiSuccess {Boolean} writable True if the document is writable by the current user
      * @apiSuccess {Object[]} acls List of ACL
      * @apiSuccess {String} acls.id ID
@@ -286,6 +288,12 @@ public class DocumentResource extends BaseResource {
         // Add custom metadata
         MetadataUtil.addMetadata(document, documentId);
 
+        // Add the current user's favorite flag (private per-user state; always false for the
+        // anonymous share principal, which has no favorites).
+        boolean favorite = !principal.isAnonymous()
+                && new FavoriteDao().getByUserAndDocument(principal.getId(), documentId) != null;
+        document.add("favorite", favorite);
+
         // Add files
         if (Boolean.TRUE == files) {
             FileDao fileDao = new FileDao();
@@ -400,6 +408,7 @@ public class DocumentResource extends BaseResource {
      * @apiParam {String} [search[uafter]] The document must have been updated after or at the value moment, accepted format is <code>yyyy-MM-dd</code>
      * @apiParam {String} [search[ubefore]] The document must have been updated before or at the value moment, accepted format is <code>yyyy-MM-dd</code>
      * @apiParam {String} [search[workflow]] If the value is <code>me</code> the document must have an active route, for other values the criteria is ignored
+     * @apiParam {String} [favorites] If the value is <code>me</code> the document must be favorited by the current user, for other values the criteria is ignored
      *
      * @apiSuccess {Number} total Total number of documents
      * @apiSuccess {Object[]} documents List of documents
@@ -414,6 +423,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {Boolean} documents.shared True if the document is shared
      * @apiSuccess {Boolean} documents.active_route True if a route is active on this document
      * @apiSuccess {Boolean} documents.current_step_name Name of the current route step
+     * @apiSuccess {Boolean} documents.favorite True if the current user has favorited this document
      * @apiSuccess {Number} documents.file_count Number of files in this document
      * @apiSuccess {Object[]} documents.tags List of tags
      * @apiSuccess {String} documents.tags.id ID
@@ -464,7 +474,8 @@ public class DocumentResource extends BaseResource {
             @QueryParam("search[uafter]") String searchUpdatedAfter,
             @QueryParam("search[ubefore]") String searchUpdatedBefore,
             @QueryParam("search[searchworkflow]") String searchWorkflow,
-            @QueryParam("search[tagMode]") String searchTagMode
+            @QueryParam("search[tagMode]") String searchTagMode,
+            @QueryParam("favorites") String favorites
     ) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -497,6 +508,10 @@ public class DocumentResource extends BaseResource {
                 searchUpdatedAfter,
                 searchUpdatedBefore,
                 searchWorkflow,
+                // favorites=me restricts the list to the current user's favorited documents. The
+                // criteria carries the user id (resolved here from the principal); the T_FAVORITE
+                // join is built in LuceneIndexingHandler. Any value other than "me" is ignored.
+                "me".equals(favorites) ? principal.getId() : null,
                 allTagDtoList);
 
         if ("or".equalsIgnoreCase(searchTagMode)) {
@@ -509,6 +524,10 @@ public class DocumentResource extends BaseResource {
         } catch (Exception e) {
             throw new ServerException("SearchError", "Error searching in documents", e);
         }
+
+        // The current user's favorited document IDs, fetched once for the per-row favorite flag.
+        Set<String> favoriteDocumentIds = new HashSet<>(
+                new FavoriteDao().getDocumentIdsByUser(principal.getId()));
 
         // Find the files of the documents
         Iterable<String> documentsIds = CollectionUtils.collect(paginatedList.getResultList(), DocumentDto::getId);
@@ -542,6 +561,7 @@ public class DocumentResource extends BaseResource {
                     .add("current_step_name", JsonUtil.nullable(documentDto.getCurrentStepName()))
                     .add("highlight", JsonUtil.nullable(documentDto.getHighlight()))
                     .add("file_count", filesCount)
+                    .add("favorite", favoriteDocumentIds.contains(documentDto.getId()))
                     .add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
 
             if (Boolean.TRUE == files) {
@@ -711,7 +731,8 @@ public class DocumentResource extends BaseResource {
             @FormParam("search[uafter]") String searchUpdatedAfter,
             @FormParam("search[ubefore]") String searchUpdatedBefore,
             @FormParam("search[searchworkflow]") String searchWorkflow,
-            @FormParam("search[tagMode]") String searchTagMode
+            @FormParam("search[tagMode]") String searchTagMode,
+            @FormParam("favorites") String favorites
     ) {
         return list(
                 limit,
@@ -734,7 +755,8 @@ public class DocumentResource extends BaseResource {
                 searchUpdatedAfter,
                 searchUpdatedBefore,
                 searchWorkflow,
-                searchTagMode
+                searchTagMode,
+                favorites
         );
     }
 
