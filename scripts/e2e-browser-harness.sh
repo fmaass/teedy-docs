@@ -42,7 +42,7 @@
 # 3.5.0). A mismatch FAILS the harness so it can never certify a stale image.
 #
 # Checks performed (each FAIL exits nonzero at the end):
-#   1. /api/app answers and current_version == expected (default 3.5.1)      [api]
+#   1. /api/app answers and current_version == expected (default 3.5.2)      [api]
 #   2. native form login admin/admin lands in the app shell (logged-in UI)   [browser]
 #   3. cold-load deep link /#/document?search=…&tags=…&exclude=… retains ALL
 #      query params after hydration (URL retention; API-level filter coverage
@@ -113,7 +113,7 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
-expect_version="${E2E_EXPECT_VERSION:-3.5.1}"
+expect_version="${E2E_EXPECT_VERSION:-3.5.2}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"
