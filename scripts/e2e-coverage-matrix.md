@@ -39,6 +39,7 @@ handling) has a second chance to surface.
 | **Gallery view (v3.5.0 #39)** | `gallery.spec.ts` — toggle List↔Gallery, cards render, mode persists | **check 19** — toggle to Gallery, assert an `article.doc-card` for the seeded doc renders, assert `teedy_document_view_mode` persists across a reload, switch back to List | **Overlap** — both exercise the SelectButton toggle and localStorage persistence; E2 re-verifies the card render + reload persistence in a second engine (CDP-visible real reload). |
 | **Stats dashboard (v3.5.0 #40)** | `stats.spec.ts` — admin dashboard totals/charts/storage, window switching, non-admin guard | **check 20** — admin `#/settings/stats` renders 5 totals cards + a chart `<canvas>` + a per-user storage row; window switch (7→30) re-hits `/api/app/stats`; a non-admin gets `403` from `/api/app/stats?window=7` (context-isolated, admin restored after) | **Overlap** — both cover the admin dashboard and the admin-only guard; E2 asserts the window switch actually re-issues the API call and the 403 in a logged-out-then-non-admin real-Chrome context. |
 | **Rich description (v3.5.0 #38)** | `rich-description.spec.ts` — Quill editor authoring + server-side HTML sanitization | **check 21** — `POST /document/:id` with legitimate formatting + a hostile payload; `/api/document` read-back is inert (no `<script`/`onerror`/`javascript:`) while `<strong>`/`<a href="https://` survived; the Quill editor (`.ql-toolbar`) mounts on the edit view | **Overlap + Complement** — both assert the sanitizer strips XSS while keeping legit markup; E2 additionally proves the stored HTML is inert via authoritative read-back against the running server (the security-critical assertion) in real Chrome. |
+| **Persisted rotation (v3.5.2 #35)** | `rotation.spec.ts` — image + PDF rotation persists to the server, survives a reload and a second session, and the served raster reflects the rotation | **check 22** — upload `wide.png` to a doc, wait out raster processing, rotate 90° (real "Rotate right" control, else a credentialed `POST /api/file/:id/rotation`), then RELOAD and assert `GET /api/document/:id?files=true` reports the file's `rotation==90` | **Overlap** — both drive a real rotation and assert PERSISTENCE via the authoritative `files[].rotation` read-back after a reload; E1 also covers the PDF path, the served-raster axis swap, and a distinct second session, while E2 re-verifies the persisted value in real Chrome. |
 
 ## Browser-isolation note (E2-specific)
 
@@ -75,9 +76,9 @@ back-to-back invocations against the same container both pass all checks.
 Every E2 row is a genuine browser action (search / open / click / act / logout)
 **plus** an assertion on rendered DOM or authoritative API state (`/api/document`,
 `/api/route`), **plus** a screenshot. No row merely loads a page and claims
-coverage. Checks 6, 7, 18, 20, and 21 assert against authoritative server state read
+coverage. Checks 6, 7, 18, 20, 21, and 22 assert against authoritative server state read
 back after the interaction (`/api/document`, `/api/route`, `/api/favorite`,
-`/api/app/stats`), not just the rendered page.
+`/api/app/stats`, `/api/document/:id?files=true`), not just the rendered page.
 
 ## Running both
 

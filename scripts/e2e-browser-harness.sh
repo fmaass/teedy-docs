@@ -95,6 +95,11 @@
 #      description mixing legitimate formatting and a hostile payload; the stored HTML
 #      read back via /api/document is inert (no <script/onerror/javascript:) while the
 #      <strong>/<a href="https:// survived; the Quill editor mounts on the edit view [browser+api]
+#  22. Persisted rotation (v3.5.2 #35) — upload an image, rotate it 90° (real UI
+#      "Rotate right" control, or a credentialed POST /api/file/:id/rotation from the
+#      page), then RELOAD and assert GET /api/document/:id?files=true reports the file's
+#      rotation==90 — the authoritative read-back proving the value is server-persisted
+#      (not transient); a failed or non-persisted rotation FAILS the check         [browser+api]
 #  12. Session restore (verified) — after the logged-out checks 10-11 + 16-17, the
 #      admin session is restored and confirmed live via GET /api/user
 #      (username=admin, not anonymous). Those checks run inside try/finally so this
@@ -241,11 +246,36 @@ rich_doc_id="$(api_put --data-urlencode "title=${rich_doc_title}" \
   -d "language=eng" "${base_url}/api/document" | json_field id || true)"
 [ -z "${rich_doc_id}" ] && note FAIL "seed: could not create rich-description document"
 
+# --- Seed for the v3.5.2 persisted-rotation check (#35) -----------------------
+# Rotation is a PER-FILE property, so the check needs a document with a real, rotatable
+# IMAGE file. Create a RUN-stamped document, then upload wide.png (60x20 — the same
+# committed fixture the Playwright rotation.spec.ts uses) to it via multipart PUT /api/file
+# (form field `id`=documentId, `file`=image bytes), authenticated with the same admin
+# session cookie the other seeds use. The upload response returns the new file id.
+rot_doc_title="${run_token} Rotation Document"
+rot_doc_id="$(api_put --data-urlencode "title=${rot_doc_title}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${rot_doc_id}" ] && note FAIL "seed: could not create rotation image doc"
+rot_fixture="${repo_root}/docs-web/src/main/webapp/e2e/fixtures/wide.png"
+rot_file_id=""
+if [ -n "${rot_doc_id}" ] && [ -f "${rot_fixture}" ]; then
+  rot_file_id="$(curl -sf -b "${cookie_jar}" -X PUT \
+    -F "id=${rot_doc_id}" -F "file=@${rot_fixture};type=image/png" \
+    "${base_url}/api/file" | json_field id || true)"
+fi
+# Fall back to the authoritative file id if the upload response id was not captured.
+[ -z "${rot_file_id}" ] && [ -n "${rot_doc_id}" ] && rot_file_id="$(curl -sf -b "${cookie_jar}" \
+  "${base_url}/api/document/${rot_doc_id}?files=true" \
+  | python3 -c 'import sys,json;f=json.load(sys.stdin).get("files",[]);print(f[0]["id"] if f else "")' 2>/dev/null || true)"
+[ -z "${rot_file_id}" ] && note FAIL "seed: could not create rotation image doc"
+
 echo "[seed] doc=${doc_id} tag_in=${tag_in} tag_ex=${tag_ex} share=${share_id} route_started=${route_ok:-0}" \
   | tee -a "${art_dir}/checks.log"
 echo "[seed] ovf_doc=${ovf_doc_id} dis_user=${dis_user} totp_user=${totp_user} totp_secret_len=${#totp_secret}" \
   | tee -a "${art_dir}/checks.log"
 echo "[seed] stats_user=${stats_user} fav_doc=${fav_doc_id} rich_doc=${rich_doc_id}" \
+  | tee -a "${art_dir}/checks.log"
+echo "[seed] rot_doc=${rot_doc_id} rot_file=${rot_file_id}" \
   | tee -a "${art_dir}/checks.log"
 
 # --- Checks 2-17: real-browser flow -------------------------------------------
@@ -259,6 +289,7 @@ BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_STATS_USER="${stats_user}" BH_STATS_PASS="${stats_pass}" \
   BH_FAV_DOC_ID="${fav_doc_id}" BH_FAV_DOC_TITLE="${fav_doc_title}" \
   BH_RICH_DOC_ID="${rich_doc_id}" \
+  BH_ROT_DOC_ID="${rot_doc_id}" BH_ROT_FILE_ID="${rot_file_id}" BH_ROT_DOC_TITLE="${rot_doc_title}" \
   browser-harness <<'PY'
 import json, os, time, urllib.parse, hmac, hashlib, base64, struct
 
@@ -284,6 +315,9 @@ stats_pass = os.environ.get("BH_STATS_PASS", "")
 fav_doc_id = os.environ.get("BH_FAV_DOC_ID", "")
 fav_doc_title = os.environ.get("BH_FAV_DOC_TITLE", "")
 rich_doc_id = os.environ.get("BH_RICH_DOC_ID", "")
+rot_doc_id = os.environ.get("BH_ROT_DOC_ID", "")
+rot_file_id = os.environ.get("BH_ROT_FILE_ID", "")
+rot_doc_title = os.environ.get("BH_ROT_DOC_TITLE", "")
 results = {}
 
 # RFC-6238 TOTP: recompute the SAME 6-digit code the server verifies (Base32 secret,
@@ -971,6 +1005,86 @@ shot("21-rich-description")
 rich_ok = (int(rich_put or 0) == 200) and inert and legit and bool(quill_present)
 results["rich_description_sanitized"] = (rich_ok, f"put={rich_put} inert={inert} legit={legit} quill={quill_present} stored={stored[:160]!r}")
 
+# --- Check 22 (#35): persisted, non-destructive file rotation (v3.5.2) ----------
+# Rotation is stored per file and applied on serve; it must SURVIVE a reload (proving it
+# is server-persisted, not a transient display state). END-TO-END as admin: open the
+# document-view content tab, wait out the async raster processing (the rotate endpoint
+# returns a retriable "still processing" error until the raster exists), then rotate the
+# file 90° — via the real UI "Rotate right" control if it can be targeted, else via a
+# credentialed POST /api/file/:id/rotation (rotation=90) issued from inside the page
+# (still a real-Chrome, real-session request). THEN the LOAD-BEARING assertion: RELOAD
+# and read the AUTHORITATIVE GET /api/document/:id?files=true — the matching file's
+# rotation must equal 90. A failed rotate or a non-persisted value FAILS this check.
+rotation_via = "none"
+rotation_reload = None
+rotation_ok = False
+if not rot_doc_id or not rot_file_id:
+    results["rotation_persist"] = (False, "missing rotation seed (doc/file id)")
+else:
+    goto_url(base + f"/#/document/view/{rot_doc_id}/content"); time.sleep(2.5); wait_for_load()
+    # Wait for the async raster processing to finish so the rotate endpoint does not return
+    # "still processing" — GET /api/file/list?id=<doc> until every file's processing flag clears.
+    proc_deadline = time.time() + 30
+    processing_done = False
+    while time.time() < proc_deadline:
+        processing_done = js("""
+          return (() => fetch(location.origin + '/api/file/list?id=arg_id', {credentials:'include'})
+            .then(r => r.ok ? r.json() : {files: []})
+            .then(d => { const fs = d.files||[]; return fs.length > 0 && fs.every(f => !f.processing); })
+            .catch(() => false))();
+        """.replace("arg_id", rot_doc_id))
+        if processing_done:
+            break
+        time.sleep(1.0)
+    shot("22a-rotation-before")
+    # Prefer the real UI rotate control (a genuine real-Chrome interaction).
+    ui_clicked = js("""
+      return (() => {
+        const card = document.querySelector('.file-preview-card');
+        const scope = card || document;
+        const btns = [...scope.querySelectorAll('button, [role=button]')];
+        const rot = btns.find(b => {
+          const label = ((b.getAttribute('aria-label')||'') + ' ' + (b.title||'') + ' ' + (b.textContent||''));
+          return /rotate\\s*right/i.test(label);
+        });
+        if (rot) { rot.click(); return true; }
+        return false;
+      })();
+    """)
+    if ui_clicked:
+        rotation_via = "ui"
+        time.sleep(2.0)
+    else:
+        # Fall back to a credentialed POST from inside the page (still real browser + real session).
+        rot_status = js("""
+          return (() => fetch(location.origin + '/api/file/arg_id/rotation', {
+            method: 'POST', credentials: 'include',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'rotation=90'
+          }).then(r => r.status).catch(() => 0))();
+        """.replace("arg_id", rot_file_id))
+        rotation_via = f"post({rot_status})"
+        time.sleep(1.5)
+    # RELOAD (navigate away and back) so the assertion reads a freshly-hydrated state, then
+    # the AUTHORITATIVE persistence read-back: the file's stored rotation must be 90.
+    goto_url(base + "/#/document"); time.sleep(1.0); wait_for_load()
+    goto_url(base + f"/#/document/view/{rot_doc_id}/content"); time.sleep(2.0); wait_for_load()
+    # Poll briefly — a UI click's rotate request + regeneration is async.
+    rr_deadline = time.time() + 10
+    while time.time() < rr_deadline:
+        rotation_reload = js("""
+          return (() => fetch(location.origin + '/api/document/arg_id?files=true', {credentials:'include'})
+            .then(r => r.ok ? r.json() : {files: []})
+            .then(d => { const f = (d.files||[]).find(x => x.id === arg_fid); return f ? f.rotation : null; })
+            .catch(() => null))();
+        """.replace("arg_id", rot_doc_id).replace("arg_fid", json.dumps(rot_file_id)))
+        if rotation_reload == 90:
+            break
+        time.sleep(0.8)
+    rotation_ok = (rotation_reload == 90)
+    results["rotation_persist"] = (rotation_ok, f"rotated_via={rotation_via} processing_done={processing_done} reload_rotation={rotation_reload}")
+    shot("22b-rotation-after-reload")
+
 # --- Checks 10-11 + 16-17: anonymous / login-form, CONTEXT-ISOLATED ------------
 # These run the browser LOGGED OUT. The whole logged-out region is wrapped in
 # try/finally so that no matter how a check fails (navigation, DOM, screenshot,
@@ -1132,6 +1246,7 @@ labels = {
     "gallery_view": "check19: gallery view toggle rendered a card for the seeded doc + persisted the mode in localStorage across reload (#39)",
     "stats_dashboard": "check20: admin stats dashboard rendered totals/chart/storage + window refetch, and a non-admin got 403 (context-isolated) (#40)",
     "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",
+    "rotation_persist": "check22: file rotation persists across reload — POST/UI rotate then GET document files[].rotation==90 (#35/v3.5.2)",
     "session_restored": "check12: admin session restored + verified live after the anonymous checks",
 }
 order = list(labels.keys())
@@ -1154,7 +1269,7 @@ PY
 # Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
 # never collides with a later run. The top-of-script cookie_jar admin session is
 # still valid (the harness restored admin at the end of its logged-out region).
-for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}"; do
+for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}" "${rot_doc_id:-}"; do
   [ -n "${d}" ] || continue
   curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
     && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
