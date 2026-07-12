@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
@@ -10,6 +10,11 @@ import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
 import type { Tag } from '../../api/tag'
 import { useTagFilterStore } from '../../stores/tagFilter'
+
+// Unmount every mounted wrapper after each test so no pending async work (queries,
+// watchers, image/pdf loads) fires after the jsdom environment is torn down — that
+// leak surfaced as an intermittent "HTMLElement is not defined" CI failure.
+enableAutoUnmount(afterEach)
 
 // The document header's clickable tag chips (#34) are the unit under test: a chip
 // click must apply a POSITIVE tag filter via the store's selectTag and land on the
