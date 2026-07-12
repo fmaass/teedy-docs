@@ -15,6 +15,8 @@ export interface DocumentListItem {
   active_route?: boolean
   current_step_name?: string | null
   highlight?: string
+  // True if the current user has favorited this document (additive; per-user private state).
+  favorite?: boolean
 }
 
 export interface DocumentListResponse {
@@ -76,6 +78,9 @@ export interface DocumentListParams {
   // target-scoped to the same signal). Sent as a typed param instead of a literal `workflow:me`
   // token folded into the free-text search.
   'search[searchworkflow]'?: 'me'
+  // Restrict the list to the current user's favorited documents. URL-round-trippable so it
+  // composes with search/tags/pagination identically to every other filter dimension.
+  favorites?: 'me'
 }
 
 export function listDocuments(params: DocumentListParams) {

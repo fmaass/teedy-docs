@@ -512,6 +512,73 @@ describe('tagFilter store', () => {
     })
   })
 
+  // --- #39/B1: favorites=me is component-owned (DocumentList) but the store's
+  //     canonical rewrite must PRESERVE it, exactly like workflow=me. buildFilterQuery
+  //     is the single serializer syncUrl's router.replace builds from; before this fix
+  //     it dropped favorites=me, so a tag change while the favorites filter was active
+  //     stripped it from the URL and the route watcher then disabled the filter — the
+  //     latent P1 compose-with-other-filters defect. ---
+  describe('favorites=me preservation (component-owned key, #39/B1)', () => {
+    it('buildFilterQuery preserves a validated favorites=me from the route query', () => {
+      mockRoute.query = { favorites: 'me' }
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      store.debouncedText = 'invoice'
+      const query = store.buildFilterQuery()
+      expect(query.favorites).toBe('me')
+      // ...alongside the normal dimensions, not instead of them.
+      expect(query.tags).toBe('a')
+      expect(query.search).toBe('invoice')
+    })
+
+    it('buildFilterQuery canonicalizes away a non-"me" / array / unknown favorites value', () => {
+      mockRoute.query = { favorites: 'them' } as unknown as Record<string, string>
+      const store = useTagFilterStore()
+      expect(store.buildFilterQuery().favorites).toBeUndefined()
+
+      mockRoute.query = { favorites: ['me', 'me'] } as unknown as Record<string, string>
+      const store2 = useTagFilterStore()
+      expect(store2.buildFilterQuery().favorites).toBeUndefined()
+
+      mockRoute.query = { favorites: '' } as unknown as Record<string, string>
+      const store3 = useTagFilterStore()
+      expect(store3.buildFilterQuery().favorites).toBeUndefined()
+    })
+
+    it('a user-driven tag change does NOT strip favorites=me from the canonical URL rewrite', async () => {
+      // The blocking gap this test guards: syncUrl's router.replace(buildFilterQuery())
+      // owns the FULL query. With favorites=me live in the URL, changing the tag
+      // selection must re-emit a query that STILL carries favorites=me.
+      mockRoute.query = { favorites: 'me' } // settled at creation
+      const store = useTagFilterStore()
+      await nextTick()
+      replace.mockClear()
+
+      store.selectedTagIds = new Set(['a', 'c'])
+      await nextTick()
+
+      expect(replace).toHaveBeenCalled()
+      const lastQuery = replace.mock.calls.at(-1)![0].query
+      expect(lastQuery.tags).toBe('a,c')
+      expect(lastQuery.favorites).toBe('me')
+    })
+
+    it('favorites=me and workflow=me both survive a tag change together', async () => {
+      mockRoute.query = { favorites: 'me', workflow: 'me' }
+      const store = useTagFilterStore()
+      await nextTick()
+      replace.mockClear()
+
+      store.selectedTagIds = new Set(['a'])
+      await nextTick()
+
+      const lastQuery = replace.mock.calls.at(-1)![0].query
+      expect(lastQuery.favorites).toBe('me')
+      expect(lastQuery.workflow).toBe('me')
+      expect(lastQuery.tags).toBe('a')
+    })
+  })
+
   describe('route-driven hydration (data re-emit must not clobber; route change must re-hydrate)', () => {
     it('a tagsData re-emit with an UNCHANGED route query does NOT reset the user selection', async () => {
       mockRoute.query = { tags: 'a' }

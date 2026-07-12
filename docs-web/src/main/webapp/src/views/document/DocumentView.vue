@@ -14,6 +14,7 @@ import Skeleton from 'primevue/skeleton'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import TagBadge from '../../components/TagBadge.vue'
+import FavoriteStar from '../../components/FavoriteStar.vue'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { DocumentKey } from './documentKey'
 
@@ -139,6 +140,7 @@ function handleDelete() {
         </div>
 
         <div class="doc-header-actions">
+          <FavoriteStar :document-id="doc.id" :favorite="!!doc.favorite" large />
           <Button
             v-if="doc.file_id"
             :as="'a'"

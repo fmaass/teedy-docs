@@ -177,7 +177,7 @@
     "title_required": "Titel ist erforderlich",
     "title": "Titel",
     "description": "Beschreibung",
-    "description_hint": "HTML wird unterstützt",
+    "description_hint": "Rich-Text wird unterstützt",
     "creation_date": "Erstellungsdatum",
     "additional_metadata": "Zusätzliche Metadaten",
     "files": "Dateien",
@@ -681,6 +681,26 @@
       "total_count": "{count} Protokolleinträge",
       "no_logs": "Keine Protokolleinträge entsprechen diesen Filtern"
     },
+    "stats": {
+      "title": "Statistik",
+      "description": "Globale Nutzungsstatistiken der gesamten Instanz.",
+      "window_label": "Zeitraum",
+      "window_days": "{days} Tage",
+      "refresh": "Aktualisieren",
+      "total_documents": "Dokumente",
+      "total_files": "Dateien (alle Versionen)",
+      "total_users": "Benutzer",
+      "total_tags": "Schlagwörter",
+      "total_favorites": "Favoriten",
+      "chart_documents_created": "Dokumente nach Erstelldatum",
+      "chart_activity": "Aktivität",
+      "storage_title": "Speicher nach Benutzer",
+      "storage_global": "Globale Nutzung: {value}",
+      "storage_user": "Benutzer",
+      "storage_used": "Belegt",
+      "storage_quota": "Kontingent",
+      "storage_empty": "Keine Benutzer vorhanden."
+    },
     "config": {
       "title": "Konfiguration",
       "general": "Allgemein",
@@ -871,12 +891,10 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "tag_chips": "Klicke in der Dokumentliste oder Dokumentansicht auf einen Schlagwort-Chip, um sofort danach zu filtern.",
-        "saved_filters": "Speichere eine Kombination aus Schlagwort-, Text- und Workflow-Filtern unter einem Namen und rufe sie über die Suchleiste erneut auf.",
-        "relations": "Verknüpfe zusammengehörige Dokumente über den neuen Abschnitt „Verwandte Dokumente“ in der Dokumentansicht.",
-        "rotation": "Drehe PDF- und Bildvorschauen spontan, zusätzlich zur intrinsischen Ausrichtung einer Seite.",
-        "admin_ui": "Neue Administrationsseiten zur Verwaltung der OIDC-Anbietereinstellungen und zum Bearbeiten des Speicherkontingents eines Benutzers nach der Anlage.",
-        "apidoc_docs": "Eine interaktive API-Referenz unter /apidoc sowie eine vollständige Dokumentationsseite zu Einrichtung, Anmeldung und täglicher Nutzung."
+        "favorites": "Markiere Dokumente mit einem Stern als Favoriten und filtere die Dokumentliste anschließend auf nur deine Favoriten.",
+        "gallery": "Schalte die Dokumentliste in eine Galerieansicht um, die Dokumente als Vorschaukacheln anordnet.",
+        "rich_descriptions": "Verfasse Dokumentbeschreibungen in einem Rich-Text-Editor mit Formatierungsleiste für Überschriften, Listen, Links und mehr.",
+        "admin_stats": "Ein neues Administrations-Statistik-Dashboard fasst Dokumente, Speicher, Benutzer und Aktivität auf einen Blick zusammen."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",
@@ -894,6 +912,11 @@
     "retry": "Erneut versuchen",
     "tree_view": "Baum",
     "facets_view": "Facetten",
+    "view": {
+      "list": "Liste",
+      "gallery": "Galerie",
+      "toggle_label": "Dokumentansicht"
+    },
     "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",
     "mode_or": "ODER",
@@ -927,6 +950,12 @@
       "delete_title": "Gespeicherten Filter löschen",
       "delete_button": "Gespeicherten Filter \"{name}\" löschen",
       "delete_confirm": "Den gespeicherten Filter \"{name}\" löschen?"
+    },
+    "favorite": {
+      "add": "Zu Favoriten hinzufügen",
+      "remove": "Aus Favoriten entfernen",
+      "filter": "Favoriten",
+      "toggle_failed": "Favoriten konnten nicht aktualisiert werden"
     }
   }
 }

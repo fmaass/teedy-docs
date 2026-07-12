@@ -6,7 +6,9 @@ import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
+import com.sismics.docs.core.dao.StatsDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.dao.dto.UserStorageDto;
 import com.sismics.docs.core.event.RebuildIndexAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
@@ -15,6 +17,7 @@ import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.StatsBucketUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
 import com.sismics.docs.core.util.jpa.PaginatedLists;
 import com.sismics.docs.rest.constant.BaseFunction;
@@ -728,6 +731,110 @@ public class AppResource extends BaseResource {
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("total", paginatedList.getResultCount())
                 .add("logs", logs);
+
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Returns global usage statistics for the admin dashboard.
+     *
+     * <p>Admin-only (the {@code /app/log} pattern: authenticate → 403 → checkBaseFunction(ADMIN)).
+     * A single JSON payload, no pagination. {@code window} selects the length of the time series
+     * (7, 30 or 90 UTC days; any other value is a 400).
+     *
+     * <p>Count semantics (pinned): {@code documents} = non-deleted; {@code files} = non-deleted
+     * rows INCLUDING historical versions (a raw count); {@code users} = non-deleted incl. disabled;
+     * {@code tags} = non-deleted; {@code favorites} = raw favorite row count (aggregate only — no
+     * per-user favorite visibility, consistent with the #41 privacy statement).
+     *
+     * <p>{@code series.documents_created} buckets on {@code DOC_CREATEDATE_D} (the document's
+     * recorded, client-suppliable create date — "documents by creation date", NOT audit CREATE
+     * events). {@code series.activity} counts audit-log entries for the entity classes
+     * {Document, File, Comment, Route, Tag} across every CRUD type. Both series are zero-filled
+     * UTC {@code [start, end)} day buckets. The activity series reflects RETAINED audit rows only
+     * (clean_storage purges orphan audit logs).
+     *
+     * @api {get} /app/stats Get application usage statistics
+     * @apiName GetAppStats
+     * @apiGroup App
+     * @apiParam {Number=7,30,90} window Length of the time series in UTC days
+     * @apiSuccess {Number} window Echoed window
+     * @apiSuccess {Object} totals Corpus totals (documents, files, users, tags, favorites)
+     * @apiSuccess {Object} storage Storage: global sum + per-user top-10
+     * @apiSuccess {Object} series Time series: documents_created and activity
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError window is not one of 7, 30, 90
+     * @apiPermission admin
+     * @apiVersion 1.13.0
+     *
+     * @param window Length of the time series in UTC days
+     * @return Response
+     */
+    @GET
+    @Path("stats")
+    public Response stats(@QueryParam("window") Integer window) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Fixed windows only — an unsupported value is a client error, not a silent default.
+        if (window == null || (window != 7 && window != 30 && window != 90)) {
+            throw new ClientException("ValidationError", "window must be one of 7, 30, 90");
+        }
+
+        DocumentDao documentDao = new DocumentDao();
+        UserDao userDao = new UserDao();
+        StatsDao statsDao = new StatsDao();
+
+        // Totals row.
+        JsonObjectBuilder totals = Json.createObjectBuilder()
+                .add("documents", documentDao.getDocumentCount())
+                .add("files", statsDao.getFileCount())
+                .add("users", statsDao.getUserCount())
+                .add("tags", statsDao.getTagCount())
+                .add("favorites", statsDao.getFavoriteCount());
+
+        // Storage: reuse the existing global sum and add the per-user top-10.
+        JsonArrayBuilder perUser = Json.createArrayBuilder();
+        for (UserStorageDto userStorage : statsDao.getTopUserStorage(10)) {
+            perUser.add(Json.createObjectBuilder()
+                    .add("username", userStorage.getUsername())
+                    .add("storage_current", userStorage.getStorageCurrent())
+                    .add("storage_quota", userStorage.getStorageQuota()));
+        }
+        JsonObjectBuilder storage = Json.createObjectBuilder()
+                .add("global", userDao.getGlobalStorageCurrent())
+                .add("per_user", perUser);
+
+        // Time series: fetch raw timestamps in the UTC [start, end) window and bucket in Java.
+        Date now = new Date();
+        Date start = StatsBucketUtil.windowStart(window, now);
+        Date end = StatsBucketUtil.windowEnd(now);
+
+        JsonArrayBuilder documentsCreated = Json.createArrayBuilder();
+        for (StatsBucketUtil.Bucket bucket : StatsBucketUtil.bucketByDay(
+                statsDao.getDocumentCreatedDates(start, end), window, now)) {
+            documentsCreated.add(Json.createObjectBuilder()
+                    .add("date", bucket.getDate())
+                    .add("count", bucket.getCount()));
+        }
+        JsonArrayBuilder activity = Json.createArrayBuilder();
+        for (StatsBucketUtil.Bucket bucket : StatsBucketUtil.bucketByDay(
+                statsDao.getActivityDates(start, end), window, now)) {
+            activity.add(Json.createObjectBuilder()
+                    .add("date", bucket.getDate())
+                    .add("count", bucket.getCount()));
+        }
+        JsonObjectBuilder series = Json.createObjectBuilder()
+                .add("documents_created", documentsCreated)
+                .add("activity", activity);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("window", window)
+                .add("totals", totals)
+                .add("storage", storage)
+                .add("series", series);
 
         return Response.ok().entity(response.build()).build();
     }

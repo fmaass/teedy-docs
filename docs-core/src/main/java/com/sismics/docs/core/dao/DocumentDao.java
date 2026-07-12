@@ -5,6 +5,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.util.AuditLogUtil;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
@@ -300,7 +301,9 @@ public class DocumentDao {
 
         // Update the document
         documentDb.setTitle(document.getTitle());
-        documentDb.setDescription(document.getDescription());
+        // Intrinsic guard: re-sanitize at the entity write boundary so no caller can bypass
+        // description sanitization. Idempotent over already-sanitized input.
+        documentDb.setDescription(DescriptionSanitizer.sanitize(document.getDescription()));
         documentDb.setSubject(document.getSubject());
         documentDb.setIdentifier(document.getIdentifier());
         documentDb.setPublisher(document.getPublisher());
@@ -428,6 +431,7 @@ public class DocumentDao {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
 
         em.createNativeQuery("delete from T_DOCUMENT_TAG where DOT_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
+        em.createNativeQuery("delete from T_FAVORITE where FAV_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_DOCUMENT_METADATA where DME_IDDOCUMENT_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_CONTRIBUTOR where CTR_IDDOC_C = :id").setParameter("id", id).executeUpdate();
         em.createNativeQuery("delete from T_ACL where ACL_SOURCEID_C = :id").setParameter("id", id).executeUpdate();

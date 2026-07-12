@@ -147,6 +147,7 @@ public class DocumentSearchCriteriaUtil {
      * @param searchUpdatedAfter  update moment after
      * @param searchUpdatedBefore update moment before
      * @param searchWorkflow      existing workflow
+     * @param favoriteUserId      when non-null, restrict to this user's favorited documents
      * @param allTagDtoList       list of existing tags
      */
     public static void addHttpSearchParams(
@@ -165,6 +166,7 @@ public class DocumentSearchCriteriaUtil {
             String searchUpdatedAfter,
             String searchUpdatedBefore,
             String searchWorkflow,
+            String favoriteUserId,
             List<TagDto> allTagDtoList
     ) {
         if (searchBy != null) {
@@ -212,6 +214,9 @@ public class DocumentSearchCriteriaUtil {
         }
         if ((WORKFLOW_ME.equals(searchWorkflow))) {
             documentCriteria.setActiveRoute(true);
+        }
+        if (favoriteUserId != null) {
+            documentCriteria.setFavoriteUserId(favoriteUserId);
         }
     }
 

@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>3.4.1</version>
+    <version>3.5.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -55,6 +55,11 @@
     <dependency>
       <groupId>org.jsoup</groupId>
       <artifactId>jsoup</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.googlecode.owasp-java-html-sanitizer</groupId>
+      <artifactId>owasp-java-html-sanitizer</artifactId>
     </dependency>
 
     <dependency>

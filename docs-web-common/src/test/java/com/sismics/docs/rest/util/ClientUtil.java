@@ -218,4 +218,42 @@ public class ClientUtil {
             }
         }
     }
+
+    /**
+     * Adds a NEW VERSION of an existing file to a document by replacing {@code previousFileId}.
+     * The prior file becomes a non-latest version (FIL_LATESTVERSION_B = false) rather than being
+     * deleted, so two non-deleted T_FILE rows exist afterwards for the one logical file.
+     *
+     * @param file File path
+     * @param token Authentication token
+     * @param documentId Document ID
+     * @param previousFileId ID of the file this upload replaces
+     * @return New (latest) file ID
+     * @throws IOException e
+     * @throws URISyntaxException e
+     */
+    public String addFileToDocumentReplacing(String file, String token, String documentId, String previousFileId)
+            throws IOException, URISyntaxException {
+        URL fileResource = Resources.getResource(file);
+        Path filePath = Paths.get(fileResource.toURI());
+        String filename = filePath.getFileName().toString();
+        try (InputStream is = fileResource.openStream()) {
+            StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("file", is, filename);
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                MultiPart formContent = multiPart
+                        .field("id", documentId)
+                        .field("previousFileId", previousFileId)
+                        .bodyPart(streamDataBodyPart);
+                JsonObject json = this.resource
+                        .register(MultiPartFeature.class)
+                        .path("/file").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(formContent,
+                                MediaType.MULTIPART_FORM_DATA_TYPE), JsonObject.class);
+                String fileId = json.getString("id");
+                Assertions.assertNotNull(fileId);
+                return fileId;
+            }
+        }
+    }
 }

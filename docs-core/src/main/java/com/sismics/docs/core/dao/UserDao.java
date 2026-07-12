@@ -345,6 +345,12 @@ public class UserDao {
         q.setParameter("userId", userDb.getId());
         q.executeUpdate();
 
+        // Favorites are private, hard-deletable membership rows: the deleted user's stars are
+        // removed outright (there is no soft-delete column, and they must not resurface).
+        q = em.createQuery("delete from Favorite f where f.userId = :userId");
+        q.setParameter("userId", userDb.getId());
+        q.executeUpdate();
+
         // For each of the user's OWNED documents, cancel any ACTIVE route and clear its ROUTING ACLs
         // BEFORE the documents are trashed, as ONE coherent per-document operation sharing the SAME
         // dateNow used for the trash below. cancelActiveRoutesForDocument ends the route CANCELLED,

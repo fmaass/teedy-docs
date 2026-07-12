@@ -50,7 +50,7 @@ public class Document implements Loggable {
     /**
      * Description.
      */
-    @Column(name = "DOC_DESCRIPTION_C", length = 4000)
+    @Column(name = "DOC_DESCRIPTION_C", length = 50000)
     private String description;
     
     /**

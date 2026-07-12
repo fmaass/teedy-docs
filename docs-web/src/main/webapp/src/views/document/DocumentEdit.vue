@@ -15,7 +15,6 @@ import { getAppInfo } from '../../api/app'
 import { queryKeys } from '../../api/queryKeys'
 import { formatFileSize } from '../../utils/formatters'
 import InputText from 'primevue/inputtext'
-import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
@@ -27,6 +26,7 @@ import Card from 'primevue/card'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
 import TagBadge from '../../components/TagBadge.vue'
+import RichDescriptionEditor from '../../components/RichDescriptionEditor.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
@@ -515,7 +515,7 @@ async function onEmlSelected(event: Event) {
 
       <div class="form-field">
         <label for="edit-desc">{{ t('ui.description') }} <span class="label-hint">({{ t('ui.description_hint') }})</span></label>
-        <Textarea id="edit-desc" v-model="form.description" rows="4" class="w-full" autoResize />
+        <RichDescriptionEditor id="edit-desc" v-model="form.description" :aria-label="t('ui.description')" />
       </div>
 
       <div class="form-row">

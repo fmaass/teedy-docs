@@ -6,10 +6,11 @@ import { type DocumentListItem } from '../api/document'
 import { languageLabel } from '../constants/languages'
 import { formatDate } from '../utils/formatters'
 import DataTable from 'primevue/datatable'
-import type { DataTablePageEvent, DataTableSortEvent, DataTableRowClickEvent, DataTableRowSelectEvent } from 'primevue/datatable'
+import type { DataTableSortEvent, DataTableRowClickEvent, DataTableRowSelectEvent } from 'primevue/datatable'
 import Column from 'primevue/column'
 import TagBadge from './TagBadge.vue'
 import TagOverflow from './TagOverflow.vue'
+import FavoriteStar from './FavoriteStar.vue'
 import { useTagFilterStore } from '../stores/tagFilter'
 
 const { t } = useI18n()
@@ -36,7 +37,6 @@ const emit = defineEmits<{
   rowClick: [doc: DocumentListItem]
   rowDblclick: [doc: DocumentListItem]
   rowContextMenu: [event: Event, doc: DocumentListItem]
-  page: [event: DataTablePageEvent]
   sort: [event: DataTableSortEvent]
 }>()
 
@@ -63,7 +63,6 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     v-model:selection="selection"
     :metaKeySelection="false"
     lazy
-    paginator
     stripedRows
     :rowHover="true"
     dataKey="id"
@@ -71,7 +70,6 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     @row-click="(e: DataTableRowClickEvent) => emit('rowClick', e.data as DocumentListItem)"
     @row-dblclick="(e: DataTableRowClickEvent) => emit('rowDblclick', e.data as DocumentListItem)"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
-    @page="(e: DataTablePageEvent) => emit('page', e)"
     @sort="(e: DataTableSortEvent) => emit('sort', e)"
   >
     <Column selectionMode="multiple" style="width: 44px" :exportable="false" />
@@ -87,6 +85,11 @@ function onRowSelect(event: DataTableRowSelectEvent) {
           />
           <i v-else class="pi pi-file" />
         </div>
+      </template>
+    </Column>
+    <Column header="" style="width: 44px" :exportable="false" class="star-cell">
+      <template #body="{ data }">
+        <FavoriteStar :document-id="data.id" :favorite="!!data.favorite" @click.stop />
       </template>
     </Column>
     <Column field="title" :header="t('document.title')" sortable>
@@ -150,7 +153,6 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     selectionMode="single"
     :metaKeySelection="false"
     lazy
-    paginator
     stripedRows
     :rowHover="true"
     dataKey="id"
@@ -159,7 +161,6 @@ function onRowSelect(event: DataTableRowSelectEvent) {
     @row-dblclick="(e: DataTableRowClickEvent) => emit('rowDblclick', e.data as DocumentListItem)"
     @row-select="onRowSelect"
     @row-contextmenu="(e: RowContextMenuEvent) => emit('rowContextMenu', e.originalEvent, e.data)"
-    @page="(e: DataTablePageEvent) => emit('page', e)"
     @sort="(e: DataTableSortEvent) => emit('sort', e)"
   >
     <Column header="" style="width: 44px">
@@ -174,6 +175,11 @@ function onRowSelect(event: DataTableRowSelectEvent) {
           />
           <i v-else class="pi pi-file" />
         </div>
+      </template>
+    </Column>
+    <Column header="" style="width: 44px" :exportable="false" class="star-cell">
+      <template #body="{ data }">
+        <FavoriteStar :document-id="data.id" :favorite="!!data.favorite" @click.stop />
       </template>
     </Column>
     <Column field="title" :header="t('document.title')" sortable>

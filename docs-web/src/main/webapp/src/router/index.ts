@@ -222,6 +222,14 @@ const router = createRouter({
               meta: { requiresAdmin: true },
             },
             {
+              path: 'stats',
+              name: 'settings-stats',
+              component: () => import('../views/settings/SettingsStats.vue'),
+              // Admin-only: SettingsStats fires the admin-gated GET /app/stats on mount.
+              // Nav is already admin-hidden; this stops a direct-URL mount as a non-admin.
+              meta: { requiresAdmin: true, wideSettings: true },
+            },
+            {
               path: 'monitoring',
               name: 'settings-monitoring',
               component: () => import('../views/settings/SettingsMonitoring.vue'),

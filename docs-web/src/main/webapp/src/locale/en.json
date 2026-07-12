@@ -177,7 +177,7 @@
     "title_required": "Title is required",
     "title": "Title",
     "description": "Description",
-    "description_hint": "HTML supported",
+    "description_hint": "Rich text supported",
     "creation_date": "Creation date",
     "additional_metadata": "Additional metadata",
     "files": "Files",
@@ -681,6 +681,26 @@
       "total_count": "{count} log entries",
       "no_logs": "No log entries match these filters"
     },
+    "stats": {
+      "title": "Statistics",
+      "description": "Global usage statistics across the whole instance.",
+      "window_label": "Time window",
+      "window_days": "{days} days",
+      "refresh": "Refresh",
+      "total_documents": "Documents",
+      "total_files": "Files (all versions)",
+      "total_users": "Users",
+      "total_tags": "Tags",
+      "total_favorites": "Favorites",
+      "chart_documents_created": "Documents by creation date",
+      "chart_activity": "Activity",
+      "storage_title": "Storage by user",
+      "storage_global": "Global usage: {value}",
+      "storage_user": "User",
+      "storage_used": "Used",
+      "storage_quota": "Quota",
+      "storage_empty": "No users to display."
+    },
     "config": {
       "title": "Configuration",
       "general": "General",
@@ -871,12 +891,10 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "tag_chips": "Click a tag chip in the document list or document view to filter by it instantly.",
-        "saved_filters": "Save a tag, text, and workflow filter combination by name and re-apply it from the search bar.",
-        "relations": "Link related documents together from a new \"Related documents\" section on the document view.",
-        "rotation": "Rotate PDF and image previews on the fly, on top of a page's intrinsic orientation.",
-        "admin_ui": "New admin screens to manage OIDC provider settings and to edit a user's storage quota after creation.",
-        "apidoc_docs": "An interactive API reference at /apidoc, plus a full documentation site covering setup, authentication, and everyday use."
+        "favorites": "Star documents to mark them as favorites, then filter the document list down to just your favorites.",
+        "gallery": "Switch the document list to a gallery view that lays out documents as thumbnail cards.",
+        "rich_descriptions": "Write document descriptions in a rich-text editor with a formatting toolbar for headings, lists, links, and more.",
+        "admin_stats": "A new admin statistics dashboard summarizes documents, storage, users, and activity at a glance."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",
@@ -894,6 +912,11 @@
     "retry": "Retry",
     "tree_view": "Tree",
     "facets_view": "Facets",
+    "view": {
+      "list": "List",
+      "gallery": "Gallery",
+      "toggle_label": "Document view mode"
+    },
     "facets_overflow": "…and {count} more",
     "mode_and": "AND",
     "mode_or": "OR",
@@ -927,6 +950,12 @@
       "delete_title": "Delete saved filter",
       "delete_button": "Delete saved filter \"{name}\"",
       "delete_confirm": "Delete the saved filter \"{name}\"?"
+    },
+    "favorite": {
+      "add": "Add to favorites",
+      "remove": "Remove from favorites",
+      "filter": "Favorites",
+      "toggle_failed": "Could not update your favorites"
     }
   }
 }

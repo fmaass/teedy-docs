@@ -14,6 +14,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.DescriptionTextUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -399,6 +400,14 @@ public class LuceneIndexingHandler implements IndexingHandler {
         if (criteria.getActiveRoute() != null && criteria.getActiveRoute()) {
             criteriaList.add("rs2.RTP_ID_C is not null");
         }
+        if (criteria.getFavoriteUserId() != null) {
+            // Inner join to T_FAVORITE restricts the result to documents the given user has
+            // favorited. Plain inner join (H2 + PostgreSQL portable); the (user, document) pair
+            // is unique so it never multiplies rows. The ACL join above still gates readability,
+            // so a favorite of a document the user can no longer read is filtered out here too.
+            sb.append("join T_FAVORITE fav on fav.FAV_IDDOCUMENT_C = d.DOC_ID_C and fav.FAV_IDUSER_C = :favoriteUserId ");
+            parameterMap.put("favoriteUserId", criteria.getFavoriteUserId());
+        }
 
         criteriaList.add(trashQuery ? "d.DOC_DELETEDATE_D is not null" : "d.DOC_DELETEDATE_D is null");
 
@@ -559,7 +568,11 @@ public class LuceneIndexingHandler implements IndexingHandler {
         luceneDocument.add(new StringField("doctype", "document", Field.Store.YES));
         luceneDocument.add(new TextField("title", document.getTitle(), Field.Store.NO));
         if (document.getDescription() != null) {
-            luceneDocument.add(new TextField("description", document.getDescription(), Field.Store.NO));
+            // Index the tag-stripped plain-text projection: a rich HTML description must be
+            // searchable by the words it contains, never by its markup (an element name like
+            // "script" from a neutralized payload must not become a search term).
+            luceneDocument.add(new TextField("description",
+                    DescriptionTextUtil.toPlainText(document.getDescription()), Field.Store.NO));
         }
         if (document.getSubject() != null) {
             luceneDocument.add(new TextField("subject", document.getSubject(), Field.Store.NO));

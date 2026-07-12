@@ -10,6 +10,7 @@ import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.AuditLogDao;
 import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.FavoriteDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.RelationDao;
 import com.sismics.docs.core.dao.RouteStepDao;
@@ -33,6 +34,7 @@ import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.ExportGuard;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
@@ -114,6 +116,36 @@ public class DocumentResource extends BaseResource {
     private static final Logger log = LoggerFactory.getLogger(DocumentResource.class);
 
     /**
+     * Upper bound on the RAW (pre-sanitization) description a client may submit. A hostile
+     * or malformed payload is rejected here before the sanitizer runs, so sanitization can
+     * never be handed an unbounded string.
+     */
+    private static final int DESCRIPTION_RAW_MAX = 100000;
+
+    /**
+     * Upper bound on the STORED (post-sanitization) description. Matches the widened
+     * DOC_DESCRIPTION_C column (dbupdate-048).
+     */
+    private static final int DESCRIPTION_STORED_MAX = 50000;
+
+    /**
+     * Enforce the description contract at a REST ingress: reject an oversized raw payload,
+     * sanitize to the allowlist, then validate the stored length. Returns null for a null
+     * (unsubmitted) description so a partial update can distinguish "not sent" from "empty".
+     *
+     * @param description Raw description form value (may be null)
+     * @return Sanitized description within the stored bound, or null
+     * @throws ClientException on a too-large raw payload or too-large sanitized result
+     */
+    private static String sanitizeDescription(String description) {
+        // Bound the raw input first so the sanitizer never processes an unbounded string.
+        description = ValidationUtil.validateLength(description, "description", 0, DESCRIPTION_RAW_MAX, true);
+        String sanitized = DescriptionSanitizer.sanitize(description);
+        // The stored contract: sanitized HTML must fit the widened column.
+        return ValidationUtil.validateLength(sanitized, "description", 0, DESCRIPTION_STORED_MAX, true);
+    }
+
+    /**
      * Returns a document.
      *
      * @api {get} /document/:id Get a document
@@ -144,6 +176,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {String} rights Rights
      * @apiSuccess {String} creator Username of the creator
      * @apiSuccess {String} file_id Main file ID
+     * @apiSuccess {Boolean} favorite True if the current user has favorited this document
      * @apiSuccess {Boolean} writable True if the document is writable by the current user
      * @apiSuccess {Object[]} acls List of ACL
      * @apiSuccess {String} acls.id ID
@@ -286,6 +319,12 @@ public class DocumentResource extends BaseResource {
         // Add custom metadata
         MetadataUtil.addMetadata(document, documentId);
 
+        // Add the current user's favorite flag (private per-user state; always false for the
+        // anonymous share principal, which has no favorites).
+        boolean favorite = !principal.isAnonymous()
+                && new FavoriteDao().getByUserAndDocument(principal.getId(), documentId) != null;
+        document.add("favorite", favorite);
+
         // Add files
         if (Boolean.TRUE == files) {
             FileDao fileDao = new FileDao();
@@ -400,6 +439,7 @@ public class DocumentResource extends BaseResource {
      * @apiParam {String} [search[uafter]] The document must have been updated after or at the value moment, accepted format is <code>yyyy-MM-dd</code>
      * @apiParam {String} [search[ubefore]] The document must have been updated before or at the value moment, accepted format is <code>yyyy-MM-dd</code>
      * @apiParam {String} [search[workflow]] If the value is <code>me</code> the document must have an active route, for other values the criteria is ignored
+     * @apiParam {String} [favorites] If the value is <code>me</code> the document must be favorited by the current user, for other values the criteria is ignored
      *
      * @apiSuccess {Number} total Total number of documents
      * @apiSuccess {Object[]} documents List of documents
@@ -414,6 +454,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {Boolean} documents.shared True if the document is shared
      * @apiSuccess {Boolean} documents.active_route True if a route is active on this document
      * @apiSuccess {Boolean} documents.current_step_name Name of the current route step
+     * @apiSuccess {Boolean} documents.favorite True if the current user has favorited this document
      * @apiSuccess {Number} documents.file_count Number of files in this document
      * @apiSuccess {Object[]} documents.tags List of tags
      * @apiSuccess {String} documents.tags.id ID
@@ -464,7 +505,8 @@ public class DocumentResource extends BaseResource {
             @QueryParam("search[uafter]") String searchUpdatedAfter,
             @QueryParam("search[ubefore]") String searchUpdatedBefore,
             @QueryParam("search[searchworkflow]") String searchWorkflow,
-            @QueryParam("search[tagMode]") String searchTagMode
+            @QueryParam("search[tagMode]") String searchTagMode,
+            @QueryParam("favorites") String favorites
     ) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -497,6 +539,10 @@ public class DocumentResource extends BaseResource {
                 searchUpdatedAfter,
                 searchUpdatedBefore,
                 searchWorkflow,
+                // favorites=me restricts the list to the current user's favorited documents. The
+                // criteria carries the user id (resolved here from the principal); the T_FAVORITE
+                // join is built in LuceneIndexingHandler. Any value other than "me" is ignored.
+                "me".equals(favorites) ? principal.getId() : null,
                 allTagDtoList);
 
         if ("or".equalsIgnoreCase(searchTagMode)) {
@@ -509,6 +555,10 @@ public class DocumentResource extends BaseResource {
         } catch (Exception e) {
             throw new ServerException("SearchError", "Error searching in documents", e);
         }
+
+        // The current user's favorited document IDs, fetched once for the per-row favorite flag.
+        Set<String> favoriteDocumentIds = new HashSet<>(
+                new FavoriteDao().getDocumentIdsByUser(principal.getId()));
 
         // Find the files of the documents
         Iterable<String> documentsIds = CollectionUtils.collect(paginatedList.getResultList(), DocumentDto::getId);
@@ -542,6 +592,7 @@ public class DocumentResource extends BaseResource {
                     .add("current_step_name", JsonUtil.nullable(documentDto.getCurrentStepName()))
                     .add("highlight", JsonUtil.nullable(documentDto.getHighlight()))
                     .add("file_count", filesCount)
+                    .add("favorite", favoriteDocumentIds.contains(documentDto.getId()))
                     .add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
 
             if (Boolean.TRUE == files) {
@@ -711,7 +762,8 @@ public class DocumentResource extends BaseResource {
             @FormParam("search[uafter]") String searchUpdatedAfter,
             @FormParam("search[ubefore]") String searchUpdatedBefore,
             @FormParam("search[searchworkflow]") String searchWorkflow,
-            @FormParam("search[tagMode]") String searchTagMode
+            @FormParam("search[tagMode]") String searchTagMode,
+            @FormParam("favorites") String favorites
     ) {
         return list(
                 limit,
@@ -734,7 +786,8 @@ public class DocumentResource extends BaseResource {
                 searchUpdatedAfter,
                 searchUpdatedBefore,
                 searchWorkflow,
-                searchTagMode
+                searchTagMode,
+                favorites
         );
     }
 
@@ -809,7 +862,7 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         title = ValidationUtil.validateLength(title, "title", 1, 100, false);
         language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = ValidationUtil.validateLength(description, "description", 0, 4000, true);
+        description = sanitizeDescription(description);
         subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
         identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
         publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
@@ -935,7 +988,7 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         title = ValidationUtil.validateLength(title, "title", 1, 100, false);
         language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = ValidationUtil.validateLength(description, "description", 0, 4000, true);
+        description = sanitizeDescription(description);
         subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
         identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
         publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
@@ -1109,7 +1162,7 @@ public class DocumentResource extends BaseResource {
             } else {
                 document.setTitle(StringUtils.abbreviate(mailContent.getSubject(), 100));
             }
-            document.setDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000));
+            document.setDescription(sanitizeDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000)));
             document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
             document.setFormat("EML");
             document.setSource("Email");

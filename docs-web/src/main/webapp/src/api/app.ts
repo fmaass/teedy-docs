@@ -84,6 +84,51 @@ export function getLogs(query: LogQuery = {}) {
   return api.get<LogPage>('/app/log', { params }).then((r) => r.data)
 }
 
+/**
+ * Admin usage-statistics dashboard payload (GET /api/app/stats). Admin-only; a single
+ * snapshot with no pagination. `window` is one of 7/30/90 UTC days and drives the length
+ * of the two time series. Counts: documents/tags = non-deleted; files = non-deleted rows
+ * INCLUDING historical versions; users = non-deleted incl. disabled; favorites = raw row
+ * count (aggregate only). documents_created buckets on the document's create date;
+ * activity counts retained audit-log entries for {Document, File, Comment, Route, Tag}.
+ */
+export const STATS_WINDOWS = [7, 30, 90] as const
+export type StatsWindow = (typeof STATS_WINDOWS)[number]
+
+export interface StatsSeriesPoint {
+  date: string
+  count: number
+}
+
+export interface StatsUserStorage {
+  username: string
+  storage_current: number
+  storage_quota: number
+}
+
+export interface AppStats {
+  window: number
+  totals: {
+    documents: number
+    files: number
+    users: number
+    tags: number
+    favorites: number
+  }
+  storage: {
+    global: number
+    per_user: StatsUserStorage[]
+  }
+  series: {
+    documents_created: StatsSeriesPoint[]
+    activity: StatsSeriesPoint[]
+  }
+}
+
+export function getAppStats(window: StatsWindow) {
+  return api.get<AppStats>('/app/stats', { params: { window } }).then((r) => r.data)
+}
+
 // GET /api/app/config_smtp returns the SMTP server config WITHOUT the password.
 // The password is write-only (BL-028 sibling): the GET never returns it and there
 // is NO password_set flag. The POST keeps the stored value when the password field

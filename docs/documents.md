@@ -5,6 +5,31 @@ one or more attached files (PDFs, images, Office files, video). This page covers
 the document lifecycle beyond simple upload — file versions, relations, viewer
 rotation, custom metadata, and the trash.
 
+## Rich descriptions
+
+The document **description** is a rich-text field. The editor supports headings,
+bold, italic, underline, strikethrough, ordered and unordered lists, links,
+blockquotes, and code blocks. A description can hold up to 50000 characters.
+
+Descriptions are stored as **sanitized HTML**. Every write — through the web
+editor, a direct `PUT /api/document` / `POST /api/document/{id}` call, or an
+EML/inbox import — passes through a single server-side sanitizer that keeps only
+the formatting above. Anything else (scripts, styles, iframes, event-handler
+attributes, `javascript:`/`data:` URLs, arbitrary inline styles) is stripped
+before the value is stored. A raw description over 100000 characters is rejected;
+the stored, sanitized result must be 50000 characters or fewer. API clients
+therefore always read back sanitized HTML — this is an intentional contract:
+what you send is not necessarily what is stored.
+
+Two consumers see a plain-text projection of the description rather than its
+markup: full-text **search** (a word inside a tag is findable; a tag name is not)
+and the **PDF export** metadata page (markup stripped, capped at 4000 characters).
+
+Descriptions written before this feature shipped were stored as raw HTML and are
+not rewritten in bulk; an old description is re-sanitized the first time its
+document is edited. Because of this, the viewer also runs a client-side sanitizer
+when rendering a description, so an unsanitized legacy value can never execute.
+
 ## Files and versions
 
 A document holds one or more files. When you upload a replacement for an existing

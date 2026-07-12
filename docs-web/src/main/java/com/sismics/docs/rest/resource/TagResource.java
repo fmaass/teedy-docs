@@ -17,6 +17,14 @@ import com.sismics.rest.util.AclUtil;
 import com.sismics.rest.util.ValidationUtil;
 import org.apache.commons.lang3.StringUtils;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
@@ -53,6 +61,15 @@ public class TagResource extends BaseResource {
      */
     @GET
     @Path("/list")
+    @Operation(
+            summary = "Get tags",
+            description = "Returns the list of all visible tags.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagListResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
     public Response list() {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -112,6 +129,20 @@ public class TagResource extends BaseResource {
      */
     @GET
     @Path("{id: [a-z0-9\\-]+}")
+    @Operation(
+            summary = "Get a tag",
+            description = "Returns a tag.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Tag ID", schema = @Schema(type = "string"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagDetail.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Tag not found")
+            }
+    )
     public Response get(@PathParam("id") String id) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -168,10 +199,24 @@ public class TagResource extends BaseResource {
      * @return Response
      */
     @PUT
+    @Operation(
+            summary = "Create a tag",
+            description = "Creates a new tag.",
+            requestBody = @RequestBody(content = @Content(
+                    schema = @Schema(implementation = TagWriteForm.class))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIdResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
+                            + "IllegalTagName - Spaces and colons are not allowed in tag name; "
+                            + "ParentNotFound - Parent not found")
+            }
+    )
     public Response add(
-            @FormParam("name") String name,
-            @FormParam("color") String color,
-            @FormParam("parent") String parentId) {
+            @Parameter(description = "Name") @FormParam("name") String name,
+            @Parameter(description = "Color") @FormParam("color") String color,
+            @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -249,11 +294,31 @@ public class TagResource extends BaseResource {
      */
     @POST
     @Path("{id: [a-z0-9\\-]+}")
+    @Operation(
+            summary = "Update a tag",
+            description = "Update a tag.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Tag ID", schema = @Schema(type = "string"))
+            },
+            requestBody = @RequestBody(content = @Content(
+                    schema = @Schema(implementation = TagWriteForm.class))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIdResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Tag not found"),
+                    @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
+                            + "IllegalTagName - Spaces and colons are not allowed in tag name; "
+                            + "ParentNotFound - Parent not found; "
+                            + "CircularReference - Circular reference in parent tag")
+            }
+    )
     public Response update(
             @PathParam("id") String id,
-            @FormParam("name") String name,
-            @FormParam("color") String color,
-            @FormParam("parent") String parentId) {
+            @Parameter(description = "Name") @FormParam("name") String name,
+            @Parameter(description = "Color") @FormParam("color") String color,
+            @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -324,6 +389,20 @@ public class TagResource extends BaseResource {
      */
     @DELETE
     @Path("{id: [a-z0-9\\-]+}")
+    @Operation(
+            summary = "Delete a tag",
+            description = "Delete a tag.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Tag ID", schema = @Schema(type = "string"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = StatusResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Tag not found")
+            }
+    )
     public Response delete(
             @PathParam("id") String id) {
         if (!authenticate()) {
@@ -353,6 +432,15 @@ public class TagResource extends BaseResource {
      */
     @GET
     @Path("/stats")
+    @Operation(
+            summary = "Get tag statistics",
+            description = "Returns document counts per tag.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagStatsResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
     public Response stats() {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -383,8 +471,24 @@ public class TagResource extends BaseResource {
      */
     @GET
     @Path("/facets")
-    public Response facets(@QueryParam("tags") String tagsParam,
+    @Operation(
+            summary = "Get tag facet counts",
+            description = "Returns co-occurring tags for faceted navigation. Given selected tags, "
+                    + "returns other tags that appear on matching documents with counts.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagFacetsResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
+    public Response facets(@Parameter(name = "tags", in = ParameterIn.QUERY,
+                                   description = "Comma-separated tag IDs (optional, empty = all tags)")
+                           @QueryParam("tags") String tagsParam,
+                           @Parameter(name = "mode", in = ParameterIn.QUERY,
+                                   description = "Tag combination mode: \"and\" (default) or \"or\"")
                            @QueryParam("mode") String modeParam,
+                           @Parameter(name = "exclude", in = ParameterIn.QUERY,
+                                   description = "Excluded tag IDs (optional, repeated)")
                            @QueryParam("exclude") List<String> excludeParams) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -454,6 +558,16 @@ public class TagResource extends BaseResource {
      */
     @GET
     @Path("/co-occurrence")
+    @Operation(
+            summary = "Get the tag co-occurrence matrix",
+            description = "Returns the full tag co-occurrence matrix. Each entry is a pair of tag IDs "
+                    + "and how many documents share both tags.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagCoOccurrenceResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
     public Response coOccurrence() {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -472,5 +586,111 @@ public class TagResource extends BaseResource {
 
         return Response.ok().entity(Json.createObjectBuilder()
                 .add("pairs", pairs).build()).build();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // OpenAPI schema models (v3.5 build-time generation spike). Documentation-only DTOs referenced
+    // by the @Schema annotations above; they mirror the JSON shapes the resource actually returns.
+    // Not used at runtime — the endpoints build their JSON via Json.createObjectBuilder.
+    // ---------------------------------------------------------------------------------------------
+
+    @Schema(name = "TagWriteForm", description = "Tag create/update form body")
+    private static class TagWriteForm {
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Color")
+        public String color;
+        @Schema(name = "parent", description = "Parent ID")
+        public String parent;
+    }
+
+    @Schema(name = "TagIdResult", description = "Tag ID envelope")
+    private static class TagIdResult {
+        @Schema(description = "Tag ID")
+        public String id;
+    }
+
+    @Schema(name = "StatusResult", description = "Status envelope")
+    private static class StatusResult {
+        @Schema(description = "Status OK")
+        public String status;
+    }
+
+    @Schema(name = "TagListItem", description = "A visible tag")
+    private static class TagListItem {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Color")
+        public String color;
+        @Schema(description = "Parent")
+        public String parent;
+    }
+
+    @Schema(name = "TagListResult", description = "List of tags")
+    private static class TagListResult {
+        @Schema(description = "List of tags")
+        public List<TagListItem> tags;
+    }
+
+    @Schema(name = "TagAcl", description = "A tag ACL entry")
+    private static class TagAcl {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Permission", allowableValues = {"READ", "WRITE"})
+        public String perm;
+        @Schema(description = "Target name")
+        public String name;
+        @Schema(description = "Target type", allowableValues = {"USER", "GROUP", "SHARE"})
+        public String type;
+    }
+
+    @Schema(name = "TagDetail", description = "A tag with ACLs")
+    private static class TagDetail {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Username of the creator")
+        public String creator;
+        @Schema(description = "Color")
+        public String color;
+        @Schema(description = "Parent")
+        public String parent;
+        @Schema(description = "True if the tag is writable by the current user")
+        public Boolean writable;
+        @Schema(description = "List of ACL")
+        public List<TagAcl> acls;
+    }
+
+    @Schema(name = "TagStatsResult", description = "Document counts per tag (tag ID to count)")
+    private static class TagStatsResult {
+        @Schema(description = "Tag ID to document count mapping")
+        public Map<String, Long> stats;
+    }
+
+    @Schema(name = "TagFacetsResult", description = "Facet counts and total matching documents")
+    private static class TagFacetsResult {
+        @Schema(description = "Tag ID to co-occurrence count mapping")
+        public Map<String, Long> facets;
+        @Schema(description = "Total matching documents")
+        public Long total;
+    }
+
+    @Schema(name = "TagCoOccurrencePair", description = "A pair of co-occurring tags")
+    private static class TagCoOccurrencePair {
+        @Schema(description = "First tag ID")
+        public String tagA;
+        @Schema(description = "Second tag ID")
+        public String tagB;
+        @Schema(description = "Document count sharing both tags")
+        public Long count;
+    }
+
+    @Schema(name = "TagCoOccurrenceResult", description = "List of co-occurring tag pairs")
+    private static class TagCoOccurrenceResult {
+        @Schema(description = "List of co-occurring tag pairs")
+        public List<TagCoOccurrencePair> pairs;
     }
 }
