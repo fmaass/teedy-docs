@@ -356,9 +356,13 @@ async function handleForgot() {
 .teedy-login-footer {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 0.5rem 1rem;
+  width: 100%;
+  max-width: 420px;
   margin-top: 1.25rem;
+  text-align: center;
 }
 .teedy-login-footer a {
   font-size: 0.75rem;

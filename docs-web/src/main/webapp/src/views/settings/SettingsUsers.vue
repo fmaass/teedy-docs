@@ -12,7 +12,7 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
-import { formatDate, formatStorage } from '../../utils/formatters'
+import { formatDate, formatStorage, BYTES_PER_GB } from '../../utils/formatters'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
@@ -28,10 +28,50 @@ const { data: usersData, isLoading: loading, isError, refetch } = useQuery({
 
 const users = computed(() => usersData.value ?? [])
 
+// The API stores/expects the storage quota in bytes; admins think in GB. These
+// helpers convert only at the UI boundary — the form models stay in bytes so the
+// API contract is unchanged. BYTES_PER_GB is the SAME binary basis formatStorage
+// uses, so the value entered here reads back identically wherever it is displayed.
+function bytesToGb(bytes: number): number {
+  return bytes / BYTES_PER_GB
+}
+
+function gbToBytes(gb: number): number {
+  return Math.round(gb * BYTES_PER_GB)
+}
+
+// Match the InputNumber's maxFractionDigits so the write-back guard compares the
+// entered value against the SAME rounded GB the field displays.
+const QUOTA_DISPLAY_DIGITS = 2
+
+function roundGb(gb: number): number {
+  return Number(gb.toFixed(QUOTA_DISPLAY_DIGITS))
+}
+
+// A writable GB view over a bytes ref. Reads bytes->GB; on write, if the entered GB
+// equals the GB the field currently DISPLAYS (rounded), the exact stored bytes are
+// kept — InputNumber re-emits its rounded display value on focus/blur even when the
+// admin changed nothing, and re-multiplying that would drift a non-round byte count.
+// Any genuinely different entry is converted to bytes.
+function gbModel(get: () => number, set: (bytes: number) => void) {
+  return computed<number>({
+    get: () => bytesToGb(get()),
+    set: (gb) => {
+      const value = typeof gb === 'number' && !Number.isNaN(gb) ? gb : 0
+      if (roundGb(bytesToGb(get())) === roundGb(value)) return
+      set(gbToBytes(value))
+    },
+  })
+}
+
 // Add user dialog
 const showAddDialog = ref(false)
 const addForm = ref({ username: '', password: '', email: '', storage_quota: 1000000000 })
 const addLoading = ref(false)
+const addQuotaGb = gbModel(
+  () => addForm.value.storage_quota,
+  (bytes) => { addForm.value.storage_quota = bytes },
+)
 
 function openAddDialog() {
   addForm.value = { username: '', password: '', email: '', storage_quota: 1000000000 }
@@ -62,6 +102,10 @@ const showEditDialog = ref(false)
 const editTarget = ref<UserListItem | null>(null)
 const editForm = ref({ email: '', password: '', storage_quota: 0 })
 const editLoading = ref(false)
+const editQuotaGb = gbModel(
+  () => editForm.value.storage_quota,
+  (bytes) => { editForm.value.storage_quota = bytes },
+)
 
 function openEditDialog(user: UserListItem) {
   editTarget.value = user
@@ -262,7 +306,7 @@ function canToggleDisabled(data: UserListItem): boolean {
         </div>
         <div class="form-field">
           <label for="add-user-quota">{{ t('ui.users.storage_quota') }}</label>
-          <InputNumber inputId="add-user-quota" v-model="addForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <InputNumber inputId="add-user-quota" v-model="addQuotaGb" :useGrouping="true" :minFractionDigits="0" :maxFractionDigits="2" :suffix="' ' + t('ui.users.storage_quota_unit')" class="w-full" :min="0" />
           <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(addForm.storage_quota) }) }}</small>
         </div>
       </div>
@@ -285,7 +329,7 @@ function canToggleDisabled(data: UserListItem): boolean {
         </div>
         <div class="form-field">
           <label for="edit-user-quota">{{ t('ui.users.storage_quota') }}</label>
-          <InputNumber inputId="edit-user-quota" v-model="editForm.storage_quota" :useGrouping="true" suffix=" B" class="w-full" :min="0" />
+          <InputNumber inputId="edit-user-quota" v-model="editQuotaGb" :useGrouping="true" :minFractionDigits="0" :maxFractionDigits="2" :suffix="' ' + t('ui.users.storage_quota_unit')" class="w-full" :min="0" />
           <small class="field-hint">{{ t('ui.users.storage_quota_hint', { human: formatStorage(editForm.storage_quota) }) }}</small>
         </div>
       </div>

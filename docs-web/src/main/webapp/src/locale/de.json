@@ -418,7 +418,8 @@
       "failed_disable_user": "Konto konnte nicht deaktiviert werden",
       "failed_enable_user": "Konto konnte nicht aktiviert werden",
       "disable_hint": "Beim Deaktivieren bleiben die Dokumente des Benutzers erhalten (beim Löschen werden sie in den Papierkorb verschoben). Es ist eine weiche Sperre pro Anfrage: Beim erneuten Aktivieren werden alte Sitzungen und API-Schlüssel wiederhergestellt.",
-      "storage_quota": "Speicherkontingent (Bytes)",
+      "storage_quota": "Speicherkontingent (GB)",
+      "storage_quota_unit": "GB",
       "storage_quota_hint": "Maximaler Speicher für dieses Konto ({human})."
     },
     "groups": {

@@ -7,6 +7,7 @@ import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
 import type { UserListItem } from '../../api/user'
+import { formatStorage, BYTES_PER_GB } from '../../utils/formatters'
 
 // Mock the user api module. The flow under test is the disable/enable toggle:
 // it must call updateUser(username, { disabled }) with the correct boolean, and
@@ -195,6 +196,106 @@ describe('SettingsUsers — storage quota field', () => {
     expect(apiMock.updateUser).toHaveBeenCalledWith('alice', {
       email: 'alice@x.com',
       storage_quota: 5000000000,
+    })
+  })
+
+  // Issue #49: the quota field is entered in GB; the API contract stays bytes. The
+  // GB<->bytes conversion happens only at the UI boundary, using the SAME binary GB
+  // basis (1024^3) that formatStorage displays — so the entered value reads back
+  // identically wherever it is shown.
+  it('converts a GB entry to bytes on create (5 GB -> 5 * 1024^3 bytes)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openAddDialog: () => void
+      addForm: { username: string; email: string; password: string; storage_quota: number }
+      addQuotaGb: number
+      handleAdd: () => Promise<void>
+    }
+    vm.openAddDialog()
+    // Default bytes surface as their binary-GB equivalent in the field.
+    expect(vm.addQuotaGb).toBeCloseTo(1000000000 / BYTES_PER_GB, 6)
+    vm.addForm.username = 'carol'
+    vm.addForm.email = 'carol@x.com'
+    vm.addForm.password = 'Password1'
+    // Admin enters 5 GB; the API must receive the binary byte-equivalent.
+    ;(vm as unknown as { addQuotaGb: number }).addQuotaGb = 5
+    expect(vm.addForm.storage_quota).toBe(5 * BYTES_PER_GB)
+    await vm.handleAdd()
+    await flushPromises()
+
+    expect(apiMock.createUser).toHaveBeenCalledWith('carol', 'Password1', 'carol@x.com', 5 * BYTES_PER_GB)
+  })
+
+  // The consistency guard: the bytes produced by entering N GB, when passed back
+  // through formatStorage (the display path), must render as "N.0 GB". This locks the
+  // input basis to the display basis so a decimal/binary mismatch cannot recur.
+  it('entered GB reads back as the same GB via formatStorage (input/display consistency)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openAddDialog: () => void
+      addForm: { storage_quota: number }
+      addQuotaGb: number
+    }
+    vm.openAddDialog()
+    ;(vm as unknown as { addQuotaGb: number }).addQuotaGb = 5
+    expect(formatStorage(vm.addForm.storage_quota)).toBe('5.0 GB')
+  })
+
+  it('shows the existing quota in GB when editing and preserves exact bytes on an untouched save', async () => {
+    // A non-round byte value that has no exact GB representation: an untouched save
+    // must NOT re-multiply it back through GB (which would drift the stored bytes).
+    // 5 GB + 243 B displays as 5.00 GB but is not a whole number of GB.
+    const oddBytes = 5 * BYTES_PER_GB + 243
+    const ODD_USER: UserListItem = { ...ENABLED_USER, storage_quota: oddBytes }
+    apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [ODD_USER] } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openEditDialog: (u: UserListItem) => void
+      editForm: { email: string; password: string; storage_quota: number }
+      editQuotaGb: number
+      handleEdit: () => Promise<void>
+    }
+    vm.openEditDialog(ODD_USER)
+    // Field shows the bytes converted to GB for display.
+    expect(vm.editQuotaGb).toBeCloseTo(oddBytes / BYTES_PER_GB, 6)
+    // InputNumber re-emits the rounded display value (5) without a real change;
+    // the exact stored bytes must survive.
+    ;(vm as unknown as { editQuotaGb: number }).editQuotaGb = 5
+    expect(vm.editForm.storage_quota).toBe(oddBytes)
+    await vm.handleEdit()
+    await flushPromises()
+
+    expect(apiMock.updateUser).toHaveBeenCalledWith('alice', {
+      email: 'alice@x.com',
+      storage_quota: oddBytes,
+    })
+  })
+
+  it('converts a changed GB entry to bytes on edit (2.5 GB -> 2.5 * 1024^3 bytes)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openEditDialog: (u: UserListItem) => void
+      editForm: { email: string; password: string; storage_quota: number }
+      editQuotaGb: number
+      handleEdit: () => Promise<void>
+    }
+    vm.openEditDialog(ENABLED_USER)
+    ;(vm as unknown as { editQuotaGb: number }).editQuotaGb = 2.5
+    expect(vm.editForm.storage_quota).toBe(2.5 * BYTES_PER_GB)
+    await vm.handleEdit()
+    await flushPromises()
+
+    expect(apiMock.updateUser).toHaveBeenCalledWith('alice', {
+      email: 'alice@x.com',
+      storage_quota: 2.5 * BYTES_PER_GB,
     })
   })
 })

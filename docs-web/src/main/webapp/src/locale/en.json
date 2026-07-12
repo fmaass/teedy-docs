@@ -418,7 +418,8 @@
       "failed_disable_user": "Failed to disable account",
       "failed_enable_user": "Failed to enable account",
       "disable_hint": "Disabling preserves the user's documents (deleting trashes them). It is a soft, per-request block: re-enabling resurrects old sessions and API keys.",
-      "storage_quota": "Storage quota (bytes)",
+      "storage_quota": "Storage quota (GB)",
+      "storage_quota_unit": "GB",
       "storage_quota_hint": "Maximum storage for this account ({human})."
     },
     "groups": {
