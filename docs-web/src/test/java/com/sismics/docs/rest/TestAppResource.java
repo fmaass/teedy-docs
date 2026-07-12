@@ -151,6 +151,52 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(0L, countSavedFilters(filterId));
     }
 
+    /**
+     * A document whose main-file pointer (DOC_IDFILE_C) still references a soft-deleted file must
+     * not wedge the storage purge.
+     *
+     * T_DOCUMENT.FK_DOC_IDFILE_C is ON DELETE RESTRICT, so unless clean_storage first clears those
+     * pointers the soft-deleted-file hard-delete throws a constraint violation and aborts the whole
+     * transaction, reclaiming nothing. Reproduce a live document pointing at a soft-deleted file,
+     * purge, and assert the file row is gone and the pointer is null.
+     */
+    @Test
+    public void testCleanStorageClearsMainFilePointerOfDeletedFiles() throws Exception {
+        String adminToken = adminToken();
+
+        // A document with one uploaded file
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Clean storage main file doc").param("language", "eng")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+
+        // The document points at this file as its main file, and the file is soft-deleted while the
+        // (still live) document keeps referencing it via DOC_IDFILE_C — the exact wedged state.
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = :fid where DOC_ID_C = :did",
+                java.util.Map.of("fid", fileId, "did", docId));
+        executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
+                java.util.Map.of("now", new java.util.Date(), "fid", fileId));
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_IDFILE_C = '" + fileId + "'", "id", docId),
+                "the live document must still point at the soft-deleted file");
+
+        // Purge storage: the soft-deleted-file hard-delete must not abort on the DOC_IDFILE_C FK
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        // The soft-deleted file row is gone and the live document's main-file pointer was cleared
+        Assertions.assertEquals(0L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the soft-deleted file must be hard-deleted");
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_IDFILE_C is null", "id", docId),
+                "the live document's main-file pointer must be cleared");
+    }
+
     private long countSavedFilters(String filterId) {
         return readCount("select count(*) from T_SAVED_FILTER where SFL_ID_C = :id", "id", filterId);
     }
