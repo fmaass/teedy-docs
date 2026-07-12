@@ -891,12 +891,10 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "tag_chips": "Klicke in der Dokumentliste oder Dokumentansicht auf einen Schlagwort-Chip, um sofort danach zu filtern.",
-        "saved_filters": "Speichere eine Kombination aus Schlagwort-, Text- und Workflow-Filtern unter einem Namen und rufe sie über die Suchleiste erneut auf.",
-        "relations": "Verknüpfe zusammengehörige Dokumente über den neuen Abschnitt „Verwandte Dokumente“ in der Dokumentansicht.",
-        "rotation": "Drehe PDF- und Bildvorschauen spontan, zusätzlich zur intrinsischen Ausrichtung einer Seite.",
-        "admin_ui": "Neue Administrationsseiten zur Verwaltung der OIDC-Anbietereinstellungen und zum Bearbeiten des Speicherkontingents eines Benutzers nach der Anlage.",
-        "apidoc_docs": "Eine interaktive API-Referenz unter /apidoc sowie eine vollständige Dokumentationsseite zu Einrichtung, Anmeldung und täglicher Nutzung."
+        "favorites": "Markiere Dokumente mit einem Stern als Favoriten und filtere die Dokumentliste anschließend auf nur deine Favoriten.",
+        "gallery": "Schalte die Dokumentliste in eine Galerieansicht um, die Dokumente als Vorschaukacheln anordnet.",
+        "rich_descriptions": "Verfasse Dokumentbeschreibungen in einem Rich-Text-Editor mit Formatierungsleiste für Überschriften, Listen, Links und mehr.",
+        "admin_stats": "Ein neues Administrations-Statistik-Dashboard fasst Dokumente, Speicher, Benutzer und Aktivität auf einen Blick zusammen."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",

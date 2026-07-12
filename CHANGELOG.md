@@ -8,16 +8,30 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
-Database migration `dbupdate-048` widens `DOC_DESCRIPTION_C` from 4000 to 50000 characters (db.version moves to 48).
-
 ### Added
-- Document descriptions are now authored in a rich-text editor (headings, bold, italic, underline, strikethrough, ordered and unordered lists, links, blockquote, and code blocks). The stored length rises from 4000 to 50000 characters.
 
 ### Changed
-- **API contract:** document descriptions are now sanitized server-side on every write. A `description` submitted to `PUT /api/document` or `POST /api/document/{id}` (or arriving via EML/inbox import) is reduced to an allowlist of formatting HTML before storage — any markup outside that set (scripts, styles, iframes, event handlers, non-`http(s)`/`mailto` URLs, arbitrary inline styles) is stripped. A raw description larger than 100000 characters is rejected; the stored sanitized result must be ≤ 50000 characters. API clients therefore always read back sanitized HTML.
+
+### Fixed
 
 ### Security
-- Closed the latent stored-XSS surface on document descriptions: HTML was previously stored raw and sanitized only at render time (leaving third-party API consumers unprotected). Sanitization now happens at write time through a single server-side chokepoint covering every description writer, with the entity-write boundary re-sanitizing as an intrinsic guard. Render-time DOMPurify is retained as a permanent defence-in-depth layer.
+
+## [3.5.0] - 2026-07-12
+
+Two database migrations this release: db.version moves from 46 to 48 (`dbupdate-047` adds the personal-favorites table; `dbupdate-048` widens `DOC_DESCRIPTION_C` from 4000 to 50000 characters).
+
+### Added
+- Personal favorites: star and unstar documents, filter the document list to just your favorites, and star a document directly from its gallery card (#41).
+- A gallery view mode for the document list that lays documents out as thumbnail cards (#39).
+- Document descriptions are now authored in a rich-text editor with a formatting toolbar (headings, bold, italic, underline, strikethrough, ordered and unordered lists, links, blockquote, and code blocks). The stored length rises from 4000 to 50000 characters (#38).
+- An admin statistics dashboard summarizing documents, storage, users, and activity (#40).
+
+### Changed
+- **API contract:** document descriptions are now stored as sanitized HTML — descriptions are sanitized server-side on every write. A `description` submitted to `PUT /api/document` or `POST /api/document/{id}` (or arriving via EML/inbox import) is reduced to an allowlist of formatting HTML before storage — any markup outside that set (scripts, styles, iframes, event handlers, non-`http(s)`/`mailto` URLs, arbitrary inline styles) is stripped. A raw description larger than 100000 characters is rejected; the stored sanitized result must be ≤ 50000 characters. API clients therefore always read back sanitized HTML.
+- The About dialog's "What's new" heading now tracks the project's MAJOR.MINOR version rather than the exact patch version, so a patch release no longer needs to touch the curated highlights.
+
+### Security
+- Closed the latent stored-XSS surface on document descriptions: HTML was previously stored raw and sanitized only at render time (leaving third-party API consumers unprotected). Server-side HTML sanitization now happens at write time through a single chokepoint covering every description writer, with the entity-write boundary re-sanitizing as an intrinsic guard. Render-time DOMPurify is retained as a permanent defence-in-depth layer (#38).
 - **Legacy data:** rows written before this release were stored raw and are NOT migrated; the write-time invariant covers descriptions written from this release onward, and an existing row is re-sanitized the next time its document is edited. The render-side DOMPurify layer therefore remains mandatory for all rows.
 
 ## [3.4.1] - 2026-07-12
@@ -186,6 +200,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1
 [3.4.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.0
 [3.3.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.3.0
