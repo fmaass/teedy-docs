@@ -72,6 +72,15 @@
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-core</artifactId>
     </dependency>
+
+    <!-- Build-time OpenAPI generation spike (v3.5): annotations are compile-visible
+         but scope=provided so no swagger jar is packaged into the WAR. -->
+    <dependency>
+      <groupId>io.swagger.core.v3</groupId>
+      <artifactId>swagger-annotations-jakarta</artifactId>
+      <version>2.2.30</version>
+      <scope>provided</scope>
+    </dependency>
   
     <dependency>
       <groupId>com.h2database</groupId>
@@ -137,6 +146,35 @@
         <directory>src/main/resources</directory>
       </resource>
     </resources>
+
+    <plugins>
+      <!-- Build-time OpenAPI generation spike (v3.5). Generates an OpenAPI spec
+           from the swagger annotations on TagResource into target/generated-openapi/.
+           Restricted to TagResource only; output never leaves the build directory,
+           so the served spec (public/apidoc/openapi.json) stays authoritative. -->
+      <plugin>
+        <groupId>io.swagger.core.v3</groupId>
+        <artifactId>swagger-maven-plugin-jakarta</artifactId>
+        <version>2.2.30</version>
+        <configuration>
+          <outputFileName>openapi</outputFileName>
+          <outputPath>${project.build.directory}/generated-openapi</outputPath>
+          <outputFormat>JSON</outputFormat>
+          <prettyPrint>true</prettyPrint>
+          <resourceClasses>
+            <resourceClass>com.sismics.docs.rest.resource.TagResource</resourceClass>
+          </resourceClasses>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>resolve</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 
   <profiles>
