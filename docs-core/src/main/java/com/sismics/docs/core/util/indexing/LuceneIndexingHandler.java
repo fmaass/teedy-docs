@@ -276,6 +276,8 @@ public class LuceneIndexingHandler implements IndexingHandler {
         boolean targetIdListReferenced = false;
 
         StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C c0, d.DOC_TITLE_C c1, d.DOC_DESCRIPTION_C c2, d.DOC_CREATEDATE_D c3, d.DOC_LANGUAGE_C c4, d.DOC_IDFILE_C, ");
+        // Main file's baked rotation, so the list thumbnail can cache-bust to the oriented raster.
+        sb.append(" (select f.FIL_ROTATION_N from T_FILE f where f.FIL_ID_C = d.DOC_IDFILE_C) fileRotation, ");
         sb.append(" s.count c5, ");
         sb.append(" rs2.RTP_ID_C c7, rs2.RTP_NAME_C, d.DOC_UPDATEDATE_D c8, d.DOC_DELETEDATE_D c9 ");
         sb.append(" from T_DOCUMENT d ");
@@ -429,6 +431,8 @@ public class LuceneIndexingHandler implements IndexingHandler {
             documentDto.setCreateTimestamp(((Timestamp) o[i++]).getTime());
             documentDto.setLanguage((String) o[i++]);
             documentDto.setFileId((String) o[i++]);
+            Number fileRotation = (Number) o[i++];
+            documentDto.setFileRotation(fileRotation == null ? 0 : fileRotation.intValue());
             Number shareCount = (Number) o[i++];
             documentDto.setShared(shareCount != null && shareCount.intValue() > 0);
             documentDto.setActiveRoute(o[i++] != null);

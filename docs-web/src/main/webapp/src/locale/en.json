@@ -232,6 +232,7 @@
     "next_page": "Next page",
     "rotate_left": "Rotate left",
     "rotate_right": "Rotate right",
+    "failed_rotate_file": "Failed to rotate file",
     "delete_document": "Delete document",
     "delete_document_confirm": "Are you sure you want to delete this document?",
     "document_deleted": "Document deleted",
@@ -418,7 +419,8 @@
       "failed_disable_user": "Failed to disable account",
       "failed_enable_user": "Failed to enable account",
       "disable_hint": "Disabling preserves the user's documents (deleting trashes them). It is a soft, per-request block: re-enabling resurrects old sessions and API keys.",
-      "storage_quota": "Storage quota (bytes)",
+      "storage_quota": "Storage quota (GB)",
+      "storage_quota_unit": "GB",
       "storage_quota_hint": "Maximum storage for this account ({human})."
     },
     "groups": {

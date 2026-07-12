@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { getFileVersions, getFileList, getFileUrl, uploadFile, toPercent, type FileVersion } from './file'
+import { getFileVersions, getFileList, getFileUrl, setRotation, uploadFile, toPercent, type FileVersion } from './file'
 
 describe('getFileVersions', () => {
   beforeEach(() => {
@@ -76,6 +76,51 @@ describe('getFileList', () => {
 describe('getFileUrl (version data)', () => {
   it('builds a bare data url for a specific version id with no size', () => {
     expect(getFileUrl('version-7')).toBe('api/file/version-7/data')
+  })
+
+  it('appends the size query param', () => {
+    expect(getFileUrl('f1', 'web')).toBe('api/file/f1/data?size=web')
+    expect(getFileUrl('f1', 'thumb')).toBe('api/file/f1/data?size=thumb')
+  })
+
+  it('appends a ?v=<rotation> cache-bust key for web/thumb when rotation is non-zero', () => {
+    expect(getFileUrl('f1', 'web', undefined, 90)).toBe('api/file/f1/data?size=web&v=90')
+    expect(getFileUrl('f1', 'thumb', undefined, 270)).toBe('api/file/f1/data?size=thumb&v=270')
+  })
+
+  it('omits the cache-bust key when rotation is 0/absent (keeps existing URLs stable)', () => {
+    expect(getFileUrl('f1', 'web', undefined, 0)).toBe('api/file/f1/data?size=web')
+    expect(getFileUrl('f1', 'web')).toBe('api/file/f1/data?size=web')
+  })
+
+  it('does NOT append a cache-bust key for the original file (no size) even with a rotation', () => {
+    // The original bytes are never baked/rotated; only the derived web/thumb rasters are.
+    expect(getFileUrl('f1', undefined, undefined, 90)).toBe('api/file/f1/data')
+  })
+
+  it('threads the share id alongside size and rotation', () => {
+    expect(getFileUrl('f1', 'web', 'share-9', 90)).toBe('api/file/f1/data?size=web&share=share-9&v=90')
+  })
+})
+
+describe('setRotation', () => {
+  beforeEach(() => {
+    mock.post.mockClear()
+  })
+
+  it('POSTs the absolute rotation form-encoded to /file/:id/rotation', async () => {
+    await setRotation('file-1', 90)
+    expect(mock.post).toHaveBeenCalledTimes(1)
+    const [url, body] = mock.post.mock.calls[0]
+    expect(url).toBe('/file/file-1/rotation')
+    expect(body).toBeInstanceOf(URLSearchParams)
+    expect((body as URLSearchParams).get('rotation')).toBe('90')
+  })
+
+  it('sends 0 as a real value (reset to upright)', async () => {
+    await setRotation('file-1', 0)
+    const body = mock.post.mock.calls[0][1] as URLSearchParams
+    expect(body.get('rotation')).toBe('0')
   })
 })
 

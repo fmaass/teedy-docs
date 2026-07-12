@@ -82,9 +82,12 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
 
 import PdfViewer from './PdfViewer.vue'
 
-function mountViewer(src = 'blob:doc-1') {
+function mountViewer(src = 'blob:doc-1', extraProps: Record<string, unknown> = {}) {
   return mount(PdfViewer, {
-    props: { src },
+    // Default to persistable so the rotate controls are present for the rotation-LOGIC tests
+    // (viewport composition, cycling, page-nav persistence). The visibility gating itself has its
+    // own dedicated tests that set persistable explicitly.
+    props: { src, persistable: true, ...extraProps },
     global: {
       plugins: [PrimeVue],
       stubs: {
@@ -221,8 +224,10 @@ describe('PdfViewer rotation (#35)', () => {
     }
   })
 
-  it('resets user rotation to 0 when src changes', async () => {
-    const wrapper = mountViewer()
+  it('resets user rotation to the initialRotation prop when src changes', async () => {
+    // initialRotation is the PERSISTED rotation (the PDF original is not baked; pdf.js applies it).
+    // On a src change the viewer re-seeds from initialRotation, NOT hardcoded 0.
+    const wrapper = mountViewer('blob:doc-1', { initialRotation: 90 })
     await flushPromises()
     await settleRenders()
 
@@ -235,11 +240,60 @@ describe('PdfViewer rotation (#35)', () => {
     await flushPromises()
     await settleRenders()
 
-    // Fresh doc → user rotation reset → back to the intrinsic-only baseline.
+    // Fresh doc → user rotation re-seeded to initialRotation(90) → (intrinsic 90 + 90) = 180.
     expect(viewportCalls.length).toBeGreaterThanOrEqual(2)
     for (const call of viewportCalls) {
-      expect(call.rotation).toBe(normalized(0))
+      expect(call.rotation).toBe(normalized(90))
     }
+  })
+
+  it('seeds the initial rotation from the initialRotation prop', async () => {
+    // A viewer opened on an already-rotated file must render at that rotation from the first frame,
+    // not upright: (intrinsic 90 + initialRotation 180) = 270 on the very first getViewport calls.
+    const wrapper = mountViewer('blob:doc-1', { initialRotation: 180 })
+    await flushPromises()
+    await settleRenders()
+
+    expect(viewportCalls.length).toBeGreaterThanOrEqual(2)
+    for (const call of viewportCalls) {
+      expect(call.rotation).toBe(normalized(180))
+    }
+    wrapper.unmount()
+  })
+
+  it('emits a rotate event with the new absolute rotation when persistable', async () => {
+    const wrapper = mountViewer('blob:doc-1', { initialRotation: 0, persistable: true })
+    await flushPromises()
+    await settleRenders()
+
+    await wrapper.get('[aria-label="ui.rotate_right"]').trigger('click')
+    await flushPromises()
+    await settleRenders()
+
+    const events = wrapper.emitted('rotate')
+    expect(events).toBeTruthy()
+    // First rotate-right from 0 → user rotation 90 (the value the parent persists).
+    expect(events![0]).toEqual([90])
+  })
+
+  it('HIDES the rotate controls entirely when not persistable (read-only/share)', async () => {
+    const wrapper = mountViewer('blob:doc-1', { persistable: false })
+    await flushPromises()
+    await settleRenders()
+
+    // A READ-only/share viewer must not even see the rotate buttons (they persist).
+    expect(wrapper.find('[aria-label="ui.rotate_right"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="ui.rotate_left"]').exists()).toBe(false)
+    expect(wrapper.emitted('rotate')).toBeFalsy()
+  })
+
+  it('SHOWS the rotate controls when persistable (writable)', async () => {
+    const wrapper = mountViewer('blob:doc-1', { persistable: true })
+    await flushPromises()
+    await settleRenders()
+
+    expect(wrapper.find('[aria-label="ui.rotate_right"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="ui.rotate_left"]').exists()).toBe(true)
   })
 
   it('cancels a superseded render when rotation triggers a re-render mid-flight', async () => {

@@ -11,10 +11,21 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString()
 
-const props = defineProps<{
-  src: string
-  maxHeight?: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    src: string
+    maxHeight?: number
+    // The persisted rotation to render with initially (the PDF original is NOT baked; pdf.js
+    // applies this to the viewport). Seeded from the file's stored rotation by the parent.
+    initialRotation?: number
+    // When true, the rotate controls emit a `rotate` event the parent persists. When false
+    // (read-only/share), the controls are hidden.
+    persistable?: boolean
+  }>(),
+  { initialRotation: 0, persistable: false },
+)
+
+const emit = defineEmits<{ rotate: [degrees: number] }>()
 
 const containerRef = ref<HTMLDivElement>()
 const currentPage = ref(1)
@@ -22,9 +33,9 @@ const totalPages = ref(0)
 const loading = ref(true)
 const error = ref(false)
 const scale = ref(1)
-// User-applied rotation (0/90/180/270), document-wide within this viewer: it
-// persists across page navigation and resets only when `src` changes.
-const rotation = ref(0)
+// User-applied rotation (0/90/180/270), document-wide within this viewer: it persists across page
+// navigation and resets to the persisted `initialRotation` only when `src` changes.
+const rotation = ref(props.initialRotation)
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null
@@ -58,7 +69,7 @@ async function loadPdf() {
     pdfDoc = await loadingTask.promise
     totalPages.value = pdfDoc.numPages
     currentPage.value = 1
-    rotation.value = 0
+    rotation.value = props.initialRotation
     loading.value = false
     await nextTick()
     await renderPage(1)
@@ -138,11 +149,13 @@ function nextPage() {
 function rotateLeft() {
   rotation.value = (rotation.value + 270) % 360
   renderPage(currentPage.value)
+  if (props.persistable) emit('rotate', rotation.value)
 }
 
 function rotateRight() {
   rotation.value = (rotation.value + 90) % 360
   renderPage(currentPage.value)
+  if (props.persistable) emit('rotate', rotation.value)
 }
 
 watch(() => props.src, () => {
@@ -177,8 +190,11 @@ onUnmounted(() => {
           <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
           <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
         </template>
-        <Button icon="pi pi-replay" text size="small" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
-        <Button icon="pi pi-refresh" text size="small" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
+        <!-- Rotation persists, so only WRITE users see the controls (READ-only/share must not). -->
+        <template v-if="persistable">
+          <Button icon="pi pi-replay" text size="small" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
+          <Button icon="pi pi-refresh" text size="small" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
+        </template>
         <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
           <i class="pi pi-external-link" />
           <span v-if="totalPages <= 1">{{ t('ui.open_new_tab') }}</span>

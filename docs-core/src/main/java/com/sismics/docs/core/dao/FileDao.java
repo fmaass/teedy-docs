@@ -164,6 +164,7 @@ public class FileDao {
         fileDb.setVersionId(file.getVersionId());
         fileDb.setLatestVersion(file.isLatestVersion());
         fileDb.setSize(file.getSize());
+        fileDb.setRotation(file.getRotation());
 
         return file;
     }

@@ -1699,6 +1699,44 @@
         }
       }
     },
+    "/file/{id}/rotation": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Rotate a file",
+        "operationId": "post_file_id_rotation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rotation": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/file/{id}/process": {
       "post": {
         "tags": [

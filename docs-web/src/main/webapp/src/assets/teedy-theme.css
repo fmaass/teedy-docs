@@ -63,9 +63,11 @@ a:hover {
 /* ── Login ── */
 .teedy-login {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  padding: 1.5rem;
   background: var(--p-surface-50);
 }
 .dark-mode .teedy-login {

@@ -9,6 +9,9 @@ export interface DocumentListItem {
   update_date: number
   language: string
   file_id: string | null
+  // Baked clockwise rotation of the main file's raster (0/90/180/270); drives the list
+  // thumbnail/preview cache-bust so a rotated document shows the oriented raster.
+  file_rotation?: number
   file_count: number
   tags: Array<{ id: string; name: string; color: string }>
   shared: boolean
@@ -57,7 +60,7 @@ export interface DocumentDetail extends DocumentListItem {
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
   metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
-  files?: Array<{ id: string; name: string; mimetype: string; size: number }>
+  files?: Array<{ id: string; name: string; mimetype: string; size: number; rotation?: number }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
   // Current active route step, present only when a route is active on this document AND the caller

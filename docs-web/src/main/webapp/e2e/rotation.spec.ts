@@ -3,158 +3,108 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { unique, createDocument, confirmDanger } from './helpers'
 
-// #35 — view-only PDF/image rotation. These assert a FALSIFIABLE, orientation-
-// observable change (a real applied CSS transform / a re-rendered canvas), NOT "swapped
-// pixel dimensions" alone, and that rotation does NOT persist across a reload
-// (it's display-only).
+// v3.5.2 — PERSISTED, non-destructive PDF/image rotation. Rotation is stored per file and baked
+// into the served `_web`/`_thumb` rasters (images) or applied by pdf.js from the stored value (PDF).
+// These assert PERSISTENCE against the AUTHORITATIVE server state (GET /api/document/:id?files=true
+// returns files[].rotation), that it SURVIVES a reload and a second session, and — secondary —
+// that the served image raster reflects the rotation (its width/height SWAP after 90°; the `_web`
+// raster is aspect-preserving, NOT a square canvas, so the swap is a real geometry change).
 //
-// Fixtures & a server fact that shapes these tests: Teedy renders EVERY uploaded image
-// onto an A4 PDF page and serves the `web` variant as a normalized 1280x1280 SQUARE
-// raster (FileProcessingAsyncListener + ImageFormatHandler). So an image preview's
-// bounding box is intrinsically square regardless of the source aspect — a square
-// image's 90° rotation is NOT observable by box aspect (that was the false premise
-// behind the earlier flaky `boundingBox().width > height` precondition, which could
-// never hold). For images we therefore prove rotation by the REAL applied transform
-// (getComputedStyle().transform is a concrete 90° matrix, not `none`), the sideways
-// stage class, sibling isolation, and reset-on-reload. The genuine aspect-INVERSION
-// proof lives in the PDF test below: PDFs render at their native (portrait) aspect, so
-// rotating one to landscape is a falsifiable geometry change.
-// nearsquare.png (600x560) drives the narrow-column no-clipping test (the sizing caps,
-// not the natural size, determine the rendered box). sample.pdf is a portrait PDF.
+// wide.png (60x20) upscales to an aspect-preserving 1280x427 web raster; before processing finishes
+// the server serves a SQUARE 1280x1280 placeholder, so the tests wait for the real (non-square)
+// raster before rotating. sample.pdf is a portrait PDF; pdf.js re-renders it landscape at the
+// stored rotation.
 
 const here = dirname(fileURLToPath(import.meta.url))
 const widePng = resolve(here, 'fixtures/wide.png')
-const nearSquarePng = resolve(here, 'fixtures/nearsquare.png')
 const samplePdf = resolve(here, 'fixtures/sample.pdf')
 
-// Read the numeric rotate(Ndeg) applied to an element's inline transform.
-async function appliedRotation(el: import('@playwright/test').Locator): Promise<number> {
-  const style = (await el.getAttribute('style')) ?? ''
-  const m = style.match(/rotate\((-?\d+)deg\)/)
-  return m ? Number(m[1]) : 0
+// Authoritative persisted rotation of a document's first file, read from the REST API using the
+// page's authenticated session.
+async function persistedRotation(
+  request: import('@playwright/test').APIRequestContext,
+  documentId: string,
+): Promise<number> {
+  const res = await request.get(`/api/document/${documentId}?files=true`)
+  expect(res.ok()).toBeTruthy()
+  const body = await res.json()
+  return body.files[0].rotation
 }
 
-// The COMPUTED transform (a DOMMatrix string like "matrix(a,b,c,d,e,f)") of a 90°
-// rotation — proves the rotation actually took visual effect at the pixel level, not
-// merely that an inline style string was written. For a pure +90° rotation the matrix
-// is ~matrix(0, 1, -1, 0, 0, 0): a ≈ 0 and b ≈ 1. `none` (no rotation) fails this.
-async function computedIsRotated90(el: import('@playwright/test').Locator): Promise<boolean> {
-  const t = await el.evaluate((node) => getComputedStyle(node as Element).transform)
-  if (!t || t === 'none') return false
-  const m = t.match(/matrix\(([^)]+)\)/)
-  if (!m) return false
-  const [a, b] = m[1].split(',').map((s) => Number(s.trim()))
-  return Math.abs(a) < 0.01 && Math.abs(Math.abs(b) - 1) < 0.01
+// True once the file's async processing has produced its real raster (processing flag cleared).
+async function processingDone(
+  request: import('@playwright/test').APIRequestContext,
+  documentId: string,
+): Promise<boolean> {
+  const res = await request.get(`/api/file/list?id=${documentId}`)
+  if (!res.ok()) return false
+  const body = await res.json()
+  return body.files.length > 0 && body.files.every((f: { processing: boolean }) => !f.processing)
 }
 
-test('image preview rotates (real computed transform), leaves siblings alone, and resets on reload', async ({ page }) => {
+// The natural (intrinsic) dimensions of a served image raster, decoded in the page. A cache-buster
+// is appended so a rotation-changed raster is re-fetched rather than read from the HTTP cache.
+async function rasterDimensions(
+  page: import('@playwright/test').Page,
+  fileId: string,
+  bust: string,
+): Promise<{ width: number; height: number }> {
+  const url = new URL(`api/file/${fileId}/data?size=web&probe=${bust}`, page.url()).toString()
+  return page.evaluate(
+    (src) =>
+      new Promise<{ width: number; height: number }>((res, rej) => {
+        const img = new Image()
+        img.onload = () => res({ width: img.naturalWidth, height: img.naturalHeight })
+        img.onerror = () => rej(new Error('raster load failed'))
+        img.src = src
+      }),
+    url,
+  )
+}
+
+test('image rotation persists to the server and survives a reload', async ({ page }) => {
   const title = unique('rotate-img')
   const { id } = await createDocument(page, title)
 
   await page.goto(`/#/document/view/${id}/content`)
 
-  // Upload the same image TWICE (two sibling cards) to prove per-card isolation.
   const input = page.locator('.p-fileupload-advanced input[type="file"]')
   await input.setInputFiles(widePng)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
-  await input.setInputFiles(widePng)
-  await expect(page.getByText('Files uploaded').first()).toBeVisible()
-
-  // Two preview cards render; wait until both images are actually present.
-  const cards = page.locator('.file-preview-card')
-  await expect(cards).toHaveCount(2)
-  const firstImg = cards.nth(0).locator('.rotatable-image')
-  const secondImg = cards.nth(1).locator('.rotatable-image')
-  await expect(firstImg).toBeVisible()
-  await expect(secondImg).toBeVisible()
-
-  // Upright: neither card carries a rotation (baseline for the change below).
-  expect(await appliedRotation(firstImg)).toBe(0)
-  expect(await computedIsRotated90(firstImg)).toBe(false)
-
-  // Rotate the first card RIGHT (90deg). The stage gains the sideways class and the
-  // image carries a rotate(90deg) transform that is ACTUALLY COMPOSITED (a real 90°
-  // matrix in the computed style) — an orientation-observable change, not a no-op.
-  await cards.nth(0).getByRole('button', { name: 'Rotate right' }).click()
-  await expect(cards.nth(0).locator('.image-preview-stage')).toHaveClass(/is-sideways/)
-  expect(await appliedRotation(firstImg)).toBe(90)
-  await expect.poll(() => computedIsRotated90(firstImg)).toBe(true)
-
-  // Sibling is UNAFFECTED: still upright, no rotation matrix, no sideways class.
-  expect(await appliedRotation(secondImg)).toBe(0)
-  expect(await computedIsRotated90(secondImg)).toBe(false)
-  await expect(cards.nth(1).locator('.image-preview-stage')).not.toHaveClass(/is-sideways/)
-
-  // Reload: rotation is display-only, never persisted → first card returns upright.
-  await page.reload()
-  const firstAfterReload = page.locator('.file-preview-card').nth(0).locator('.rotatable-image')
-  await expect(firstAfterReload).toBeVisible()
-  expect(await appliedRotation(firstAfterReload)).toBe(0)
-  expect(await computedIsRotated90(firstAfterReload)).toBe(false)
-  await expect(page.locator('.file-preview-card').nth(0).locator('.image-preview-stage')).not.toHaveClass(/is-sideways/)
-
-  // Cleanup.
-  await page.goto(`/#/document/view/${id}`)
-  await page.getByRole('button', { name: 'Delete', exact: true }).click()
-  await confirmDanger(page)
-})
-
-test('near-square image is NOT clipped when rotated in a narrow preview column', async ({ page }) => {
-  // Constrain the viewport so the preview column (grid minmax(280px, 1fr)) lays
-  // out WELL under 400px wide. Falsifiability bar: under the old fixed 400px
-  // sideways caps, the 600x560 fixture painted at 400x373 → rotated visual width
-  // 373px. The stage must be narrower than that 373px for the clipping to have
-  // occurred, so a 360px viewport bounds the stage below it structurally.
-  await page.setViewportSize({ width: 360, height: 800 })
-
-  const title = unique('rotate-clip')
-  const { id } = await createDocument(page, title)
-
-  await page.goto(`/#/document/view/${id}/content`)
-  await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(nearSquarePng)
-  await expect(page.getByText('Files uploaded').first()).toBeVisible()
 
   const card = page.locator('.file-preview-card').first()
-  const stage = card.locator('.image-preview-stage')
   const img = card.locator('.rotatable-image')
   await expect(img).toBeVisible()
 
-  // Sanity: the column really is narrower than the old-code rotated width (373px)
-  // — the premise of the clipping scenario. If the layout ever changes so preview
-  // columns can't get this narrow, the scenario no longer bites; fail loudly.
-  const stageBox = await stage.boundingBox()
-  expect(stageBox, 'stage bounding box').not.toBeNull()
-  expect(stageBox!.width, 'stage must be narrower than 373px for this scenario').toBeLessThan(373)
+  // Wait for the async raster to be produced (else the server serves a square placeholder and the
+  // rotate endpoint returns a retriable "still processing" error).
+  await expect.poll(() => processingDone(page.request, id)).toBe(true)
 
-  // Rotate right. Barrier: the transform is applied before measuring.
+  // Baseline: server rotation 0, and the real upright web raster is landscape (60x20 → 1280x427).
+  expect(await persistedRotation(page.request, id)).toBe(0)
+  const upright = await rasterDimensions(page, await fileIdOf(page.request, id), 'up')
+  expect(upright.width).toBeGreaterThan(upright.height)
+
+  // Rotate right 90°. AUTHORITATIVE persistence: the server now reports rotation 90.
   await card.getByRole('button', { name: 'Rotate right' }).click()
-  await expect(stage).toHaveClass(/is-sideways/)
-  expect(await appliedRotation(img)).toBe(90)
+  await expect.poll(() => persistedRotation(page.request, id)).toBe(90)
 
-  // ACCEPTANCE: the rotated image's visual bounding box (boundingBox reflects the
-  // transform) fits entirely inside the stage's box on BOTH axes. overflow:hidden
-  // does not shrink a clipped element's rect, so an overflow here is detected,
-  // not masked. 1px tolerance for rounding.
-  await expect
-    .poll(async () => {
-      const i = await img.boundingBox()
-      const s = await stage.boundingBox()
-      if (!i || !s) return 'no boxes'
-      const fitsHorizontally = i.x >= s.x - 1 && i.x + i.width <= s.x + s.width + 1
-      const fitsVertically = i.y >= s.y - 1 && i.y + i.height <= s.y + s.height + 1
-      return fitsHorizontally && fitsVertically
-        ? true
-        : `img ${JSON.stringify(i)} vs stage ${JSON.stringify(s)}`
-    })
-    .toBe(true)
+  // The <img src> carries the ?v=90 cache-bust so the freshly-oriented raster loads.
+  await expect.poll(async () => (await img.getAttribute('src'))?.includes('v=90')).toBe(true)
 
-  // Rotation actually took visual effect (not a no-op) is already asserted above via
-  // the `.is-sideways` class and appliedRotation === 90. A height>width aspect check is
-  // deliberately NOT made here: a near-square image (600x560) constrained to the narrow
-  // stage renders close to square, so its post-rotation box has no reliable major axis —
-  // asserting one is flaky and, for this fixture, meaningless. Aspect inversion is
-  // covered by the wide-fixture test above; this test's contract is non-clipping, which
-  // the containment poll proves directly.
+  // The regenerated web raster's axes are SWAPPED — full content preserved, no crop (a cropping
+  // rotation would keep the landscape box).
+  const rotated = await rasterDimensions(page, await fileIdOf(page.request, id), 'rot')
+  expect(rotated.width).toBe(upright.height)
+  expect(rotated.height).toBe(upright.width)
+  expect(rotated.height).toBeGreaterThan(rotated.width)
+
+  // Reload: the rotation is PERSISTED, not display-only → the server still reports 90.
+  await page.reload()
+  expect(await persistedRotation(page.request, id)).toBe(90)
+  const afterReload = page.locator('.file-preview-card').first().locator('.rotatable-image')
+  await expect(afterReload).toBeVisible()
+  await expect.poll(async () => (await afterReload.getAttribute('src'))?.includes('v=90')).toBe(true)
 
   // Cleanup.
   await page.goto(`/#/document/view/${id}`)
@@ -162,15 +112,50 @@ test('near-square image is NOT clipped when rotated in a narrow preview column',
   await confirmDanger(page)
 })
 
-test('PDF preview rotation changes the rendered canvas orientation', async ({ page }) => {
+test('a second session sees the persisted image rotation (server-stored, not per-session)', async ({
+  page,
+  browser,
+}) => {
+  const title = unique('rotate-img-2')
+  const { id } = await createDocument(page, title)
+
+  await page.goto(`/#/document/view/${id}/content`)
+  await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(widePng)
+  await expect(page.getByText('Files uploaded').first()).toBeVisible()
+  await expect.poll(() => processingDone(page.request, id)).toBe(true)
+
+  await page.locator('.file-preview-card').first().getByRole('button', { name: 'Rotate right' }).click()
+  await expect.poll(() => persistedRotation(page.request, id)).toBe(90)
+
+  // A DISTINCT authenticated browser context (its own cookie jar — a genuinely separate session,
+  // not just another tab of the same session) reads the rotation from the server, proving it is
+  // stored server-side and not held in the first session's memory. The admin storageState re-auths
+  // this second context.
+  const otherContext = await browser.newContext({ storageState: 'e2e/.auth/admin.json' })
+  try {
+    const res = await otherContext.request.get(`/api/document/${id}?files=true`)
+    expect(res.ok()).toBeTruthy()
+    const body = await res.json()
+    expect(body.files[0].rotation).toBe(90)
+  } finally {
+    await otherContext.close()
+  }
+
+  // Cleanup.
+  await page.goto(`/#/document/view/${id}`)
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+  await confirmDanger(page)
+})
+
+test('PDF rotation persists to the server and re-renders the canvas landscape', async ({ page }) => {
   const title = unique('rotate-pdf')
   const { id } = await createDocument(page, title)
 
   await page.goto(`/#/document/view/${id}/content`)
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(samplePdf)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
+  await expect.poll(() => processingDone(page.request, id)).toBe(true)
 
-  // Wait until the pdf.js canvas has finished its first render (non-zero size).
   const canvas = page.locator('.pdf-canvas-container canvas')
   await expect(canvas).toBeVisible()
   await expect
@@ -180,17 +165,30 @@ test('PDF preview rotation changes the rendered canvas orientation', async ({ pa
     })
     .toBe(true)
 
-  // sample.pdf is portrait (612x792) → the rendered canvas is taller than wide.
+  // sample.pdf is portrait → the rendered canvas is taller than wide.
   const portrait = await canvas.boundingBox()
   expect(portrait!.height).toBeGreaterThan(portrait!.width)
 
-  // Rotate RIGHT 90deg: the canvas re-renders against the rotated viewport and
-  // becomes landscape (width > height) — a falsifiable orientation change of the
-  // ACTUAL rendered pixels, not a swapped-dimensions assertion on the DOM.
+  // Rotate RIGHT 90deg. The canvas re-renders landscape (pdf.js applies the rotation) AND the
+  // rotation is PERSISTED to the server (the PDF original is not baked; the stored value seeds
+  // pdf.js on the next open).
   await page.getByRole('button', { name: 'Rotate right' }).click()
   await expect
     .poll(async () => {
       const box = await canvas.boundingBox()
+      return box ? box.width > box.height : false
+    })
+    .toBe(true)
+  await expect.poll(() => persistedRotation(page.request, id)).toBe(90)
+
+  // Reopen: the stored rotation seeds the viewer, so the canvas renders landscape from the first
+  // frame without any user interaction.
+  await page.reload()
+  const reopened = page.locator('.pdf-canvas-container canvas')
+  await expect(reopened).toBeVisible()
+  await expect
+    .poll(async () => {
+      const box = await reopened.boundingBox()
       return box ? box.width > box.height : false
     })
     .toBe(true)
@@ -200,3 +198,13 @@ test('PDF preview rotation changes the rendered canvas orientation', async ({ pa
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 })
+
+// The first (main) file id of a document, from the authoritative list.
+async function fileIdOf(
+  request: import('@playwright/test').APIRequestContext,
+  documentId: string,
+): Promise<string> {
+  const res = await request.get(`/api/document/${documentId}?files=true`)
+  const body = await res.json()
+  return body.files[0].id
+}

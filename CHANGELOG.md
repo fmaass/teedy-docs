@@ -16,6 +16,22 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.5.2] - 2026-07-12
+
+One database migration this release: db.version moves from 48 to 49 (`dbupdate-049` adds `FIL_ROTATION_N` to store per-file rotation).
+
+### Added
+- Persistent PDF and image rotation: rotation chosen in the document viewer is now stored per file and applied whenever the file is served or thumbnailed, so it survives reloads, sessions, and other viewers — extending the previous view-only rotation (#35). It is non-destructive: the original uploaded bytes are never rewritten and OCR is not re-run; only the derived web and thumbnail rasters are regenerated from the original and rotated.
+- Real-browser (CDP) harness coverage for the 3.5 features — favorites, gallery view, the admin statistics dashboard (including a non-admin 403 check), rich-description sanitization, and persisted rotation — plus index-timing hardening for the existing document-search and open checks.
+
+### Changed
+- User storage quota is entered and displayed in gigabytes (on the same binary unit basis as the size shown elsewhere) instead of raw bytes (#49).
+
+### Fixed
+- Storage cleanup (`/app/batch/clean_storage`) no longer aborts wholesale: a soft-deleted file still referenced by a document's primary-file pointer (a RESTRICT foreign key) rolled back the entire purge and reclaimed nothing; the purge now clears those pointers before deleting the files, on both PostgreSQL and H2 (#54).
+- The rich-text description editor's toolbar is now themed for dark mode: the toolbar icons, the format-picker dropdown, and the link-edit tooltip previously kept the editor library's hardcoded light-theme colors, rendering low-contrast or as bright popovers against a dark background (#38).
+- The custom footer links are aligned (centered below the card) on the login/front page instead of floating beside it (#48).
+
 ## [3.5.0] - 2026-07-12
 
 Two database migrations this release: db.version moves from 46 to 48 (`dbupdate-047` adds the personal-favorites table; `dbupdate-048` widens `DOC_DESCRIPTION_C` from 4000 to 50000 characters).
@@ -200,7 +216,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...HEAD
+[3.5.2]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...v3.5.2
 [3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1
 [3.4.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.0

@@ -85,7 +85,7 @@ const tagOptions = computed(() =>
     </div>
     <div v-else-if="document" class="slide-over-body">
       <div v-if="document.file_id" class="slide-preview">
-        <img :src="getFileUrl(document.file_id, 'web')" alt="" loading="lazy" @error="($event.target as HTMLImageElement).style.display = 'none'" />
+        <img :src="getFileUrl(document.file_id, 'web', undefined, document.file_rotation)" alt="" loading="lazy" @error="($event.target as HTMLImageElement).style.display = 'none'" />
       </div>
 
       <div class="slide-section">
@@ -135,7 +135,7 @@ const tagOptions = computed(() =>
               <div v-if="document.files?.length" class="slide-file-list">
                 <div v-for="file in document.files" :key="file.id" class="slide-file-card">
                   <div v-if="file.mimetype?.startsWith('image/')" class="file-inline-preview">
-                    <img :src="getFileUrl(file.id, 'web')" alt="" loading="lazy" />
+                    <img :src="getFileUrl(file.id, 'web', undefined, file.rotation)" alt="" loading="lazy" />
                   </div>
                   <div class="file-card-row">
                     <i class="pi pi-file" /><span class="file-name">{{ file.name }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>

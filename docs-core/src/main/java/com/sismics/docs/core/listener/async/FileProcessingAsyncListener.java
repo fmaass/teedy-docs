@@ -15,21 +15,14 @@ import com.sismics.docs.core.model.jpa.DocumentTag;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.TagMatchRule;
 import com.sismics.docs.core.model.jpa.User;
-import com.sismics.docs.core.util.DirectoryUtil;
-import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.RasterGenerationUtil;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.format.FormatHandlerUtil;
-import com.sismics.util.ImageUtil;
-import com.sismics.util.Scalr;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.crypto.Cipher;
-import javax.crypto.CipherOutputStream;
-import java.awt.image.BufferedImage;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.MessageFormat;
@@ -171,6 +164,25 @@ public class FileProcessingAsyncListener {
     }
 
     /**
+     * Read a file's current rotation FRESH from the database, in its own short transaction. Called
+     * from inside the raster helper's per-file lock so the value cannot be stale relative to a
+     * concurrent rotate. A file deleted since (no row) contributes 0 (upright).
+     *
+     * @param fileId File ID
+     * @return The stored rotation ({0,90,180,270}), or 0 if the file no longer exists
+     */
+    private int readFreshRotation(String fileId) {
+        AtomicReference<Integer> rotation = new AtomicReference<>(0);
+        TransactionUtil.handle(() -> {
+            File fresh = new FileDao().getActiveById(fileId);
+            if (fresh != null) {
+                rotation.set(fresh.getRotation());
+            }
+        });
+        return rotation.get();
+    }
+
+    /**
      * Extract text content from a file.
      * This is executed outside of a transaction.
      *
@@ -187,28 +199,17 @@ public class FileProcessingAsyncListener {
             return null;
         }
 
-        // Generate file variations
+        // Generate file variations through the single shared, rotation-aware raster helper so a
+        // reprocess or re-upload always bakes the file's currently stored rotation (R11) rather than
+        // reverting it. The rotation is read FRESH from the DB INSIDE the helper's per-file lock (not
+        // from the file loaded in the opening transaction): a reprocess that races a rotate must not
+        // capture a stale 0 and install upright rasters while the DB says 90. This writer does not
+        // update the rotation itself (content is saved in a separate transaction), so its persist step
+        // is a no-op.
         try {
-            Cipher cipher = EncryptionUtil.getEncryptionCipher(user.getPrivateKey());
-            BufferedImage image = formatHandler.generateThumbnail(event.getUnencryptedFile());
-            if (image != null) {
-                // Generate thumbnails from image
-                BufferedImage web = Scalr.resize(image, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, 1280);
-                BufferedImage thumbnail = Scalr.resize(image, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.AUTOMATIC, 256);
-                image.flush();
-
-                // Write "web" encrypted image
-                Path outputFile = DirectoryUtil.getStorageDirectory().resolve(file.getId() + "_web");
-                try (OutputStream outputStream = new CipherOutputStream(Files.newOutputStream(outputFile), cipher)) {
-                    ImageUtil.writeJpeg(web, outputStream);
-                }
-
-                // Write "thumb" encrypted image
-                outputFile = DirectoryUtil.getStorageDirectory().resolve(file.getId() + "_thumb");
-                try (OutputStream outputStream = new CipherOutputStream(Files.newOutputStream(outputFile), cipher)) {
-                    ImageUtil.writeJpeg(thumbnail, outputStream);
-                }
-            }
+            RasterGenerationUtil.regenerateRasters(file.getId(), event.getUnencryptedFile(),
+                    file.getMimeType(), () -> readFreshRotation(file.getId()), user.getPrivateKey(),
+                    () -> { });
         } catch (Throwable e) {
             log.error("Unable to generate thumbnails for: " + file, e);
         }

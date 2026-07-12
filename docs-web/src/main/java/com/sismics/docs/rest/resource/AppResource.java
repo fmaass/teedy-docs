@@ -976,6 +976,12 @@ public class AppResource extends BaseResource {
         q = em.createNativeQuery("delete from T_SAVED_FILTER where SFL_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
         log.info("Deleting {} saved filters of soft deleted users", q.executeUpdate());
 
+        // Clear main-file pointers to soft-deleted files before the file hard-delete
+        // (T_DOCUMENT.FK_DOC_IDFILE_C is ON DELETE RESTRICT, so a document still pointing at a
+        // soft-deleted file would abort the whole purge)
+        q = em.createNativeQuery("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_IDFILE_C in (select FIL_ID_C from T_FILE where FIL_DELETEDATE_D is not null)");
+        log.info("Clearing {} main-file pointers to soft deleted files", q.executeUpdate());
+
         // Hard delete softly deleted data
         log.info("Deleting {} soft deleted document tag links", em.createQuery("delete DocumentTag where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted ACLs", em.createQuery("delete Acl where deleteDate is not null").executeUpdate());

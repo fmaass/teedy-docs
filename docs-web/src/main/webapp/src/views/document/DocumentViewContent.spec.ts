@@ -18,8 +18,18 @@ vi.mock('../../api/document', async (importOriginal) => ({
   listDocuments: (...a: unknown[]) => listDocumentsMock(...a),
   updateDocument: (...a: unknown[]) => updateDocumentMock(...a),
 }))
+const setRotationMock = vi.fn(() => Promise.resolve({ data: { status: 'ok', rotation: 0 } }))
 vi.mock('../../api/file', () => ({
-  getFileUrl: (id: string) => `/api/file/${id}/data`,
+  // Reflect the size + rotation cache-bust so tests can assert the served URL varies by rotation
+  // (the real getFileUrl behaviour). The original file (no size) never carries a cache-bust key.
+  getFileUrl: (id: string, size?: string, _shareId?: string, rotation?: number) => {
+    const params = new URLSearchParams()
+    if (size) params.set('size', size)
+    if ((size === 'web' || size === 'thumb') && rotation) params.set('v', String(rotation))
+    const suffix = params.toString()
+    return `/api/file/${id}/data${suffix ? `?${suffix}` : ''}`
+  },
+  setRotation: (...a: unknown[]) => setRotationMock(...a),
   deleteFile: vi.fn(),
   renameFile: vi.fn(),
   uploadFile: vi.fn(),
@@ -190,5 +200,73 @@ describe('DocumentViewContent — related documents (#36)', () => {
     const keys = invalidateSpy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
     expect(keys).toContainEqual(['document', 'doc-src'])
     expect(keys).toContainEqual(['document', 'rel-gone'])
+  })
+})
+
+// v3.5.2 — persisted, non-destructive image rotation. The served _web raster is physically rotated
+// server-side, so the image must NOT also carry a CSS rotate transform (double-rotation). The stored
+// rotation drives only the cache-bust key and the next rotate value.
+describe('DocumentViewContent — persisted image rotation', () => {
+  beforeEach(() => {
+    setRotationMock.mockReset().mockResolvedValue({ data: { status: 'ok', rotation: 0 } })
+  })
+
+  function imageDoc(rotation?: number): DocumentDetail {
+    return makeDoc({
+      relations: [],
+      files: [{ id: 'img-1', name: 'photo.jpg', mimetype: 'image/jpeg', size: 100, rotation }],
+    } as unknown as Partial<DocumentDetail>)
+  }
+
+  it('does NOT apply a CSS rotate transform to the persisted image (no double-rotation)', () => {
+    const { wrapper } = mountView(imageDoc(90))
+    const img = wrapper.find('.rotatable-image')
+    expect(img.exists()).toBe(true)
+    const style = img.attributes('style') ?? ''
+    expect(style).not.toContain('rotate')
+    // The rotation lives in the URL cache-bust key, not a transform.
+    expect(img.attributes('src')).toBe('/api/file/img-1/data?size=web&v=90')
+  })
+
+  it('an upright image (rotation 0/absent) has no cache-bust key', () => {
+    const { wrapper } = mountView(imageDoc(0))
+    expect(wrapper.find('.rotatable-image').attributes('src')).toBe('/api/file/img-1/data?size=web')
+  })
+
+  it('rotate-right persists the next absolute rotation and invalidates BOTH the document AND the documents list', async () => {
+    const { wrapper, invalidateSpy } = mountView(imageDoc(90))
+    const rotateRight = wrapper
+      .findAll('.image-preview-controls button')
+      .find((b) => b.attributes('aria-label') === 'ui.rotate_right')!
+    await rotateRight.trigger('click')
+    await flushPromises()
+    // 90 + 90 = 180 (absolute, from the persisted value — never compounds).
+    expect(setRotationMock).toHaveBeenCalledWith('img-1', 180)
+    const keys = invalidateSpy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
+    expect(keys).toContainEqual(['document', 'doc-src'])
+    // The list (gallery/table/slide-over rows carry file_rotation + a cache-busted thumb URL) must
+    // also refetch, or every list consumer keeps the stale rotation for the whole staleTime window.
+    expect(keys).toContainEqual(['documents'])
+  })
+
+  it('rotate-left wraps to 270 from an upright image', async () => {
+    const { wrapper } = mountView(imageDoc(0))
+    const rotateLeft = wrapper
+      .findAll('.image-preview-controls button')
+      .find((b) => b.attributes('aria-label') === 'ui.rotate_left')!
+    await rotateLeft.trigger('click')
+    await flushPromises()
+    expect(setRotationMock).toHaveBeenCalledWith('img-1', 270)
+  })
+
+  it('hides the rotate controls when the document is not writable', () => {
+    const { wrapper } = mountView(
+      makeDoc({
+        relations: [],
+        writable: false,
+        files: [{ id: 'img-1', name: 'photo.jpg', mimetype: 'image/jpeg', size: 100 }],
+      } as unknown as Partial<DocumentDetail>),
+    )
+    expect(wrapper.find('.image-preview-controls').exists()).toBe(false)
   })
 })

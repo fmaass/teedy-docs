@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
@@ -250,6 +252,16 @@ describe('Login — configurable footer links', () => {
     expect(anchors[0].attributes('rel')).toBe('noopener noreferrer')
     expect(anchors[1].text()).toBe('Privacy')
     expect(anchors[1].attributes('rel')).toBe('noopener noreferrer')
+
+    // The footer is a direct child of the centered .teedy-login container appearing
+    // AFTER the card (a stacked sibling, not nested inside it). Guards the #48 DOM
+    // structure the column layout relies on.
+    const container = wrapper.find('.teedy-login')
+    const children = Array.from(container.element.children)
+    const cardIndex = children.findIndex((el) => el.classList.contains('teedy-login-card'))
+    const footerIndex = children.findIndex((el) => el.classList.contains('teedy-login-footer'))
+    expect(cardIndex).toBeGreaterThanOrEqual(0)
+    expect(footerIndex).toBeGreaterThan(cardIndex)
   })
 
   it('renders NOTHING when footer_links is absent', async () => {
@@ -265,5 +277,19 @@ describe('Login — configurable footer links', () => {
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.find('.teedy-login-footer').exists()).toBe(false)
+  })
+
+  // #48 regression guard: the container MUST lay its children out as a centered
+  // column. The bug was the default row direction, which floated the footer beside
+  // the card instead of stacking it below. jsdom applies no external CSS, so assert
+  // the rule at its source in the global theme.
+  it('.teedy-login lays out as a centered column (guards the row-flex regression)', () => {
+    // Vitest runs from the webapp project root (process.cwd()).
+    const css = readFileSync(resolve(process.cwd(), 'src/assets/teedy-theme.css'), 'utf8')
+    const rule = css.match(/\.teedy-login\s*\{([^}]*)\}/)
+    expect(rule).not.toBeNull()
+    const body = rule![1]
+    expect(body).toMatch(/flex-direction:\s*column/)
+    expect(body).toMatch(/align-items:\s*center/)
   })
 })
