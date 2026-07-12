@@ -77,7 +77,7 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
           <span class="card-thumb">
             <img
               v-if="doc.file_id && !failedThumbs.has(doc.file_id)"
-              :src="getFileUrl(doc.file_id, 'thumb')"
+              :src="getFileUrl(doc.file_id, 'thumb', undefined, doc.file_rotation)"
               alt=""
               loading="lazy"
               @error="onThumbError(doc.file_id!)"

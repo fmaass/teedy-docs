@@ -26,8 +26,8 @@ const sanitizedDescription = computed(() =>
   doc.value?.description ? DOMPurify.sanitize(doc.value.description) : '',
 )
 
-function fileUrl(fileId: string, size?: 'web') {
-  return getFileUrl(fileId, size, props.shareId)
+function fileUrl(fileId: string, size?: 'web', rotation?: number) {
+  return getFileUrl(fileId, size, props.shareId, rotation)
 }
 
 function isImage(mime: string) {
@@ -64,7 +64,7 @@ function formatDate(ts: number) {
         <div v-if="doc.files?.length" class="share-files">
           <template v-for="file in doc.files" :key="file.id">
             <div v-if="isImage(file.mimetype)" class="share-file-card">
-              <img :src="fileUrl(file.id, 'web')" :alt="file.name" loading="lazy" />
+              <img :src="fileUrl(file.id, 'web', file.rotation)" :alt="file.name" loading="lazy" />
               <div class="share-file-label">{{ file.name }}</div>
             </div>
           </template>

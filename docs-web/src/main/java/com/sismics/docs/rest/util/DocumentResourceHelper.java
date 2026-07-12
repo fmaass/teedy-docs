@@ -156,6 +156,7 @@ public final class DocumentResourceHelper {
                 .add("create_date", documentDto.getCreateTimestamp())
                 .add("description", JsonUtil.nullable(documentDto.getDescription()))
                 .add("file_id", JsonUtil.nullable(documentDto.getFileId()))
+                .add("file_rotation", documentDto.getFileRotation())
                 .add("id", documentDto.getId())
                 .add("language", documentDto.getLanguage())
                 .add("shared", documentDto.getShared())

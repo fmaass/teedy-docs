@@ -232,6 +232,7 @@
     "next_page": "Next page",
     "rotate_left": "Rotate left",
     "rotate_right": "Rotate right",
+    "failed_rotate_file": "Failed to rotate file",
     "delete_document": "Delete document",
     "delete_document_confirm": "Are you sure you want to delete this document?",
     "document_deleted": "Document deleted",

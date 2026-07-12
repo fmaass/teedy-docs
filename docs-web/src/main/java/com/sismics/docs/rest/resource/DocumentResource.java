@@ -446,6 +446,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {String} documents.id ID
      * @apiSuccess {String} documents.highlight Search highlight (for fulltext search)
      * @apiSuccess {String} documents.file_id Main file ID
+     * @apiSuccess {Number} documents.file_rotation Baked clockwise rotation of the main file's raster
      * @apiSuccess {String} documents.title Title
      * @apiSuccess {String} documents.description Description
      * @apiSuccess {Number} documents.create_date Create date (timestamp)

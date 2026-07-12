@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048). */
-    private static final int TARGET_VERSION = 48;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049). */
+    private static final int TARGET_VERSION = 49;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -74,7 +74,8 @@ public class TestPopulatedMigration {
     /**
      * The full scenario, dialect-agnostic (DbOpenHelper derives the dialect from the
      * connection): build a v36 schema, seed it, prove the retired rows exist, run the
-     * real upgrade, prove the retired rows are gone and the retained rows survived.
+     * real upgrade, prove the retired rows are gone and the retained rows survived. The FIL_ROTATION_N
+     * column added by 049 is proven to round-trip on the retained file row (5j).
      */
     private static void runScenario(Connection connection) throws Exception {
         // 1. Build the schema up to db.version=36 using the REAL migration scripts.
@@ -101,7 +102,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 48).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 49).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,11 +119,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-048 must run cleanly on a populated database");
+                "migrations 037-049 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 48 after the full upgrade path");
+                "DB_VERSION must be 49 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -306,6 +307,33 @@ public class TestPopulatedMigration {
             Assertions.assertTrue(rs.next(), "048 widened column: the retained document row must exist");
             Assertions.assertEquals(longDescription, rs.getString(1),
                     "048 must widen DOC_DESCRIPTION_C so a >4000-char description round-trips unchanged");
+        }
+
+        // 5j. Migration 049 added T_FILE.FIL_ROTATION_N (int, default 0). Prove the retained file row
+        //     defaulted to 0 (no crash on the ADD COLUMN over populated data) AND that a rotation
+        //     value round-trips unchanged on BOTH dialects. Pre-049 the column does not exist, so this
+        //     update would fail on an unknown column.
+        connection.commit();
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "select FIL_ROTATION_N from T_FILE where FIL_ID_C = 'file-1'");
+             ResultSet rs = ps.executeQuery()) {
+            Assertions.assertTrue(rs.next(), "049 added column: the retained file row must exist");
+            Assertions.assertEquals(0, rs.getInt(1),
+                    "049 ADD COLUMN must default the existing file row's rotation to 0");
+        }
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "update T_FILE set FIL_ROTATION_N = ? where FIL_ID_C = 'file-1'")) {
+            ps.setInt(1, 270);
+            Assertions.assertEquals(1, ps.executeUpdate(),
+                    "049 column: the rotation update must affect the retained file row");
+        }
+        connection.commit();
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "select FIL_ROTATION_N from T_FILE where FIL_ID_C = 'file-1'");
+             ResultSet rs = ps.executeQuery()) {
+            Assertions.assertTrue(rs.next(), "049 column: the retained file row must exist");
+            Assertions.assertEquals(270, rs.getInt(1),
+                    "049 must add FIL_ROTATION_N so a rotation value round-trips unchanged");
         }
 
         connection.commit();

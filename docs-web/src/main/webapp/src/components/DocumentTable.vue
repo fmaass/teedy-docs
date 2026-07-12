@@ -78,7 +78,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
         <div class="doc-thumb">
           <img
             v-if="data.file_id"
-            :src="getFileUrl(data.file_id, 'thumb')"
+            :src="getFileUrl(data.file_id, 'thumb', undefined, data.file_rotation)"
             alt=""
             loading="lazy"
             @error="($event.target as HTMLImageElement).style.display = 'none'"
@@ -168,7 +168,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
         <div class="doc-thumb">
           <img
             v-if="data.file_id"
-            :src="getFileUrl(data.file_id, 'thumb')"
+            :src="getFileUrl(data.file_id, 'thumb', undefined, data.file_rotation)"
             alt=""
             loading="lazy"
             @error="($event.target as HTMLImageElement).style.display = 'none'"

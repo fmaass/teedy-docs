@@ -44,6 +44,8 @@ export interface FileListItem {
   document_id: string | null
   create_date: number
   size: number
+  // Baked clockwise rotation (0/90/180/270); drives the ?v= cache-bust on web/thumb URLs.
+  rotation?: number
 }
 
 /**
@@ -68,12 +70,37 @@ export function uploadFile(
   })
 }
 
-export function getFileUrl(fileId: string, size?: 'web' | 'thumb' | 'content', shareId?: string) {
+/**
+ * Build the URL for a file's data. For the derived `web`/`thumb` rasters a `rotation` bakes into
+ * the served bytes, so a `?v=<rotation>` cache-bust key is appended when a rotation is supplied —
+ * the raster is cached long-lived (private, ~1yr), so every consumer must vary the URL by rotation
+ * to pick up the freshly-oriented image after a rotate. The key is omitted for the original file
+ * (`content`/no size — never rotated) and when rotation is 0/absent (keeps existing URLs stable).
+ */
+export function getFileUrl(
+  fileId: string,
+  size?: 'web' | 'thumb' | 'content',
+  shareId?: string,
+  rotation?: number,
+) {
   const query = new URLSearchParams()
   if (size) query.set('size', size)
   if (shareId) query.set('share', shareId)
+  if ((size === 'web' || size === 'thumb') && rotation) query.set('v', String(rotation))
   const suffix = query.toString()
   return `api/file/${fileId}/data${suffix ? `?${suffix}` : ''}`
+}
+
+/**
+ * Persist an absolute clockwise rotation ({0,90,180,270}) for a file via
+ * POST /api/file/:id/rotation (form-encoded). The backend regenerates the web/thumb rasters from
+ * the ORIGINAL upright bytes, baking in the rotation; the original file and OCR content are
+ * untouched. Idempotent — re-sending the same value never compounds.
+ */
+export function setRotation(fileId: string, degrees: number) {
+  const params = new URLSearchParams()
+  params.set('rotation', String(degrees))
+  return api.post(`/file/${fileId}/rotation`, params)
 }
 
 export function deleteFile(fileId: string) {

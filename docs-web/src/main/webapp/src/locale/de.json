@@ -232,6 +232,7 @@
     "next_page": "Nächste Seite",
     "rotate_left": "Nach links drehen",
     "rotate_right": "Nach rechts drehen",
+    "failed_rotate_file": "Datei konnte nicht gedreht werden",
     "delete_document": "Dokument löschen",
     "delete_document_confirm": "Möchten Sie dieses Dokument wirklich löschen?",
     "document_deleted": "Dokument gelöscht",

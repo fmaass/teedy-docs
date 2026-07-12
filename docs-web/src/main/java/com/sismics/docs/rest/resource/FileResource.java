@@ -34,6 +34,7 @@ import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.RasterGenerationUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -323,6 +324,108 @@ public class FileResource extends BaseResource {
     }
 
     /**
+     * Rotate a file (persisted, non-destructive).
+     *
+     * @api {post} /file/:id/rotation Rotate a file
+     * @apiDescription Store an absolute clockwise display rotation ({0,90,180,270}) for the file and
+     * regenerate its web/thumbnail rasters from the ORIGINAL upright bytes. The original encrypted
+     * upload is never re-encoded and OCR is not re-run, so the operation is reversible (rotation=0
+     * regenerates upright) and idempotent (re-applying the same value never compounds).
+     * @apiName PostFileRotation
+     * @apiGroup File
+     * @apiParam {String} id File ID
+     * @apiParam {Number="0","90","180","270"} rotation Absolute clockwise rotation in degrees
+     * @apiSuccess {String} status Status OK
+     * @apiSuccess {Number} rotation The normalized stored rotation
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Rotation must be a multiple of 90
+     * @apiError (server) ProcessingError The file is still processing or the raster regeneration failed
+     * @apiPermission user
+     * @apiVersion 1.12.0
+     *
+     * @param id File ID
+     * @param rotationStr Absolute clockwise rotation in degrees
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/rotation")
+    public Response rotation(@PathParam("id") String id,
+                             @FormParam("rotation") String rotationStr) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        // WRITE on the parent document — a READ-only or share user must be rejected.
+        File file = findFile(id, null, PermType.WRITE);
+
+        // Validate: a multiple of 90, normalized to {0,90,180,270}.
+        ValidationUtil.validateRequired(rotationStr, "rotation");
+        int rotation;
+        try {
+            rotation = Integer.parseInt(rotationStr.trim());
+        } catch (NumberFormatException e) {
+            throw new ClientException("ValidationError", "rotation must be an integer multiple of 90");
+        }
+        if (rotation % 90 != 0) {
+            throw new ClientException("ValidationError", "rotation must be a multiple of 90");
+        }
+        int normalized = ((rotation % 360) + 360) % 360;
+
+        // The rasters must already exist before we can regenerate from the original — if the file's
+        // initial async processing has not produced them yet, return a retriable error rather than
+        // racing the processor.
+        if (FileUtil.isProcessingFile(id)) {
+            throw new ServerException("ProcessingError", "The file is still processing, retry shortly");
+        }
+
+        // Regenerate from the ORIGINAL bytes with the OWNER's key, baking in the new rotation, then
+        // persist FIL_ROTATION_N as the LAST step inside the shared per-file lock (DB = source of
+        // truth). On any failure before the DB commit the prior rasters + DB row are left intact.
+        // Accepted residual risk: a crash in the swap→commit window can leave a cosmetically-stale
+        // thumbnail (never data loss — the original bytes and OCR are untouched), self-healed by
+        // re-rotating. See RasterGenerationUtil for the single-instance atomicity model.
+        UserDao userDao = new UserDao();
+        User owner = userDao.getById(file.getUserId());
+        java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(id);
+        java.nio.file.Path unencryptedFile = null;
+        try {
+            unencryptedFile = EncryptionUtil.decryptFile(storedFile, owner.getPrivateKey());
+            final java.nio.file.Path original = unencryptedFile;
+            // The rotate endpoint IS the writer of intent: it bakes and persists the requested value.
+            // The whole read/generate/swap/persist sequence runs under the shared per-file lock, and
+            // the DB update is the LAST step inside it. The rotation is COMMITTED inside the lock (via
+            // RasterGenerationUtil.commitRotation → TransactionUtil.commit, which commits the request
+            // transaction then re-begins a fresh one) so a subsequent lock-holder — a reprocess reading
+            // rotation fresh inside its own lock — always observes the committed value. Without this
+            // in-lock commit the request transaction would only commit later in RequestContextFilter,
+            // OUTSIDE the lock, and a reprocess that acquired the lock in that window would read the
+            // stale committed rotation and install upright rasters over a DB that already says rotated.
+            // The early commit is safe because NO fallible transactional work follows the rotation
+            // commit in this endpoint (only the JSON response is built), so nothing after it can fail
+            // and require rolling the rotation back.
+            RasterGenerationUtil.regenerateRasters(id, original, file.getMimeType(), () -> normalized,
+                    owner.getPrivateKey(), () -> RasterGenerationUtil.commitRotation(file, normalized));
+        } catch (Exception e) {
+            throw new ServerException("ProcessingError", "Error rotating this file", e);
+        } finally {
+            // Delete the decrypted plaintext temp on both success and failure. decryptFile returns
+            // the stored file unchanged when the private key is null (tests) — never delete that.
+            if (unencryptedFile != null && !unencryptedFile.equals(storedFile)) {
+                try {
+                    Files.deleteIfExists(unencryptedFile);
+                } catch (IOException e) {
+                    log.warn("Unable to delete temporary file: " + unencryptedFile, e);
+                }
+            }
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok")
+                .add("rotation", normalized);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
      * Process a file manually.
      *
      * @api {post} /file/:id/process Process a file manually
@@ -496,6 +599,7 @@ public class FileResource extends BaseResource {
      * @apiSuccess {String} files.mimetype MIME type
      * @apiSuccess {String} files.document_id Document ID
      * @apiSuccess {String} files.create_date Create date (timestamp)
+     * @apiSuccess {Number} files.rotation Baked clockwise rotation of the file's raster
      * @apiSuccess {String} files.size File size (in bytes)
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) NotFound Document not found

@@ -17,6 +17,12 @@ public class DocumentDto {
     private String fileId;
 
     /**
+     * Clockwise rotation baked into the main file's rasters (0 when none/absent). Exposed so the
+     * list thumbnail/preview can cache-bust to the freshly-oriented raster.
+     */
+    private Integer fileRotation;
+
+    /**
      * Title.
      */
     private String title;
@@ -130,6 +136,18 @@ public class DocumentDto {
 
     public DocumentDto setFileId(String fileId) {
         this.fileId = fileId;
+        return this;
+    }
+
+    /**
+     * @return The main file's baked rotation; 0 when the document has no main file or it is upright.
+     */
+    public int getFileRotation() {
+        return fileRotation == null ? 0 : fileRotation;
+    }
+
+    public DocumentDto setFileRotation(Integer fileRotation) {
+        this.fileRotation = fileRotation;
         return this;
     }
 

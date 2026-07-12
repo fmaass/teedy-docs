@@ -71,6 +71,15 @@ public class File implements Loggable {
     private Integer order;
     
     /**
+     * Clockwise display rotation baked into the derived _web/_thumb rasters, in degrees.
+     * One of {0, 90, 180, 270}. A legacy/absent value is treated as 0 (upright) — see
+     * {@link #getRotation()}. The original encrypted bytes are never re-encoded; this drives
+     * only raster regeneration and the client cache-bust key.
+     */
+    @Column(name = "FIL_ROTATION_N")
+    private Integer rotation;
+
+    /**
      * Version ID.
      */
     @Column(name = "FIL_IDVERSION_C")
@@ -183,6 +192,17 @@ public class File implements Loggable {
 
     public void setPrivateKey(String privateKey) {
         this.privateKey = privateKey;
+    }
+
+    /**
+     * @return The stored rotation normalized to one of {0, 90, 180, 270}; 0 when never set.
+     */
+    public int getRotation() {
+        return rotation == null ? 0 : rotation;
+    }
+
+    public void setRotation(Integer rotation) {
+        this.rotation = rotation;
     }
 
     public String getVersionId() {

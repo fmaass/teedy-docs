@@ -36,6 +36,7 @@ public class RestUtil {
                     .add("mimetype", fileDb.getMimeType())
                     .add("document_id", JsonUtil.nullable(fileDb.getDocumentId()))
                     .add("create_date", fileDb.getCreateDate().getTime())
+                    .add("rotation", fileDb.getRotation())
                     .add("size", fileSize);
         } catch (IOException e) {
             throw new ServerException("FileError", "Unable to get the size of " + fileDb.getId(), e);
