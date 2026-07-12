@@ -305,6 +305,14 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     // "me" activates; arrays/empty/unknown values are inactive and canonicalized
     // away (never re-emitted).
     if (route.query.workflow === 'me') query.workflow = 'me'
+    // `favorites=me` (the "Favorites" filter) is likewise component-owned by
+    // DocumentList, NOT this serializer — but the canonical URL rewrite (syncUrl)
+    // builds from this one function. Without preserving it here, a tag/text/mode
+    // change would strip an active favorites filter from the URL, and
+    // DocumentList's route watcher would then disable it. Same validated contract
+    // as workflow: only the scalar string "me" survives; everything else is
+    // canonicalized away.
+    if (route.query.favorites === 'me') query.favorites = 'me'
     return query
   }
 

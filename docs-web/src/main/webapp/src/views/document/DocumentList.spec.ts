@@ -178,18 +178,50 @@ vi.mock('@tanstack/vue-query', () => ({
 // --- Stub child components. DocumentTable re-emits row-click / row-dblclick so we
 //     can drive both interaction paths from the test without PrimeVue internals. ---
 const DocumentTableStub = defineComponent({
-  props: ['documents'],
-  emits: ['rowClick', 'rowDblclick', 'rowContextMenu', 'page', 'sort'],
+  props: ['documents', 'selection'],
+  emits: ['rowClick', 'rowDblclick', 'rowContextMenu', 'sort', 'update:selection'],
   setup(props, { emit }) {
     return () =>
       h('div', { class: 'doc-table-stub' }, [
         h('button', { class: 'single', onClick: () => emit('rowClick', props.documents[0]) }, 'single'),
         h('button', { class: 'single-b', onClick: () => emit('rowClick', props.documents[1]) }, 'single-b'),
         h('button', { class: 'double', onClick: () => emit('rowDblclick', props.documents[0]) }, 'double'),
+        // Drive a real multi-selection through the v-model:selection binding so the
+        // parent's selectedDocs (and thus the bulk toolbar) reflects it — used by the
+        // B2 gallery-clears-selection test.
+        h('button', { class: 'select-one', onClick: () => emit('update:selection', [props.documents[0]]) }, 'select'),
       ])
   },
 })
 const passthrough = defineComponent({ setup: () => () => h('div') })
+
+// Gallery stub mirrors the table stub's re-emit contract so a test can drive the
+// open paths in gallery mode too, and so a test can assert WHICH mode is rendered.
+const DocumentGalleryStub = defineComponent({
+  props: ['documents'],
+  emits: ['cardClick', 'cardDblclick'],
+  setup(props, { emit }) {
+    return () =>
+      h('div', { class: 'doc-gallery-stub' }, [
+        h('button', { class: 'card-single', onClick: () => emit('cardClick', props.documents[0]) }, 'card'),
+        h('button', { class: 'card-double', onClick: () => emit('cardDblclick', props.documents[0]) }, 'card-dbl'),
+      ])
+  },
+})
+
+// SelectButton stub: exposes the current model value and lets a test switch modes
+// by emitting update:modelValue (the real control's contract).
+const SelectButtonStub = defineComponent({
+  props: ['modelValue', 'options'],
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () =>
+      h('div', { class: 'view-toggle-stub', 'data-mode': props.modelValue }, [
+        h('button', { class: 'to-gallery', onClick: () => emit('update:modelValue', 'gallery') }, 'gallery'),
+        h('button', { class: 'to-list', onClick: () => emit('update:modelValue', 'list') }, 'list'),
+      ])
+  },
+})
 
 import DocumentList from './DocumentList.vue'
 import { listDocuments } from '../../api/document'
@@ -200,6 +232,9 @@ function mountView() {
     global: {
       stubs: {
         DocumentTable: DocumentTableStub,
+        DocumentGallery: DocumentGalleryStub,
+        SelectButton: SelectButtonStub,
+        Paginator: passthrough,
         DocumentSlideOver: {
           props: ['visible', 'document'],
           template: '<div class="slide-over" v-if="visible">{{ document?.id }}</div>',
@@ -207,7 +242,7 @@ function mountView() {
         DocumentSearchBar: passthrough,
         SavedFilters: passthrough,
         TagFilterChips: passthrough,
-        BulkActionBar: passthrough,
+        BulkActionBar: { template: '<div class="bulk-bar-stub" />' },
         EmptyState: passthrough,
         ErrorState: passthrough,
         ContextMenu: passthrough,
@@ -555,5 +590,90 @@ describe('DocumentList — favorites=me filter round-trip (#41)', () => {
     mountView()
     await flushPromises()
     expect(routerReplace).not.toHaveBeenCalled()
+  })
+})
+
+// --- #39: the list ⇄ gallery view mode. A pure RENDER mode over the SAME query,
+//     pagination, and filter state — persisted to localStorage; gallery is
+//     browse/open-only (no selection). These assert the toggle persists and
+//     restores, both modes consume identical state, and switching to gallery clears
+//     any live multi-selection (B2) so the bulk toolbar is unreachable there. ---
+describe('DocumentList — list ⇄ gallery view mode (#39)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    localStorage.clear()
+  })
+
+  it('defaults to list mode and renders the table, not the gallery', () => {
+    const wrapper = mountView()
+    expect(wrapper.find('.doc-table-stub').exists()).toBe(true)
+    expect(wrapper.find('.doc-gallery-stub').exists()).toBe(false)
+  })
+
+  it('switching to gallery renders the gallery and persists the choice to localStorage', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.to-gallery').trigger('click')
+    // The gallery now renders and the table is gone — a pure mode switch.
+    expect(wrapper.find('.doc-gallery-stub').exists()).toBe(true)
+    expect(wrapper.find('.doc-table-stub').exists()).toBe(false)
+    // Persisted under the documented key.
+    expect(localStorage.getItem('teedy_document_view_mode')).toBe('gallery')
+  })
+
+  it('restores gallery mode from localStorage on a fresh mount (reload)', () => {
+    localStorage.setItem('teedy_document_view_mode', 'gallery')
+    const wrapper = mountView()
+    // A cold mount reads the persisted mode → gallery renders immediately.
+    expect(wrapper.find('.doc-gallery-stub').exists()).toBe(true)
+    expect(wrapper.find('.doc-table-stub').exists()).toBe(false)
+  })
+
+  it('both modes consume the SAME list query state (identical params, one shared query)', async () => {
+    // The list query runs once at mount. Switching the render mode must NOT change
+    // the params — it is a view over the same TanStack query/pagination/filters, not
+    // a separate fetch. Prove it by asserting the mount-time params, then that a mode
+    // switch drives the same open-document paths (same `documents` reach both modes).
+    mockRoute.query = { favorites: 'me' }
+    filterState.debouncedText = 'invoice'
+    const wrapper = mountView()
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.favorites).toBe('me')
+    expect(listParams.search).toBe('invoice')
+
+    // Switch to gallery: the SAME documents render (the card carries the first doc),
+    // and opening a card drives the same navigation path as a table row.
+    await wrapper.find('.to-gallery').trigger('click')
+    await wrapper.find('.card-double').trigger('click')
+    expect(routerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'document-view', params: { id: 'doc-42' } }),
+    )
+  })
+
+  it('B2: switching to gallery clears an active list selection so the bulk toolbar is unreachable', async () => {
+    const wrapper = mountView()
+    // Make a real multi-selection in the table through the v-model:selection binding —
+    // this is exactly what the production DocumentTable emits on a checkbox click.
+    await wrapper.find('.select-one').trigger('click')
+    await flushPromises()
+    // The bulk toolbar renders while a selection is live in list mode (it renders
+    // solely from selectedDocs.length).
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(true)
+
+    // Switch to gallery: the selection is cleared, so the bulk toolbar detaches and
+    // no bulk-mutation control is reachable in gallery mode.
+    await wrapper.find('.to-gallery').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
+    // And the toolbar stays gone (selection empty) — switching back to list confirms
+    // there is nothing to act on.
+    await wrapper.find('.to-list').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
   })
 })

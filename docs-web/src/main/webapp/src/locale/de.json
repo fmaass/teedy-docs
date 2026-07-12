@@ -914,6 +914,11 @@
     "retry": "Erneut versuchen",
     "tree_view": "Baum",
     "facets_view": "Facetten",
+    "view": {
+      "list": "Liste",
+      "gallery": "Galerie",
+      "toggle_label": "Dokumentansicht"
+    },
     "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",
     "mode_or": "ODER",

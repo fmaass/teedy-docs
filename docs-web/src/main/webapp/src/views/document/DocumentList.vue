@@ -8,7 +8,7 @@ import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
 import ContextMenu from 'primevue/contextmenu'
 import type { MenuItem } from 'primevue/menuitem'
-import type { DataTablePageEvent, DataTableSortEvent } from 'primevue/datatable'
+import type { DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
@@ -17,7 +17,11 @@ import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
 import SavedFilters from '../../components/SavedFilters.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import ToggleButton from 'primevue/togglebutton'
+import SelectButton from 'primevue/selectbutton'
+import Paginator from 'primevue/paginator'
+import type { PageState } from 'primevue/paginator'
 import DocumentTable from '../../components/DocumentTable.vue'
+import DocumentGallery from '../../components/DocumentGallery.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 import BulkActionBar from '../../components/BulkActionBar.vue'
 import { updateDocument, deleteDocument } from '../../api/document'
@@ -45,6 +49,24 @@ const PAGE_SIZE = 20
 const pageOffset = ref(0)
 const sortField = ref<string>('create_date')
 const sortOrder = ref<number>(-1)
+
+// --- View mode (list | gallery) ---
+//
+// A pure RENDER mode over the SAME query/pagination/filter state — the table and
+// the gallery consume identical `documents`, and one hoisted Paginator (below)
+// drives `pageOffset` for both. Persisted to localStorage exactly like the tag
+// panel's `teedy_tag_view_mode` so a user's choice survives reloads.
+type DocumentViewMode = 'list' | 'gallery'
+const VIEW_MODE_KEY = 'teedy_document_view_mode'
+const viewMode = ref<DocumentViewMode>(
+  localStorage.getItem(VIEW_MODE_KEY) === 'gallery' ? 'gallery' : 'list',
+)
+watch(viewMode, (v) => localStorage.setItem(VIEW_MODE_KEY, v))
+
+const viewModeOptions = computed(() => [
+  { label: t('ui.view.list'), value: 'list', icon: 'pi pi-list' },
+  { label: t('ui.view.gallery'), value: 'gallery', icon: 'pi pi-th-large' },
+])
 
 // "Assigned to me" workflow filter — sent as the typed search[searchworkflow]=me param, NOT folded
 // into the free-text search. Restricts the list to documents whose current step targets the viewer.
@@ -165,7 +187,10 @@ const totalCount = computed(() => documentsData.value?.total ?? 0)
 // with no paginator to escape. Clamp back to the last valid page when that happens.
 useClampedOffset(documentsData, isLoading, pageOffset, PAGE_SIZE)
 
-function onPage(event: DataTablePageEvent) {
+// The single hoisted Paginator (rendered by this view) drives pagination for BOTH
+// the table and the gallery — the tables no longer own a paginator. PageState.first
+// is the new absolute offset.
+function onPage(event: PageState) {
   pageOffset.value = event.first
 }
 
@@ -371,6 +396,16 @@ function clearSelection() {
   selectedDocs.value = []
 }
 
+// B2: gallery mode is browse/open-only (pinned) and exposes NO selection
+// affordance. Any multi-selection made in the table must not survive a switch to
+// gallery — otherwise the bulk toolbar (which renders solely from
+// selectedDocs.length) would stay reachable while no way exists to change or clear
+// the selection. Clear it on entry to gallery so no bulk-mutation control is
+// reachable outside list mode.
+watch(viewMode, (mode) => {
+  if (mode === 'gallery') clearSelection()
+})
+
 function summariseBulk(result: BulkResult) {
   const succeeded = result.succeeded.length
   const failed = result.failed.length
@@ -466,11 +501,29 @@ function bulkDelete() {
           size="small"
         />
         <SavedFilters />
+        <SelectButton
+          :model-value="viewMode"
+          :options="viewModeOptions"
+          optionLabel="label"
+          optionValue="value"
+          dataKey="value"
+          :allowEmpty="false"
+          :aria-label="t('ui.view.toggle_label')"
+          class="view-mode-toggle"
+          @update:model-value="(v: DocumentViewMode) => { if (v) viewMode = v }"
+        >
+          <template #option="{ option }">
+            <i :class="option.icon" aria-hidden="true" />
+            <span class="view-mode-label">{{ option.label }}</span>
+          </template>
+        </SelectButton>
       </div>
     </div>
 
-    <!-- Bulk action toolbar -->
-    <div v-if="selectedDocs.length" class="bulk-bar-wrap">
+    <!-- Bulk action toolbar. Render-guarded on list mode (B2): gallery is
+         browse/open-only, so the toolbar is structurally unreachable there — the
+         clear-on-entry watcher below is belt-and-suspenders, not the sole guard. -->
+    <div v-if="viewMode === 'list' && selectedDocs.length" class="bulk-bar-wrap">
       <BulkActionBar
         :count="selectedDocs.length"
         :tags="tf.allTags"
@@ -482,25 +535,44 @@ function bulkDelete() {
       />
     </div>
 
-    <!-- Document list -->
+    <!-- Document list / gallery — both render the SAME paginated result set. -->
     <div class="doc-area">
-      <DocumentTable
-        v-if="documents.length || isLoading"
-        v-model:selection="selectedDocs"
-        selectable
-        :documents="documents"
-        :totalRecords="totalCount"
-        :rows="PAGE_SIZE"
-        :first="pageOffset"
-        :loading="isLoading"
-        :sortField="sortField"
-        :sortOrder="sortOrder"
-        @row-click="openDocument"
-        @row-dblclick="openDocumentFull"
-        @row-context-menu="onDocContextMenu"
-        @page="onPage"
-        @sort="onSort"
-      />
+      <template v-if="documents.length || isLoading">
+        <DocumentTable
+          v-if="viewMode === 'list'"
+          v-model:selection="selectedDocs"
+          selectable
+          :documents="documents"
+          :totalRecords="totalCount"
+          :rows="PAGE_SIZE"
+          :first="pageOffset"
+          :loading="isLoading"
+          :sortField="sortField"
+          :sortOrder="sortOrder"
+          @row-click="openDocument"
+          @row-dblclick="openDocumentFull"
+          @row-context-menu="onDocContextMenu"
+          @sort="onSort"
+        />
+
+        <DocumentGallery
+          v-else
+          :documents="documents"
+          :loading="isLoading"
+          @card-click="openDocument"
+          @card-dblclick="openDocumentFull"
+        />
+
+        <!-- One hoisted Paginator serves BOTH modes (the tables no longer own one). -->
+        <Paginator
+          v-if="totalCount > PAGE_SIZE"
+          :first="pageOffset"
+          :rows="PAGE_SIZE"
+          :totalRecords="totalCount"
+          class="doc-paginator"
+          @page="onPage"
+        />
+      </template>
 
       <ErrorState v-else-if="isError" @retry="refetch()" />
 
