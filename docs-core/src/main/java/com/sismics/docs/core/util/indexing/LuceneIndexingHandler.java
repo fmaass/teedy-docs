@@ -14,6 +14,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.DescriptionTextUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -567,7 +568,11 @@ public class LuceneIndexingHandler implements IndexingHandler {
         luceneDocument.add(new StringField("doctype", "document", Field.Store.YES));
         luceneDocument.add(new TextField("title", document.getTitle(), Field.Store.NO));
         if (document.getDescription() != null) {
-            luceneDocument.add(new TextField("description", document.getDescription(), Field.Store.NO));
+            // Index the tag-stripped plain-text projection: a rich HTML description must be
+            // searchable by the words it contains, never by its markup (an element name like
+            // "script" from a neutralized payload must not become a search term).
+            luceneDocument.add(new TextField("description",
+                    DescriptionTextUtil.toPlainText(document.getDescription()), Field.Store.NO));
         }
         if (document.getSubject() != null) {
             luceneDocument.add(new TextField("subject", document.getSubject(), Field.Store.NO));

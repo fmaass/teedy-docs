@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, fillDescription } from './helpers'
 
 // Per-document activity (DocumentViewActivity -> GET /auditlog?document=<id>). The
 // Activity tab renders audit rows in a table (date / user / message columns, where the
@@ -28,7 +28,7 @@ test("a document's activity tab shows audit entries scoped to that document", as
     decoyId = decoy.id
     await page.goto(`/#/document/edit/${decoyId}`)
     await expect(page.locator('#edit-title')).toBeVisible()
-    await page.locator('#edit-desc').fill(`decoy-edit-${Date.now()}`)
+    await fillDescription(page, `decoy-edit-${Date.now()}`)
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(new RegExp(`#/document/view/${decoyId}`))
 
@@ -46,7 +46,7 @@ test("a document's activity tab shows audit entries scoped to that document", as
     // Edit the target — this writes another audit row scoped to the target.
     await page.goto(`/#/document/edit/${targetId}`)
     await expect(page.locator('#edit-title')).toBeVisible()
-    await page.locator('#edit-desc').fill(`target-edit-${Date.now()}`)
+    await fillDescription(page, `target-edit-${Date.now()}`)
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(new RegExp(`#/document/view/${targetId}`))
 

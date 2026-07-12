@@ -24,13 +24,24 @@ export async function createDocument(
   await page.goto('/#/document/add')
   await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
   await page.locator('#edit-title').fill(title)
-  if (opts.description) await page.locator('#edit-desc').fill(opts.description)
+  if (opts.description) await fillDescription(page, opts.description)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   const url = page.url()
   const id = url.split('/document/view/')[1].split(/[/?#]/)[0]
   return { id, title }
+}
+
+// Type plain text into the rich description editor (a Quill contenteditable, not a
+// native textarea). The editor lives under the #edit-desc Editor root; its editable
+// region is `.ql-editor`. Quill stores typed text as a paragraph, so the rendered
+// description round-trips as `<p>text</p>`.
+export async function fillDescription(page: Page, text: string): Promise<void> {
+  const editor = page.locator('#edit-desc .ql-editor')
+  await expect(editor).toBeVisible()
+  await editor.click()
+  await editor.fill(text)
 }
 
 // Delete a document (currently on its full view) via the header Delete button +

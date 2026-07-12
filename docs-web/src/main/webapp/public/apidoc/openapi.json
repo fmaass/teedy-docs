@@ -908,7 +908,8 @@
                     "type": "string"
                   },
                   "description": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Stored as sanitized HTML (rich text). Any markup outside the allowed set (headings, bold, italic, underline, strike, lists, links, blockquote, code blocks) is stripped server-side on write. Max 50000 stored characters."
                   },
                   "subject": {
                     "type": "string"
@@ -1363,7 +1364,8 @@
                     "type": "string"
                   },
                   "description": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Stored as sanitized HTML (rich text). Any markup outside the allowed set (headings, bold, italic, underline, strike, lists, links, blockquote, code blocks) is stripped server-side on write. Max 50000 stored characters."
                   },
                   "subject": {
                     "type": "string"

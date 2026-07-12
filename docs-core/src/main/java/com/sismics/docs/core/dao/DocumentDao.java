@@ -5,6 +5,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.util.AuditLogUtil;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 
@@ -300,7 +301,9 @@ public class DocumentDao {
 
         // Update the document
         documentDb.setTitle(document.getTitle());
-        documentDb.setDescription(document.getDescription());
+        // Intrinsic guard: re-sanitize at the entity write boundary so no caller can bypass
+        // description sanitization. Idempotent over already-sanitized input.
+        documentDb.setDescription(DescriptionSanitizer.sanitize(document.getDescription()));
         documentDb.setSubject(document.getSubject());
         documentDb.setIdentifier(document.getIdentifier());
         documentDb.setPublisher(document.getPublisher());

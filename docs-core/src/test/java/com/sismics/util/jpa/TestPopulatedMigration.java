@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==47, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==48, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047). */
-    private static final int TARGET_VERSION = 47;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048). */
+    private static final int TARGET_VERSION = 48;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -101,7 +101,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 47).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 48).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -118,11 +118,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-047 must run cleanly on a populated database");
+                "migrations 037-048 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 47 after the full upgrade path");
+                "DB_VERSION must be 48 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -286,6 +286,27 @@ public class TestPopulatedMigration {
         // case-insensitive precheck gives users identical behaviour on both dialects. A
         // true-race differently-cased duplicate is only possible on PostgreSQL and is
         // documented as acceptable.
+
+        // 5i. Migration 048 widened T_DOCUMENT.DOC_DESCRIPTION_C from varchar(4000) to
+        //     varchar(50000) so a rich sanitized-HTML description fits. Prove a value
+        //     LONGER than the old 4000-char limit now stores AND round-trips unchanged on
+        //     BOTH dialects. Pre-048 this update would have overflowed the column.
+        connection.commit();
+        String longDescription = "d".repeat(5000);
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "update T_DOCUMENT set DOC_DESCRIPTION_C = ? where DOC_ID_C = 'doc-1'")) {
+            ps.setString(1, longDescription);
+            Assertions.assertEquals(1, ps.executeUpdate(),
+                    "048 widened column: the long-description update must affect the retained document");
+        }
+        connection.commit();
+        try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                "select DOC_DESCRIPTION_C from T_DOCUMENT where DOC_ID_C = 'doc-1'");
+             ResultSet rs = ps.executeQuery()) {
+            Assertions.assertTrue(rs.next(), "048 widened column: the retained document row must exist");
+            Assertions.assertEquals(longDescription, rs.getString(1),
+                    "048 must widen DOC_DESCRIPTION_C so a >4000-char description round-trips unchanged");
+        }
 
         connection.commit();
     }

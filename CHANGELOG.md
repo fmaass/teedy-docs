@@ -6,6 +6,20 @@ All notable changes to this fork are documented here. The format is based on
 
 Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teedy-docs/releases).
 
+## [Unreleased]
+
+Database migration `dbupdate-048` widens `DOC_DESCRIPTION_C` from 4000 to 50000 characters (db.version moves to 48).
+
+### Added
+- Document descriptions are now authored in a rich-text editor (headings, bold, italic, underline, strikethrough, ordered and unordered lists, links, blockquote, and code blocks). The stored length rises from 4000 to 50000 characters.
+
+### Changed
+- **API contract:** document descriptions are now sanitized server-side on every write. A `description` submitted to `PUT /api/document` or `POST /api/document/{id}` (or arriving via EML/inbox import) is reduced to an allowlist of formatting HTML before storage — any markup outside that set (scripts, styles, iframes, event handlers, non-`http(s)`/`mailto` URLs, arbitrary inline styles) is stripped. A raw description larger than 100000 characters is rejected; the stored sanitized result must be ≤ 50000 characters. API clients therefore always read back sanitized HTML.
+
+### Security
+- Closed the latent stored-XSS surface on document descriptions: HTML was previously stored raw and sanitized only at render time (leaving third-party API consumers unprotected). Sanitization now happens at write time through a single server-side chokepoint covering every description writer, with the entity-write boundary re-sanitizing as an intrinsic guard. Render-time DOMPurify is retained as a permanent defence-in-depth layer.
+- **Legacy data:** rows written before this release were stored raw and are NOT migrated; the write-time invariant covers descriptions written from this release onward, and an existing row is re-sanitized the next time its document is edited. The render-side DOMPurify layer therefore remains mandatory for all rows.
+
 ## [3.4.1] - 2026-07-12
 
 No database migration this release: db.version stays at 46. A patch release folding in five fixes surfaced by the post-3.4.0 audit, plus extended end-to-end coverage and a hardened test harness.

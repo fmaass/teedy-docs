@@ -177,7 +177,7 @@
     "title_required": "Title is required",
     "title": "Title",
     "description": "Description",
-    "description_hint": "HTML supported",
+    "description_hint": "Rich text supported",
     "creation_date": "Creation date",
     "additional_metadata": "Additional metadata",
     "files": "Files",

@@ -34,6 +34,7 @@ import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.ExportGuard;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
@@ -113,6 +114,36 @@ public class DocumentResource extends BaseResource {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(DocumentResource.class);
+
+    /**
+     * Upper bound on the RAW (pre-sanitization) description a client may submit. A hostile
+     * or malformed payload is rejected here before the sanitizer runs, so sanitization can
+     * never be handed an unbounded string.
+     */
+    private static final int DESCRIPTION_RAW_MAX = 100000;
+
+    /**
+     * Upper bound on the STORED (post-sanitization) description. Matches the widened
+     * DOC_DESCRIPTION_C column (dbupdate-048).
+     */
+    private static final int DESCRIPTION_STORED_MAX = 50000;
+
+    /**
+     * Enforce the description contract at a REST ingress: reject an oversized raw payload,
+     * sanitize to the allowlist, then validate the stored length. Returns null for a null
+     * (unsubmitted) description so a partial update can distinguish "not sent" from "empty".
+     *
+     * @param description Raw description form value (may be null)
+     * @return Sanitized description within the stored bound, or null
+     * @throws ClientException on a too-large raw payload or too-large sanitized result
+     */
+    private static String sanitizeDescription(String description) {
+        // Bound the raw input first so the sanitizer never processes an unbounded string.
+        description = ValidationUtil.validateLength(description, "description", 0, DESCRIPTION_RAW_MAX, true);
+        String sanitized = DescriptionSanitizer.sanitize(description);
+        // The stored contract: sanitized HTML must fit the widened column.
+        return ValidationUtil.validateLength(sanitized, "description", 0, DESCRIPTION_STORED_MAX, true);
+    }
 
     /**
      * Returns a document.
@@ -831,7 +862,7 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         title = ValidationUtil.validateLength(title, "title", 1, 100, false);
         language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = ValidationUtil.validateLength(description, "description", 0, 4000, true);
+        description = sanitizeDescription(description);
         subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
         identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
         publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
@@ -957,7 +988,7 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         title = ValidationUtil.validateLength(title, "title", 1, 100, false);
         language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = ValidationUtil.validateLength(description, "description", 0, 4000, true);
+        description = sanitizeDescription(description);
         subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
         identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
         publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
@@ -1131,7 +1162,7 @@ public class DocumentResource extends BaseResource {
             } else {
                 document.setTitle(StringUtils.abbreviate(mailContent.getSubject(), 100));
             }
-            document.setDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000));
+            document.setDescription(sanitizeDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000)));
             document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
             document.setFormat("EML");
             document.setSource("Email");

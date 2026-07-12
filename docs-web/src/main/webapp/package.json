@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "lint": "eslint \"src/**/*.{vue,ts}\"",
     "i18n:check": "node scripts/check-i18n-parity.mjs",
+    "fixtures:quill": "node scripts/export-quill-fixtures.mjs",
     "test:unit": "vitest run",
     "test:e2e": "playwright test"
   },
@@ -22,6 +23,7 @@
     "pinia": "~3.0.4",
     "primeicons": "^7.0.0",
     "primevue": "^4.3.0",
+    "quill": "2.0.3",
     "vue": "~3.5.38",
     "vue-i18n": "^11.3.0",
     "vue-router": "^4.5.0"

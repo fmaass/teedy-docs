@@ -33,6 +33,7 @@ import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.DocumentUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.TransactionUtil;
@@ -240,7 +241,7 @@ public class InboxService extends AbstractScheduledService {
         else
           document.setUserId("admin");
         document.setTitle(StringUtils.abbreviate(subject, 100));
-        document.setDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000));
+        document.setDescription(DescriptionSanitizer.sanitize(StringUtils.abbreviate(mailContent.getMessage(), 4000)));
         document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
         document.setFormat("EML");
         document.setSource("Inbox");

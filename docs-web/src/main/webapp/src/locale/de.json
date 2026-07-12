@@ -177,7 +177,7 @@
     "title_required": "Titel ist erforderlich",
     "title": "Titel",
     "description": "Beschreibung",
-    "description_hint": "HTML wird unterstützt",
+    "description_hint": "Rich-Text wird unterstützt",
     "creation_date": "Erstellungsdatum",
     "additional_metadata": "Zusätzliche Metadaten",
     "files": "Dateien",
