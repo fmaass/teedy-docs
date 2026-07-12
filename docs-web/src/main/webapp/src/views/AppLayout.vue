@@ -75,6 +75,7 @@ const settingsAdminItems = computed(() => [
   { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
   { label: t('ui.workflow_admin.title'), icon: 'pi pi-sitemap', to: '/settings/workflow', name: 'settings-workflow' },
   { label: t('ui.vocabulary.title'), icon: 'pi pi-list', to: '/settings/vocabulary', name: 'settings-vocabulary' },
+  { label: t('ui.stats.title'), icon: 'pi pi-chart-bar', to: '/settings/stats', name: 'settings-stats' },
   { label: t('ui.monitoring.title'), icon: 'pi pi-chart-line', to: '/settings/monitoring', name: 'settings-monitoring' },
   { label: t('ui.inbox.title'), icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
 ])

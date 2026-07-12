@@ -681,6 +681,26 @@
       "total_count": "{count} Protokolleinträge",
       "no_logs": "Keine Protokolleinträge entsprechen diesen Filtern"
     },
+    "stats": {
+      "title": "Statistik",
+      "description": "Globale Nutzungsstatistiken der gesamten Instanz.",
+      "window_label": "Zeitraum",
+      "window_days": "{days} Tage",
+      "refresh": "Aktualisieren",
+      "total_documents": "Dokumente",
+      "total_files": "Dateien (alle Versionen)",
+      "total_users": "Benutzer",
+      "total_tags": "Schlagwörter",
+      "total_favorites": "Favoriten",
+      "chart_documents_created": "Dokumente nach Erstelldatum",
+      "chart_activity": "Aktivität",
+      "storage_title": "Speicher nach Benutzer",
+      "storage_global": "Globale Nutzung: {value}",
+      "storage_user": "Benutzer",
+      "storage_used": "Belegt",
+      "storage_quota": "Kontingent",
+      "storage_empty": "Keine Benutzer vorhanden."
+    },
     "config": {
       "title": "Konfiguration",
       "general": "Allgemein",

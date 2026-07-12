@@ -81,6 +81,33 @@ recorded. View it via `GET /api/auditlog` (admin only), with optional `limit`,
 `offset`, and sort parameters. Each entry records the action type, the affected
 entity, a message, the timestamp, and the acting user.
 
+## Statistics dashboard
+
+Admins get a global usage dashboard at **Settings → Statistics** (backed by
+`GET /api/app/stats?window=` — admin only, `window` is one of `7`, `30`, `90` days;
+any other value is a `400`). It is a read-only snapshot with a manual refresh and window
+selector — there is no auto-refresh.
+
+- **Totals** — documents (non-deleted), files (non-deleted rows **including historical
+  versions**, so it is higher than the document count), users (non-deleted, **including
+  disabled** ones, which still hold storage), tags (non-deleted), and favorites (a raw
+  aggregate row count — no per-user favorite visibility, consistent with favorites being
+  private).
+- **Documents by creation date** — a daily series bucketed on each document's recorded
+  create date (which is client-suppliable/backdatable), not on audit events.
+- **Activity** — a daily series counting retained audit-log entries for documents, files,
+  comments, routes, and tags across all create/update/delete actions.
+- **Storage by user** — global usage plus the top 10 users by current storage
+  (descending, ties broken by username).
+
+All day buckets are UTC `[start, end)` calendar days and are zero-filled across the window.
+
+> **Caveat — activity reflects RETAINED audit rows only.** The storage-cleanup job
+> (`POST /api/app/batch/clean_storage`) hard-deletes "orphan" audit logs. Because that
+> query does not join the route table, route audit entries are purged wholesale, so the
+> activity series undercounts route activity after a cleanup run. This is a known
+> pre-existing limitation, tracked separately.
+
 ## Theming (API-only)
 
 Teedy's appearance is customized through a custom-CSS injection endpoint — there is

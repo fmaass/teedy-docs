@@ -561,6 +561,36 @@
         }
       }
     },
+    "/app/stats": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Get application usage statistics",
+        "operationId": "get_app_stats",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": true,
+            "description": "Length of the time series in UTC days (7, 30 or 90)",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                7,
+                30,
+                90
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/app/batch/reindex": {
       "post": {
         "tags": [

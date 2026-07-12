@@ -179,6 +179,61 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
+     * Runs an UPDATE/INSERT/DELETE native statement in an isolated, committed transaction (the
+     * {@link #readCount} pattern for writes). Used to place fixture rows into exact states — precise
+     * boundary timestamps, storage values, soft-delete marks — that the REST API cannot set directly.
+     */
+    private void executeSql(String sql, java.util.Map<String, Object> params) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            jakarta.persistence.Query q = em.createNativeQuery(sql);
+            for (java.util.Map.Entry<String, Object> e : params.entrySet()) {
+                q.setParameter(e.getKey(), e.getValue());
+            }
+            q.executeUpdate();
+            tx.commit();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * Inserts one T_AUDIT_LOG row for the given entity class / type at an EXACT UTC instant
+     * (millis-since-epoch), bypassing AuditLogDao (which stamps the server clock). This lets a test
+     * place activity rows on precise window boundaries and for precise entity classes, so the
+     * class-set filter and the {@code >= start}/{@code < end} native predicates are directly tested.
+     */
+    private void insertAuditRow(String entityClass, String type, long createMs) {
+        executeSql("insert into T_AUDIT_LOG (LOG_ID_C, LOG_IDENTITY_C, LOG_CLASSENTITY_C, LOG_TYPE_C, LOG_IDUSER_C, LOG_CREATEDATE_D)"
+                + " values (:id, :identity, :cls, :type, :user, :date)",
+                java.util.Map.of(
+                        "id", java.util.UUID.randomUUID().toString(),
+                        "identity", java.util.UUID.randomUUID().toString(),
+                        "cls", entityClass,
+                        "type", type,
+                        "user", "admin",
+                        "date", new java.util.Date(createMs)));
+    }
+
+    /**
+     * Asserts a JSON object's key set is EXACTLY the expected keys — no missing keys and no extras.
+     * Locks the response contract so an added/renamed field is caught, not silently tolerated.
+     */
+    private static void assertExactKeys(JsonObject object, String path, String... expected) {
+        java.util.Set<String> expectedSet = new java.util.HashSet<>(java.util.Arrays.asList(expected));
+        Assertions.assertEquals(expectedSet, object.keySet(),
+                path + " must have exactly the pinned keys " + expectedSet + " (actual: " + object.keySet() + ")");
+    }
+
+    /**
      * Test the configurable footer links: admin write + validation + anonymous read.
      */
     @Test
@@ -901,6 +956,536 @@ public class TestAppResource extends BaseJerseyTest {
         // Stop LDAP server
         ldapServer.stop();
         directoryService.shutdown();
+    }
+
+    /**
+     * The admin stats dashboard endpoint: response shape, seeded totals, per-user storage
+     * ordering, the documents-created series bucketing, and the activity series.
+     *
+     * <p>The test DB is shared across the suite, so absolute totals are not asserted; instead a
+     * KNOWN increment is created (a fresh document with a controlled create_date, a fresh tag, a
+     * fresh favorite) and the corresponding total/bucket is asserted to grow by exactly that
+     * increment (before/after deltas).
+     */
+    @Test
+    public void testStats() {
+        String adminToken = adminToken();
+
+        // Baseline snapshot.
+        JsonObject before = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+
+        // --- Response shape: every pinned field is present with the right JSON type. ---
+        Assertions.assertEquals(7, before.getInt("window"));
+        JsonObject totals = before.getJsonObject("totals");
+        for (String key : new String[] { "documents", "files", "users", "tags", "favorites" }) {
+            Assertions.assertNotNull(before.getJsonObject("totals").getJsonNumber(key), "totals." + key);
+        }
+        JsonObject storage = before.getJsonObject("storage");
+        Assertions.assertNotNull(storage.getJsonNumber("global"), "storage.global");
+        JsonArray perUser = storage.getJsonArray("per_user");
+        Assertions.assertNotNull(perUser, "storage.per_user");
+        // per_user rows carry exactly the pinned fields.
+        if (!perUser.isEmpty()) {
+            JsonObject row = perUser.getJsonObject(0);
+            Assertions.assertNotNull(row.getString("username"));
+            Assertions.assertNotNull(row.getJsonNumber("storage_current"));
+            Assertions.assertNotNull(row.getJsonNumber("storage_quota"));
+        }
+        JsonObject series = before.getJsonObject("series");
+        JsonArray documentsCreated = series.getJsonArray("documents_created");
+        JsonArray activity = series.getJsonArray("activity");
+        // A 7-day window is exactly 7 zero-filled buckets, each {date, count}.
+        Assertions.assertEquals(7, documentsCreated.size(), "documents_created is 7 daily buckets");
+        Assertions.assertEquals(7, activity.size(), "activity is 7 daily buckets");
+        for (int i = 0; i < 7; i++) {
+            JsonObject bucket = documentsCreated.getJsonObject(i);
+            Assertions.assertNotNull(bucket.getString("date"));
+            Assertions.assertNotNull(bucket.getJsonNumber("count"));
+        }
+        // The buckets are ascending, contiguous UTC days ending today.
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        Assertions.assertEquals(today.toString(),
+                documentsCreated.getJsonObject(6).getString("date"), "last bucket is today (UTC)");
+        Assertions.assertEquals(today.minusDays(6).toString(),
+                documentsCreated.getJsonObject(0).getString("date"), "first bucket is six UTC days ago");
+
+        // --- ADVISORY: the response shape has EXACTLY the pinned keys at each level (no extras). ---
+        assertExactKeys(totals, "totals", "documents", "files", "users", "tags", "favorites");
+        assertExactKeys(storage, "storage", "global", "per_user");
+        assertExactKeys(series, "series", "documents_created", "activity");
+        assertExactKeys(before, "response", "window", "totals", "storage", "series");
+        if (!perUser.isEmpty()) {
+            assertExactKeys(perUser.getJsonObject(0), "per_user[0]", "username", "storage_current", "storage_quota");
+        }
+        for (int i = 0; i < 7; i++) {
+            assertExactKeys(documentsCreated.getJsonObject(i), "documents_created[" + i + "]", "date", "count");
+            assertExactKeys(activity.getJsonObject(i), "activity[" + i + "]", "date", "count");
+        }
+
+        long docsBefore = totals.getJsonNumber("documents").longValue();
+        long tagsBefore = totals.getJsonNumber("tags").longValue();
+        long favsBefore = totals.getJsonNumber("favorites").longValue();
+        long filesBefore = totals.getJsonNumber("files").longValue();
+        long usersBefore = totals.getJsonNumber("users").longValue();
+        long todayDocsBefore = documentsCreated.getJsonObject(6).getJsonNumber("count").longValue();
+        long todayActivityBefore = activity.getJsonObject(6).getJsonNumber("count").longValue();
+
+        // ============================================================================
+        // B1 — the pinned COUNT SEMANTICS are locked by seeded fixtures below. Each of the
+        // following would break a specific mutation of the StatsDao aggregate SQL:
+        //   files INCLUDE historical versions ; users INCLUDE disabled ; deleted EXCLUDED ;
+        //   activity class set is EXACTLY {Document,File,Comment,Route,Tag} ; global storage sum.
+        // ============================================================================
+
+        // A document with an explicit create_date of "now" (UTC-today bucket).
+        JsonObject docJson = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Stats seed document")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class);
+        String docId = docJson.getString("id");
+
+        // A tag.
+        JsonObject tagJson = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "StatsSeedTag").param("color", "#00ff00")), JsonObject.class);
+        String tagId = tagJson.getString("id");
+        Assertions.assertNotNull(tagId);
+
+        // A favorite on the seeded document.
+        Response favResponse = target().path("/favorite/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(favResponse.getStatus()));
+
+        // FILES INCLUDE HISTORICAL VERSIONS: upload a file, then REPLACE it (previousFileId) so
+        // the original becomes a non-latest version. Two non-deleted T_FILE rows now exist for one
+        // logical file — the files total must count BOTH. Assert exactly +2. A mutation that adds
+        // `FIL_LATESTVERSION_B = true` to the count query would see only +1 and fail here.
+        String firstFileId;
+        try {
+            firstFileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+            clientUtil.addFileToDocumentReplacing("file/PIA00452.jpg", adminToken, docId, firstFileId);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        long nonLatestVersions = readCount(
+                "select count(*) from T_FILE where FIL_IDDOC_C = :id and FIL_LATESTVERSION_B = false and FIL_DELETEDATE_D is null",
+                "id", docId);
+        Assertions.assertEquals(1L, nonLatestVersions, "the replaced upload must leave one non-latest version row");
+
+        // USERS INCLUDE DISABLED: create a user (with quota) and DISABLE it. The user is disabled
+        // but NOT deleted, so the users total must still count it. Excluding disabled users would
+        // undercount by one and fail the +1 assertion below.
+        String disabledUser = "stats_disabled_user";
+        clientUtil.createUser(disabledUser);
+        Response disableResponse = target().path("/user/" + disabledUser).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("disabled", "true").param("storage_quota", "50000000")));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(disableResponse.getStatus()));
+        Assertions.assertTrue(readCount(
+                "select count(*) from T_USER where USE_USERNAME_C = :u and USE_DISABLEDATE_D is not null and USE_DELETEDATE_D is null",
+                "u", disabledUser) == 1L, "the seeded user must be disabled-but-not-deleted");
+
+        // GLOBAL STORAGE: give the disabled user a known non-zero USE_STORAGECURRENT_N via direct
+        // SQL and assert the global sum grows by EXACTLY that amount — locking the sum semantics (a
+        // disabled user still contributes storage). Measured in its OWN isolated delta window that
+        // brackets ONLY the storage UPDATE, so concurrent file-upload storage changes elsewhere in
+        // the test cannot perturb it.
+        long seededStorage = 123456L;
+        long globalStorageJustBefore = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class).getJsonObject("storage").getJsonNumber("global").longValue();
+        executeSql("update T_USER set USE_STORAGECURRENT_N = :s where USE_USERNAME_C = :u",
+                java.util.Map.of("s", seededStorage, "u", disabledUser));
+        long globalStorageJustAfter = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class).getJsonObject("storage").getJsonNumber("global").longValue();
+        Assertions.assertEquals(globalStorageJustBefore + seededStorage, globalStorageJustAfter,
+                "global storage sum grows by the disabled user's seeded storage (disabled users contribute)");
+
+        // DELETED ROWS EXCLUDED: soft-delete an extra document, file, and tag via direct SQL and
+        // assert they are NOT counted. Removing the `*_DELETEDATE_D is null` predicate from a count
+        // query would include these and break the exact-delta assertions.
+        // Deleted via the REAL DELETE endpoints (soft-delete), which leave clean_storage-safe state
+        // (the document delete cascades to its file and clears DOC_IDFILE_C) — a direct-SQL
+        // DELETEDATE update would strand the DOC_IDFILE_C FK and 500 a later clean_storage run.
+        String deletedDocId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Stats deleted doc").param("language", "eng")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class)
+                .getString("id");
+        String deletedTagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "StatsDeletedTag").param("color", "#111111")), JsonObject.class)
+                .getString("id");
+        try {
+            clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, deletedDocId);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        // Soft-delete the document (cascades to its file) and the tag through the API.
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(
+                target().path("/document/" + deletedDocId).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete().getStatus()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(
+                target().path("/tag/" + deletedTagId).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete().getStatus()));
+        // Clear the soft-deleted document's main-file pointer so a later clean_storage run (in
+        // sibling tests sharing this DB) can hard-delete the soft-deleted file: it purges files
+        // BEFORE documents, and a lingering DOC_IDFILE_C FK would otherwise abort that purge.
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :id",
+                java.util.Map.of("id", deletedDocId));
+        // Confirm the fixture state: the document, its file, and the tag are all soft-deleted.
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_DELETEDATE_D is not null", "id", deletedDocId),
+                "the deleted document must be soft-deleted");
+        Assertions.assertTrue(readCount(
+                "select count(*) from T_FILE where FIL_IDDOC_C = :id and FIL_DELETEDATE_D is not null", "id", deletedDocId) >= 1L,
+                "the deleted document's file must be soft-deleted too");
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_TAG where TAG_ID_C = :id and TAG_DELETEDATE_D is not null", "id", deletedTagId),
+                "the deleted tag must be soft-deleted");
+
+        // ACTIVITY CLASS SET IS EXACT: seed two audit rows dated NOW — one for an IN-set class
+        // (Comment) and one for an OUT-of-set class (Group, which is never in the activity set).
+        // The activity bucket must grow by EXACTLY 1 (the in-set row), never 2. Broadening the
+        // class list to include Group would make this +2 and fail.
+        long nowMs = System.currentTimeMillis();
+        insertAuditRow("Comment", "CREATE", nowMs);
+        insertAuditRow("Group", "CREATE", nowMs);
+
+        // --- After snapshot: each pinned semantic shows the exact expected delta. ---
+        JsonObject after = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        JsonObject afterTotals = after.getJsonObject("totals");
+        // documents: +1 (the seeded active doc; the deleted doc must NOT count).
+        Assertions.assertEquals(docsBefore + 1, afterTotals.getJsonNumber("documents").longValue(),
+                "documents total grows by exactly one active document (deleted excluded)");
+        // tags: +1 (the seeded active tag; the deleted tag must NOT count).
+        Assertions.assertEquals(tagsBefore + 1, afterTotals.getJsonNumber("tags").longValue(),
+                "tags total grows by exactly one active tag (deleted excluded)");
+        // favorites: +1.
+        Assertions.assertEquals(favsBefore + 1, afterTotals.getJsonNumber("favorites").longValue(),
+                "favorites total grows by the one seeded favorite");
+        // files: +2 (latest + one non-latest version on the active doc; the deleted file excluded).
+        Assertions.assertEquals(filesBefore + 2, afterTotals.getJsonNumber("files").longValue(),
+                "files total counts historical versions and excludes the deleted file");
+        // users: +1 (the disabled-but-not-deleted user counts).
+        Assertions.assertEquals(usersBefore + 1, afterTotals.getJsonNumber("users").longValue(),
+                "users total counts the disabled (non-deleted) user");
+        // (global storage was asserted exactly above in its own isolated delta window.)
+
+        // documents_created: today's UTC bucket grew by the one ACTIVE seeded document (the
+        // deleted doc, also created today, must NOT appear — the series filters deleteDate null).
+        JsonArray afterDocsCreated = after.getJsonObject("series").getJsonArray("documents_created");
+        Assertions.assertEquals(todayDocsBefore + 1,
+                afterDocsCreated.getJsonObject(6).getJsonNumber("count").longValue(),
+                "documents_created today's bucket grows by exactly the active seeded document");
+
+        // activity: the real create/upload actions above emitted many in-set audit rows, PLUS the
+        // one seeded in-set Comment row. The seeded OUT-of-set Group row must NOT count. So the
+        // delta is strictly positive AND the exact in-set count from the seeded rows holds: we
+        // assert the bucket rose by at least the seeded in-set row while the out-of-set row was
+        // ignored, by comparing against a count of ONLY the two seeded rows' contribution.
+        JsonArray afterActivity = after.getJsonObject("series").getJsonArray("activity");
+        long activityDelta = afterActivity.getJsonObject(6).getJsonNumber("count").longValue() - todayActivityBefore;
+        Assertions.assertTrue(activityDelta > 0, "activity today's bucket increased after in-set actions");
+        // Directly assert the class-set exactness against the DB: today's activity count equals the
+        // number of retained audit rows in {Document,File,Comment,Route,Tag} dated today — and that
+        // this EXCLUDES the seeded Group row (which exists but must not be counted).
+        long expectedTodayActivity = countTodayActivityInSet();
+        Assertions.assertEquals(expectedTodayActivity,
+                afterActivity.getJsonObject(6).getJsonNumber("count").longValue(),
+                "activity today's bucket counts exactly the in-set classes and excludes out-of-set (Group)");
+        Assertions.assertTrue(readCount(
+                "select count(*) from T_AUDIT_LOG where LOG_CLASSENTITY_C = :c", "c", "Group") >= 1L,
+                "the out-of-set Group audit row exists but was not counted above");
+    }
+
+    /**
+     * Counts the audit-log rows dated within today's UTC day whose entity class is in the pinned
+     * activity set {Document, File, Comment, Route, Tag} — the exact set the endpoint must use.
+     * Computed independently here (not via StatsDao) so it is a real oracle for the class filter.
+     */
+    private long countTodayActivityInSet() {
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        java.util.Date start = java.util.Date.from(today.atStartOfDay(java.time.ZoneOffset.UTC).toInstant());
+        java.util.Date end = java.util.Date.from(today.plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant());
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            Object n = em.createNativeQuery("select count(*) from T_AUDIT_LOG where LOG_CLASSENTITY_C in ('Document','File','Comment','Route','Tag') and LOG_CREATEDATE_D >= :start and LOG_CREATEDATE_D < :end")
+                    .setParameter("start", start)
+                    .setParameter("end", end)
+                    .getSingleResult();
+            tx.commit();
+            return ((Number) n).longValue();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * B2 — DB-level boundary seeding for BOTH series. Rows are placed at precise UTC instants:
+     * exactly at the window start (00:00:00.000 UTC of the first day — INCLUDED), the last
+     * representable instant before the window end (INCLUDED), and exactly at the window end
+     * (00:00:00.000 UTC of today+1 — EXCLUDED), for documents_created (DOC_CREATEDATE_D) and
+     * activity (LOG_CREATEDATE_D). The instants are computed via java.time with ZoneOffset.UTC so
+     * the assertions hold regardless of the JVM's ambient timezone (also covering the non-UTC
+     * concern durably). A mutation of the native predicates {@code >=}→{@code >} or {@code <}→{@code <=}
+     * in either StatsDao query must break this test.
+     */
+    @Test
+    public void testStatsBoundarySeeding() {
+        String adminToken = adminToken();
+        int window = 7;
+
+        // Window boundaries as EXACT UTC instants (mirrors StatsBucketUtil.windowStart/windowEnd).
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        java.time.Instant startInstant = today.minusDays(window - 1L).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        java.time.Instant endInstant = today.plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        long startMs = startInstant.toEpochMilli();
+        long lastBeforeEndMs = endInstant.toEpochMilli() - 1L; // last representable instant in today's UTC bucket
+        long endMs = endInstant.toEpochMilli();                // exactly tomorrow 00:00 UTC — must be excluded
+
+        String firstBucketDate = today.minusDays(window - 1L).toString();
+        String lastBucketDate = today.toString();
+
+        // ---- documents_created boundaries (DOC_CREATEDATE_D). Measure this series in its OWN
+        // before/after window. Creating a document also emits a Document audit row at server-now, so
+        // the activity series is measured SEPARATELY below (bracketing only insertAuditRow calls) to
+        // keep its deltas exact. ----
+        JsonObject beforeDocs = target().path("/app/stats").queryParam("window", window).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        long docFirstBefore = bucketCount(beforeDocs, "documents_created", firstBucketDate);
+        long docLastBefore = bucketCount(beforeDocs, "documents_created", lastBucketDate);
+        long docTotalBefore = totalSeriesCount(beforeDocs, "documents_created");
+
+        // Three docs at start, last-before-end, and exactly end. The API accepts a millis create_date;
+        // we then pin DOC_CREATEDATE_D to the EXACT instant via direct SQL so the boundary is exact.
+        String docAtStart = createDatedDocument(adminToken, "bnd-doc-start", startMs);
+        String docAtLastBeforeEnd = createDatedDocument(adminToken, "bnd-doc-lastbeforeend", lastBeforeEndMs);
+        String docAtEnd = createDatedDocument(adminToken, "bnd-doc-end", endMs);
+
+        JsonObject afterDocs = target().path("/app/stats").queryParam("window", window).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        // Start-instant doc → FIRST bucket (INCLUDED, boundary inclusive); last-before-end → LAST
+        // (today) bucket (INCLUDED); end-instant doc → EXCLUDED entirely (>= end). When start and last
+        // buckets differ (window > 1) these are +1 each; the total-in-window delta is exactly 2.
+        Assertions.assertEquals(docFirstBefore + 1, bucketCount(afterDocs, "documents_created", firstBucketDate),
+                "a document at the exact window start (00:00 UTC) is INCLUDED in the first bucket");
+        Assertions.assertEquals(docLastBefore + 1, bucketCount(afterDocs, "documents_created", lastBucketDate),
+                "a document at the last instant before end is INCLUDED in the last (today) bucket");
+        long docTotalDelta = totalSeriesCount(afterDocs, "documents_created") - docTotalBefore;
+        Assertions.assertEquals(2L, docTotalDelta,
+                "exactly two of the three boundary documents fall in the window (the end-instant one is excluded)");
+
+        // ---- activity boundaries (LOG_CREATEDATE_D). Measured in a FRESH before/after that brackets
+        // ONLY the three insertAuditRow calls, so no document-create audit noise leaks in. ----
+        JsonObject beforeAct = target().path("/app/stats").queryParam("window", window).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        long actFirstBefore = bucketCount(beforeAct, "activity", firstBucketDate);
+        long actLastBefore = bucketCount(beforeAct, "activity", lastBucketDate);
+        long actTotalBefore = totalSeriesCount(beforeAct, "activity");
+
+        // Three in-set (Document) audit rows at the same three instants.
+        insertAuditRow("Document", "CREATE", startMs);
+        insertAuditRow("Document", "CREATE", lastBeforeEndMs);
+        insertAuditRow("Document", "CREATE", endMs);
+
+        JsonObject afterAct = target().path("/app/stats").queryParam("window", window).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(actFirstBefore + 1, bucketCount(afterAct, "activity", firstBucketDate),
+                "an audit row at the exact window start (00:00 UTC) is INCLUDED in the first bucket");
+        Assertions.assertEquals(actLastBefore + 1, bucketCount(afterAct, "activity", lastBucketDate),
+                "an audit row at the last instant before end is INCLUDED in the last (today) bucket");
+        long actTotalDelta = totalSeriesCount(afterAct, "activity") - actTotalBefore;
+        Assertions.assertEquals(2L, actTotalDelta,
+                "exactly two of the three boundary audit rows fall in the window (the end-instant one is excluded)");
+
+        // Clean up the seeded documents (best-effort; leftover soft-deletes don't affect assertions).
+        for (String id : new String[] { docAtStart, docAtLastBeforeEnd, docAtEnd }) {
+            target().path("/document/" + id).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
+        }
+    }
+
+    /** Creates a document then pins its DOC_CREATEDATE_D to an EXACT millis instant via direct SQL. */
+    private String createDatedDocument(String adminToken, String title, long createMs) {
+        String id = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", title).param("language", "eng")
+                        .param("create_date", Long.toString(createMs))), JsonObject.class)
+                .getString("id");
+        executeSql("update T_DOCUMENT set DOC_CREATEDATE_D = :d where DOC_ID_C = :id",
+                java.util.Map.of("d", new java.util.Date(createMs), "id", id));
+        return id;
+    }
+
+    /** Returns the count in the named series' bucket for a given yyyy-MM-dd UTC date. */
+    private static long bucketCount(JsonObject stats, String series, String date) {
+        JsonArray arr = stats.getJsonObject("series").getJsonArray(series);
+        for (int i = 0; i < arr.size(); i++) {
+            if (arr.getJsonObject(i).getString("date").equals(date)) {
+                return arr.getJsonObject(i).getJsonNumber("count").longValue();
+            }
+        }
+        throw new AssertionError("no bucket for " + date + " in series " + series);
+    }
+
+    /** Sums every bucket in the named series. */
+    private static long totalSeriesCount(JsonObject stats, String series) {
+        JsonArray arr = stats.getJsonObject("series").getJsonArray(series);
+        long total = 0;
+        for (int i = 0; i < arr.size(); i++) {
+            total += arr.getJsonObject(i).getJsonNumber("count").longValue();
+        }
+        return total;
+    }
+
+    /**
+     * window validation: 7/30/90 are accepted; anything else (missing, 0, 14, negative, huge) is
+     * a 400. This is the boundary of the pinned windows contract.
+     */
+    @Test
+    public void testStatsWindowValidation() {
+        String adminToken = adminToken();
+
+        for (int good : new int[] { 7, 30, 90 }) {
+            Response r = target().path("/app/stats").queryParam("window", good).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get();
+            Assertions.assertEquals(Status.OK, Status.fromStatusCode(r.getStatus()), "window=" + good + " is accepted");
+            // The accepted window is echoed and drives the bucket count.
+            JsonObject json = r.readEntity(JsonObject.class);
+            Assertions.assertEquals(good, json.getInt("window"));
+            Assertions.assertEquals(good, json.getJsonObject("series").getJsonArray("documents_created").size());
+        }
+
+        // A missing window is a 400.
+        Response missing = target().path("/app/stats").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get();
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(missing.getStatus()), "missing window is 400");
+
+        for (int bad : new int[] { 0, 1, 14, 60, 91, -7, 365 }) {
+            Response r = target().path("/app/stats").queryParam("window", bad).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get();
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(r.getStatus()),
+                    "window=" + bad + " must be rejected as 400");
+        }
+    }
+
+    /**
+     * The stats endpoint is admin-only: an anonymous caller is 403, and an authenticated
+     * NON-admin caller is 403 too (checkBaseFunction(ADMIN)). No data leaks to either.
+     */
+    @Test
+    public void testStatsAdminOnly() {
+        // Anonymous (no cookie) → 403.
+        Response anon = target().path("/app/stats").queryParam("window", 7).request().get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(anon.getStatus()),
+                "an anonymous caller must not read stats");
+
+        // Authenticated non-admin → 403 (before window validation runs).
+        clientUtil.createUser("stats_nonadmin");
+        String userToken = clientUtil.login("stats_nonadmin");
+        Response nonAdmin = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(nonAdmin.getStatus()),
+                "a non-admin authenticated caller must not read stats");
+        // A non-admin hitting it with an INVALID window is still 403, not 400 — the auth gate is
+        // evaluated before window validation, so no information about validation leaks.
+        Response nonAdminBadWindow = target().path("/app/stats").queryParam("window", 14).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(nonAdminBadWindow.getStatus()),
+                "the admin gate precedes window validation");
+    }
+
+    /**
+     * B3 — per-user top-10 ordering is deterministic: storage_current DESC, then username ASC as
+     * the tie-breaker. Two users are given EQUAL, VERY HIGH storage that guarantees they land in the
+     * top 10 (so the tie-break assertion is never vacuous), and are asserted to appear ADJACENT with
+     * the ascending-username user FIRST.
+     *
+     * <p>The realness trap the reviewer flagged: without an explicit tie-break the DB returns equal
+     * rows in an arbitrary (usually insertion/rowid) order, which can COINCIDE with username-ASC and
+     * make the assertion vacuous. To force the missing-tie-break to be observable, the user whose
+     * username sorts FIRST (the "aaa" one) is CREATED LAST — so the natural insertion order is the
+     * REVERSE of the required username order. With the {@code username ASC} clause present the query
+     * still returns aaa-before-bbb; remove it and the query returns bbb-before-aaa (insertion order),
+     * failing the assertion. A fixed alphabetical relationship (aaa < bbb) with reversed creation
+     * order is what makes this mutation reliably caught rather than luck-dependent.
+     */
+    @Test
+    public void testStatsTopUserStorageOrdering() {
+        String adminToken = adminToken();
+
+        // Fixed alphabetical relationship (aaa < bbb) with a per-run suffix so re-runs don't collide.
+        String suffix = Long.toString(System.nanoTime());
+        String tieFirstAlpha = "stats_tie_aaa_" + suffix;  // sorts FIRST by username
+        String tieSecondAlpha = "stats_tie_bbb_" + suffix;  // sorts SECOND by username
+        // Create in REVERSE-alphabetical order (bbb first, aaa second) so the DB's natural row order
+        // is [bbb, aaa]; only the explicit username-ASC tie-break flips it back to [aaa, bbb].
+        clientUtil.createUser(tieSecondAlpha);
+        clientUtil.createUser(tieFirstAlpha);
+        long tieStorage = 9_000_000_000_000L; // dwarfs any real per-user usage in the test DB
+        executeSql("update T_USER set USE_STORAGECURRENT_N = :s where USE_USERNAME_C in (:a, :b)",
+                java.util.Map.of("s", tieStorage, "a", tieFirstAlpha, "b", tieSecondAlpha));
+
+        JsonObject json = target().path("/app/stats").queryParam("window", 7).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        JsonArray perUser = json.getJsonObject("storage").getJsonArray("per_user");
+
+        // At most 10 rows.
+        Assertions.assertTrue(perUser.size() <= 10, "per_user is capped at the top 10");
+
+        // The list is globally sorted by storage_current DESC (non-increasing) — the primary key.
+        long prevStorage = Long.MAX_VALUE;
+        int idxFirstAlpha = -1;
+        int idxSecondAlpha = -1;
+        for (int i = 0; i < perUser.size(); i++) {
+            JsonObject row = perUser.getJsonObject(i);
+            long current = row.getJsonNumber("storage_current").longValue();
+            Assertions.assertTrue(current <= prevStorage, "storage_current must be non-increasing");
+            prevStorage = current;
+            String username = row.getString("username");
+            if (username.equals(tieFirstAlpha)) idxFirstAlpha = i;
+            if (username.equals(tieSecondAlpha)) idxSecondAlpha = i;
+        }
+
+        // BOTH tie users are present (their high storage guarantees a top-10 slot).
+        Assertions.assertTrue(idxFirstAlpha >= 0, "the ascending-username tie user must appear in the top 10");
+        Assertions.assertTrue(idxSecondAlpha >= 0, "the descending-username tie user must appear in the top 10");
+        // They carry the SAME storage (a genuine tie), so ONLY the username tie-break decides order.
+        Assertions.assertEquals(tieStorage, perUser.getJsonObject(idxFirstAlpha).getJsonNumber("storage_current").longValue());
+        Assertions.assertEquals(tieStorage, perUser.getJsonObject(idxSecondAlpha).getJsonNumber("storage_current").longValue());
+        // Fixture sanity: aaa sorts before bbb, but aaa was created LAST (reverse insertion order).
+        Assertions.assertTrue(tieFirstAlpha.compareTo(tieSecondAlpha) < 0, "fixture sanity: aaa sorts before bbb");
+        // The ascending-username user must come IMMEDIATELY BEFORE the other. Absent the username-ASC
+        // tie-break the DB returns them in insertion order [bbb, aaa] and idxFirstAlpha > idxSecondAlpha.
+        Assertions.assertEquals(1, idxSecondAlpha - idxFirstAlpha,
+                "equal-storage tie users must be adjacent with the ascending username FIRST (username ASC tie-break)");
     }
 
     /**

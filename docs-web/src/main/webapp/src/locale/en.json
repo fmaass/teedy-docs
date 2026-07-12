@@ -681,6 +681,26 @@
       "total_count": "{count} log entries",
       "no_logs": "No log entries match these filters"
     },
+    "stats": {
+      "title": "Statistics",
+      "description": "Global usage statistics across the whole instance.",
+      "window_label": "Time window",
+      "window_days": "{days} days",
+      "refresh": "Refresh",
+      "total_documents": "Documents",
+      "total_files": "Files (all versions)",
+      "total_users": "Users",
+      "total_tags": "Tags",
+      "total_favorites": "Favorites",
+      "chart_documents_created": "Documents by creation date",
+      "chart_activity": "Activity",
+      "storage_title": "Storage by user",
+      "storage_global": "Global usage: {value}",
+      "storage_user": "User",
+      "storage_used": "Used",
+      "storage_quota": "Quota",
+      "storage_empty": "No users to display."
+    },
     "config": {
       "title": "Configuration",
       "general": "General",
