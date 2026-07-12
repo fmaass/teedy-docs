@@ -18,7 +18,7 @@ handling) has a second chance to surface.
 
 | Feature area | Playwright spec (E1) | Browser-harness check (E2) | Relationship |
 |---|---|---|---|
-| Release identity / version | `smoke.spec.ts` (app shell renders) | **check 1** — `/api/app current_version == 3.4.0` (hard gate) | **Complement** — only E2 asserts the exact release version and fails a stale image. |
+| Release identity / version | `smoke.spec.ts` (app shell renders) | **check 1** — `/api/app current_version == 3.5.0` (hard gate) | **Complement** — only E2 asserts the exact release version and fails a stale image. |
 | Native login | `auth.spec.ts` (login / bad creds / logout) | **check 2** — form login admin/admin enters the shell | **Overlap** — both verify the login form; E1 is deeper (error paths, logout). |
 | Deep-link / URL hydration | `tags.spec.ts` ("URL round-trips included + excluded tag") | **check 3** — cold-load deep link retains search+tags+exclude | **Overlap** — E1 asserts filter *behavior*; E2 asserts *URL retention* after a real reload in a second engine. |
 | Documents CRUD | `documents.spec.ts` (create → list → open) | **check 4** — list search surfaces the seeded document row | **Overlap** — E1 owns full CRUD; E2 re-verifies list search + render in real Chrome. |
@@ -35,12 +35,17 @@ handling) has a second chance to surface.
 | **B — disabled-user enforcement (#17)** | `admin-guards.spec.ts` — 2 tests: disable via the row toggle → login denied (anonymous read-back) → re-enable → login restored; and the toggle is hidden for the guest+admin rows | **check 16** — a disabled user is denied native form login (stays on `/login`, session stays anonymous) | **Overlap** — both assert the disabled login is denied against the running server; E1 additionally proves reversibility (re-enable restores) and the guest/admin toggle-hide; E2 re-verifies the denial in real Chrome. |
 | **C — filterable tag pickers, colored chips (#14/#23)** | `tags.spec.ts` — 2 tests: doc-edit MultiSelect filter winnows options + selected chip is a colored `TagBadge`; tag-edit parent Select filter winnows options | **check 13** — doc-edit MultiSelect filter winnows options AND the selected chip is a colored `TagBadge` (non-transparent background) | **Overlap** — both assert the MultiSelect filter actually winnows and the chip is colored; E1 also covers the tag-edit parent Select filter, E2 re-verifies the MultiSelect in real Chrome (computed background color). |
 | **D — document-list UX (#11/#24/#25)** | `documents.spec.ts` — 3 tests: dblclick row → full view; a 5-tag doc shows a focusable `+2` control whose popover reveals the hidden tags (not repeating the first 3); admin/settings pages carry the wide-layout class | **check 14** (+N overflow popover reveals hidden tags AND is not clipped — real-Chrome layout + CDP screenshot) and **check 15** (dblclick row → `/document/view/:id`) | **Complement + Overlap** — the +N *clipping* is a genuine real-browser layout concern (the popover teleports out of the DataTable's overflow), so E2 asserts the panel rect is inside the viewport with a screenshot — value E1's jsdom-style checks cannot add; dblclick overlaps E1. The wide-settings width is **E1-only**. |
+| **Favorites (v3.5.0 #41)** | `favorites.spec.ts` — star/unstar a document, the `favorites=me` filter, and the private-per-user contract | **check 18** — click the real `FavoriteStar` on a list row, then authoritative `/api/favorite` + `/api/document` read-back: `favorite:true`, present in `/document/list?favorites=me`, repeat `PUT` idempotent 200, `DELETE` removes it | **Overlap** — both drive the star and the `favorites=me` filter against the running server; E2 clicks the real UI control and asserts every claim via authoritative API read-back in real Chrome. |
+| **Gallery view (v3.5.0 #39)** | `gallery.spec.ts` — toggle List↔Gallery, cards render, mode persists | **check 19** — toggle to Gallery, assert an `article.doc-card` for the seeded doc renders, assert `teedy_document_view_mode` persists across a reload, switch back to List | **Overlap** — both exercise the SelectButton toggle and localStorage persistence; E2 re-verifies the card render + reload persistence in a second engine (CDP-visible real reload). |
+| **Stats dashboard (v3.5.0 #40)** | `stats.spec.ts` — admin dashboard totals/charts/storage, window switching, non-admin guard | **check 20** — admin `#/settings/stats` renders 5 totals cards + a chart `<canvas>` + a per-user storage row; window switch (7→30) re-hits `/api/app/stats`; a non-admin gets `403` from `/api/app/stats?window=7` (context-isolated, admin restored after) | **Overlap** — both cover the admin dashboard and the admin-only guard; E2 asserts the window switch actually re-issues the API call and the 403 in a logged-out-then-non-admin real-Chrome context. |
+| **Rich description (v3.5.0 #38)** | `rich-description.spec.ts` — Quill editor authoring + server-side HTML sanitization | **check 21** — `POST /document/:id` with legitimate formatting + a hostile payload; `/api/document` read-back is inert (no `<script`/`onerror`/`javascript:`) while `<strong>`/`<a href="https://` survived; the Quill editor (`.ql-toolbar`) mounts on the edit view | **Overlap + Complement** — both assert the sanitizer strips XSS while keeping legit markup; E2 additionally proves the stored HTML is inert via authoritative read-back against the running server (the security-critical assertion) in real Chrome. |
 
 ## Browser-isolation note (E2-specific)
 
 E2 attaches to a **persistent** local Chrome, so `new_tab()` does **not** give a
 clean cookie context (unlike Playwright's per-test contexts in E1). The two
-anonymous checks (10, 11) therefore explicitly:
+anonymous / non-admin checks (10, 11, 16, 17, and the non-admin portion of 20)
+therefore explicitly:
 
 1. Log the browser **out** via the real `POST /api/user/logout` (which expires the
    httpOnly `auth_token` cookie exactly as the app does — `document.cookie` cannot
@@ -63,15 +68,16 @@ correctly reports FAIL.
 Every run stamps its documents, tags, and share link with a unique token
 (`bh-<epoch>-<pid>`), so reruns against a long-lived instance never collide.
 Created documents are trashed at the end (best-effort). Verified rerun-green:
-back-to-back invocations against the same container both pass all 11 checks.
+back-to-back invocations against the same container both pass all checks.
 
 ## Realness
 
 Every E2 row is a genuine browser action (search / open / click / act / logout)
 **plus** an assertion on rendered DOM or authoritative API state (`/api/document`,
 `/api/route`), **plus** a screenshot. No row merely loads a page and claims
-coverage. Checks 6 and 7 assert against authoritative server state read back after
-the interaction, not just the rendered page.
+coverage. Checks 6, 7, 18, 20, and 21 assert against authoritative server state read
+back after the interaction (`/api/document`, `/api/route`, `/api/favorite`,
+`/api/app/stats`), not just the rendered page.
 
 ## Running both
 

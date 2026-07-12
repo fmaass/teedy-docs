@@ -81,7 +81,7 @@ A preconfigured Docker image (with OCR and media-conversion tools) listens on po
 `8080`. With no `DATABASE_URL`, Teedy uses an embedded H2 database — **for testing
 only**; use the PostgreSQL configuration in production.
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.5.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.5.1`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data` — mount a volume on it — and `DOCS_BASE_URL` must be
@@ -128,7 +128,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.5.0
+    image: ghcr.io/fmaass/teedy-docs:v3.5.1
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -187,7 +187,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.5.0
+    image: ghcr.io/fmaass/teedy-docs:v3.5.1
     restart: unless-stopped
     ports:
       - 8080:8080

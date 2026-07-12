@@ -16,6 +16,16 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.5.1] - 2026-07-12
+
+No database migration this release: db.version stays at 48. A same-day patch polishing the 3.5.0 feature set.
+
+### Fixed
+- The rich-text description editor's toolbar is now themed for dark mode: the toolbar icons, the format-picker dropdown, and the link-edit tooltip previously kept the editor library's hardcoded light-theme colors, rendering low-contrast or as bright popovers against a dark background (#38).
+
+### Added
+- Real-browser (CDP) harness coverage for the 3.5 features — favorites star round-trip, the gallery view toggle with persistence, the admin statistics dashboard (including a non-admin 403 check), and rich-description sanitization — plus index-timing hardening for the existing document-search and open checks.
+
 ## [3.5.0] - 2026-07-12
 
 Two database migrations this release: db.version moves from 46 to 48 (`dbupdate-047` adds the personal-favorites table; `dbupdate-048` widens `DOC_DESCRIPTION_C` from 4000 to 50000 characters).
@@ -200,7 +210,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.1...HEAD
+[3.5.1]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...v3.5.1
 [3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1
 [3.4.0]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.0

@@ -42,7 +42,7 @@
 # 3.5.0). A mismatch FAILS the harness so it can never certify a stale image.
 #
 # Checks performed (each FAIL exits nonzero at the end):
-#   1. /api/app answers and current_version == expected (default 3.5.0)      [api]
+#   1. /api/app answers and current_version == expected (default 3.5.1)      [api]
 #   2. native form login admin/admin lands in the app shell (logged-in UI)   [browser]
 #   3. cold-load deep link /#/document?search=…&tags=…&exclude=… retains ALL
 #      query params after hydration (URL retention; API-level filter coverage
@@ -80,6 +80,21 @@
 #      submit reveals the OTP field (400 ValidationCodeRequired); a code computed
 #      with the same RFC-6238 algorithm the server verifies completes the login
 #      (session live via GET /api/user) — a genuine end-to-end 2FA login        [browser+api]
+#  18. Favorites (v3.5.0 #41) — click the real FavoriteStar on a document row, then
+#      confirm via authoritative /api/favorite + /api/document read-back: doc is
+#      favorite:true and in /document/list?favorites=me; repeat PUT is an idempotent
+#      200; DELETE removes it from the favorites list                           [browser+api]
+#  19. Gallery view (v3.5.0 #39) — toggle the doc list to Gallery, assert a gallery
+#      card renders for the seeded doc, assert the mode persists in localStorage
+#      teedy_document_view_mode across a reload, then switch back to List        [browser]
+#  20. Stats dashboard (v3.5.0 #40) — admin #/settings/stats renders the five totals
+#      cards + a chart <canvas> + a per-user storage row; switching the window (7->30)
+#      re-hits /api/app/stats; and (context-isolated) a NON-admin gets 403 from
+#      GET /api/app/stats?window=7, admin restored after                        [browser+api]
+#  21. Rich description (v3.5.0 #38, security-critical) — POST /document/:id with a
+#      description mixing legitimate formatting and a hostile payload; the stored HTML
+#      read back via /api/document is inert (no <script/onerror/javascript:) while the
+#      <strong>/<a href="https:// survived; the Quill editor mounts on the edit view [browser+api]
 #  12. Session restore (verified) — after the logged-out checks 10-11 + 16-17, the
 #      admin session is restored and confirmed live via GET /api/user
 #      (username=admin, not anonymous). Those checks run inside try/finally so this
@@ -93,7 +108,7 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
-expect_version="${E2E_EXPECT_VERSION:-3.5.0}"
+expect_version="${E2E_EXPECT_VERSION:-3.5.1}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"
@@ -199,9 +214,38 @@ totp_secret="$(curl -sf -b "${totp_jar}" -X POST "${base_url}/api/user/enable_to
 rm -f "${totp_jar}"
 [ -z "${totp_secret}" ] && note FAIL "seed: could not enable TOTP / read secret"
 
+# --- Seed for the v3.5.0 feature checks (favorites / gallery / stats / rich desc) --
+# Stats (#40): a plain NON-admin user. GET /api/app/stats is admin-gated (403 for a
+# non-admin), so the stats check logs in AS this user to prove the 403, then restores
+# admin. Created here (not reusing dis_user, which is disabled and cannot log in).
+stats_user="${run_token}nonadmin"
+stats_pass="NonAdminPass123"
+api_put -d "username=${stats_user}" -d "password=${stats_pass}" \
+  -d "email=${stats_user}@example.com" -d "storage_quota=1000000000" \
+  "${base_url}/api/user" >/dev/null || note FAIL "seed: could not create non-admin stats user"
+
+# Favorites (#41): a dedicated RUN-stamped document the favorites check stars/unstars
+# via the real UI star + authoritative /api/favorite read-back. Kept separate from the
+# main probe doc so its favorite state does not perturb the other checks.
+fav_doc_title="${run_token} Favorite Document"
+fav_doc_id="$(api_put --data-urlencode "title=${fav_doc_title}" \
+  --data-urlencode "description=browser-harness ${run_token}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${fav_doc_id}" ] && note FAIL "seed: could not create favorite-target document"
+
+# Rich description (#38): a RUN-stamped document the sanitizer check updates with a
+# mixed legitimate+hostile description, then reads back to assert the XSS payload was
+# stripped and the legitimate formatting survived.
+rich_doc_title="${run_token} Rich Description Document"
+rich_doc_id="$(api_put --data-urlencode "title=${rich_doc_title}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${rich_doc_id}" ] && note FAIL "seed: could not create rich-description document"
+
 echo "[seed] doc=${doc_id} tag_in=${tag_in} tag_ex=${tag_ex} share=${share_id} route_started=${route_ok:-0}" \
   | tee -a "${art_dir}/checks.log"
 echo "[seed] ovf_doc=${ovf_doc_id} dis_user=${dis_user} totp_user=${totp_user} totp_secret_len=${#totp_secret}" \
+  | tee -a "${art_dir}/checks.log"
+echo "[seed] stats_user=${stats_user} fav_doc=${fav_doc_id} rich_doc=${rich_doc_id}" \
   | tee -a "${art_dir}/checks.log"
 
 # --- Checks 2-17: real-browser flow -------------------------------------------
@@ -212,6 +256,9 @@ BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_OVF_DOC_TITLE="${ovf_doc_title}" BH_OVF_TAG4="${run_token}-ovf4" BH_OVF_TAG5="${run_token}-ovf5" \
   BH_DIS_USER="${dis_user}" BH_DIS_PASS="${dis_pass}" \
   BH_TOTP_USER="${totp_user}" BH_TOTP_PASS="${totp_pass}" BH_TOTP_SECRET="${totp_secret}" \
+  BH_STATS_USER="${stats_user}" BH_STATS_PASS="${stats_pass}" \
+  BH_FAV_DOC_ID="${fav_doc_id}" BH_FAV_DOC_TITLE="${fav_doc_title}" \
+  BH_RICH_DOC_ID="${rich_doc_id}" \
   browser-harness <<'PY'
 import json, os, time, urllib.parse, hmac, hashlib, base64, struct
 
@@ -232,6 +279,11 @@ dis_pass = os.environ.get("BH_DIS_PASS", "")
 totp_user = os.environ.get("BH_TOTP_USER", "")
 totp_pass = os.environ.get("BH_TOTP_PASS", "")
 totp_secret = os.environ.get("BH_TOTP_SECRET", "")
+stats_user = os.environ.get("BH_STATS_USER", "")
+stats_pass = os.environ.get("BH_STATS_PASS", "")
+fav_doc_id = os.environ.get("BH_FAV_DOC_ID", "")
+fav_doc_title = os.environ.get("BH_FAV_DOC_TITLE", "")
+rich_doc_id = os.environ.get("BH_RICH_DOC_ID", "")
 results = {}
 
 # RFC-6238 TOTP: recompute the SAME 6-digit code the server verifies (Base32 secret,
@@ -250,6 +302,42 @@ def shot(name):
 
 def cur_url():
     return page_info()["url"]
+
+# --- index-latency helper: a freshly-created document is not immediately searchable
+# (Lucene indexing is asynchronous), so the list row a UI check depends on can be
+# missing for a beat. Poll the authoritative /api/document/list?search=<title> as the
+# current (credentialed) session until the document appears, then land the browser on
+# the filtered list so the row is actually rendered. Returns True once the doc is both
+# searchable AND its row is on the page. Bounded by timeout_s so a genuinely-missing
+# doc still fails the caller's assertion rather than hanging.
+def wait_for_doc_searchable(title, timeout_s=15):
+    deadline = time.time() + timeout_s
+    api_found = False
+    while time.time() < deadline:
+        api_found = js("""
+          return (() => fetch(location.origin + '/api/document/list?limit=50&search='
+              + encodeURIComponent(arg_title), {credentials:'include'})
+            .then(r => r.ok ? r.json() : {documents: []})
+            .then(d => (d.documents||[]).some(x => (x.title||'').includes(arg_title)))
+            .catch(() => false))();
+        """.replace("arg_title", json.dumps(title)))
+        if api_found:
+            break
+        time.sleep(1.0)
+    # Land on the filtered list and wait for the row to actually render.
+    goto_url(base + "/#/document?search=" + urllib.parse.quote(title))
+    time.sleep(1.5); wait_for_load()
+    row_deadline = time.time() + 6
+    row_seen = False
+    while time.time() < row_deadline:
+        row_seen = js("""
+          return (() => [...document.querySelectorAll('.doc-title')]
+            .some(e => (e.textContent||'').includes(arg_title)))();
+        """.replace("arg_title", json.dumps(title)))
+        if row_seen:
+            break
+        time.sleep(0.8)
+    return bool(api_found and row_seen)
 
 # --- session helpers: log the browser in/out via the REAL app endpoints so the
 # httpOnly auth_token cookie is actually set/expired in this persistent Chrome.
@@ -322,17 +410,9 @@ results["hydration_roundtrip"] = (kept, url)
 shot("03-deep-link-hydrated")
 
 # --- Check 4: documents CRUD — search finds the seeded document ---------------
-# Clear any leftover filters, type the unique title into the search box, and
-# assert the document row renders in the list.
-goto_url(base + "/#/document"); time.sleep(1); wait_for_load()
-js("""
-  (() => {
-    const box = document.querySelector('.search-input input, input.search-input, .search-input');
-    const el = box && box.tagName === 'INPUT' ? box : document.querySelector('.search-row input');
-    if (el) { el.value = arguments0; el.dispatchEvent(new Event('input', {bubbles:true})); }
-  })();
-""".replace("arguments0", json.dumps(doc_title)))
-time.sleep(2.5); wait_for_load()
+# Wait out the async Lucene indexing latency (a freshly-created doc is not instantly
+# searchable), which lands the browser on the filtered list; then assert the row renders.
+wait_for_doc_searchable(doc_title)
 found = js("""
   return (() => [...document.querySelectorAll('.doc-title')].some(e => e.textContent.includes(arguments0)))();
 """.replace("arguments0", json.dumps(run)))
@@ -605,14 +685,8 @@ results["tag_overflow"] = (overflow_ok, f"before={ovf_before} after_names={names
 
 # --- Check 15 (behavior D): double-click a row opens the full document view ----
 # Single-click opens a slide-over; a DOUBLE-click must navigate to /document/view/<id>.
-goto_url(base + "/#/document"); time.sleep(1.5); wait_for_load()
-js("""
-  (() => {
-    const el = document.querySelector('.search-input input, input.search-input, .search-row input');
-    if (el) { el.value = arguments0; el.dispatchEvent(new Event('input', {bubbles:true})); }
-  })();
-""".replace("arguments0", json.dumps(doc_title)))
-time.sleep(2.5); wait_for_load()
+# Wait out the async index latency so the row is reliably rendered before the dblclick.
+wait_for_doc_searchable(doc_title)
 # Dispatch a real dblclick on the seeded document's row title cell.
 js("""
   (() => {
@@ -627,6 +701,275 @@ dbl_url = cur_url()
 dblclick_ok = "/document/view/" in dbl_url
 results["dblclick_open"] = (dblclick_ok, f"after dblclick url={dbl_url}")
 shot("15-dblclick-open")
+
+# --- Check 18 (#41): favorites round-trip — real star click + authoritative API -
+# As admin: drive the real FavoriteStar control on the seeded favorite document's list
+# row, then confirm every claim against authoritative /api/favorite + /api/document
+# read-back: the doc is favorite:true, it appears in GET /api/document/list?favorites=me,
+# a repeat PUT is an idempotent 200, and after DELETE it is gone from the favorites list.
+# Wait out the async index latency and land on the filtered list so the favorite-target
+# doc's ROW (carrying the star control) is reliably rendered before we click the star.
+fav_searchable = wait_for_doc_searchable(fav_doc_title)
+# Click the star on the seeded document's row (the .favorite-star Button rendered in the
+# star Column). Locate the row by its title cell, then its star control.
+star_clicked = js("""
+  return (() => {
+    const cell = [...document.querySelectorAll('.doc-title')].find(e => (e.textContent||'').includes(arguments0));
+    const row = cell ? cell.closest('tr') : null;
+    if (!row) return {found: false};
+    const star = row.querySelector('.favorite-star');
+    if (!star) return {found: false};
+    star.click();
+    return {found: true, pressed_before: star.getAttribute('aria-pressed')};
+  })();
+""".replace("arguments0", json.dumps(run)))
+time.sleep(1.5)
+shot("18a-favorite-starred")
+# Authoritative: the document now reports favorite:true.
+fav_flag = js("""
+  return (() => fetch(location.origin + '/api/document/arg_id', {credentials:'include'})
+    .then(r=>r.json()).then(d=> d.favorite === true).catch(()=> false))();
+""".replace("arg_id", fav_doc_id))
+# Authoritative: the favorites=me filtered list includes this document.
+fav_in_list = js("""
+  return (() => fetch(location.origin + '/api/document/list?favorites=me&limit=100', {credentials:'include'})
+    .then(r=>r.json())
+    .then(d => (d.documents||[]).some(x => x.id === arg_id)).catch(()=> false))();
+""".replace("arg_id", json.dumps(fav_doc_id)))
+# Idempotent re-star: a repeat PUT must be a 200 (no error), not a duplicate/500.
+repeat_put = js("""
+  return (() => fetch(location.origin + '/api/favorite/arg_id', {method:'PUT', credentials:'include'})
+    .then(r => r.status).catch(()=> 0))();
+""".replace("arg_id", fav_doc_id))
+time.sleep(0.4)
+# Unstar via the API and confirm it drops out of the favorites list.
+del_status = js("""
+  return (() => fetch(location.origin + '/api/favorite/arg_id', {method:'DELETE', credentials:'include'})
+    .then(r => r.status).catch(()=> 0))();
+""".replace("arg_id", fav_doc_id))
+time.sleep(0.4)
+fav_gone = js("""
+  return (() => fetch(location.origin + '/api/document/list?favorites=me&limit=100', {credentials:'include'})
+    .then(r=>r.json())
+    .then(d => !(d.documents||[]).some(x => x.id === arg_id)).catch(()=> false))();
+""".replace("arg_id", json.dumps(fav_doc_id)))
+favorites_ok = (
+    bool(star_clicked.get("found"))
+    and bool(fav_flag)                 # doc reports favorite:true after the UI click
+    and bool(fav_in_list)              # and appears in favorites=me
+    and int(repeat_put or 0) == 200    # repeat PUT is an idempotent 200
+    and int(del_status or 0) == 200    # DELETE succeeds
+    and bool(fav_gone)                 # and it is gone from favorites=me
+)
+results["favorites_roundtrip"] = (favorites_ok, f"searchable={fav_searchable} star={star_clicked} favorite_flag={fav_flag} in_list={fav_in_list} repeat_put={repeat_put} delete={del_status} gone={fav_gone}")
+shot("18b-favorite-unstarred")
+
+# --- Check 19 (#39): gallery view mode — toggle, card renders, persists ---------
+# As admin: switch the doc-list to Gallery via the SelectButton toggle, assert a gallery
+# card (article.doc-card with the seeded title) renders, assert the mode persisted to
+# localStorage teedy_document_view_mode AND survived a reload, then switch back to List.
+goto_url(base + "/#/document"); time.sleep(1.5); wait_for_load()
+# Search so the seeded doc is among the rendered results in either mode.
+js("""
+  (() => {
+    const el = document.querySelector('.search-input input, input.search-input, .search-row input');
+    if (el) { el.value = arguments0; el.dispatchEvent(new Event('input', {bubbles:true})); }
+  })();
+""".replace("arguments0", json.dumps(doc_title)))
+time.sleep(2.0); wait_for_load()
+# Click the "Gallery" option in the view-mode SelectButton.
+js("""
+  (() => {
+    const toggle = document.querySelector('.view-mode-toggle') || document;
+    const opts = [...toggle.querySelectorAll('.p-togglebutton, [role=button], .p-selectbutton *, .view-mode-label')];
+    const gallery = opts.find(o => /gallery/i.test(o.textContent||''));
+    (gallery || opts[0]).click();
+  })();
+""")
+time.sleep(1.8); wait_for_load()
+gallery_state = js("""
+  return (() => {
+    const cards = [...document.querySelectorAll('article.doc-card')];
+    const titled = cards.some(c => {
+      const t = c.querySelector('.card-title');
+      return t && (t.textContent||'').includes(arguments0);
+    });
+    return {cards: cards.length, titled, stored: localStorage.getItem('teedy_document_view_mode')};
+  })();
+""".replace("arguments0", json.dumps(run)))
+shot("19a-gallery-cards")
+# Reload to prove the mode persists across a cold load (localStorage-restored).
+js("location.reload()")
+time.sleep(3.5); wait_for_load()
+gallery_after_reload = js("""
+  return (() => ({
+    cards: document.querySelectorAll('article.doc-card').length,
+    stored: localStorage.getItem('teedy_document_view_mode'),
+  }))();
+""")
+# Switch back to List so later admin checks see the default render mode.
+js("""
+  (() => {
+    const toggle = document.querySelector('.view-mode-toggle') || document;
+    const opts = [...toggle.querySelectorAll('.p-togglebutton, [role=button], .p-selectbutton *, .view-mode-label')];
+    const list = opts.find(o => /(^|\\b)list(\\b|$)/i.test(o.textContent||''));
+    if (list) list.click();
+  })();
+""")
+time.sleep(1.2)
+gallery_ok = (
+    int(gallery_state.get("cards") or 0) >= 1
+    and bool(gallery_state.get("titled"))                     # a card for the seeded doc rendered
+    and gallery_state.get("stored") == "gallery"              # mode persisted to localStorage
+    and int(gallery_after_reload.get("cards") or 0) >= 1      # and survived a reload as gallery
+    and gallery_after_reload.get("stored") == "gallery"
+)
+results["gallery_view"] = (gallery_ok, f"initial={gallery_state} after_reload={gallery_after_reload}")
+shot("19b-gallery-after-reload")
+
+# --- Check 20 (#40): admin stats dashboard + non-admin 403 (context-isolated) ---
+# As admin: open #/settings/stats and assert the five totals cards, a <canvas> chart, and
+# a per-user storage row render; switch the window (7 -> 30) and assert the API is re-hit
+# (a fresh /app/stats?window=30 response). Then, context-isolated (mirrors the guard
+# checks), log in as a NON-admin and assert GET /api/app/stats?window=7 is 403; restore
+# admin in a try/finally so a failure here never leaves a non-admin session behind.
+goto_url(base + "/#/settings/stats"); time.sleep(3); wait_for_load()
+stats_admin = js("""
+  return (() => {
+    const labels = [...document.querySelectorAll('.total-label')].map(e => (e.textContent||'').trim());
+    const need = ['Documents', 'Users', 'Tags', 'Favorites'];
+    const cards = document.querySelectorAll('.total-card').length;
+    const labelsOk = need.every(n => labels.some(l => l.includes(n)))
+      && labels.some(l => /files/i.test(l));   // "Files (all versions)"
+    const canvases = document.querySelectorAll('canvas').length;
+    const storageRows = document.querySelectorAll('.storage-table tbody tr').length;
+    return {cards, labels, labelsOk, canvases, storageRows};
+  })();
+""")
+shot("20a-stats-admin")
+# Switch the window from 7 to 30 days and confirm a refetch was issued for window=30.
+# The click -> query-key change -> refetch is async, so we (1) install a fetch recorder
+# that logs every /app/stats URL to a global BEFORE the click, (2) click the 30-day
+# window control, then (3) POLL for up to ~8s for a window=30 call to appear (a single
+# post-click read races the async fetch). The recorder is restored at the end.
+js("""
+  (() => {
+    if (!window.__statsCalls) {
+      window.__statsCalls = [];
+      // The app fetches via Axios (XMLHttpRequest), so wrap XHR.open; also wrap
+      // fetch defensively in case any call path uses it.
+      const of = window.fetch;
+      window.__statsOrigFetch = of;
+      window.fetch = function(...args) {
+        try { const u = String(args[0]); if (u.includes('/app/stats')) window.__statsCalls.push(u); } catch (e) {}
+        return of.apply(this, args);
+      };
+      const ox = window.XMLHttpRequest.prototype.open;
+      window.__statsOrigXhrOpen = ox;
+      window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        try { const u = String(url); if (u.includes('/app/stats')) window.__statsCalls.push(u); } catch (e) {}
+        return ox.call(this, method, url, ...rest);
+      };
+    }
+  })();
+""")
+# Click the 30-day window option. The SelectButton renders its options as
+# .p-togglebutton elements; match the one whose label reads "30".
+js("""
+  (() => {
+    const scope = document.querySelector('.header-actions') || document;
+    const opts = [...scope.querySelectorAll('.p-togglebutton, [role=button], .p-selectbutton *, button')];
+    const b30 = opts.find(b => /(^|[^0-9])30([^0-9]|$)/.test((b.textContent||'').trim()));
+    if (b30) b30.click();
+  })();
+""")
+win_switched = False
+win_deadline = time.time() + 8
+while time.time() < win_deadline:
+    win_switched = js("""
+      return (() => (window.__statsCalls||[]).some(u => u.includes('window=30')))();
+    """)
+    if win_switched:
+        break
+    time.sleep(0.6)
+# Restore the original fetch so the recorder does not linger for later checks.
+js("""
+  (() => {
+    if (window.__statsOrigFetch) { window.fetch = window.__statsOrigFetch; delete window.__statsOrigFetch; }
+    if (window.__statsOrigXhrOpen) { window.XMLHttpRequest.prototype.open = window.__statsOrigXhrOpen; delete window.__statsOrigXhrOpen; }
+    delete window.__statsCalls;
+  })();
+""")
+win_switched = bool(win_switched)
+shot("20b-stats-window-30")
+stats_dash_ok = (
+    int(stats_admin.get("cards") or 0) >= 5
+    and bool(stats_admin.get("labelsOk"))          # all five totals labels present
+    and int(stats_admin.get("canvases") or 0) >= 1 # at least one chart canvas
+    and int(stats_admin.get("storageRows") or 0) >= 1
+    and bool(win_switched)                         # window switch re-hit /app/stats?window=30
+)
+# Non-admin 403 — context-isolated, admin restored in finally.
+rest_logout()
+stats_forbidden = None
+stats_403_ok = False
+stats_restore_ok = False
+try:
+    login_status = js("""
+      return (() => fetch(location.origin + '/api/user/login', {
+        method: 'POST', credentials: 'include',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'username=arg_u&password=arg_p&remember=false'
+      }).then(r => r.status).catch(() => 0))();
+    """.replace("arg_u", stats_user).replace("arg_p", stats_pass))
+    time.sleep(0.6)
+    stats_forbidden = js("""
+      return (() => fetch(location.origin + '/api/app/stats?window=7', {credentials:'include'})
+        .then(r => r.status).catch(() => 0))();
+    """)
+    stats_403_ok = (int(login_status or 0) == 200) and (int(stats_forbidden or 0) == 403)
+finally:
+    goto_url(base + "/#/login"); wait_for_load(); time.sleep(0.4)
+    stats_restore = rest_login()
+    time.sleep(0.4)
+    stats_admin_back = admin_session_live()
+    stats_restore_ok = (stats_restore == 200) and bool(stats_admin_back)
+stats_ok = stats_dash_ok and stats_403_ok and stats_restore_ok
+results["stats_dashboard"] = (stats_ok, f"admin={stats_admin} window_refetch={win_switched} nonadmin_status={stats_forbidden} restore_ok={stats_restore_ok}")
+shot("20c-stats-admin-restored")
+
+# --- Check 21 (#38): rich description sanitized (XSS-inert) --------------------
+# Security-critical: PUT /api/document with a description mixing legitimate formatting and
+# a hostile payload; read it back via /api/document and assert the stored HTML is inert —
+# NO <script, NO onerror, NO javascript: — while the legitimate <strong>/<a href="https://
+# survived. Also open the edit view and confirm the Quill editor (.ql-toolbar) is present.
+rich_desc = ('<p><strong>bold</strong> <a href="https://example.com">link</a></p>'
+             '<script>window.__x=1</script>'
+             '<img src=x onerror="window.__y=1">'
+             '<a href="javascript:window.__z=1">bad</a>')
+rich_put = js("""
+  return (() => fetch(location.origin + '/api/document/arg_id', {
+    method: 'POST', credentials: 'include',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: new URLSearchParams({title: arg_title, language: 'eng', description: arg_desc}).toString()
+  }).then(r => r.status).catch(() => 0))();
+""".replace("arg_id", rich_doc_id)
+   .replace("arg_title", json.dumps(run + " Rich Description Document"))
+   .replace("arg_desc", json.dumps(rich_desc)))
+time.sleep(0.8)
+stored = js("""
+  return (() => fetch(location.origin + '/api/document/arg_id', {credentials:'include'})
+    .then(r=>r.json()).then(d => d.description || '').catch(()=> ''))();
+""".replace("arg_id", rich_doc_id))
+stored_l = (stored or "").lower()
+inert = ("<script" not in stored_l) and ("onerror" not in stored_l) and ("javascript:" not in stored_l)
+legit = ("<strong" in stored_l) and ('href="https://example.com"' in stored_l)
+# Confirm the Quill editor mounts on the edit view (.ql-toolbar rendered at runtime).
+goto_url(base + f"/#/document/edit/{rich_doc_id}"); time.sleep(2.5); wait_for_load()
+quill_present = js("return (() => !!document.querySelector('.ql-toolbar') && !!document.querySelector('.ql-editor'))();")
+shot("21-rich-description")
+rich_ok = (int(rich_put or 0) == 200) and inert and legit and bool(quill_present)
+results["rich_description_sanitized"] = (rich_ok, f"put={rich_put} inert={inert} legit={legit} quill={quill_present} stored={stored[:160]!r}")
 
 # --- Checks 10-11 + 16-17: anonymous / login-form, CONTEXT-ISOLATED ------------
 # These run the browser LOGGED OUT. The whole logged-out region is wrapped in
@@ -785,6 +1128,10 @@ labels = {
     "guard_redirect": "check11: anonymous /settings/users redirected to /login (context-isolated)",
     "disabled_login_denied": "check16: a disabled user was denied native form login (behavior B, context-isolated)",
     "totp_login": "check17: TOTP challenge revealed the OTP field + a valid code completed login (behavior A, context-isolated)",
+    "favorites_roundtrip": "check18: favorites star (real UI click) round-trips via /api/favorite + /api/document, idempotent PUT + DELETE (#41)",
+    "gallery_view": "check19: gallery view toggle rendered a card for the seeded doc + persisted the mode in localStorage across reload (#39)",
+    "stats_dashboard": "check20: admin stats dashboard rendered totals/chart/storage + window refetch, and a non-admin got 403 (context-isolated) (#40)",
+    "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",
     "session_restored": "check12: admin session restored + verified live after the anonymous checks",
 }
 order = list(labels.keys())
@@ -807,13 +1154,13 @@ PY
 # Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
 # never collides with a later run. The top-of-script cookie_jar admin session is
 # still valid (the harness restored admin at the end of its logged-out region).
-for d in "${doc_id:-}" "${ovf_doc_id:-}"; do
+for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}"; do
   [ -n "${d}" ] || continue
   curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
     && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
     || echo "[cleanup] could not trash document ${d} (non-fatal)" | tee -a "${art_dir}/checks.log"
 done
-for u in "${dis_user:-}" "${totp_user:-}"; do
+for u in "${dis_user:-}" "${totp_user:-}" "${stats_user:-}"; do
   [ -n "${u}" ] || continue
   curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/user/${u}" >/dev/null 2>&1 \
     && echo "[cleanup] deleted user ${u}" | tee -a "${art_dir}/checks.log" \
