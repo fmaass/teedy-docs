@@ -34,7 +34,7 @@
     "type": "Typ",
     "coverage": "Geltungsbereich",
     "rights": "Rechte",
-    "count": "{count} {count} gefunden",
+    "count": "{count} Dokumente gefunden",
     "search_help": {
       "title": "Suchhilfe",
       "contents_hint": "Die Suche durchsucht den gesamten Inhalt Ihrer Dokumente – einschließlich des per OCR aus PDFs und Bildern extrahierten Textes – nicht nur die Titel.",
