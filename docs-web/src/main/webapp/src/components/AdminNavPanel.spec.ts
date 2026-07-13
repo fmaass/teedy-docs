@@ -1,23 +1,15 @@
-import { describe, it, expect, vi } from 'vitest'
-import { ref } from 'vue'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import en from '../locale/en.json'
-
-// The panel reads the running version from the shared app-info query (#62). Mock it
-// so a test can drive current_version without the network.
-const appInfoValue = vi.hoisted(() => ({ value: { current_version: '3.5.2' } as { current_version: string } | undefined }))
-vi.mock('../composables/useAppInfo', () => ({
-  useAppInfo: () => ({ data: ref(appInfoValue.value) }),
-}))
 
 import AdminNavPanel from './AdminNavPanel.vue'
 
 // Unit under test: the settings admin nav (#61) renders the 13 admin items grouped
 // into THREE labelled sections (Access & Users / Content Model / System) with the
-// correct membership, plus the renamed personal header ("Personal"), and the running
-// app version pinned at the BOTTOM (#62). ROUTES are unchanged — this asserts the
-// presentation regroup + version label only.
+// correct membership, plus the renamed personal header ("Personal"). ROUTES are
+// unchanged — this asserts the presentation regroup only. (The running app version
+// label moved to AppLayout's panel footer in #62; see e2e settings coverage.)
 
 const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
 
@@ -118,29 +110,5 @@ describe('AdminNavPanel — settings nav regroup (#61)', () => {
   it('renders no admin group sections for a non-admin', () => {
     const sections = mountPanel(false).findAll('.admin-nav-section').map((s) => s.text())
     expect(sections).toEqual(['Personal'])
-  })
-
-  it('pins the running app version at the BOTTOM of the panel (#62)', () => {
-    appInfoValue.value = { current_version: '3.5.2' }
-    const wrapper = mountPanel()
-    const label = wrapper.find('.admin-nav-version')
-    expect(label.exists()).toBe(true)
-    expect(label.text()).toBe('v3.5.2')
-    // It is the LAST child of the nav container (bottom of the panel).
-    const nav = wrapper.get('.admin-nav')
-    expect(nav.element.lastElementChild).toBe(label.element)
-  })
-
-  it('renders the version for a non-admin too (the label is not admin-gated)', () => {
-    appInfoValue.value = { current_version: '3.6.0' }
-    const wrapper = mountPanel(false)
-    expect(wrapper.find('.admin-nav-version').text()).toBe('v3.6.0')
-  })
-
-  it('omits the version label when the app version is not yet known', () => {
-    appInfoValue.value = undefined
-    const wrapper = mountPanel()
-    expect(wrapper.find('.admin-nav-version').exists()).toBe(false)
-    appInfoValue.value = { current_version: '3.5.2' }
   })
 })

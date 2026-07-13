@@ -28,6 +28,9 @@ const modeOptions = computed<Array<{ label: string; value: 'and' | 'or' }>>(() =
 // renders today's exact chrome (nothing) when none are configured.
 const { data: appInfo } = useAppInfo()
 const footerLinks = computed(() => appInfo.value?.footer_links ?? [])
+// #62: running app version, shown as a muted label directly above the two
+// footer nav links (Manage Tags / Settings) in the settings/tag sidebar.
+const appVersion = computed(() => appInfo.value?.current_version ?? null)
 
 const isMobile = ref(false)
 const drawerOpen = ref(false)
@@ -172,6 +175,7 @@ function handleMobileTagSelect(tagId: string) {
 
         <!-- Footer nav -->
         <div class="panel-footer">
+          <div v-if="appVersion && isAdminContext" class="panel-footer-version">{{ `v${appVersion}` }}</div>
           <router-link
             to="/tag"
             class="footer-link"
@@ -254,6 +258,7 @@ function handleMobileTagSelect(tagId: string) {
             @navigate="drawerOpen = false"
           />
           <div class="panel-footer">
+            <div v-if="appVersion && isAdminContext" class="panel-footer-version">{{ `v${appVersion}` }}</div>
             <router-link to="/tag" class="footer-link" @click="drawerOpen = false">
               <i class="pi pi-tags" /><span>{{ t('ui.manage_tags') }}</span>
             </router-link>
@@ -384,6 +389,13 @@ function handleMobileTagSelect(tagId: string) {
   flex-direction: column;
   gap: 0.125rem;
   flex-shrink: 0;
+}
+
+.panel-footer-version {
+  padding: 0.125rem 0.5rem 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .footer-link {

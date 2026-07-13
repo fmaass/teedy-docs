@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { unique, login, deleteUser } from './helpers'
+import { unique, login, deleteUser, openNav, closeNav } from './helpers'
 
 // #64: /settings is a landing HUB (a grouped, annotated list), not the old redirect
 // to the Account form. These specs assert, against the real app:
@@ -75,4 +75,30 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
   } finally {
     await deleteUser(page, username)
   }
+})
+
+// #62: the running app version renders as a muted label in the sidebar footer,
+// directly ABOVE the two footer nav buttons (Manage Tags / Settings), and only in
+// the settings/tag (admin) context — not in the documents view. Works on both the
+// desktop aside and the mobile nav Drawer.
+test('the app version sits above the sidebar footer buttons on settings, absent in documents (#62)', async ({ page }) => {
+  await page.goto('/#/settings')
+  const nav = await openNav(page)
+
+  const version = nav.locator('.panel-footer-version')
+  await expect(version).toBeVisible()
+  await expect(version).toHaveText(/^v\d+\.\d+\.\d+/)
+
+  // It renders above the first footer nav button (Manage Tags) within the footer.
+  const firstFooterLink = nav.locator('.panel-footer .footer-link').first()
+  const vBox = await version.boundingBox()
+  const lBox = await firstFooterLink.boundingBox()
+  expect(vBox!.y).toBeLessThan(lBox!.y)
+  await closeNav(page)
+
+  // Gated to the admin (settings/tag) context — absent in the documents sidebar.
+  await page.goto('/#/document')
+  const docNav = await openNav(page)
+  await expect(docNav.locator('.panel-footer-version')).toHaveCount(0)
+  await closeNav(page)
 })
