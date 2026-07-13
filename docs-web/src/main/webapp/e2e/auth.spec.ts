@@ -1,4 +1,4 @@
-import { test, expect, request as pwRequest } from '@playwright/test'
+import { test, expect, request as pwRequest } from './fixtures'
 import { unique, totpCode } from './helpers'
 
 // The login-form specs must start UNauthenticated — override the project-wide

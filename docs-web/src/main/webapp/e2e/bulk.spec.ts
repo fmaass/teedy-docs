@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Bulk operations over a multi-selection: add a tag, set a language, delete.

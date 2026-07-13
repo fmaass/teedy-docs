@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { unique, createDocument, confirmDanger, dismissToasts } from './helpers'
+import { test, expect } from './fixtures'
+import { unique, createDocument, confirmDanger } from './helpers'
 
 // Trash lifecycle: delete a document to trash, restore it, permanent-delete, and
 // empty trash. Also asserts the retention countdown column renders (auto-purge
@@ -63,28 +63,42 @@ test('empty trash removes all trashed documents', async ({ page }) => {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toBeVisible()
   }
 
-  // Empty the trash. The open→confirm gesture is overlay-fragile at the mobile
-  // viewport: the two seed create+delete steps stack toasts (top-right, 25rem wide)
-  // that overflow to cover the page-header "Empty trash" button, so a click issued
-  // while a toast still overlays it lands on the toast and the button never fires —
-  // the trash is never emptied and the seeded rows stay (the deterministic-in-CI
-  // failure this guards against; the app itself empties correctly, verified against a
-  // real RC). Tear the toast layer down first so the trigger is reachable, then make
-  // the whole open-dialog→confirm gesture retriable: if the button-click or the "Yes"
-  // click is dropped, re-issue it until the ConfirmDialog is actually accepted. The
-  // gesture is idempotent (emptying an already-empty trash is a no-op), so retrying is
-  // safe. The AUTHORITATIVE success check is the strict toHaveCount(0) below, which is
-  // unchanged and still proves the trash was emptied — the retry only fixes a dropped
-  // input, it never masks a trash that stayed populated.
+  // Empty the trash. The original CI failure on this spec looked like an overlay race,
+  // but the real cause was a SERVER bug: DELETE /api/document/trash returned 500 whenever
+  // the trash held a file owned by a since-deleted user (the user-reassign specs delete a
+  // user upstream), so the trash was never emptied and the seeded rows stayed (fixed in
+  // FileUtil.reclaimUserQuota). Toasts covering the button on mobile were a secondary
+  // hazard, now neutralised GLOBALLY by the click-through fixture (e2e/fixtures.ts).
+  //
+  // The gesture is written to prove the AUTHORITATIVE server effect rather than a UI
+  // side-effect: each attempt clicks "Empty trash", accepts the ConfirmDialog if it
+  // opened, and waits for the DELETE /api/document/trash response — the request the empty
+  // actually issues. A dropped click sends no DELETE, so the outer toPass retries; the op
+  // is idempotent (emptying an already-empty trash is a no-op), so retrying is safe. The
+  // button is v-if'd on documents.length, so once the trash is empty it disappears — that
+  // absence is itself the success signal and we stop. The strict toHaveCount(0) below is
+  // unchanged and remains the final authoritative proof the seeded rows are gone.
+  const emptyBtn = page.getByRole('button', { name: 'Empty trash' })
+  const confirm = page.getByRole('alertdialog')
   await expect(async () => {
-    await dismissToasts(page)
-    await page.getByRole('button', { name: 'Empty trash' }).click()
-    await confirmDanger(page)
-    // Confirm the gesture landed: our seeded rows must be gone within a short window.
-    for (const title of titles) {
-      await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0, { timeout: 3000 })
+    if (!(await emptyBtn.isVisible().catch(() => false))) return // trash already empty
+    const deleteResponse = page.waitForResponse(
+      (r) => r.url().endsWith('/api/document/trash') && r.request().method() === 'DELETE',
+      { timeout: 8000 },
+    )
+    await emptyBtn.click()
+    if (await confirm.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await confirm.getByRole('button', { name: 'Yes' }).click()
+      await expect(confirm).toBeHidden()
     }
-  }).toPass({ timeout: 20000 })
+    // Prove the empty actually fired server-side (not just that a dialog closed); if the
+    // click/confirm was dropped no DELETE was sent and this rejects, so toPass retries.
+    await deleteResponse
+    // Then our seeded rows must clear from the (invalidated + refetched) list.
+    for (const title of titles) {
+      await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0, { timeout: 5000 })
+    }
+  }).toPass({ timeout: 30000 })
 
   // Final authoritative assertion: the seeded rows are gone. (Other runs' docs may
   // remain, so assert on our own titles rather than a global empty state.)

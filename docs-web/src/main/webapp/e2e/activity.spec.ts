@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger, fillDescription } from './helpers'
 
 // Per-document activity (DocumentViewActivity -> GET /auditlog?document=<id>). The

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger, deleteUser } from './helpers'
 
 // Document permissions (ACL) end to end via DocumentViewPermissions:

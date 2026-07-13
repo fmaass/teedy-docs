@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // Per-user storage quota (#37): the create and edit dialogs expose a quota field, and editing
 // a user's quota is reflected in the users table after save (post-refresh barrier). Runs as the

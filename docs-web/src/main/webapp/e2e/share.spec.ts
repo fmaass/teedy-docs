@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Share-by-URL: create a public link on a document, open it in a SEPARATE

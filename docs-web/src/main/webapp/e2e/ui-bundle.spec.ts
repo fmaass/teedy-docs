@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique, openNav, isMobileViewport } from './helpers'
 
 // v3.6.0 UI bundle e2e (#57 title/favicon, #61 settings regroup, #52 items-per-page,

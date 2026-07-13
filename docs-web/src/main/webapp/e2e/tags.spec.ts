@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, confirmDanger, toggleTagFilter, expectTagNodeState, openNav } from './helpers'
 
 // Tag management (create/edit/delete on the /tag page) and the left-panel tag

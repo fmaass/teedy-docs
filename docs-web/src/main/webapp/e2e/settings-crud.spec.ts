@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, confirmDanger } from './helpers'
 
 // Admin CRUD smoke for the settings screens: create one of each entity, see it

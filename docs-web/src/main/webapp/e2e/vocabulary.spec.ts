@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Delete every remaining entry of a vocabulary namespace via the admin API. A

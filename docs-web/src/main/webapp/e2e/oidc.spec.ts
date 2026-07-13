@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // OIDC settings smoke (#44): the admin opens /settings/oidc, sees the enabled toggle reveal the
 // provider/claim fields, the client secret is masked (a Password input, never a plaintext value),

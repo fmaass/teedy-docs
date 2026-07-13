@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // Guest (passwordless) login. The guest button + passwordless login path ARE real UI
 // (Login.vue -> auth.login('guest', '')), but a fresh DB defaults GUEST_LOGIN=false

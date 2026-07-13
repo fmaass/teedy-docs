@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique, tagTreePanel } from './helpers'
 
 // #34: tag chips on a document view are clickable filter actions. Clicking a tag

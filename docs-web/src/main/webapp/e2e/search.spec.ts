@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Full-text search: a created document is found by a title term and by a tag:

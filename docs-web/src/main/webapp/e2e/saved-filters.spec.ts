@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page } from './fixtures'
 import { unique, confirmDanger, toggleTagFilter } from './helpers'
 
 // #42: per-user saved filters. A user builds a filter (an included tag + free-text

@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type Locator, type APIRequestContext } from './fixtures'
 import { isMobileViewport } from './helpers'
 
 // REAL visual-regression + multi-language (EN/DE) gate over the key screens most

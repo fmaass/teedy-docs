@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, login, deleteUser, openNav, closeNav } from './helpers'
 
 // #64: /settings is a landing HUB (a grouped, annotated list), not the old redirect

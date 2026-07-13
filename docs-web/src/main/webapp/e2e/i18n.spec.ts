@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // UI language switch (vue-i18n) via the REAL Settings → Account language control.
 // Proves the whole loop: selecting Deutsch swaps rendered strings to German, the

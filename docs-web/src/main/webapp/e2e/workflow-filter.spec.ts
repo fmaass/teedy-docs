@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { unique } from './helpers'
 
 // #28: the "Assigned to me" (workflow=me) document-list filter must round-trip

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { createDocument, deleteCurrentDocument } from './helpers'
 
 // #53 forgiving search + client-side quick filter.

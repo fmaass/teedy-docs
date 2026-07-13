@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique, openNav } from './helpers'
 
 // #12: the facet (co-occurrence) tree bounds dense children — a node with more

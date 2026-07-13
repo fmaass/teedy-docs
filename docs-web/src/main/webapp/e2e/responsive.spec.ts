@@ -1,4 +1,4 @@
-import { test, expect, type Locator } from '@playwright/test'
+import { test, expect, type Locator } from './fixtures'
 import { createDocument, unique } from './helpers'
 
 // Mobile / responsive coverage. This spec runs ONLY under the `mobile`

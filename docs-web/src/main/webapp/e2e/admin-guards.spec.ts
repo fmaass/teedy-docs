@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, login, confirmDanger, deleteUser } from './helpers'
 // unique, login, confirmDanger are used by both the non-admin guard test and the
 // behavior-B disabled-user tests below.

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // #60: the admin Config maintenance "Clean storage" action must first show a dry-run summary
 // confirm ("delete N file(s), reclaim ~X") BEFORE the real cleanup runs. This proves the

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Document relations end to end via the "Related documents" section on the

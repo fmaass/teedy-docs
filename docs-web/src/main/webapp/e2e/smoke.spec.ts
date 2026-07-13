@@ -1,4 +1,4 @@
-import { test, expect, type ConsoleMessage } from '@playwright/test'
+import { test, expect, type ConsoleMessage } from './fixtures'
 import { openNav } from './helpers'
 
 // Runs authenticated (project-wide admin storageState). Verifies the app shell +

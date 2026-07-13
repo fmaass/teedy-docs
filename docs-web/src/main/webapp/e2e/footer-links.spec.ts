@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { openNav } from './helpers'
 
 // Configurable footer/imprint links (issue #43). Two admin-configured links must
