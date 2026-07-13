@@ -841,6 +841,8 @@
       "userinfo_endpoint": "UserInfo-Endpunkt",
       "username_claim": "Benutzernamen-Claim",
       "email_claim": "E-Mail-Claim",
+      "username_verbatim": "Benutzernamen-Claim unverändert übernehmen",
+      "username_verbatim_hint": "Wenn aktiviert, behalten bereitgestellte OIDC-Benutzer ihren preferred_username unverändert (ohne eindeutigen Hash-Suffix). Ein späteres, anderes Konto mit demselben Namen wird automatisch eindeutig gemacht.",
       "from_property": "Derzeit über eine JVM-Eigenschaft gesetzt — beim Speichern wird eine Datenbank-Überschreibung angelegt.",
       "url_invalid": "Muss eine http(s)-URL sein.",
       "issuer_required": "Issuer-URL ist erforderlich.",

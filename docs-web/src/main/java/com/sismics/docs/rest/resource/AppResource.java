@@ -1245,6 +1245,8 @@ public class AppResource extends BaseResource {
                 .add("userinfo_endpoint", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERINFO_ENDPOINT)))
                 .add("username_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_CLAIM)))
                 .add("email_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.EMAIL_CLAIM)))
+                .add("username_verbatim",
+                        Boolean.parseBoolean(OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_VERBATIM)))
                 .add("sources", sources);
 
         return Response.ok().entity(response.build()).build();
@@ -1253,7 +1255,7 @@ public class AppResource extends BaseResource {
     /**
      * Configures the OIDC authentication (provider/claim settings only, per the ADR-0015 fence).
      *
-     * <p>Writes each of the twelve OIDC config values to T_CONFIG (DB-first precedence: a stored
+     * <p>Writes each of the OIDC config values to T_CONFIG (DB-first precedence: a stored
      * value overrides the {@code docs.oidc_*} JVM property). The client secret is write-only: an
      * EMPTY {@code client_secret} preserves the stored secret; an explicit
      * {@code client_secret_reset=true} clears it (the write-only contract stays intact — the GET
@@ -1275,6 +1277,7 @@ public class AppResource extends BaseResource {
      * @apiParam {String} userinfo_endpoint UserInfo endpoint (optional)
      * @apiParam {String} username_claim Username claim name
      * @apiParam {String} email_claim Email claim name
+     * @apiParam {Boolean} username_verbatim If true, provision the sanitized preferred_username verbatim (no hash suffix)
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
      * @apiPermission admin
@@ -1296,7 +1299,8 @@ public class AppResource extends BaseResource {
                                @FormParam("jwks_uri") String jwksUri,
                                @FormParam("userinfo_endpoint") String userinfoEndpoint,
                                @FormParam("username_claim") String usernameClaim,
-                               @FormParam("email_claim") String emailClaim) {
+                               @FormParam("email_claim") String emailClaim,
+                               @FormParam("username_verbatim") Boolean usernameVerbatim) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -1348,6 +1352,9 @@ public class AppResource extends BaseResource {
             configDao.update(ConfigType.OIDC_USERINFO_ENDPOINT, Strings.nullToEmpty(userinfoEndpoint));
             configDao.update(ConfigType.OIDC_USERNAME_CLAIM, usernameClaim);
             configDao.update(ConfigType.OIDC_EMAIL_CLAIM, emailClaim);
+            // Verbatim-username opt-in (default OFF preserves the safe hash-suffix behaviour).
+            configDao.update(ConfigType.OIDC_USERNAME_VERBATIM,
+                    Boolean.toString(usernameVerbatim != null && usernameVerbatim));
             // Secret last: an explicit reset clears it; a non-empty value overwrites; a blank
             // value with no reset leaves the stored secret untouched (write-only keep-on-empty).
             if (resetSecret) {

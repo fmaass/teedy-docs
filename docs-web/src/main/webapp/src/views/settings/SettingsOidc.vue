@@ -29,6 +29,7 @@ const form = reactive<OidcConfig>({
   userinfo_endpoint: '',
   username_claim: 'preferred_username',
   email_claim: 'email',
+  username_verbatim: false,
 })
 
 const sources = ref<Record<string, OidcSource>>({})
@@ -57,6 +58,7 @@ watch(oidcConfig, (config) => {
   form.userinfo_endpoint = config.userinfo_endpoint ?? ''
   form.username_claim = config.username_claim || 'preferred_username'
   form.email_claim = config.email_claim || 'email'
+  form.username_verbatim = config.username_verbatim === true
   sources.value = config.sources ?? {}
   seeded = true
 }, { immediate: true })
@@ -194,6 +196,14 @@ function resetSecret() {
           <InputText id="oidc-email-claim" v-model="form.email_claim" class="w-full" :invalid="fieldErrors.has('email_claim_required')" />
           <small v-if="fieldErrors.has('email_claim_required')" class="field-error">{{ t('ui.oidc.email_claim_required') }}</small>
         </div>
+
+        <div class="form-field">
+          <div class="enable-toggle">
+            <ToggleSwitch v-model="form.username_verbatim" inputId="oidc-username-verbatim" />
+            <label for="oidc-username-verbatim" class="toggle-label">{{ t('ui.oidc.username_verbatim') }}</label>
+          </div>
+          <small class="field-hint">{{ t('ui.oidc.username_verbatim_hint') }}</small>
+        </div>
       </template>
 
       <Button class="save-btn" :label="t('save')" icon="pi pi-check" :loading="saving" @click="onSave" />
@@ -232,6 +242,10 @@ function resetSecret() {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--p-text-color);
+}
+.toggle-label {
+  margin-bottom: 0;
+  cursor: pointer;
 }
 .field-hint {
   display: block;

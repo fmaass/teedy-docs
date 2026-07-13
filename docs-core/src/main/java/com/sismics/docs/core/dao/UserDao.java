@@ -100,11 +100,44 @@ public class UserDao {
         user.setPrivateKey(EncryptionUtil.generatePrivateKey());
         user.setStorageCurrent(0L);
         em.persist(user);
-        
+
+        // Force the INSERT now so the active-username unique index (IDX_USER_USERNAME_ACTIVE,
+        // dbupdate-050) is checked HERE — inside create(), synchronously — rather than surfacing
+        // later as an unhandled PersistenceException at request-transaction commit (a 500). The
+        // case-insensitive precheck above already rejects the common case; this flush is the race
+        // backstop that closes the window between the precheck SELECT and the commit. A violation
+        // of THIS index is translated to the same "AlreadyExistingUsername" the precheck throws, so
+        // every creation path (local, LDAP, OIDC) gets one clean signal. Any OTHER constraint
+        // violation (e.g. IDX_USER_OIDC on the OIDC path) is left to propagate unchanged so its own
+        // handler still sees it.
+        try {
+            em.flush();
+        } catch (jakarta.persistence.PersistenceException e) {
+            if (isActiveUsernameConflict(e)) {
+                throw new Exception("AlreadyExistingUsername", e);
+            }
+            throw e;
+        }
+
         // Create audit log
         AuditLogUtil.create(user, AuditLogType.CREATE, userId);
-        
+
         return user.getId();
+    }
+
+    /**
+     * True when the throwable chain is a violation of the active-username unique index
+     * {@code IDX_USER_USERNAME_ACTIVE} (dbupdate-050). Detected by index name so it is dialect
+     * agnostic (H2 names it in the message; PostgreSQL reports the lowercase constraint name).
+     */
+    private static boolean isActiveUsernameConflict(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            String msg = c.getMessage();
+            if (msg != null && msg.toUpperCase().contains("IDX_USER_USERNAME_ACTIVE")) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /**

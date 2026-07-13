@@ -97,5 +97,13 @@ public enum ConfigType {
     OIDC_JWKS_URI,
     OIDC_USERINFO_ENDPOINT,
     OIDC_USERNAME_CLAIM,
-    OIDC_EMAIL_CLAIM
+    OIDC_EMAIL_CLAIM,
+
+    /**
+     * When true, an OIDC user is provisioned with the sanitized {@code preferred_username}
+     * claim VERBATIM (no deterministic hash suffix), using the full username-length budget.
+     * Default OFF preserves the safe hash-suffix behaviour. See {@code OidcResource} and
+     * ADR-0018 (extends ADR-0015).
+     */
+    OIDC_USERNAME_VERBATIM
 }

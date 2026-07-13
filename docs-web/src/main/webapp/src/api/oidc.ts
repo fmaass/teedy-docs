@@ -29,6 +29,9 @@ export interface OidcConfig {
   userinfo_endpoint?: string
   username_claim?: string
   email_claim?: string
+  // #59 opt-in: when true, provision the sanitized preferred_username verbatim (no hash suffix).
+  // Default OFF preserves the safe hash-suffix behavior.
+  username_verbatim?: boolean
   // Per-field effective source, keyed by the lowercase key name (enabled, issuer, ...).
   sources?: Record<string, OidcSource>
 }
@@ -55,6 +58,7 @@ export function saveOidcConfig(config: OidcConfig) {
     params.set('userinfo_endpoint', config.userinfo_endpoint ?? '')
     params.set('username_claim', config.username_claim ?? '')
     params.set('email_claim', config.email_claim ?? '')
+    params.set('username_verbatim', String(config.username_verbatim === true))
   }
   return api.post('/app/config_oidc', params)
 }

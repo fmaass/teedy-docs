@@ -841,6 +841,8 @@
       "userinfo_endpoint": "UserInfo endpoint",
       "username_claim": "Username claim",
       "email_claim": "Email claim",
+      "username_verbatim": "Use the username claim verbatim",
+      "username_verbatim_hint": "When on, provisioned OIDC users keep their preferred_username as-is (no unique hash suffix). A later, different account presenting the same name is disambiguated automatically.",
       "from_property": "Currently set from a JVM property — saving stores a database override.",
       "url_invalid": "Must be an http(s) URL.",
       "issuer_required": "Issuer URL is required.",

@@ -22,9 +22,13 @@ test.describe('OIDC settings', () => {
     await expect(secret).toBeVisible()
     await expect(secret).toHaveAttribute('type', 'password')
 
+    // #59: the verbatim-username opt-in toggle is present in the enabled form.
+    await expect(page.locator('#oidc-username-verbatim')).toBeVisible()
+
     // Toggle back off — fields collapse.
     await page.locator('#oidc-enabled').click()
     await expect(page.locator('#oidc-issuer')).toHaveCount(0)
+    await expect(page.locator('#oidc-username-verbatim')).toHaveCount(0)
   })
 
   test('saving a disabled OIDC config succeeds without error', async ({ page }) => {

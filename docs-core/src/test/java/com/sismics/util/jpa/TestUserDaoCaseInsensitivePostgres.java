@@ -163,4 +163,59 @@ public class TestUserDaoCaseInsensitivePostgres {
                 "creating an 'ADMIN' account while the seeded 'admin' exists must be refused on Postgres");
         Assertions.assertEquals("AlreadyExistingUsername", ex.getMessage());
     }
+
+    /**
+     * The active-username unique index (dbupdate-050) is the RACE BACKSTOP the app precheck cannot
+     * cover: two concurrent local creations whose case-insensitive prechecks BOTH pass (each in its
+     * own transaction, before either commits) still contend at the DB. {@link UserDao#create} forces
+     * a flush and translates that DB unique-index violation to the SAME clean
+     * {@code AlreadyExistingUsername} the precheck throws — so a racing local/LDAP creation surfaces
+     * a clean validation error, never a raw 500 PersistenceException. This drives the race on real
+     * PostgreSQL (case-sensitive {@code =}, so the constraint's lower() index is what fires).
+     */
+    @Test
+    public void createTranslatesActiveUsernameConstraintRaceToAlreadyExistingUsername() throws Exception {
+        // The request EM (from setUp) is txA. Its precheck for "racer" passes (no such user yet),
+        // and it persists+flushes "racer" but does NOT commit — the row is not yet visible to others.
+        EntityManager emA = ThreadLocalContext.get().getEntityManager();
+        new UserDao().create(newUser("racer"), "admin");
+        emA.flush();
+
+        // txB: a SEPARATE EM/transaction. Its precheck ALSO passes (txA is uncommitted, so txB does
+        // not see "racer"), then create() flushes and MUST hit the unique index and translate to
+        // AlreadyExistingUsername rather than a raw PersistenceException. Run txB on its own thread
+        // so its blocking flush (waiting on txA's uncommitted row lock) cannot deadlock this thread;
+        // committing txA below releases the lock and lets txB observe the violation.
+        final Exception[] thrown = new Exception[1];
+        Thread txB = new Thread(() -> {
+            EntityManager emB = emf.createEntityManager();
+            EntityManager prev = ThreadLocalContext.get().getEntityManager();
+            EntityTransaction tx = emB.getTransaction();
+            try {
+                ThreadLocalContext.get().setEntityManager(emB);
+                tx.begin();
+                new UserDao().create(newUser("RACER"), "admin"); // case-variant → same lower() key
+                tx.commit();
+            } catch (Exception e) {
+                thrown[0] = e;
+            } finally {
+                if (tx.isActive()) tx.rollback();
+                emB.close();
+                ThreadLocalContext.get().setEntityManager(prev);
+            }
+        });
+        txB.start();
+        // Give txB a moment to reach its flush and block on txA's row lock, then commit txA so the
+        // lock releases and txB sees the unique violation.
+        Thread.sleep(500);
+        emA.getTransaction().commit();
+        txB.join(10_000);
+
+        Assertions.assertNotNull(thrown[0], "the racing creation must fail, not silently create a duplicate");
+        Assertions.assertEquals("AlreadyExistingUsername", thrown[0].getMessage(),
+                "a DB active-username constraint race must surface as AlreadyExistingUsername, not a raw 500");
+
+        // Re-open a transaction for the tearDown rollback (setUp's was committed above).
+        emA.getTransaction().begin();
+    }
 }

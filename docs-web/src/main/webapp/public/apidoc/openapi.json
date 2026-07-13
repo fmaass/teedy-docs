@@ -749,6 +749,9 @@
                   },
                   "email_claim": {
                     "type": "string"
+                  },
+                  "username_verbatim": {
+                    "type": "string"
                   }
                 }
               }

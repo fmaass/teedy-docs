@@ -47,6 +47,7 @@ describe('oidc api module', () => {
       userinfo_endpoint: 'https://iss.example/userinfo',
       username_claim: 'preferred_username',
       email_claim: 'email',
+      username_verbatim: true,
     })
     const params = clientMock.post.mock.calls[0][1] as URLSearchParams
     expect(params.get('enabled')).toBe('true')
@@ -56,6 +57,13 @@ describe('oidc api module', () => {
     expect(params.get('scope')).toBe('openid profile email')
     expect(params.get('username_claim')).toBe('preferred_username')
     expect(params.get('email_claim')).toBe('email')
+    expect(params.get('username_verbatim')).toBe('true')
+  })
+
+  it('username_verbatim defaults to false when omitted', async () => {
+    await saveOidcConfig({ enabled: true, issuer: 'https://i', client_id: 'c', redirect_uri: 'https://r', scope: 's', username_claim: 'u', email_claim: 'e' })
+    const params = clientMock.post.mock.calls[0][1] as URLSearchParams
+    expect(params.get('username_verbatim')).toBe('false')
   })
 
   it('write-only secret: an empty client_secret is sent blank (backend keeps the stored value)', async () => {
