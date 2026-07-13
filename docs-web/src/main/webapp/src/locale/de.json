@@ -881,6 +881,29 @@
       "group_content": "Inhaltsmodell",
       "group_system": "System"
     },
+    "settings": {
+      "hub": {
+        "heading": "Einstellungen",
+        "intro": "Verwalten Sie Ihr Konto und konfigurieren Sie – als Administrator – die gesamte Teedy-Instanz.",
+        "desc": {
+          "account": "Ihr Profil, Passwort, Sprache, Zwei-Faktor-Authentifizierung und aktive Sitzungen.",
+          "apikeys": "Persönliche API-Schlüssel für Skripte und Integrationen von Drittanbietern.",
+          "users": "Benutzerkonten erstellen, bearbeiten, deaktivieren und löschen.",
+          "groups": "Benutzer in Gruppen für gemeinsame Berechtigungen organisieren.",
+          "ldap": "Benutzer gegen ein externes LDAP-Verzeichnis authentifizieren.",
+          "oidc": "Anmeldung über einen externen OpenID-Connect-Identitätsanbieter.",
+          "metadata": "Benutzerdefinierte Metadatenfelder für Dokumente definieren.",
+          "vocabulary": "Die von Dokumentfeldern genutzten kontrollierten Vokabulare pflegen.",
+          "tag_rules": "Tags automatisch auf Dokumente anwenden, die einer Regel entsprechen.",
+          "workflow": "Mehrstufige Prüf- und Freigabe-Arbeitsabläufe gestalten.",
+          "config": "Instanzweite Einstellungen: Sprache, Uploads, OCR, E-Mail und mehr.",
+          "inbox": "Dokumente automatisch aus einem IMAP-Postfach importieren.",
+          "webhooks": "Externe Dienste benachrichtigen, wenn sich Dokumente ändern.",
+          "stats": "Nutzungsstatistiken und Speicherverbrauch pro Benutzer.",
+          "monitoring": "Server-Protokoll und Laufzeitzustand einsehen."
+        }
+      }
+    },
     "date": "Datum",
     "user": "Benutzer",
     "action": "Aktion",

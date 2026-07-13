@@ -93,6 +93,10 @@
 #  24. Gallery right-click tags (v3.6.0 #50) — right-click a gallery card, click a tag
 #      in the context menu, and verify the tag lands on the document via
 #      GET /api/document/:id (authoritative)                                     [browser+api]
+#  26. Settings landing hub (v3.6.0 #64) — admin #/settings renders the grouped,
+#      annotated HUB (H1 "Settings" + the Personal/Access/Content/System section H2s +
+#      a one-line description per entry), NOT the old Account form; a hub entry then
+#      navigates to its leaf route (#/settings/users)                            [browser]
 #  20. Stats dashboard (v3.5.0 #40) — admin #/settings/stats renders the five totals
 #      cards + a chart <canvas> + a per-user storage row; switching the window (7->30)
 #      re-hits /api/app/stats; and (context-isolated) a NON-admin gets 403 from
@@ -981,6 +985,55 @@ settings_groups_ok = (
 )
 results["settings_groups"] = (settings_groups_ok, f"sections={_sections} users={nav_groups.get('hasUsers')} config={nav_groups.get('hasConfig')}")
 
+# --- Check 26 (#64): /settings landing HUB (grouped, annotated list) -------------
+# As admin: navigate to #/settings and assert it renders the HUB (its H1 "Settings"
+# heading + the grouped H2 sections + the one-line entry descriptions) and NOT the
+# old Account form. Then click a hub entry (Users) and confirm it navigates to the
+# leaf route #/settings/users. A regression back to the redirect (or a hub that drops
+# the load-bearing descriptions) would fail this.
+goto_url(base + "/#/settings"); time.sleep(1.5); wait_for_load()
+hub_state = js("""
+  return (() => {
+    const h1 = document.querySelector('.settings-hub h1');
+    const h2s = [...document.querySelectorAll('.settings-hub h2')].map(e => (e.textContent||'').trim());
+    const descs = [...document.querySelectorAll('.settings-hub .hub-entry-desc')].map(e => (e.textContent||'').trim());
+    const accountForm = !!document.querySelector('.sessions-table');  // Account view marker
+    return {
+      url: location.hash,
+      h1: h1 ? (h1.textContent||'').trim() : '',
+      h2s,
+      descCount: descs.filter(d => d.length > 0).length,
+      accountForm,
+    };
+  })();
+""")
+shot("26a-settings-hub")
+# Click the Users hub entry (a real router-link to the leaf route) and confirm navigation.
+js("""
+  (() => {
+    const links = [...document.querySelectorAll('.settings-hub .hub-entry')];
+    const users = links.find(a => {
+      const t = a.querySelector('.hub-entry-title');
+      return t && /users/i.test(t.textContent||'');
+    });
+    if (users) users.click();
+  })();
+""")
+time.sleep(1.5); wait_for_load()
+hub_leaf_url = cur_url()
+shot("26b-settings-hub-leaf")
+_h2s = hub_state.get("h2s") or []
+hub_ok = (
+    hub_state.get("h1") == "Settings"
+    and "/#/settings" in (hub_state.get("url") or "") and "account" not in (hub_state.get("url") or "")
+    and not bool(hub_state.get("accountForm"))          # not the Account form
+    and "Personal" in _h2s
+    and "Access & Users" in _h2s and "Content Model" in _h2s and "System" in _h2s
+    and int(hub_state.get("descCount") or 0) >= 15      # a description per entry (the load-bearing feature)
+    and "/settings/users" in hub_leaf_url               # a hub entry navigated to its leaf route
+)
+results["settings_hub"] = (hub_ok, f"h1={hub_state.get('h1')!r} h2s={_h2s} descCount={hub_state.get('descCount')} account_form={hub_state.get('accountForm')} leaf_url={hub_leaf_url}")
+
 # --- Check 24 (#50): right-click a gallery card adds a tag (authoritative API) ---
 # Create a fresh tag NOT on the seeded doc, switch the list to Gallery, right-click
 # the seeded doc's card, click the tag in the context menu, then verify the tag is
@@ -1437,6 +1490,7 @@ labels = {
     "favorites_roundtrip": "check18: favorites star (real UI click) round-trips via /api/favorite + /api/document, idempotent PUT + DELETE (#41)",
     "gallery_view": "check19: gallery view toggle rendered a card for the seeded doc + persisted the mode in localStorage across reload (#39)",
     "settings_groups": "check23: settings admin nav rendered the Personal header + three labelled admin groups with correct membership (#61)",
+    "settings_hub": "check26: /settings landing hub rendered the grouped, annotated list (H1 + section H2s + per-entry descriptions), not the Account form, and an entry navigated to its leaf route (#64)",
     "gallery_right_click_tag": "check24: right-clicking a gallery card added a tag via the context menu, verified on the document via /api/document (#50)",
     "stats_dashboard": "check20: admin stats dashboard rendered totals/chart/storage + window refetch, and a non-admin got 403 (context-isolated) (#40)",
     "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",

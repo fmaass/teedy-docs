@@ -881,6 +881,29 @@
       "group_content": "Content Model",
       "group_system": "System"
     },
+    "settings": {
+      "hub": {
+        "heading": "Settings",
+        "intro": "Manage your account and, if you are an administrator, configure the whole Teedy instance.",
+        "desc": {
+          "account": "Your profile, password, language, two-factor authentication and active sessions.",
+          "apikeys": "Personal API keys for scripting and third-party integrations.",
+          "users": "Create, edit, disable and delete user accounts.",
+          "groups": "Organise users into groups for shared permissions.",
+          "ldap": "Authenticate users against an external LDAP directory.",
+          "oidc": "Sign in with an external OpenID Connect identity provider.",
+          "metadata": "Define custom metadata fields for documents.",
+          "vocabulary": "Curate the controlled vocabularies used by document fields.",
+          "tag_rules": "Automatically apply tags to documents that match a rule.",
+          "workflow": "Design multi-step review and approval workflows.",
+          "config": "Instance-wide settings: language, uploads, OCR, email and more.",
+          "inbox": "Import documents automatically from an IMAP mailbox.",
+          "webhooks": "Notify external services when documents change.",
+          "stats": "Usage statistics and per-user storage consumption.",
+          "monitoring": "Inspect the server log and runtime health."
+        }
+      }
+    },
     "date": "Date",
     "user": "User",
     "action": "Action",
