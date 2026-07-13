@@ -80,7 +80,8 @@ public class TestDocumentWorkflowSearch extends BaseJerseyTest {
                 .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken).get();
         Assertions.assertEquals(Response.Status.OK.getStatusCode(), r4.getStatus());
 
-        target().path("/user/wfmatrix").request()
+        target().path("/user/wfmatrix")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
     }
 
@@ -112,7 +113,8 @@ public class TestDocumentWorkflowSearch extends BaseJerseyTest {
         Assertions.assertFalse(listContainsDocument(otherJson, documentId),
                 "workflow:me must not include a document whose active step targets someone else");
 
-        target().path("/user/wfnontarget").request()
+        target().path("/user/wfnontarget")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
     }
 
@@ -263,9 +265,11 @@ public class TestDocumentWorkflowSearch extends BaseJerseyTest {
         Assertions.assertFalse(readerDetail.getJsonObject("route_step").getBoolean("transitionable"),
                 "transitionable must be false for a non-target reader");
 
-        target().path("/user/wfstepuser").request()
+        target().path("/user/wfstepuser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
-        target().path("/user/wfreader").request()
+        target().path("/user/wfreader")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
     }
 

@@ -103,7 +103,8 @@ public class TestWebhookResource extends BaseJerseyTest {
         Assertions.assertEquals(0, webhooks.size());
 
         // Deletes webhook1
-        target().path("/user/webhook1").request()
+        target().path("/user/webhook1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

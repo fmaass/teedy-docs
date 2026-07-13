@@ -966,8 +966,16 @@ public class AppResource extends BaseResource {
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan documents", q.executeUpdate());
 
-        // Soft delete orphan files
-        q = em.createNativeQuery("update T_FILE set FIL_DELETEDATE_D = :dateNow where FIL_ID_C in (select f.FIL_ID_C from T_FILE f left join T_USER u on u.USE_ID_C = f.FIL_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
+        // Soft delete orphan files. A file is orphaned when its uploader is gone (soft-deleted or
+        // absent) — EXCEPT a file that still backs a LIVE (non-deleted) document is NEVER an orphan,
+        // regardless of uploader state. This is the invariant that keeps a document reassigned away
+        // from a departing user intact: its files keep FIL_IDUSER_C = the departing (now soft-deleted)
+        // uploader so their bytes stay decryptable, and the live document they back holds them alive.
+        q = em.createNativeQuery("update T_FILE set FIL_DELETEDATE_D = :dateNow where FIL_ID_C in ("
+                + " select f.FIL_ID_C from T_FILE f"
+                + " left join T_USER u on u.USE_ID_C = f.FIL_IDUSER_C and u.USE_DELETEDATE_D is null"
+                + " left join T_DOCUMENT d on d.DOC_ID_C = f.FIL_IDDOC_C and d.DOC_DELETEDATE_D is null"
+                + " where u.USE_ID_C is null and d.DOC_ID_C is null)");
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan files", q.executeUpdate());
 
@@ -990,7 +998,22 @@ public class AppResource extends BaseResource {
         log.info("Deleting {} soft deleted comments", em.createQuery("delete Comment where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted files", em.createQuery("delete File where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted documents", em.createQuery("delete Document where deleteDate is not null").executeUpdate());
-        log.info("Deleting {} soft deleted users", em.createQuery("delete User where deleteDate is not null").executeUpdate());
+
+        // Hard delete soft-deleted users, EXCEPT any that live data still references under an ON DELETE
+        // RESTRICT foreign key — hard-deleting such a user would abort the whole purge. A user whose
+        // documents were reassigned away is retained here as a hidden ghost key-holder: soft-deleted and
+        // invisible, kept solely so its privateKey still decrypts the reassigned files it originally
+        // uploaded and so it does not orphan the (surviving) routes it initiated. It becomes purgeable
+        // once no live data references it. The referencing live FKs are:
+        //   - T_FILE.FK_FIL_IDUSER_C           — a live file's uploader (the retained decryption key)
+        //   - T_ROUTE.FK_RTE_IDUSER_C          — a live route's initiator (NOT NULL)
+        //   - T_ROUTE_STEP.FK_RTP_IDVALIDATORUSER_C — a live route step's validator (nullable)
+        // (RTP_IDTARGET_C is a name-resolved principal, not a T_USER FK, so it does not restrict.)
+        Query userPurge = em.createNativeQuery("delete from T_USER where USE_DELETEDATE_D is not null"
+                + " and USE_ID_C not in (select f.FIL_IDUSER_C from T_FILE f where f.FIL_DELETEDATE_D is null)"
+                + " and USE_ID_C not in (select r.RTE_IDUSER_C from T_ROUTE r where r.RTE_DELETEDATE_D is null)"
+                + " and USE_ID_C not in (select rs.RTP_IDVALIDATORUSER_C from T_ROUTE_STEP rs where rs.RTP_IDVALIDATORUSER_C is not null and rs.RTP_DELETEDATE_D is null)");
+        log.info("Deleting {} soft deleted users", userPurge.executeUpdate());
         log.info("Deleting {} soft deleted groups", em.createQuery("delete Group where deleteDate is not null").executeUpdate());
 
         // Always return OK

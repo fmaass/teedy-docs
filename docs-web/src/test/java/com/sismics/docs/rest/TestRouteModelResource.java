@@ -150,7 +150,8 @@ public class TestRouteModelResource extends BaseJerseyTest {
         Assertions.assertNull(findModel(adminModels(adminToken), routeModelId));
 
         // Deletes routeModel1 user
-        target().path("/user/routeModel1").request()
+        target().path("/user/routeModel1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -215,7 +216,8 @@ public class TestRouteModelResource extends BaseJerseyTest {
         Assertions.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), deleteResponse.getStatus());
 
         // Cleanup
-        target().path("/user/rmnonadmin").request()
+        target().path("/user/rmnonadmin")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -285,7 +287,8 @@ public class TestRouteModelResource extends BaseJerseyTest {
                 updateShareResp.readEntity(JsonObject.class).getString("type"));
 
         // Cleanup
-        target().path("/user/rmtargetuser").request()
+        target().path("/user/rmtargetuser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -325,7 +328,8 @@ public class TestRouteModelResource extends BaseJerseyTest {
         Assertions.assertTrue(foundComplete);
 
         // Delete the target user
-        target().path("/user/incompletetarget").request()
+        target().path("/user/incompletetarget")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
 

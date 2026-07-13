@@ -199,10 +199,12 @@ public class TestCommentResource extends BaseJerseyTest {
         Assertions.assertEquals(1, json.getJsonArray("comments").size());
 
         // Cleanup
-        target().path("/user/comment_owner").request()
+        target().path("/user/comment_owner")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/comment_stranger").request()
+        target().path("/user/comment_stranger")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

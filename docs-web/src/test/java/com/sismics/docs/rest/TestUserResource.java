@@ -191,7 +191,8 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertTrue(session.getString("user_agent").startsWith("Jersey"));
         
         // Delete all sessions
-        response = target().path("/user/session").request()
+        response = target().path("/user/session")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, bobToken)
                 .delete();
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
@@ -354,13 +355,15 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
 
         // User admin deletes user admin_user1
-        json = target().path("/user/admin_user1").request()
+        json = target().path("/user/admin_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
         
         // User admin deletes user admin_user1 : KO (user doesn't exist)
-        response = target().path("/user/admin_user1").request()
+        response = target().path("/user/admin_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
@@ -457,7 +460,8 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertFalse(json.getBoolean("totp_enabled"));
 
         // Delete totp1
-        response = target().path("/user/totp1").request()
+        response = target().path("/user/totp1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Response.Status.OK, Response.Status.fromStatusCode(response.getStatus()));
@@ -611,7 +615,8 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertEquals("KeyNotFound", json.getString("type"));
 
         // Delete absent_minded
-        response = target().path("/user/absent_minded").request()
+        response = target().path("/user/absent_minded")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Response.Status.OK, Response.Status.fromStatusCode(response.getStatus()));
@@ -687,7 +692,8 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertTrue(referencedBefore);
 
         // Delete the user: 200 + warning payload naming the affected model.
-        JsonObject json = target().path("/user/wfmodeluser").request()
+        JsonObject json = target().path("/user/wfmodeluser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
@@ -745,7 +751,8 @@ public class TestUserResource extends BaseJerseyTest {
         });
 
         // Delete the user.
-        JsonObject json = target().path("/user/wfstepuser").request()
+        JsonObject json = target().path("/user/wfstepuser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
@@ -827,7 +834,8 @@ public class TestUserResource extends BaseJerseyTest {
         });
 
         // Delete bob (owner of the FUTURE step2). This cancels the route (its open step2 targets bob).
-        JsonObject json = target().path("/user/wfbob").request()
+        JsonObject json = target().path("/user/wfbob")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
@@ -856,35 +864,34 @@ public class TestUserResource extends BaseJerseyTest {
     }
 
     /**
-     * B3: deleting a user who OWNS a document that has an ACTIVE route targeting SOMEONE ELSE cancels
-     * that route and clears its ROUTING ACLs as the document is trashed. The structural fix does NOT
-     * route owned documents through DocumentDao.delete (that would trash files by documentId and
-     * over-trash a collaborator's file, breaking BL-021's stranded-file quota reclaim). Instead
-     * UserDao.delete, for each owned document it is about to bulk-trash, first locks the document row
-     * FOR UPDATE and calls cancelActiveRoutesForDocument — which cancels the active route, system-ends
-     * its open steps, and clears ALL its ROUTING ACLs with the deterministic (documentDeleteDate - 1ms)
-     * timestamp — sharing the SAME dateNow as the trash; file trashing stays owner-scoped. Before the
-     * fix, UserDao.delete bulk-trashed owned documents directly with no route handling, leaving the
-     * route ACTIVE and the target's ROUTING grant stranded (a stuck route that can never advance —
-     * trashed docs are excluded from reads). This test also asserts the W2c restore-safety invariant:
-     * the soft-deleted ROUTING ACL's delete timestamp is DISTINCT from the document's own trash
-     * timestamp, so a later restore-from-trash (which un-deletes the doc's own ACLs by exact-equality
-     * on the doc timestamp) cannot resurrect the cancelled route's grant. RED without the fix: the
-     * route stays ACTIVE and the active ROUTING ACL count is non-zero.
+     * Reassignment (#55): admin-deleting a user who OWNS a document that has an ACTIVE route targeting
+     * SOMEONE ELSE (a still-live user) reassigns the document to the chosen target rather than trashing
+     * it. Because the document survives (under the new owner) and its route still targets a live user,
+     * the route legitimately CONTINUES: it stays ACTIVE and the current step's ROUTING grant to that
+     * live target is preserved. Only routes with an OPEN step targeting the DEPARTING user are
+     * cancelled (by cancelRoutesTargetingPrincipal, covered by testDeleteUserTargetedByOpenStep); a
+     * route targeting a different, surviving user is not disturbed by the owner's departure.
+     *
+     * <p>(Before #55 the owner's document was trashed and its active route cancelled — see the
+     * self-delete path, which still trashes, in testSelfDeleteOwnerAndTargetClearsRouteAndAcls. The
+     * admin delete now reassigns, so the trash-and-cancel behaviour no longer applies here.)</p>
      */
     @Test
-    public void testDeleteUserOwningDocWithActiveRouteCancelsIt() {
+    public void testDeleteUserOwningDocWithActiveRouteReassignsAndKeepsRoute() {
         String adminToken = adminToken();
         clientUtil.createUser("wfowner");
         clientUtil.createUser("wftarget");
+        clientUtil.createUser("wfnewowner");
 
         String[] documentId = new String[1];
         String[] routeId = new String[1];
+        String[] newOwnerId = new String[1];
         inTx(() -> {
             User owner = new UserDao().getActiveByUsername("wfowner");
             User targetUser = new UserDao().getActiveByUsername("wftarget");
+            newOwnerId[0] = new UserDao().getActiveByUsername("wfnewowner").getId();
 
-            // wfowner OWNS the document; the route's step targets wftarget (someone else).
+            // wfowner OWNS the document; the route's step targets wftarget (someone else, still alive).
             Document document = new Document();
             document.setUserId(owner.getId());
             document.setLanguage("eng");
@@ -905,43 +912,39 @@ public class TestUserResource extends BaseJerseyTest {
             return null;
         });
 
-        // Delete the OWNER (wfowner). Their owned document is trashed; its active route must be
-        // cancelled and its ROUTING ACLs cleared in the process.
-        JsonObject json = target().path("/user/wfowner").request()
+        // Admin deletes the OWNER (wfowner), reassigning their documents to wfnewowner. The owned
+        // document is reassigned (not trashed); its active route (targeting the still-live wftarget)
+        // continues.
+        JsonObject json = target().path("/user/wfowner")
+                .queryParam("reassign_to_username", "wfnewowner").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
         Assertions.assertEquals("ok", json.getString("status"));
 
         inTx(() -> {
+            // The document is reassigned to the new owner and NOT trashed.
+            java.sql.Timestamp docDeleteTs = (java.sql.Timestamp) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select DOC_DELETEDATE_D from T_DOCUMENT where DOC_ID_C = :id")
+                    .setParameter("id", documentId[0]).getSingleResult();
+            Assertions.assertNull(docDeleteTs, "The owned document must be reassigned, not trashed");
+            String docOwner = (String) ThreadLocalContext.get().getEntityManager()
+                    .createNativeQuery("select DOC_IDUSER_C from T_DOCUMENT where DOC_ID_C = :id")
+                    .setParameter("id", documentId[0]).getSingleResult();
+            Assertions.assertEquals(newOwnerId[0], docOwner, "The document must be owned by the reassignment target");
+
+            // The route targets a still-live user and continues: it stays ACTIVE and the ROUTING grant
+            // to that live target is preserved.
             Route route = ThreadLocalContext.get().getEntityManager().find(Route.class, routeId[0]);
-            Assertions.assertEquals(RouteStatus.CANCELLED, route.getStatus(),
-                    "The owned document's active route must be cancelled, not left ACTIVE and stuck");
-            Assertions.assertNotNull(route.getEndDate(), "A cancelled route must carry an end date");
+            Assertions.assertEquals(RouteStatus.ACTIVE, route.getStatus(),
+                    "A route targeting a surviving user must continue when the owner's docs are reassigned");
+            Assertions.assertNull(route.getEndDate(), "An active route must not carry an end date");
 
             long routingAclCount = ((Number) ThreadLocalContext.get().getEntityManager()
                     .createNativeQuery("select count(*) from T_ACL where ACL_SOURCEID_C = :src and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is null")
                     .setParameter("src", documentId[0])
                     .getSingleResult()).longValue();
-            Assertions.assertEquals(0, routingAclCount,
-                    "The stranded ROUTING ACL on the owned document must be cleared when its route is cancelled");
-
-            // W2c restore-safety: the ROUTING ACL's delete timestamp must be DISTINCT from the
-            // document's own trash timestamp. restore() un-deletes the doc's own ACLs by
-            // exact-equality on the doc's delete timestamp, so a distinct routing-ACL timestamp is
-            // what keeps the cancelled route's grant from being resurrected. The per-doc path uses
-            // (documentDeleteDate - 1ms), guaranteeing the two differ even when the deleted user is
-            // both the owner and a step target (no independent clock sample to collide).
-            java.sql.Timestamp docDeleteTs = (java.sql.Timestamp) ThreadLocalContext.get().getEntityManager()
-                    .createNativeQuery("select DOC_DELETEDATE_D from T_DOCUMENT where DOC_ID_C = :id")
-                    .setParameter("id", documentId[0]).getSingleResult();
-            java.sql.Timestamp routingAclDeleteTs = (java.sql.Timestamp) ThreadLocalContext.get().getEntityManager()
-                    .createNativeQuery("select ACL_DELETEDATE_D from T_ACL where ACL_SOURCEID_C = :src " +
-                            "and ACL_TYPE_C = 'ROUTING' and ACL_DELETEDATE_D is not null")
-                    .setParameter("src", documentId[0]).getSingleResult();
-            Assertions.assertNotNull(docDeleteTs, "The owned document must be trashed");
-            Assertions.assertNotNull(routingAclDeleteTs, "The ROUTING ACL must be soft-deleted");
-            Assertions.assertNotEquals(docDeleteTs.getTime(), routingAclDeleteTs.getTime(),
-                    "The ROUTING ACL delete timestamp must differ from the doc trash timestamp (restore-safety)");
+            Assertions.assertEquals(1, routingAclCount,
+                    "The current step's ROUTING grant to the still-live target must be preserved");
             return null;
         });
     }

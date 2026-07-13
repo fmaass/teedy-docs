@@ -353,10 +353,12 @@ public class TestRouteResource extends BaseJerseyTest {
         Assertions.assertFalse(json.containsKey("route_step"));
 
         // Cleanup
-        target().path("/user/validatoruser").request()
+        target().path("/user/validatoruser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/nextuser").request()
+        target().path("/user/nextuser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -401,7 +403,8 @@ public class TestRouteResource extends BaseJerseyTest {
                         .param("routeModelId", modelId)));
         Assertions.assertEquals(Response.Status.OK.getStatusCode(), startResponse.getStatus());
 
-        target().path("/user/starter").request()
+        target().path("/user/starter")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -432,7 +435,8 @@ public class TestRouteResource extends BaseJerseyTest {
                         .param("routeModelId", modelId)));
         Assertions.assertEquals(Response.Status.NOT_FOUND.getStatusCode(), response.getStatus());
 
-        target().path("/user/nowrite").request()
+        target().path("/user/nowrite")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

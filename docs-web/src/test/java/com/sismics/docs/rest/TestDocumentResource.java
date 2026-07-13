@@ -2255,7 +2255,8 @@ public class TestDocumentResource extends BaseJerseyTest {
 
         // Cleanup
         String adminToken = adminToken();
-        target().path("/user/emptycreatedate").request()
+        target().path("/user/emptycreatedate")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

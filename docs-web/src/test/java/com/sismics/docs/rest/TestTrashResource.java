@@ -176,7 +176,8 @@ public class TestTrashResource extends BaseJerseyTest {
         target().path("/document/" + adminDocId + "/permanent").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
-        target().path("/user/trash_user1").request()
+        target().path("/user/trash_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -224,10 +225,12 @@ public class TestTrashResource extends BaseJerseyTest {
                 "the owner's trashed document must survive another user's empty-trash");
 
         // Cleanup
-        target().path("/user/empty_owner").request()
+        target().path("/user/empty_owner")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/empty_attacker").request()
+        target().path("/user/empty_attacker")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

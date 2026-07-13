@@ -311,6 +311,55 @@ echo "[seed] rot_doc=${rot_doc_id} rot_file=${rot_file_id}" \
 echo "[seed] fs_compound=${fs_compound_id} fs_other=${fs_other_id} fs_token=${fs_token}" \
   | tee -a "${art_dir}/checks.log"
 
+# --- Check 27 (#55): reassign document ownership on user delete (round-trip) ---
+# A departing user creates a document with a file; admin deletes them, reassigning to
+# admin; then admin must OWN the document and OPEN/decrypt the file with intact content.
+# This exercises the whole reassign path end to end via the REST surface: ownership
+# transfer, the READ+WRITE ACL grant (admin could not read the file without it), file
+# survival (no physical delete), and decryption through the departing user's retained
+# key. A regression in any of those makes the final /api/file/:id/data read 403/404/empty.
+ra_user="ra_${run_token}"
+ra_jar="${art_dir}/ra_cookies.txt"
+ra_fixture="${repo_root}/docs-web/src/main/webapp/e2e/fixtures/sample.txt"
+ra_expect="Teedy e2e fixture text file."
+# admin creates the departing user
+curl -sf -b "${cookie_jar}" -X PUT \
+  -d "username=${ra_user}" -d "password=Password1e2e" \
+  --data-urlencode "email=${ra_user}@example.com" -d "storage_quota=1000000000" \
+  "${base_url}/api/user" >/dev/null || note FAIL "check27: could not create departing user"
+# departing user logs in (own cookie jar) and creates a document + uploads a file
+curl -sf -c "${ra_jar}" -X POST -d "username=${ra_user}&password=Password1e2e&remember=false" \
+  "${base_url}/api/user/login" >/dev/null || note FAIL "check27: departing-user login failed"
+ra_doc_id="$(curl -sf -b "${ra_jar}" -X PUT --data-urlencode "title=${run_token} Reassign Doc" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+ra_file_id=""
+if [ -n "${ra_doc_id}" ] && [ -f "${ra_fixture}" ]; then
+  ra_file_id="$(curl -sf -b "${ra_jar}" -X PUT \
+    -F "id=${ra_doc_id}" -F "file=@${ra_fixture};type=text/plain" \
+    "${base_url}/api/file" | json_field id || true)"
+fi
+[ -z "${ra_doc_id}" ] || [ -z "${ra_file_id}" ] && note FAIL "check27: could not seed departing user's doc+file"
+# admin deletes the departing user, reassigning their documents to admin
+ra_del_code="$(curl -s -o /dev/null -w '%{http_code}' -b "${cookie_jar}" -X DELETE \
+  "${base_url}/api/user/${ra_user}?reassign_to_username=admin")"
+[ "${ra_del_code}" = "200" ] || note FAIL "check27: reassign-delete returned ${ra_del_code} (expected 200)"
+# admin now owns the reassigned document (authoritative /api/document read-back)
+ra_owner_ok=""
+if [ -n "${ra_doc_id}" ]; then
+  ra_owner_ok="$(curl -sf -b "${cookie_jar}" "${base_url}/api/document/${ra_doc_id}" \
+    | python3 -c 'import sys,json;print("1" if json.load(sys.stdin).get("creator")=="admin" else "")' 2>/dev/null || true)"
+fi
+# admin opens/decrypts the reassigned file — content intact (matches the uploaded text)
+ra_data="$(curl -sf -b "${cookie_jar}" "${base_url}/api/file/${ra_file_id}/data" 2>/dev/null || true)"
+if [ -n "${ra_owner_ok}" ] && printf '%s' "${ra_data}" | grep -qF "${ra_expect}"; then
+  note OK "check27: user delete reassigned doc to admin; file opens with intact content"
+else
+  note FAIL "check27: reassign round-trip failed (owner_ok=${ra_owner_ok:-0} data_len=${#ra_data})"
+fi
+# cleanup: trash the reassigned document (now admin's)
+[ -n "${ra_doc_id}" ] && curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${ra_doc_id}" >/dev/null 2>&1 || true
+rm -f "${ra_jar}" 2>/dev/null || true
+
 # --- Checks 2-17: real-browser flow -------------------------------------------
 BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_TAG_IN="${tag_in}" BH_TAG_EX="${tag_ex}" BH_TAG_IN_NAME="${run_token}-in" \
@@ -1524,9 +1573,10 @@ for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}" "$
     && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
     || echo "[cleanup] could not trash document ${d} (non-fatal)" | tee -a "${art_dir}/checks.log"
 done
+# Deleting a user now reassigns their documents to a required target (#55); pass admin.
 for u in "${dis_user:-}" "${totp_user:-}" "${stats_user:-}"; do
   [ -n "${u}" ] || continue
-  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/user/${u}" >/dev/null 2>&1 \
+  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/user/${u}?reassign_to_username=admin" >/dev/null 2>&1 \
     && echo "[cleanup] deleted user ${u}" | tee -a "${art_dir}/checks.log" \
     || echo "[cleanup] could not delete user ${u} (non-fatal)" | tee -a "${art_dir}/checks.log"
 done

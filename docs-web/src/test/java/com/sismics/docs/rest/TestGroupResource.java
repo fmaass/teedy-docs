@@ -62,7 +62,8 @@ public class TestGroupResource extends BaseJerseyTest {
         clientUtil.createUser("trashme");
         
         // Delete trashme with admin2
-        target().path("/user/trashme").request()
+        target().path("/user/trashme")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, admin2Token)
                 .delete(JsonObject.class);
         
@@ -218,10 +219,12 @@ public class TestGroupResource extends BaseJerseyTest {
         target().path("/group/g112").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
-        target().path("/user/group1").request()
+        target().path("/user/group1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/admin2").request()
+        target().path("/user/admin2")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

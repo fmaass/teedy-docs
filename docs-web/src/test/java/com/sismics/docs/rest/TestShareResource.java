@@ -134,10 +134,12 @@ public class TestShareResource extends BaseJerseyTest {
 
         // Deletes share1 and share 2
         String adminToken = adminToken();
-        target().path("/user/share1").request()
+        target().path("/user/share1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/share2").request()
+        target().path("/user/share2")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

@@ -135,7 +135,8 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(1L, countSavedFilters(filterId));
 
         // Admin soft-deletes the user (row stays until the storage purge)
-        Response response = target().path("/user/clean_storage_filter_user").request()
+        Response response = target().path("/user/clean_storage_filter_user")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
@@ -488,7 +489,8 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(0, json.getJsonArray("sessions").size());
 
         // Guest cannot delete opened sessions
-        response = target().path("/user/session").request()
+        response = target().path("/user/session")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, guestToken)
                 .delete();
         Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());
