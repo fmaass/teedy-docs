@@ -932,10 +932,12 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "favorites": "Markiere Dokumente mit einem Stern als Favoriten und filtere die Dokumentliste anschließend auf nur deine Favoriten.",
-        "gallery": "Schalte die Dokumentliste in eine Galerieansicht um, die Dokumente als Vorschaukacheln anordnet.",
-        "rich_descriptions": "Verfasse Dokumentbeschreibungen in einem Rich-Text-Editor mit Formatierungsleiste für Überschriften, Listen, Links und mehr.",
-        "admin_stats": "Ein neues Administrations-Statistik-Dashboard fasst Dokumente, Speicher, Benutzer und Aktivität auf einen Blick zusammen."
+        "fuzzy_search": "Die Dokumentsuche findet jetzt auch Teilwörter und verzeiht kleine Tippfehler, sodass du Dokumente selbst dann findest, wenn ein Begriff nur teilweise stimmt.",
+        "reassign_documents": "Beim Löschen eines Benutzers kannst du dessen Dokumente einem anderen Benutzer übertragen, statt sie in den Papierkorb zu verschieben.",
+        "settings_home": "Die Einstellungen öffnen sich auf einer Übersichtsseite mit gruppierter Navigation, statt direkt in dein Konto zu springen.",
+        "oidc_verbatim_username": "Administratoren können optional den OIDC-preferred_username unverändert als Kontonamen übernehmen.",
+        "custom_branding": "Gib jeder Instanz einen eigenen Anwendungstitel und ein eigenes Favicon.",
+        "page_size_gallery_tags": "Lege fest, wie viele Dokumente pro Seite angezeigt werden, und bearbeite die Tags eines Dokuments direkt über ein Rechtsklick-Menü in der Galerie."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",

@@ -128,7 +128,7 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
-expect_version="${E2E_EXPECT_VERSION:-3.5.2}"
+expect_version="${E2E_EXPECT_VERSION:-3.6.0}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"

@@ -16,6 +16,24 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.6.0] - 2026-07-13
+
+One database migration this release: db.version moves from 49 to 50 (`dbupdate-050` adds a case-insensitive unique index on active usernames, so verbatim OIDC provisioning can rely on a database-level constraint instead of a race-prone application precheck; the migration aborts with a clear failure if duplicate active usernames already exist). Portable across PostgreSQL 17 and H2 2.3.232.
+
+### Added
+- Reassign a deleted user's documents to a chosen user instead of trashing them: deleting a user can now hand their documents to another account rather than moving them to the trash (#55).
+- A settings landing page with a grouped settings navigation, so settings open on an overview instead of jumping straight into the account page (#64, #61).
+- Optional verbatim OIDC usernames: an admin can opt in to using the OIDC `preferred_username` claim verbatim as the account name (#59). See ADR-0018.
+- Custom application title and favicon per instance, so each deployment can carry its own branding (#57).
+- A configurable number of documents shown per page, plus a right-click menu to edit a document's tags directly from the gallery view (#52, #50).
+
+### Changed
+- Document search now matches partial words and tolerates small typos, so a partly-correct term still finds documents (#53).
+
+### Fixed
+
+### Security
+
 ## [3.5.2] - 2026-07-12
 
 One database migration this release: db.version moves from 48 to 49 (`dbupdate-049` adds `FIL_ROTATION_N` to store per-file rotation).
@@ -216,7 +234,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...v3.6.0
 [3.5.2]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...v3.5.2
 [3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1

@@ -18,29 +18,30 @@ vi.mock('../composables/useAppInfo', () => ({
 
 import AboutDialog from './AboutDialog.vue'
 
-// --- About dialog "What's new" must reflect the 3.5.0 release ---
+// --- About dialog "What's new" must reflect the 3.6.0 release ---
 //
-// The bullets are hand-curated per release (personal favorites, gallery view
-// mode, rich-text descriptions, admin statistics dashboard). The heading is
-// pinned to that release and must stay in step with the project's MAJOR.MINOR —
+// The bullets are hand-curated per release (forgiving fuzzy search, deleted-user
+// document reassignment, the settings landing page, verbatim OIDC usernames,
+// per-instance branding, and the page-size / gallery-tag controls). The heading
+// is pinned to that release and must stay in step with the project's MAJOR.MINOR —
 // the final test guards against the heading drifting behind a minor bump, which
 // is exactly how the 3.1.0 bullets survived unchanged to 3.4.0.
 
 describe('AboutDialog highlights', () => {
-  it('pins the What\'s-new heading to the 3.5 highlights', () => {
-    expect(HIGHLIGHTS_VERSION).toBe('3.5.0')
+  it('pins the What\'s-new heading to the 3.6 highlights', () => {
+    expect(HIGHLIGHTS_VERSION).toBe('3.6.0')
   })
 
-  it('surfaces concrete 3.5.0 highlights in both locales', () => {
+  it('surfaces concrete 3.6.0 highlights in both locales', () => {
     const enText = HIGHLIGHT_KEYS.map((k) => resolve(en, k).toLowerCase()).join(' ')
     const deText = HIGHLIGHT_KEYS.map((k) => resolve(de, k).toLowerCase()).join(' ')
-    // Favorites + the gallery view are two load-bearing 3.5.0 additions.
-    expect(enText).toContain('favorite')
-    expect(enText).toContain('gallery')
-    expect(deText).toContain('galerie')
-    // The stale 3.4.0 bullets (saved filters, /apidoc reference) must be gone.
-    expect(enText).not.toContain('/apidoc')
-    expect(enText).not.toContain('saved filter')
+    // Fuzzy search + deleted-user reassignment are two load-bearing 3.6.0 additions.
+    expect(enText).toContain('typo')
+    expect(enText).toContain('delete a user')
+    expect(deText).toContain('tippfehler')
+    // The stale 3.5.0 bullets (favorites, gallery view) must be gone.
+    expect(enText).not.toContain('favorite')
+    expect(enText).not.toContain('rich-text editor')
   })
 
   it('every highlight key resolves in both locales (no missing bullet)', () => {

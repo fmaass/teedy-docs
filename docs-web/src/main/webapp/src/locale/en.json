@@ -932,10 +932,12 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "favorites": "Star documents to mark them as favorites, then filter the document list down to just your favorites.",
-        "gallery": "Switch the document list to a gallery view that lays out documents as thumbnail cards.",
-        "rich_descriptions": "Write document descriptions in a rich-text editor with a formatting toolbar for headings, lists, links, and more.",
-        "admin_stats": "A new admin statistics dashboard summarizes documents, storage, users, and activity at a glance."
+        "fuzzy_search": "Document search now matches partial words and tolerates small typos, so you still find documents when a term is only partly right.",
+        "reassign_documents": "When you delete a user, you can hand their documents to another user instead of moving them to the trash.",
+        "settings_home": "Settings open on a landing page with a grouped navigation, instead of jumping straight into your account.",
+        "oidc_verbatim_username": "Admins can opt in to using the OIDC preferred_username verbatim as the account name.",
+        "custom_branding": "Give each instance its own application title and favicon.",
+        "page_size_gallery_tags": "Choose how many documents show per page, and edit a document's tags directly from a right-click menu in the gallery."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",

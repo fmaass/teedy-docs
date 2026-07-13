@@ -9,7 +9,7 @@
 // The heading tracks MAJOR.MINOR only: a patch release reuses the current minor's
 // bullets and does not need to touch this file. A new minor (or major) release
 // with fresh bullets bumps this to match.
-export const HIGHLIGHTS_VERSION = '3.5.0'
+export const HIGHLIGHTS_VERSION = '3.6.0'
 
 /**
  * The MAJOR.MINOR prefix of a semantic version ("3.5.2" -> "3.5"). Returns the
@@ -34,11 +34,14 @@ export function headingVersion(currentVersion: string | null | undefined): strin
 }
 
 // Each entry is an i18n key so the bullets translate. The list is intentionally
-// short and accurate to the 3.5.0 line (personal favorites, gallery view mode,
-// rich-text descriptions, admin statistics dashboard).
+// short and accurate to the 3.6.0 line (forgiving fuzzy search, deleted-user
+// document reassignment, the new settings landing page, verbatim OIDC usernames,
+// per-instance branding, and the page-size / gallery-tag controls).
 export const HIGHLIGHT_KEYS = [
-  'ui.about.highlights.favorites',
-  'ui.about.highlights.gallery',
-  'ui.about.highlights.rich_descriptions',
-  'ui.about.highlights.admin_stats',
+  'ui.about.highlights.fuzzy_search',
+  'ui.about.highlights.reassign_documents',
+  'ui.about.highlights.settings_home',
+  'ui.about.highlights.oidc_verbatim_username',
+  'ui.about.highlights.custom_branding',
+  'ui.about.highlights.page_size_gallery_tags',
 ] as const

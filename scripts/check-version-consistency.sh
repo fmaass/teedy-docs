@@ -6,9 +6,12 @@
 # Usage:
 #   check-version-consistency.sh <tag> [repo_root]
 #
-# <tag> is the git tag being built (e.g. "v3.0.0" or "3.0.0"); a leading "v"
-# is stripped before comparison. If <tag> is empty the tag check is skipped
-# and the script only asserts that pom.xml and package.json agree.
+# <tag> is the git tag being built (e.g. "v3.0.0", "3.0.0", or a pre-release
+# such as "v3.6.0-rc.1"). A leading "v" and any trailing SemVer pre-release
+# suffix ("-rc.1", "-beta.2", "-alpha.1", generally "-<identifiers>") are
+# stripped before comparison, so both "v3.6.0-rc.1" and "v3.6.0" compare equal
+# to pom version "3.6.0". If <tag> is empty the tag check is skipped and the
+# script only asserts that pom.xml and package.json agree.
 set -euo pipefail
 
 raw_tag="${1:-}"
@@ -48,7 +51,10 @@ if [[ "$pom_version" != "$package_version" ]]; then
 fi
 
 if [[ -n "$raw_tag" ]]; then
+  # Strip a leading "v", then strip any trailing SemVer pre-release suffix
+  # ("-rc.1", "-beta.2", ...) so an RC tag compares equal to the final version.
   tag_version="${raw_tag#v}"
+  tag_version="${tag_version%%-*}"
   if [[ "$tag_version" != "$pom_version" ]]; then
     echo "Version mismatch: tag=$raw_tag (=$tag_version) pom.xml=$pom_version" >&2
     status=1
