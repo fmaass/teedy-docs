@@ -204,7 +204,7 @@ services:
 
 ## Requirements
 
-- Java 21
+- Java 21 or Java 25 (both LTS; Teedy builds and runs on either)
 - Tesseract 4+ for OCR
 - ffmpeg for video thumbnails
 - mediainfo for video metadata extraction
@@ -217,7 +217,7 @@ The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/r
 
 ## How to build Teedy from the sources
 
-Prerequisites: JDK 21, Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Tesseract 4+
+Prerequisites: JDK 21 or JDK 25 (both LTS), Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Tesseract 4+
 
 Teedy is organized in several Maven modules:
 
