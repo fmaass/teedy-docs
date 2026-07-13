@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { unique, login, confirmDanger } from './helpers'
+import { unique, login, deleteUser } from './helpers'
 
 // #64: /settings is a landing HUB (a grouped, annotated list), not the old redirect
 // to the Account form. These specs assert, against the real app:
@@ -73,10 +73,6 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
 
     await ctx.close()
   } finally {
-    await page.goto('/#/settings/users')
-    const row = page.getByRole('row', { name: new RegExp(username) })
-    await row.getByRole('button', { name: 'Delete' }).click()
-    await confirmDanger(page)
-    await expect(page.getByText('User deleted')).toBeVisible()
+    await deleteUser(page, username)
   }
 })

@@ -62,6 +62,26 @@ export async function confirmDanger(page: Page): Promise<void> {
   await expect(dialog).toBeHidden()
 }
 
+// Delete a user via Settings › Users. Since #55, deleting a user reassigns all of
+// their documents to a REQUIRED target and opens a real (non-danger) Dialog with a
+// reassign-target Select — it is NOT the old alertdialog danger-confirm. The row's
+// trash button opens the "Delete user" dialog; a target must be picked before the
+// dialog's own "Delete" button fires. Lands with a "User deleted" toast.
+// `reassignTo` defaults to admin (always present, distinct from any test-created user).
+export async function deleteUser(page: Page, username: string, reassignTo = 'admin'): Promise<void> {
+  await page.goto('/#/settings/users')
+  const row = page.getByRole('row', { name: new RegExp(username) })
+  await expect(row).toBeVisible()
+  await row.getByRole('button', { name: 'Delete' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Delete user' })
+  await expect(dialog).toBeVisible()
+  await dialog.locator('#reassign-target').click()
+  await page.getByRole('option', { name: reassignTo, exact: true }).click()
+  await dialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('User deleted')).toBeVisible()
+}
+
 // Log in through the native form in the current (typically fresh) context.
 export async function login(page: Page, user: string, pass: string): Promise<void> {
   await page.goto('/#/login')
