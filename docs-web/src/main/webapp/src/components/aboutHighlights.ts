@@ -11,6 +11,28 @@
 // with fresh bullets bumps this to match.
 export const HIGHLIGHTS_VERSION = '3.5.0'
 
+/**
+ * The MAJOR.MINOR prefix of a semantic version ("3.5.2" -> "3.5"). Returns the
+ * input unchanged when it is not a dotted MAJOR.MINOR[.PATCH] string (a defensive
+ * fallback for an unexpected server value). Shared by the component and its guard
+ * test so the rendered heading version can never drift from what the test pins.
+ */
+export function minorOf(version: string): string {
+  const parts = version.split('.')
+  if (parts.length < 2) return version
+  return `${parts[0]}.${parts[1]}`
+}
+
+/**
+ * The version string the "What's new in {version}" heading DISPLAYS. Derived from
+ * the CURRENT app version (major.minor), so any 3.5.x app shows "3.5" — the heading
+ * can never show a patch that mismatches the running app. Falls back to the curated
+ * HIGHLIGHTS_VERSION's major.minor when the live version is not yet known.
+ */
+export function headingVersion(currentVersion: string | null | undefined): string {
+  return minorOf((currentVersion ?? '').trim() || HIGHLIGHTS_VERSION)
+}
+
 // Each entry is an i18n key so the bullets translate. The list is intentionally
 // short and accurate to the 3.5.0 line (personal favorites, gallery view mode,
 // rich-text descriptions, admin statistics dashboard).

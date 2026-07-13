@@ -87,6 +87,12 @@
 #  19. Gallery view (v3.5.0 #39) — toggle the doc list to Gallery, assert a gallery
 #      card renders for the seeded doc, assert the mode persists in localStorage
 #      teedy_document_view_mode across a reload, then switch back to List        [browser]
+#  23. Settings nav regroup (v3.6.0 #61) — admin #/settings/account renders the renamed
+#      "Personal" header + the three labelled admin groups (Access & Users / Content
+#      Model / System) with Users under the first and Config under the last       [browser]
+#  24. Gallery right-click tags (v3.6.0 #50) — right-click a gallery card, click a tag
+#      in the context menu, and verify the tag lands on the document via
+#      GET /api/document/:id (authoritative)                                     [browser+api]
 #  20. Stats dashboard (v3.5.0 #40) — admin #/settings/stats renders the five totals
 #      cards + a chart <canvas> + a per-user storage row; switching the window (7->30)
 #      re-hits /api/app/stats; and (context-isolated) a NON-admin gets 403 from
@@ -861,6 +867,104 @@ gallery_ok = (
 results["gallery_view"] = (gallery_ok, f"initial={gallery_state} after_reload={gallery_after_reload}")
 shot("19b-gallery-after-reload")
 
+# --- Check 23 (#61): settings admin nav shows three labelled groups -------------
+# As admin: open #/settings/account and assert the admin nav renders the renamed
+# "Personal" header plus the THREE labelled admin group sections with the right
+# membership (Users under Access & Users, Config under System).
+goto_url(base + "/#/settings/account"); time.sleep(1.5); wait_for_load()
+nav_groups = js("""
+  return (() => {
+    const sections = [...document.querySelectorAll('.admin-nav .admin-nav-section')]
+      .map(e => (e.textContent||'').trim());
+    const linkText = [...document.querySelectorAll('.admin-nav .admin-nav-link')]
+      .map(e => (e.textContent||'').trim());
+    return {sections, hasUsers: linkText.includes('Users'), hasConfig: linkText.includes('Config')};
+  })();
+""")
+shot("23-settings-groups")
+_sections = nav_groups.get("sections") or []
+settings_groups_ok = (
+    "Personal" in _sections
+    and "Access & Users" in _sections
+    and "Content Model" in _sections
+    and "System" in _sections
+    and bool(nav_groups.get("hasUsers"))
+    and bool(nav_groups.get("hasConfig"))
+)
+results["settings_groups"] = (settings_groups_ok, f"sections={_sections} users={nav_groups.get('hasUsers')} config={nav_groups.get('hasConfig')}")
+
+# --- Check 24 (#50): right-click a gallery card adds a tag (authoritative API) ---
+# Create a fresh tag NOT on the seeded doc, switch the list to Gallery, right-click
+# the seeded doc's card, click the tag in the context menu, then verify the tag is
+# on the document via GET /api/document/<id> (authoritative, not a DOM claim).
+rc_tag_name = run + "-rc"
+rc_tag_id = js("""
+  return (() => fetch(location.origin + '/api/tag', {
+    method:'PUT', credentials:'include',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'name=' + encodeURIComponent(arg_name) + '&color=%23cc0000'
+  }).then(r => r.ok ? r.json() : {}).then(j => j.id || '').catch(() => ''))();
+""".replace("arg_name", json.dumps(rc_tag_name)))
+time.sleep(0.8)
+goto_url(base + "/#/document?search=" + urllib.parse.quote(doc_title)); time.sleep(1.8); wait_for_load()
+# Switch to Gallery.
+js("""
+  (() => {
+    const toggle = document.querySelector('.view-mode-toggle') || document;
+    const opts = [...toggle.querySelectorAll('.p-togglebutton, [role=button], .p-selectbutton *, .view-mode-label')];
+    const gallery = opts.find(o => /gallery/i.test(o.textContent||''));
+    (gallery || opts[0]).click();
+  })();
+""")
+time.sleep(1.8); wait_for_load()
+# Dispatch a real contextmenu event on the seeded doc's card to open the menu.
+rc_menu_opened = js("""
+  return (() => {
+    const card = [...document.querySelectorAll('article.doc-card')].find(c => {
+      const t = c.querySelector('.card-title');
+      return t && (t.textContent||'').includes(arg_title);
+    });
+    if (!card) return false;
+    const r = card.getBoundingClientRect();
+    card.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true,
+      clientX: r.left + 10, clientY: r.top + 10}));
+    return true;
+  })();
+""".replace("arg_title", json.dumps(doc_title)))
+time.sleep(1.0)
+shot("24a-gallery-contextmenu")
+# Click the new tag's entry in the open PrimeVue ContextMenu (teleported to body).
+rc_clicked = js("""
+  return (() => {
+    const items = [...document.querySelectorAll('.p-contextmenu .p-menuitem-link, .p-contextmenu [role=menuitem]')];
+    const target = items.find(i => (i.textContent||'').includes(arg_name));
+    if (!target) return false;
+    target.click();
+    return true;
+  })();
+""".replace("arg_name", json.dumps(rc_tag_name)))
+time.sleep(1.2)
+# Authoritative read-back: the tag is now on the document.
+rc_tag_present = js("""
+  return (() => fetch(location.origin + '/api/document/' + arg_id, {credentials:'include'})
+    .then(r => r.ok ? r.json() : {})
+    .then(d => (d.tags||[]).some(t => t.id === arg_tag))
+    .catch(() => false))();
+""".replace("arg_id", json.dumps(doc_id)).replace("arg_tag", json.dumps(rc_tag_id)))
+shot("24b-gallery-tag-added")
+rc_ok = bool(rc_tag_id) and bool(rc_menu_opened) and bool(rc_clicked) and bool(rc_tag_present)
+results["gallery_right_click_tag"] = (rc_ok, f"tag_id={bool(rc_tag_id)} menu={rc_menu_opened} clicked={rc_clicked} tag_on_doc={rc_tag_present}")
+# Switch back to List for later admin checks.
+js("""
+  (() => {
+    const toggle = document.querySelector('.view-mode-toggle') || document;
+    const opts = [...toggle.querySelectorAll('.p-togglebutton, [role=button], .p-selectbutton *, .view-mode-label')];
+    const list = opts.find(o => /(^|\\b)list(\\b|$)/i.test(o.textContent||''));
+    if (list) list.click();
+  })();
+""")
+time.sleep(1.0)
+
 # --- Check 20 (#40): admin stats dashboard + non-admin 403 (context-isolated) ---
 # As admin: open #/settings/stats and assert the five totals cards, a <canvas> chart, and
 # a per-user storage row render; switch the window (7 -> 30) and assert the API is re-hit
@@ -1244,6 +1348,8 @@ labels = {
     "totp_login": "check17: TOTP challenge revealed the OTP field + a valid code completed login (behavior A, context-isolated)",
     "favorites_roundtrip": "check18: favorites star (real UI click) round-trips via /api/favorite + /api/document, idempotent PUT + DELETE (#41)",
     "gallery_view": "check19: gallery view toggle rendered a card for the seeded doc + persisted the mode in localStorage across reload (#39)",
+    "settings_groups": "check23: settings admin nav rendered the Personal header + three labelled admin groups with correct membership (#61)",
+    "gallery_right_click_tag": "check24: right-clicking a gallery card added a tag via the context menu, verified on the document via /api/document (#50)",
     "stats_dashboard": "check20: admin stats dashboard rendered totals/chart/storage + window refetch, and a non-admin got 403 (context-isolated) (#40)",
     "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",
     "rotation_persist": "check22: file rotation persists across reload — POST/UI rotate then GET document files[].rotation==90 (#35/v3.5.2)",

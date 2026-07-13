@@ -28,6 +28,8 @@ export const queryKeys = {
   trash: () => ['trash'] as const,
   /** Application info. */
   app: () => ['app-info'] as const,
+  /** Theme configuration (custom app name / color / css). */
+  theme: () => ['theme'] as const,
 } as const
 
 /**

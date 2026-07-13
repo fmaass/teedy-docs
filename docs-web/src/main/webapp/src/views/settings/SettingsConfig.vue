@@ -331,8 +331,8 @@ function handleReindex() {
       </div>
     </template></Card>
 
-    <Card class="mb-4" style="max-width: 520px"><template #content>
-      <h3>{{ t('ui.config.maintenance') }}</h3>
+    <Card class="mb-4 danger-zone" style="max-width: 520px"><template #content>
+      <h3 class="danger-zone-title"><i class="pi pi-exclamation-triangle" aria-hidden="true" />{{ t('ui.config.maintenance') }}</h3>
       <p class="section-hint">
         {{ t('ui.config.maintenance_hint') }}
       </p>
@@ -408,6 +408,18 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
 }
 .clean-storage-hint {
   margin: 0.75rem 0 0;
+}
+/* Danger zone: the destructive maintenance actions (reindex, clean storage) are
+   visually fenced with a red-tinted border + warning-coloured heading so an admin
+   registers the block as irreversible before acting. */
+.danger-zone {
+  border: 1px solid var(--p-red-400, #f87171);
+}
+.danger-zone-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--p-red-500, #ef4444);
 }
 .footer-link-row {
   display: flex;

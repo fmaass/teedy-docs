@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useAppInfo } from '../composables/useAppInfo'
-import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS } from './aboutHighlights'
+import { HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
@@ -14,8 +14,15 @@ const { t } = useI18n()
 const { data: appInfo } = useAppInfo()
 const version = computed(() => appInfo.value?.current_version ?? null)
 
-// Curated "What's new" highlights and the pinned heading version live in a
-// shared module (single source of truth, unit-tested — BL-019).
+// The "What's new in {version}" heading DISPLAYS the running app's MAJOR.MINOR,
+// derived from the live version — so a 3.5.x app always reads "What's new in 3.5"
+// and can never show a patch that mismatches the badge above it. The curated
+// bullets stay tied to the current minor (aboutHighlights); only the display
+// format is derived here.
+const whatsNewVersion = computed(() => headingVersion(version.value))
+
+// Curated "What's new" highlights live in a shared module (single source of
+// truth, unit-tested — BL-019).
 const highlightKeys = HIGHLIGHT_KEYS
 
 const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
@@ -36,7 +43,7 @@ const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
       </div>
 
       <section class="about-section">
-        <h3 class="about-heading">{{ t('ui.about.whats_new_title', { version: HIGHLIGHTS_VERSION }) }}</h3>
+        <h3 class="about-heading">{{ t('ui.about.whats_new_title', { version: whatsNewVersion }) }}</h3>
         <ul class="about-highlights">
           <li v-for="key in highlightKeys" :key="key">{{ t(key) }}</li>
         </ul>

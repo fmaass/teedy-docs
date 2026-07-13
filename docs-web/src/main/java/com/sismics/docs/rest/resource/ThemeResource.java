@@ -73,6 +73,7 @@ public class ThemeResource extends BaseResource {
      * @apiSuccess {String} name Application name
      * @apiSuccess {String} color Main color
      * @apiSuccess {String} css Custom CSS
+     * @apiSuccess {Number} favicon_version Cache-bust token for the favicon (changes when the uploaded favicon is replaced)
      * @apiPermission none
      * @apiVersion 1.5.0
      *
@@ -85,7 +86,31 @@ public class ThemeResource extends BaseResource {
         json.add("name", themeConfig.getString("name", "Teedy"));
         json.add("color", themeConfig.getString("color", "#ffffff"));
         json.add("css", themeConfig.getString("css", ""));
+        // Cache-bust token for the favicon: the uploaded file's last-modified epoch
+        // millis (0 when no custom favicon is uploaded — the bundled default is used).
+        // The SPA appends this to the favicon URL so replacing the image forces a
+        // re-fetch past the 15-day image cache, without depending on the theme name.
+        json.add("favicon_version", faviconVersion());
         return Response.ok().entity(json.build()).build();
+    }
+
+    /**
+     * Returns a cache-bust token for the favicon: the last-modified time (epoch
+     * millis) of the admin-uploaded favicon, or 0 when none is uploaded (the
+     * bundled default is served, which never changes).
+     *
+     * @return Favicon version token
+     */
+    private long faviconVersion() {
+        java.nio.file.Path faviconPath = DirectoryUtil.getThemeDirectory().resolve("favicon");
+        if (!Files.exists(faviconPath)) {
+            return 0L;
+        }
+        try {
+            return Files.getLastModifiedTime(faviconPath).toMillis();
+        } catch (IOException e) {
+            return 0L;
+        }
     }
 
     /**
@@ -152,7 +177,7 @@ public class ThemeResource extends BaseResource {
      * @apiDescription This resource accepts only multipart/form-data.
      * @apiName PutThemeImage
      * @apiGroup Theme
-     * @apiParam {String="logo","background"} type Image type
+     * @apiParam {String="logo","background","favicon"} type Image type
      * @apiParam {String} image Image data
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied
@@ -166,7 +191,7 @@ public class ThemeResource extends BaseResource {
      * @return Response
      */
     @PUT
-    @Path("image/{type: logo|background}")
+    @Path("image/{type: logo|background|favicon}")
     @Consumes("multipart/form-data")
     public Response images(@PathParam("type") String type,
             @FormDataParam("image") FormDataBodyPart imageBodyPart) {
@@ -197,7 +222,7 @@ public class ThemeResource extends BaseResource {
      * @api {get} /theme/image/:type Get a theme image
      * @apiName GetThemeImage
      * @apiGroup Theme
-     * @apiParam {String="logo","background"} type Image type
+     * @apiParam {String="logo","background","favicon"} type Image type
      * @apiSuccess {String} image The whole response is the image
      * @apiPermission none
      * @apiVersion 1.5.0
@@ -207,7 +232,7 @@ public class ThemeResource extends BaseResource {
      */
     @GET
     @Produces("image/*")
-    @Path("image/{type: logo|background}")
+    @Path("image/{type: logo|background|favicon}")
     public Response getImage(@PathParam("type") final String type) {
         final java.nio.file.Path filePath = DirectoryUtil.getThemeDirectory().resolve(type);
 
@@ -220,7 +245,7 @@ public class ThemeResource extends BaseResource {
                     if (Files.exists(filePath)) {
                         inputStream = Files.newInputStream(filePath);
                     } else {
-                        inputStream = getClass().getResource("/image/" + (type.equals("logo") ? "logo.png" : "background.jpg")).openStream();
+                        inputStream = getClass().getResource("/image/" + defaultImageName(type)).openStream();
                     }
                     ByteStreams.copy(inputStream, outputStream);
                 } finally {
@@ -239,6 +264,24 @@ public class ThemeResource extends BaseResource {
         .header(HttpHeaders.CACHE_CONTROL, "public")
         .header(HttpHeaders.EXPIRES, HttpUtil.buildExpiresHeader(3_600_000L * 24L * 15L))
         .build();
+    }
+
+    /**
+     * Returns the bundled default image name backing a theme image type when no
+     * admin-uploaded override exists in the theme directory.
+     *
+     * @param type Image type (logo|background|favicon)
+     * @return Classpath image file name under /image
+     */
+    private static String defaultImageName(String type) {
+        switch (type) {
+            case "background":
+                return "background.jpg";
+            case "favicon":
+                return "favicon.ico";
+            default:
+                return "logo.png";
+        }
     }
 
     /**

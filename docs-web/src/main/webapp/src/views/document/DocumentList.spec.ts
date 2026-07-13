@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, computed, watch as vueWatch } from 'vue'
 
@@ -12,6 +12,9 @@ const routerReplace = vi.hoisted(() => vi.fn())
 // component's immediate route-query watcher fire on that reassignment, modelling a
 // real Back / cold-load navigation.
 const routeHolder = vi.hoisted(() => ({ route: { query: {} as Record<string, unknown> } }))
+// Total the list query reports. Defaults to 2 (existing tests); the #52 tests raise
+// it so the hoisted Paginator (which renders only when totalCount > pageSize) mounts.
+const listTotalHolder = vi.hoisted(() => ({ total: 2 }))
 vi.mock('vue-router', async () => {
   const { reactive } = await vi.importActual<typeof import('vue')>('vue')
   routeHolder.route = reactive({ query: {} as Record<string, unknown> })
@@ -101,7 +104,9 @@ vi.mock('../../stores/tagFilter', async () => {
       get selectedTags() { return filterHolder.state.selectedTags },
       excludedTags: [],
       relatedTags: [],
-      allTags: [],
+      // A candidate tag not yet on the seeded docs, so the quick-tag context menu
+      // renders an "add" entry (#50).
+      allTags: [{ id: 'tag-ctx', name: 'urgent', color: '#cc0000' }],
       get debouncedText() { return filterHolder.state.debouncedText },
       hasActiveFilters: false,
       searchText: '',
@@ -119,8 +124,12 @@ vi.mock('../../stores/tagFilter', async () => {
   }
 })
 
+// Capture the tag mutation spies so the #50 context-menu test can assert the
+// gallery right-click round-trips through the SAME add/remove-tag path the table uses.
+const addTagSpy = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
+const removeTagSpy = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
 vi.mock('../../composables/useDocumentTags', () => ({
-  useDocumentTags: () => ({ addTag: vi.fn(), removeTag: vi.fn() }),
+  useDocumentTags: () => ({ addTag: addTagSpy, removeTag: removeTagSpy }),
 }))
 vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
@@ -164,7 +173,9 @@ vi.mock('@tanstack/vue-query', () => ({
       vueWatch(() => opts.queryKey!.value, () => opts.queryFn?.())
     }
     return {
-      data: { value: { documents: [doc, docB], total: 2 } },
+      // total is read from the holder so the #52 tests can raise it to render the
+      // Paginator; documents stay the two seeded docs the interaction tests use.
+      data: computed(() => ({ documents: [doc, docB], total: listTotalHolder.total })),
       isLoading: { value: false },
       isError: { value: false },
       error: { value: null },
@@ -199,13 +210,57 @@ const passthrough = defineComponent({ setup: () => () => h('div') })
 // open paths in gallery mode too, and so a test can assert WHICH mode is rendered.
 const DocumentGalleryStub = defineComponent({
   props: ['documents'],
-  emits: ['cardClick', 'cardDblclick'],
+  emits: ['cardClick', 'cardDblclick', 'cardContextMenu'],
   setup(props, { emit }) {
     return () =>
       h('div', { class: 'doc-gallery-stub' }, [
         h('button', { class: 'card-single', onClick: () => emit('cardClick', props.documents[0]) }, 'card'),
         h('button', { class: 'card-double', onClick: () => emit('cardDblclick', props.documents[0]) }, 'card-dbl'),
+        // Right-click a gallery card → forward the native event + doc (#50). We pass a
+        // real MouseEvent so the view's guard (instanceof MouseEvent) accepts it.
+        h(
+          'button',
+          {
+            class: 'card-context',
+            onClick: () => emit('cardContextMenu', new MouseEvent('contextmenu'), props.documents[0]),
+          },
+          'ctx',
+        ),
       ])
+  },
+})
+
+// ContextMenu stub: renders the leaf commands from its `model` (walking nested
+// `items` groups) as buttons keyed by label, so a test can invoke the add/remove
+// command exactly as a real menu click would.
+const ContextMenuStub = defineComponent({
+  props: ['model'],
+  setup(props, { expose }) {
+    expose({ show: () => {}, hide: () => {} })
+    function leaves(items: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
+      const out: Array<Record<string, unknown>> = []
+      for (const it of items) {
+        if (Array.isArray(it.items)) out.push(...leaves(it.items as Array<Record<string, unknown>>))
+        else if (typeof it.command === 'function') out.push(it)
+      }
+      return out
+    }
+    return () =>
+      h(
+        'div',
+        { class: 'context-menu-stub' },
+        leaves(props.model as Array<Record<string, unknown>>).map((it) =>
+          h(
+            'button',
+            {
+              class: 'ctx-item',
+              'data-label': it.label as string,
+              onClick: () => (it.command as () => void)(),
+            },
+            it.label as string,
+          ),
+        ),
+      )
   },
 })
 
@@ -223,6 +278,36 @@ const SelectButtonStub = defineComponent({
   },
 })
 
+// Items-per-page Select stub (#52): exposes the current page size and lets a test
+// pick a new size (the real Select's update:modelValue contract). A "bad" button
+// emits an out-of-range value so a test can prove the component clamps it.
+const PageSizeSelectStub = defineComponent({
+  props: ['modelValue', 'options'],
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () =>
+      h('div', { class: 'per-page-stub', 'data-size': props.modelValue }, [
+        h('button', { class: 'size-50', onClick: () => emit('update:modelValue', 50) }, '50'),
+        h('button', { class: 'size-10', onClick: () => emit('update:modelValue', 10) }, '10'),
+        h('button', { class: 'size-bad', onClick: () => emit('update:modelValue', 9999) }, 'bad'),
+      ])
+  },
+})
+
+// Paginator stub that surfaces its `rows` prop so a test can assert the page size
+// drives the paginator, and its `totalRecords`/render presence.
+const PaginatorStub = defineComponent({
+  props: ['rows', 'first', 'totalRecords'],
+  emits: ['page'],
+  setup(props, { emit }) {
+    return () =>
+      h('div', { class: 'paginator-stub', 'data-rows': props.rows, 'data-first': props.first }, [
+        // Jump to offset 40 (page 3 at size 20) — the real Paginator emits { first }.
+        h('button', { class: 'goto-page3', onClick: () => emit('page', { first: 40 }) }, 'p3'),
+      ])
+  },
+})
+
 import DocumentList from './DocumentList.vue'
 import { listDocuments } from '../../api/document'
 const listDocumentsMock = listDocuments as unknown as ReturnType<typeof vi.fn>
@@ -234,7 +319,8 @@ function mountView() {
         DocumentTable: DocumentTableStub,
         DocumentGallery: DocumentGalleryStub,
         SelectButton: SelectButtonStub,
-        Paginator: passthrough,
+        Select: PageSizeSelectStub,
+        Paginator: PaginatorStub,
         DocumentSlideOver: {
           props: ['visible', 'document'],
           template: '<div class="slide-over" v-if="visible">{{ document?.id }}</div>',
@@ -245,7 +331,7 @@ function mountView() {
         BulkActionBar: { template: '<div class="bulk-bar-stub" />' },
         EmptyState: passthrough,
         ErrorState: passthrough,
-        ContextMenu: passthrough,
+        ContextMenu: ContextMenuStub,
         ToggleButton: passthrough,
       },
       directives: { tooltip: {} },
@@ -675,5 +761,139 @@ describe('DocumentList — list ⇄ gallery view mode (#39)', () => {
     await wrapper.find('.to-list').trigger('click')
     await flushPromises()
     expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
+  })
+})
+
+// --- #52: items-per-page selector. The page size is user-selectable, persisted to
+//     localStorage, clamped to an allowed option, drives the list query `limit` AND
+//     the paginator `rows`, and resets the offset to page 1 on change. ---
+describe('DocumentList — items-per-page selector (#52)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    // A total larger than any page size so the hoisted Paginator renders.
+    listTotalHolder.total = 500
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    listTotalHolder.total = 2
+  })
+
+  it('defaults to 20 items per page (backward-compatible) and sends it as the query limit', () => {
+    mountView()
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.limit).toBe(20)
+  })
+
+  it('picking a size persists it to localStorage and re-queries with the new limit', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.size-50').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('teedy_document_page_size')).toBe('50')
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.limit).toBe(50)
+  })
+
+  it('restores the persisted page size on a fresh mount (reload)', () => {
+    localStorage.setItem('teedy_document_page_size', '50')
+    mountView()
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.limit).toBe(50)
+  })
+
+  it('clamps an out-of-range persisted value to the largest allowed option', () => {
+    localStorage.setItem('teedy_document_page_size', '9999')
+    mountView()
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.limit).toBe(100)
+  })
+
+  it('clamps an out-of-range picked value (never sends 9999)', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.size-bad').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('teedy_document_page_size')).toBe('100')
+    const listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.limit).toBe(100)
+  })
+
+  it('drives the paginator rows with the selected page size', async () => {
+    const wrapper = mountView()
+    expect(wrapper.find('.paginator-stub').attributes('data-rows')).toBe('20')
+    await wrapper.find('.size-50').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.paginator-stub').attributes('data-rows')).toBe('50')
+  })
+
+  it('resets the offset to page 1 when the page size changes', async () => {
+    const wrapper = mountView()
+    // Move off page 1 by driving the hoisted Paginator's page event (real contract).
+    await wrapper.find('.goto-page3').trigger('click')
+    await flushPromises()
+    let listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.offset).toBe(40)
+    // Changing the page size resets the offset to 0.
+    await wrapper.find('.size-10').trigger('click')
+    await flushPromises()
+    listParams = listDocumentsMock.mock.calls.at(-1)![0] as Record<string, unknown>
+    expect(listParams.offset).toBe(0)
+    expect(listParams.limit).toBe(10)
+  })
+})
+
+// --- #50: right-click a GALLERY card opens the quick-tag context menu and adds /
+//     removes a tag via the SAME add/remove-tag path the table row-context-menu uses. ---
+describe('DocumentList — right-click tags in gallery (#50)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    addTagSpy.mockClear()
+    removeTagSpy.mockClear()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    localStorage.setItem('teedy_document_view_mode', 'gallery')
+  })
+
+  afterEach(() => {
+    doc.tags = []
+    localStorage.clear()
+  })
+
+  it('right-clicking a gallery card then choosing "add" calls addTag with that card + tag', async () => {
+    const wrapper = mountView()
+    // Confirm we are in gallery mode (the right-click surface #50 targets).
+    expect(wrapper.find('.doc-gallery-stub').exists()).toBe(true)
+    // Right-click the first card → the shared ContextMenu is populated for that doc.
+    await wrapper.find('.card-context').trigger('click')
+    await flushPromises()
+    // The candidate tag 'urgent' is not on the doc, so the menu shows an add entry.
+    const addItem = wrapper.find('.ctx-item[data-label="urgent"]')
+    expect(addItem.exists()).toBe(true)
+    await addItem.trigger('click')
+    await flushPromises()
+    expect(addTagSpy).toHaveBeenCalledWith('doc-42', 'tag-ctx')
+    expect(removeTagSpy).not.toHaveBeenCalled()
+  })
+
+  it('right-clicking a gallery card then choosing an existing tag removes it (round-trip)', async () => {
+    // Seed a tag on the first doc so the menu offers a remove entry.
+    doc.tags = [{ id: 'tag-on', name: 'keep', color: '#00aa00' }]
+    const wrapper = mountView()
+    await wrapper.find('.card-context').trigger('click')
+    await flushPromises()
+    const removeItem = wrapper.find('.ctx-item[data-label="keep"]')
+    expect(removeItem.exists()).toBe(true)
+    await removeItem.trigger('click')
+    await flushPromises()
+    expect(removeTagSpy).toHaveBeenCalledWith('doc-42', 'tag-on')
   })
 })

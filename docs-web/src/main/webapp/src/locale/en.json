@@ -870,7 +870,11 @@
     },
     "nav": {
       "settings": "Settings",
-      "administration": "Administration"
+      "personal": "Personal",
+      "administration": "Administration",
+      "group_access": "Access & Users",
+      "group_content": "Content Model",
+      "group_system": "System"
     },
     "date": "Date",
     "user": "User",
@@ -917,7 +921,9 @@
     "view": {
       "list": "List",
       "gallery": "Gallery",
-      "toggle_label": "Document view mode"
+      "toggle_label": "Document view mode",
+      "per_page": "{count} / page",
+      "per_page_label": "Items per page"
     },
     "facets_overflow": "…and {count} more",
     "mode_and": "AND",

@@ -32,6 +32,8 @@ import {
   type BulkResult,
 } from '../../utils/bulkOps'
 import { useClampedOffset } from '../../composables/useClampedOffset'
+import { clampPageSize, DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../../utils/pagination'
+import Select from 'primevue/select'
 import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
@@ -45,7 +47,26 @@ const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
 
-const PAGE_SIZE = 20
+// Items-per-page is user-selectable (#52) and persisted to localStorage exactly like
+// the view mode below. The stored value is clamped to an allowed option on load so a
+// stale/tampered value can never drive an out-of-range page size. Changing it resets
+// the offset to page 1 (a smaller page would otherwise strand the offset past the end).
+const PAGE_SIZE_KEY = 'teedy_document_page_size'
+const pageSize = ref<number>(
+  clampPageSize(Number(localStorage.getItem(PAGE_SIZE_KEY) ?? DEFAULT_PAGE_SIZE)),
+)
+watch(pageSize, (v) => {
+  localStorage.setItem(PAGE_SIZE_KEY, String(v))
+  pageOffset.value = 0
+})
+
+const pageSizeOptions = PAGE_SIZE_OPTIONS.map((value) => ({ label: String(value), value }))
+
+function onPageSizeChange(value: number | null) {
+  if (value == null) return
+  pageSize.value = clampPageSize(value)
+}
+
 const pageOffset = ref(0)
 const sortField = ref<string>('create_date')
 const sortOrder = ref<number>(-1)
@@ -162,12 +183,13 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
     workflowMe: workflowMe.value,
     favoritesMe: favoritesMe.value,
     offset: pageOffset.value,
+    limit: pageSize.value,
     sortField: sortField.value,
     sortOrder: sortOrder.value,
   }]),
   queryFn: () =>
     listDocuments({
-      limit: PAGE_SIZE,
+      limit: pageSize.value,
       offset: pageOffset.value,
       sort_column: SORT_FIELD_MAP[sortField.value] ?? 3,
       asc: sortOrder.value === 1,
@@ -185,7 +207,7 @@ const totalCount = computed(() => documentsData.value?.total ?? 0)
 // Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
 // the server returns zero rows while total is still positive — a false-empty page
 // with no paginator to escape. Clamp back to the last valid page when that happens.
-useClampedOffset(documentsData, isLoading, pageOffset, PAGE_SIZE)
+useClampedOffset(documentsData, isLoading, pageOffset, pageSize)
 
 // The single hoisted Paginator (rendered by this view) drives pagination for BOTH
 // the table and the gallery — the tables no longer own a paginator. PageState.first
@@ -517,6 +539,19 @@ function bulkDelete() {
             <span class="view-mode-label">{{ option.label }}</span>
           </template>
         </SelectButton>
+        <Select
+          :model-value="pageSize"
+          :options="pageSizeOptions"
+          optionLabel="label"
+          optionValue="value"
+          :aria-label="t('ui.view.per_page_label')"
+          class="per-page-select"
+          @update:model-value="onPageSizeChange"
+        >
+          <template #value="{ value }">
+            {{ t('ui.view.per_page', { count: value }) }}
+          </template>
+        </Select>
       </div>
     </div>
 
@@ -544,7 +579,7 @@ function bulkDelete() {
           selectable
           :documents="documents"
           :totalRecords="totalCount"
-          :rows="PAGE_SIZE"
+          :rows="pageSize"
           :first="pageOffset"
           :loading="isLoading"
           :sortField="sortField"
@@ -561,13 +596,14 @@ function bulkDelete() {
           :loading="isLoading"
           @card-click="openDocument"
           @card-dblclick="openDocumentFull"
+          @card-context-menu="onDocContextMenu"
         />
 
         <!-- One hoisted Paginator serves BOTH modes (the tables no longer own one). -->
         <Paginator
-          v-if="totalCount > PAGE_SIZE"
+          v-if="totalCount > pageSize"
           :first="pageOffset"
-          :rows="PAGE_SIZE"
+          :rows="pageSize"
           :totalRecords="totalCount"
           class="doc-paginator"
           @page="onPage"

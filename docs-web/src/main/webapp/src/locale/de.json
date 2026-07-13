@@ -870,7 +870,11 @@
     },
     "nav": {
       "settings": "Einstellungen",
-      "administration": "Administration"
+      "personal": "Persönlich",
+      "administration": "Administration",
+      "group_access": "Zugriff & Benutzer",
+      "group_content": "Inhaltsmodell",
+      "group_system": "System"
     },
     "date": "Datum",
     "user": "Benutzer",
@@ -917,7 +921,9 @@
     "view": {
       "list": "Liste",
       "gallery": "Galerie",
-      "toggle_label": "Dokumentansicht"
+      "toggle_label": "Dokumentansicht",
+      "per_page": "{count} / Seite",
+      "per_page_label": "Einträge pro Seite"
     },
     "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",

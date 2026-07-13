@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAppInfo } from '../composables/useAppInfo'
 
 const { t } = useI18n()
+
+// #62: show the running app version at the BOTTOM of the settings/admin nav (NOT the
+// main app nav). Sourced from the SHARED app-info query (same key the About dialog
+// uses) — no new endpoint, no duplicate fetch (TanStack dedups by key).
+const { data: appInfo } = useAppInfo()
+const version = computed(() => appInfo.value?.current_version ?? null)
 
 interface NavItem {
   label: string
@@ -10,12 +18,17 @@ interface NavItem {
   name: string
 }
 
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
 const props = defineProps<{
   mode: 'settings' | 'tag'
   isAdmin: boolean
   currentRouteName?: string | symbol | null
   settingsNavItems: NavItem[]
-  settingsAdminItems: NavItem[]
+  settingsAdminGroups: NavGroup[]
   tagManageItems: NavItem[]
 }>()
 
@@ -52,7 +65,7 @@ function isNavActive(name: string) {
     </template>
 
     <template v-else>
-      <div class="admin-nav-section">{{ t('ui.nav.settings') }}</div>
+      <div class="admin-nav-section">{{ t('ui.nav.personal') }}</div>
       <router-link
         v-for="item in settingsNavItems"
         :key="item.name"
@@ -65,20 +78,25 @@ function isNavActive(name: string) {
         <span>{{ item.label }}</span>
       </router-link>
       <template v-if="isAdmin">
-        <div class="admin-nav-section">{{ t('ui.nav.administration') }}</div>
-        <router-link
-          v-for="item in settingsAdminItems"
-          :key="item.name"
-          :to="item.to"
-          class="admin-nav-link"
-          :class="{ active: isNavActive(item.name) }"
-          @click="emit('navigate')"
-        >
-          <i :class="item.icon" />
-          <span>{{ item.label }}</span>
-        </router-link>
+        <template v-for="group in settingsAdminGroups" :key="group.label">
+          <div class="admin-nav-section">{{ group.label }}</div>
+          <router-link
+            v-for="item in group.items"
+            :key="item.name"
+            :to="item.to"
+            class="admin-nav-link"
+            :class="{ active: isNavActive(item.name) }"
+            @click="emit('navigate')"
+          >
+            <i :class="item.icon" />
+            <span>{{ item.label }}</span>
+          </router-link>
+        </template>
       </template>
     </template>
+
+    <!-- #62: running app version, pinned at the bottom of the admin/settings nav. -->
+    <div v-if="version" class="admin-nav-version">{{ `v${version}` }}</div>
   </div>
 </template>
 
@@ -88,6 +106,14 @@ function isNavActive(name: string) {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+}
+
+.admin-nav-version {
+  margin-top: auto;
+  padding: 0.75rem 0.5rem 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .back-to-docs {
