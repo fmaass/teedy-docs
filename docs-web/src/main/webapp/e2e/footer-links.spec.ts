@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
+import { openNav } from './helpers'
 
 // Configurable footer/imprint links (issue #43). Two admin-configured links must
 // render BOTH in the authenticated app shell AND on the logged-out login screen —
@@ -40,8 +41,11 @@ test.describe('configurable footer links', () => {
     await page.goto('/#/document')
     await page.reload()
 
-    const shellImprint = page.getByRole('link', { name: IMPRINT.label })
-    const shellPrivacy = page.getByRole('link', { name: PRIVACY.label })
+    // The footer links live in the panel footer (desktop) OR the Drawer footer
+    // (mobile) — openNav opens the Drawer on mobile so both are in view.
+    const nav = await openNav(page)
+    const shellImprint = nav.getByRole('link', { name: IMPRINT.label })
+    const shellPrivacy = nav.getByRole('link', { name: PRIVACY.label })
     await expect(shellImprint).toBeVisible()
     await expect(shellPrivacy).toBeVisible()
     await expect(shellImprint).toHaveAttribute('href', IMPRINT.url)

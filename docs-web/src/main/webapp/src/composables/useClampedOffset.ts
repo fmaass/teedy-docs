@@ -1,5 +1,9 @@
-import { watch, type Ref } from 'vue'
+import { watch, unref, type Ref, type MaybeRefOrGetter } from 'vue'
 import { clampOffset } from '../utils/pagination'
+
+function resolvePageSize(pageSize: MaybeRefOrGetter<number>): number {
+  return typeof pageSize === 'function' ? pageSize() : unref(pageSize)
+}
 
 /**
  * Shape a paginated query result must expose for the stale-offset clamp: the
@@ -25,19 +29,20 @@ export interface ClampablePage {
  * @param data        The `useQuery` data ref (`{ documents, total }`, may be undefined).
  * @param isLoading   The `useQuery` isLoading ref — clamp is skipped while true.
  * @param pageOffset  The paginator offset ref; mutated in place when it must change.
- * @param pageSize    Items per page (> 0).
+ * @param pageSize    Items per page (> 0) — a plain number, ref, or getter so the
+ *                    clamp tracks a user-selectable page size (#52).
  */
 export function useClampedOffset(
   data: Ref<ClampablePage | undefined>,
   isLoading: Ref<boolean>,
   pageOffset: Ref<number>,
-  pageSize: number,
+  pageSize: MaybeRefOrGetter<number>,
 ): void {
   watch(data, () => {
     if (isLoading.value) return
     const visibleCount = data.value?.documents.length ?? 0
     const totalCount = data.value?.total ?? 0
-    const next = clampOffset(pageOffset.value, visibleCount, totalCount, pageSize)
+    const next = clampOffset(pageOffset.value, visibleCount, totalCount, resolvePageSize(pageSize))
     if (next !== pageOffset.value) pageOffset.value = next
   })
 }

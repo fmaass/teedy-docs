@@ -54,9 +54,25 @@ function nodeTagId(key: string): string {
   return idx >= 0 ? key.slice(idx + 2) : key
 }
 
+// Sum a tree-mode node's own document count plus all descendants' counts,
+// treating an unused tag (absent from tagCounts) as 0. Used so a parent whose
+// documents live only on nested tags still shows a rolled-up total (#66).
+function subtreeCount(node: any): number {
+  let total = props.tagCounts[node.key] ?? 0
+  for (const child of node.children ?? []) total += subtreeCount(child)
+  return total
+}
+
 function getNodeCount(node: any): number | undefined {
   if (node.key?.includes('__')) {
     return node.data?.coCount
+  }
+  // Parent (tree-mode) node: display the rolled-up subtree total so a parent of
+  // used-but-nested tags is never blank (#66). Suppress a 0 badge (whole subtree
+  // unused) to preserve the "unused tags show no number" behaviour.
+  if (node.children?.length) {
+    const total = subtreeCount(node)
+    return total > 0 ? total : undefined
   }
   return props.tagCounts[node.key]
 }

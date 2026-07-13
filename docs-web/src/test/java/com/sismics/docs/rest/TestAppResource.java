@@ -5,6 +5,7 @@ import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetup;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.jpa.EMF;
@@ -135,7 +136,8 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(1L, countSavedFilters(filterId));
 
         // Admin soft-deletes the user (row stays until the storage purge)
-        Response response = target().path("/user/clean_storage_filter_user").request()
+        Response response = target().path("/user/clean_storage_filter_user")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
@@ -195,6 +197,976 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(1L, readCount(
                 "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_IDFILE_C is null", "id", docId),
                 "the live document's main-file pointer must be cleared");
+    }
+
+    /**
+     * #60: a non-admin must NOT be able to preview the storage cleanup dry-run.
+     */
+    @Test
+    public void testCleanStorageDryRunRejectsNonAdmin() {
+        clientUtil.createUser("dryrun_nonadmin");
+        String userToken = clientUtil.login("dryrun_nonadmin");
+
+        Response response = target().path("/app/batch/clean_storage/dry_run").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
+                "the dry-run preview is admin-only");
+    }
+
+    /**
+     * #60 (load-bearing safety invariant): the dry-run must mutate NOTHING. Seed a wedged state
+     * (a live document pointing at a soft-deleted file — exactly what a real clean_storage would
+     * reclaim), snapshot the DB row counts and the on-disk file set, call the dry-run, and assert
+     * that every row count is unchanged AND no filesystem file was removed. The manifest must
+     * still report the reclaimable file so we know the preview actually saw work to do.
+     */
+    @Test
+    public void testCleanStorageDryRunMutatesNothing() throws Exception {
+        String adminToken = adminToken();
+
+        // A document with one uploaded file, then soft-delete the file while the live document keeps
+        // pointing at it via DOC_IDFILE_C — a genuine reclaim candidate.
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Dry run mutation doc").param("language", "eng")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = :fid where DOC_ID_C = :did",
+                java.util.Map.of("fid", fileId, "did", docId));
+        executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
+                java.util.Map.of("now", new java.util.Date(), "fid", fileId));
+
+        // Snapshot: DB row counts across every table clean_storage would touch + the on-disk set.
+        long filesBefore = readCount("select count(*) from T_FILE");
+        long docsBefore = readCount("select count(*) from T_DOCUMENT");
+        long aclBefore = readCount("select count(*) from T_ACL");
+        long tagBefore = readCount("select count(*) from T_TAG");
+        long auditBefore = readCount("select count(*) from T_AUDIT_LOG");
+        long cleanupRunsBefore = readCount("select count(*) from T_CLEANUP_RUN");
+        java.util.Set<String> storageBefore = listStorageFiles();
+
+        // Dry-run: the preview must report the reclaimable file...
+        JsonObject dryRun = target().path("/app/batch/clean_storage/dry_run").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertTrue(dryRun.getJsonNumber("total").longValue() >= 1,
+                "the dry-run must see at least the one reclaimable file");
+
+        // ...and NOTHING may have changed: no DB row removed/added, no filesystem file deleted.
+        Assertions.assertEquals(filesBefore, readCount("select count(*) from T_FILE"), "T_FILE unchanged");
+        Assertions.assertEquals(docsBefore, readCount("select count(*) from T_DOCUMENT"), "T_DOCUMENT unchanged");
+        Assertions.assertEquals(aclBefore, readCount("select count(*) from T_ACL"), "T_ACL unchanged");
+        Assertions.assertEquals(tagBefore, readCount("select count(*) from T_TAG"), "T_TAG unchanged");
+        Assertions.assertEquals(auditBefore, readCount("select count(*) from T_AUDIT_LOG"), "T_AUDIT_LOG unchanged");
+        Assertions.assertEquals(cleanupRunsBefore, readCount("select count(*) from T_CLEANUP_RUN"),
+                "the dry-run must NOT write a protocol record");
+        Assertions.assertEquals(storageBefore, listStorageFiles(), "no filesystem file may be removed by a dry-run");
+        // The live document still points at the soft-deleted file (pointer not cleared).
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_IDFILE_C = '" + fileId + "'", "id", docId),
+                "the dry-run must not clear the main-file pointer");
+    }
+
+    /**
+     * #60 (dry-run/apply parity, count AND bytes): the file count and reclaimed_bytes the dry-run
+     * reports must EQUAL what a real clean_storage run actually deletes/frees. Seed a reclaimable file,
+     * read the dry-run total + reclaimed_bytes, capture the file's ACTUAL on-disk footprint (original +
+     * _web/_thumb), run the real cleanup, and assert: dry-run total == real file_count; dry-run
+     * reclaimed_bytes == real bytes == the measured on-disk footprint; and the bytes are actually freed.
+     */
+    @Test
+    public void testCleanStorageDryRunMatchesRealDeletion() throws Exception {
+        String adminToken = adminToken();
+
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Dry run parity doc").param("language", "eng")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = :fid where DOC_ID_C = :did",
+                java.util.Map.of("fid", fileId, "did", docId));
+        executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
+                java.util.Map.of("now", new java.util.Date(), "fid", fileId));
+
+        // The file's ACTUAL on-disk footprint (original + derivatives) BEFORE the run.
+        long onDiskBefore = onDiskFootprint(fileId);
+        Assertions.assertTrue(onDiskBefore > 0, "the seeded file must occupy real bytes on disk");
+
+        JsonObject dryRun = target().path("/app/batch/clean_storage/dry_run").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        long dryRunTotal = dryRun.getJsonNumber("total").longValue();
+        long dryRunBytes = dryRun.getJsonNumber("reclaimed_bytes").longValue();
+        Assertions.assertTrue(dryRunTotal >= 1, "expected at least one reclaimable file");
+
+        JsonObject realRun = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()), JsonObject.class);
+        long realCount = realRun.getJsonNumber("file_count").longValue();
+        long realBytes = realRun.getJsonNumber("bytes").longValue();
+
+        Assertions.assertEquals(dryRunTotal, realCount,
+                "the dry-run manifest count must equal the real run's actual deletions");
+        // BYTE PARITY: the dry-run and the apply compute reclaimed bytes identically over the same set.
+        Assertions.assertEquals(dryRunBytes, realBytes,
+                "dry-run reclaimed_bytes must equal the real run's freed bytes");
+        // And that number is the file's real on-disk footprint (not a logical FIL_SIZE_N estimate).
+        Assertions.assertEquals(onDiskBefore, realBytes,
+                "reported reclaimed bytes must equal the actual on-disk footprint (original + derivatives)");
+        // The reclaimed file row is really gone, and its bytes are actually freed.
+        Assertions.assertEquals(0L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId), "the file must be hard-deleted");
+        Assertions.assertEquals(0L, onDiskFootprint(fileId), "the file's bytes must be freed on disk");
+    }
+
+    /**
+     * Sum of the actual on-disk sizes of a file's stored variants (original + {@code _web}/{@code _thumb}).
+     */
+    private long onDiskFootprint(String fileId) throws Exception {
+        java.nio.file.Path dir = DirectoryUtil.getStorageDirectory();
+        long total = 0L;
+        for (String suffix : new String[]{"", "_web", "_thumb"}) {
+            java.nio.file.Path p = dir.resolve(fileId + suffix);
+            if (java.nio.file.Files.isRegularFile(p)) {
+                total += java.nio.file.Files.size(p);
+            }
+        }
+        return total;
+    }
+
+    /**
+     * #60 (durable protocol + survives a second cleanup): a real run writes a T_CLEANUP_RUN record,
+     * and a SECOND clean_storage does NOT erase the first run's protocol row — the protocol must
+     * live in a store the next cleanup does not purge.
+     */
+    @Test
+    public void testCleanStorageWritesProtocolSurvivingSecondCleanup() {
+        String adminToken = adminToken();
+
+        long before = readCount("select count(*) from T_CLEANUP_RUN");
+
+        // First real run: writes exactly one protocol record.
+        Response first = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(first.getStatus()));
+        long afterFirst = readCount("select count(*) from T_CLEANUP_RUN");
+        Assertions.assertEquals(before + 1, afterFirst, "the first real run must write one protocol record");
+
+        // Second real run: writes its own record AND must NOT erase the first.
+        Response second = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(second.getStatus()));
+        long afterSecond = readCount("select count(*) from T_CLEANUP_RUN");
+        Assertions.assertEquals(afterFirst + 1, afterSecond,
+                "a second cleanup must ADD its own record and preserve the first (protocol is purge-exempt)");
+    }
+
+    /**
+     * #54 (production FK abort, PostgreSQL): a still-LIVE file whose {@code FIL_IDDOC_C} references a
+     * soft-deleted document must not wedge the storage purge. {@code FK_FIL_IDDOC_C} is ON DELETE
+     * RESTRICT, so hard-deleting the document while a live collaborator file still points at it aborts
+     * the whole transaction. Reproduce a collaborator's file on a trashed document, purge, and assert
+     * the run completes AND both the document and the file are gone (the file was reclaimed).
+     *
+     * <p>H2 does not enforce RESTRICT as strictly as PostgreSQL, so the real regression bites on PG —
+     * this same scenario is one edge of {@link #testCleanStorageSurvivesEveryRestrictFkEdge()}, which
+     * is PG-first.</p>
+     */
+    @Test
+    public void testCleanStorageClearsCollaboratorFileOnTrashedDocument() throws Exception {
+        String adminToken = adminToken();
+
+        // Owner creates a document.
+        clientUtil.createUser("clean_fk_owner");
+        String ownerToken = clientUtil.login("clean_fk_owner");
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("title", "Collaborator file doc").param("language", "eng")),
+                        JsonObject.class)
+                .getString("id");
+
+        // Grant a collaborator WRITE, and the collaborator uploads a file (uploader = collaborator).
+        clientUtil.createUser("clean_fk_collab");
+        String collabToken = clientUtil.login("clean_fk_collab");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("source", docId).param("perm", "WRITE")
+                        .param("target", "clean_fk_collab").param("type", "USER")), JsonObject.class);
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", collabToken, docId);
+
+        // Soft-delete ONLY the document (leave the collaborator's file live, FIL_IDDOC_C intact) — the
+        // exact wedged state: FK_FIL_IDDOC_C from a live file into a soft-deleted document.
+        executeSql("update T_DOCUMENT set DOC_DELETEDATE_D = :now where DOC_ID_C = :did",
+                java.util.Map.of("now", new java.util.Date(), "did", docId));
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id and FIL_DELETEDATE_D is null", "id", fileId),
+                "precondition: the collaborator's file is still LIVE and points at the trashed document");
+
+        // Purge: must complete (no FK abort) with a 200.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "clean_storage must not abort on FK_FIL_IDDOC_C");
+
+        // The trashed document AND the collaborator file are both hard-deleted.
+        Assertions.assertEquals(0L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id", "id", docId),
+                "the trashed document must be hard-deleted");
+        Assertions.assertEquals(0L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the collaborator file attached to it must be reclaimed");
+    }
+
+    /**
+     * #60 structural FK invariant (PG-first, the anti-whack-a-mole test): a single WORST-CASE messy
+     * fixture that exercises EVERY {@code ON DELETE RESTRICT} edge into a table clean_storage hard-
+     * deletes, all at once — a collaborator file (different uploader) on a trashed doc, document
+     * metadata, a favorite by another live user, a cross-user tag link, an ACL/share, a saved filter
+     * and favorite of a departing user, and an ended-but-undeleted route with steps on a trashed doc.
+     * Soft-delete the relevant slice, run clean_storage, and assert it COMPLETES with ZERO FK abort
+     * and leaves a consistent DB (all doomed rows gone; unrelated rows intact). This one test replaces
+     * scenario-by-scenario coverage and would have caught all four historical aborts.
+     *
+     * <p>PostgreSQL enforces RESTRICT strictly (H2 does not), so the abort only reproduces on PG —
+     * this test is PG-first. On H2 it still runs and asserts the same end state.</p>
+     */
+    @Test
+    public void testCleanStorageSurvivesEveryRestrictFkEdge() throws Exception {
+        String adminToken = adminToken();
+
+        // ── Actors: an owner who will "depart" (be soft-deleted) + a surviving collaborator.
+        clientUtil.createUser("fk_owner");
+        String ownerToken = clientUtil.login("fk_owner");
+        clientUtil.createUser("fk_collab");
+        String collabToken = clientUtil.login("fk_collab");
+        String ownerUserId = readSingle("select USE_ID_C from T_USER where USE_USERNAME_C = 'fk_owner'");
+
+        // ── The departing owner's TRASHED document, shared WRITE with the collaborator.
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("title", "Worst case FK doc").param("language", "eng")),
+                        JsonObject.class)
+                .getString("id");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("source", docId).param("perm", "WRITE")
+                        .param("target", "fk_collab").param("type", "USER")), JsonObject.class);
+
+        // ── A SURVIVING (live) document owned by the collaborator — the departing owner will hold
+        // RESTRICT edges INTO this live doc (tag link) and reference it (comment), which must NOT be
+        // collaterally destroyed and must NOT block the owner's purge.
+        String survivorDocId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, collabToken)
+                .put(Entity.form(new Form().param("title", "Survivor doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+
+        // Edge FIL_IDDOC_C — collaborator (different uploader) file AND owner file on the trashed doc.
+        String collabFileId = clientUtil.addFileToDocument("file/PIA00452.jpg", collabToken, docId);
+        String ownerFileId = clientUtil.addFileToDocument("file/PIA00452.jpg", ownerToken, docId);
+
+        // Edge FAV_IDUSER_C — the DEPARTING OWNER owns a favorite (of the survivor doc, which is live).
+        // This is the edge that blocks the user purge if not cleared: FAV_IDUSER_C = fk_owner.
+        String ownerFavId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_FAVORITE (FAV_ID_C, FAV_IDUSER_C, FAV_IDDOCUMENT_C, FAV_CREATEDATE_D)"
+                        + " values (:id, :uid, :did, :now)",
+                java.util.Map.of("id", ownerFavId, "uid", ownerUserId, "did", survivorDocId, "now", new java.util.Date()));
+        // Edge FAV_IDDOCUMENT_C — a favorite pointing at the TRASHED doc (blocks the doc purge).
+        executeSql("insert into T_FAVORITE (FAV_ID_C, FAV_IDUSER_C, FAV_IDDOCUMENT_C, FAV_CREATEDATE_D)"
+                        + " values (:id, :uid, :did, :now)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(),
+                        "uid", readSingle("select USE_ID_C from T_USER where USE_USERNAME_C = 'fk_collab'"),
+                        "did", docId, "now", new java.util.Date()));
+
+        // Edge DME_IDDOCUMENT_C — metadata on the trashed doc (no soft-delete column).
+        String metadataId = target().path("/metadata").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "fk_meta_" + java.util.UUID.randomUUID())
+                        .param("type", "STRING")), JsonObject.class)
+                .getString("id");
+        executeSql("insert into T_DOCUMENT_METADATA (DME_ID_C, DME_IDDOCUMENT_C, DME_IDMETADATA_C, DME_VALUE_C)"
+                        + " values (:id, :did, :mid, :val)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "did", docId,
+                        "mid", metadataId, "val", "worst-case"));
+
+        // Edge DOT_IDTAG_C / TAG_IDUSER_C (gap 2a) — a tag OWNED BY THE DEPARTING OWNER, linked to the
+        // SURVIVING document. The orphan-tag pass soft-deletes the tag (owner gone); the link on the
+        // live doc stays live and would block the tag hard-delete unless clean_storage clears it. The
+        // link is inserted directly (a collaborator cannot apply another user's tag via the API), which
+        // is exactly the cross-user state that produces the FK edge.
+        String ownerTagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("name", "fkTag" + System.nanoTime()).param("color", "#ff0000")),
+                        JsonObject.class)
+                .getString("id");
+        executeSql("insert into T_DOCUMENT_TAG (DOT_ID_C, DOT_IDDOCUMENT_C, DOT_IDTAG_C) values (:id, :did, :tid)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "did", survivorDocId, "tid", ownerTagId));
+
+        // Edge RTE_IDUSER_C / RTP_IDVALIDATORUSER_C (gap 2b) — a SOFT-DELETED route INITIATED by the
+        // departing owner, on the SURVIVOR doc (so it is NOT swept by the trashed-doc route delete),
+        // with a soft-deleted step the departing owner VALIDATES. These soft-deleted rows keep their
+        // FK into the departing owner and would block the user purge unless clean_storage removes them.
+        String ownerRouteId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_ROUTE (RTE_ID_C, RTE_IDDOCUMENT_C, RTE_NAME_C, RTE_STATUS_C, RTE_IDUSER_C, RTE_CREATEDATE_D, RTE_DELETEDATE_D)"
+                        + " values (:id, :did, :name, 'ENDED', :uid, :now, :del)",
+                java.util.Map.of("id", ownerRouteId, "did", survivorDocId, "name", "owner-route", "uid", ownerUserId,
+                        "now", new java.util.Date(), "del", new java.util.Date()));
+        executeSql("insert into T_ROUTE_STEP (RTP_ID_C, RTP_IDROUTE_C, RTP_NAME_C, RTP_TYPE_C, RTP_IDTARGET_C, RTP_IDVALIDATORUSER_C, RTP_ORDER_N, RTP_CREATEDATE_D, RTP_DELETEDATE_D)"
+                        + " values (:id, :rid, :name, 'VALIDATE', :tgt, :val, 0, :now, :del)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "rid", ownerRouteId, "name", "step",
+                        "tgt", "admin", "val", ownerUserId, "now", new java.util.Date(), "del", new java.util.Date()));
+        // Also an ended-but-undeleted route with steps on the TRASHED doc (the original edge).
+        String trashRouteId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_ROUTE (RTE_ID_C, RTE_IDDOCUMENT_C, RTE_NAME_C, RTE_STATUS_C, RTE_IDUSER_C, RTE_CREATEDATE_D)"
+                        + " values (:id, :did, :name, 'ENDED', :uid, :now)",
+                java.util.Map.of("id", trashRouteId, "did", docId, "name", "trash-route", "uid", "admin",
+                        "now", new java.util.Date()));
+        executeSql("insert into T_ROUTE_STEP (RTP_ID_C, RTP_IDROUTE_C, RTP_NAME_C, RTP_TYPE_C, RTP_IDTARGET_C, RTP_ORDER_N, RTP_CREATEDATE_D)"
+                        + " values (:id, :rid, :name, 'VALIDATE', :tgt, 0, :now)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "rid", trashRouteId, "name", "step",
+                        "tgt", "admin", "now", new java.util.Date()));
+
+        // Edge RTP_IDROUTE_C with a LIVE step (finding #1): a soft-deleted route owned by the departing
+        // user with a LIVE (RTP_DELETEDATE_D is null) step. FK_RTP_IDROUTE_C is ON DELETE RESTRICT, so a
+        // live step on a doomed route would abort the route hard-delete unless clean_storage deletes ALL
+        // of a doomed route's steps regardless of their own deleteDate. (Not reachable via the app today
+        // — RouteDao.deleteRoute soft-deletes steps atomically — but closed defensively.)
+        String liveStepRouteId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_ROUTE (RTE_ID_C, RTE_IDDOCUMENT_C, RTE_NAME_C, RTE_STATUS_C, RTE_IDUSER_C, RTE_CREATEDATE_D, RTE_DELETEDATE_D)"
+                        + " values (:id, :did, :name, 'ENDED', :uid, :now, :del)",
+                java.util.Map.of("id", liveStepRouteId, "did", survivorDocId, "name", "live-step-route", "uid", ownerUserId,
+                        "now", new java.util.Date(), "del", new java.util.Date()));
+        String liveStepId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_ROUTE_STEP (RTP_ID_C, RTP_IDROUTE_C, RTP_NAME_C, RTP_TYPE_C, RTP_IDTARGET_C, RTP_ORDER_N, RTP_CREATEDATE_D)"
+                        + " values (:id, :rid, :name, 'VALIDATE', :tgt, 0, :now)", // NO RTP_DELETEDATE_D → LIVE step
+                java.util.Map.of("id", liveStepId, "rid", liveStepRouteId, "name", "live-step",
+                        "tgt", "admin", "now", new java.util.Date()));
+
+        // Edge COM_IDDOC_C with a LIVE comment on the DOOMED (trashed) doc (finding #3b): FK_COM_IDDOC_C
+        // is ON DELETE RESTRICT. The orphan-comment pass soft-deletes comments whose doc is not live, then
+        // the comment hard-delete removes them before the document hard-delete, so a live comment on a
+        // doomed doc must not abort. Authored by the surviving collaborator so it exercises COM_IDDOC_C,
+        // not the user edge.
+        String liveCommentId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_COMMENT (COM_ID_C, COM_IDDOC_C, COM_IDUSER_C, COM_CONTENT_C, COM_CREATEDATE_D)"
+                        + " values (:id, :did, :uid, :c, :now)", // NO COM_DELETEDATE_D → LIVE comment
+                java.util.Map.of("id", liveCommentId, "did", docId,
+                        "uid", readSingle("select USE_ID_C from T_USER where USE_USERNAME_C = 'fk_collab'"),
+                        "c", "live comment on trashed doc", "now", new java.util.Date()));
+
+        // Edge DOT_IDDOCUMENT_C with a LIVE tag link on the DOOMED (trashed) doc (finding #3b): a live
+        // document-tag link on a soon-hard-deleted document. FK_DOT_IDDOCUMENT_C is ON DELETE RESTRICT;
+        // the orphan-tag-link pass must soft-delete it (doc not live) before the doc hard-delete.
+        String collabTagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, collabToken)
+                .put(Entity.form(new Form().param("name", "fkCollabTag" + System.nanoTime()).param("color", "#00ff00")),
+                        JsonObject.class)
+                .getString("id");
+        String liveTagLinkId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_DOCUMENT_TAG (DOT_ID_C, DOT_IDDOCUMENT_C, DOT_IDTAG_C) values (:id, :did, :tid)",
+                java.util.Map.of("id", liveTagLinkId, "did", docId, "tid", collabTagId));
+
+        // Edge COM_IDUSER_C — a SOFT-DELETED comment authored by the departing owner on the survivor
+        // doc. The comment hard-delete pass removes it before the user purge, so it must not block.
+        executeSql("insert into T_COMMENT (COM_ID_C, COM_IDDOC_C, COM_IDUSER_C, COM_CONTENT_C, COM_CREATEDATE_D, COM_DELETEDATE_D)"
+                        + " values (:id, :did, :uid, :c, :now, :del)",
+                java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "did", survivorDocId, "uid", ownerUserId,
+                        "c", "fk comment", "now", new java.util.Date(), "del", new java.util.Date()));
+
+        // Edge SFL_IDUSER_C — the departing owner has a saved filter.
+        target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("name", "fk-owner-filter").param("query", "search=x")), JsonObject.class);
+
+        // ── Soft-delete the trashed doc, then soft-delete the departing owner (leaving the collaborator
+        // file LIVE on the trashed doc — the #54 edge).
+        executeSql("update T_DOCUMENT set DOC_DELETEDATE_D = :now where DOC_ID_C = :did",
+                java.util.Map.of("now", new java.util.Date(), "did", docId));
+        executeSql("update T_USER set USE_DELETEDATE_D = :now where USE_USERNAME_C = 'fk_owner'",
+                java.util.Map.of("now", new java.util.Date()));
+
+        long liveDocsBefore = readCount("select count(*) from T_DOCUMENT where DOC_DELETEDATE_D is null");
+
+        // ── Purge: must COMPLETE with no FK abort.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "clean_storage must survive every RESTRICT edge without aborting");
+
+        // ── Consistent end state: every doomed row is gone; the survivor + collaborator remain.
+        Assertions.assertEquals(0L, readCount("select count(*) from T_DOCUMENT where DOC_ID_C = '" + docId + "'"),
+                "the trashed document is hard-deleted");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = '" + collabFileId + "'"),
+                "the collaborator file on the trashed doc is reclaimed");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = '" + ownerFileId + "'"),
+                "the owner file on the trashed doc is reclaimed");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_DOCUMENT_METADATA where DME_IDDOCUMENT_C = '" + docId + "'"),
+                "document metadata of the trashed doc is removed");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FAVORITE where FAV_IDDOCUMENT_C = '" + docId + "'"),
+                "favorites pointing at the trashed doc are removed");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FAVORITE where FAV_ID_C = '" + ownerFavId + "'"),
+                "the departing owner's own favorite is removed (FAV_IDUSER_C edge)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_ROUTE where RTE_ID_C = '" + trashRouteId + "'"),
+                "routes on the trashed doc are removed");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_ROUTE where RTE_ID_C = '" + ownerRouteId + "'"),
+                "the departing owner's soft-deleted route is removed (RTE_IDUSER_C edge)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_ROUTE where RTE_ID_C = '" + liveStepRouteId + "'"),
+                "the doomed route WITH A LIVE STEP is removed (RTP_IDROUTE_C RESTRICT, finding #1)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_ROUTE_STEP where RTP_ID_C = '" + liveStepId + "'"),
+                "the LIVE step of the doomed route is deleted (regardless of its own deleteDate)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_COMMENT where COM_ID_C = '" + liveCommentId + "'"),
+                "the LIVE comment on the trashed doc is removed (COM_IDDOC_C RESTRICT, finding #3b)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_DOCUMENT_TAG where DOT_ID_C = '" + liveTagLinkId + "'"),
+                "the LIVE tag link on the trashed doc is removed (DOT_IDDOCUMENT_C RESTRICT, finding #3b)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_TAG where TAG_ID_C = '" + ownerTagId + "'"),
+                "the departing owner's tag is hard-deleted (its link on the survivor doc was cleared first)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_USER where USE_USERNAME_C = 'fk_owner'"),
+                "the departing owner is hard-deleted once nothing live references it");
+        // The unrelated survivor document, its LIVE tag link now gone, and the collaborator are intact.
+        Assertions.assertEquals(1L, readCount("select count(*) from T_DOCUMENT where DOC_ID_C = '" + survivorDocId + "'"),
+                "the surviving document is untouched");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_USER where USE_USERNAME_C = 'fk_collab'"),
+                "the surviving collaborator is untouched");
+        Assertions.assertTrue(readCount("select count(*) from T_DOCUMENT where DOC_DELETEDATE_D is null") >= liveDocsBefore,
+                "no live document was collaterally removed");
+    }
+
+    /**
+     * #74 quota reclamation: when clean_storage hard-deletes a user's file, that user's stored quota
+     * (USE_STORAGECURRENT_N) must drop by the file's size, and never go negative. A collaborator uploads
+     * a file to another user's document; the document is soft-deleted directly (bypassing the API trash
+     * path's own reclaim, so the file is one clean_storage NEWLY removes), and clean_storage must credit
+     * the collaborator's quota back.
+     */
+    @Test
+    public void testCleanStorageReclaimsUploaderQuota() throws Exception {
+        String adminToken = adminToken();
+
+        // Admin owns a document; a collaborator with WRITE uploads a file to it.
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Quota reclaim doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        clientUtil.createUser("quota_collab");
+        String collabToken = clientUtil.login("quota_collab");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("source", docId).param("perm", "WRITE")
+                        .param("target", "quota_collab").param("type", "USER")), JsonObject.class);
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", collabToken, docId);
+
+        // The upload charged the collaborator's quota; capture it (the file's FIL_SIZE_N).
+        long quotaAfterUpload = getUserStorageCurrent(collabToken);
+        long fileSize = readCountLong("select FIL_SIZE_N from T_FILE where FIL_ID_C = '" + fileId + "'");
+        Assertions.assertTrue(quotaAfterUpload >= fileSize && fileSize > 0,
+                "precondition: the upload charged the collaborator's quota by the file size (" + fileSize + ")");
+
+        // Soft-delete the DOCUMENT directly (bypasses the API trash path's own quota reclaim). The
+        // collaborator's file stays LIVE → clean_storage NEWLY removes it (attached_to_deleted_document).
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :did", java.util.Map.of("did", docId));
+        executeSql("update T_DOCUMENT set DOC_DELETEDATE_D = :now where DOC_ID_C = :did",
+                java.util.Map.of("now", new java.util.Date(), "did", docId));
+
+        // Purge: the collaborator's quota is credited back by the file's size.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the collaborator file was purged");
+        long quotaAfterPurge = getUserStorageCurrent(collabToken);
+        Assertions.assertEquals(quotaAfterUpload - fileSize, quotaAfterPurge,
+                "the collaborator's storage_current dropped by the purged file's size (#74)");
+        Assertions.assertTrue(quotaAfterPurge >= 0L, "quota never goes negative");
+    }
+
+    /**
+     * #74 BLOCKER 1 — the exact quota-LEAK scenario: a user uploads a file, TRASHES the document via the
+     * real API (DELETE /document/{id} → DocumentDao.delete, which does NOT reclaim quota — it only sets
+     * deleteDate on the doc and its files), then an admin runs clean_storage BEFORE the retention purge.
+     * The trashed file's quota is still HELD after trashing; clean_storage hard-deletes it (a permanent
+     * deletion bypassing TrashPurgeService), so it MUST reclaim the quota or the bytes leak forever.
+     */
+    @Test
+    public void testCleanStorageReclaimsQuotaOfApiTrashedDocumentBeforeRetention() throws Exception {
+        String adminToken = adminToken();
+
+        clientUtil.createUser("leak_user");
+        String userToken = clientUtil.login("leak_user");
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .put(Entity.form(new Form().param("title", "Leak doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", userToken, docId);
+
+        long quotaAfterUpload = getUserStorageCurrent(userToken);
+        long fileSize = readCountLong("select FIL_SIZE_N from T_FILE where FIL_ID_C = '" + fileId + "'");
+        Assertions.assertTrue(quotaAfterUpload >= fileSize && fileSize > 0, "precondition: quota charged");
+
+        // TRASH the document via the real API (soft-delete; DocumentDao.delete reclaims NO quota).
+        Response trash = target().path("/document/" + docId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .delete();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(trash.getStatus()));
+        // The quota is STILL HELD after trashing (this is the crux — trashing does not reclaim).
+        Assertions.assertEquals(quotaAfterUpload, getUserStorageCurrent(userToken),
+                "precondition: trashing a document does NOT reclaim quota (the leak this fix closes)");
+
+        // Admin runs clean_storage BEFORE the retention purge → it hard-deletes the trashed file and
+        // MUST reclaim the held quota.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the trashed file was hard-deleted");
+        Assertions.assertEquals(quotaAfterUpload - fileSize, getUserStorageCurrent(userToken),
+                "clean_storage reclaimed the trashed file's held quota — no leak (#74 blocker 1)");
+    }
+
+    /**
+     * #74 BLOCKER 3 — a #55 RETAINED GHOST uploader: a soft-deleted user kept alive as a key-holder
+     * (because a document was reassigned away from it) still owns a file. When clean_storage purges that
+     * file and credits the ghost's quota, {@code UserDao.updateQuota}'s active-only filter would throw
+     * NoResultException AFTER the destructive unlink → 500 with bytes gone and quota not credited. The
+     * ghost-tolerant path (updateQuotaById) must credit (or safely skip) without throwing.
+     */
+    @Test
+    public void testCleanStorageQuotaCreditToleratesRetainedGhostUploader() throws Exception {
+        String adminToken = adminToken();
+
+        // The ghost owns a PURGED file (on a doomed doc → its quota is credited to the ghost during the
+        // run) AND a RETAINED live file (backing a live doc → keeps the ghost from being hard-deleted,
+        // the #55 key-holder state). Crediting the purged file's quota to the soft-deleted ghost must not
+        // throw — updateQuota's active-only filter would; updateQuotaById must not.
+        clientUtil.createUser("ghost_up");
+        String ghostToken = clientUtil.login("ghost_up");
+        String ghostUserId = readSingle("select USE_ID_C from T_USER where USE_USERNAME_C = 'ghost_up'");
+        // Doomed doc + purged file.
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ghostToken)
+                .put(Entity.form(new Form().param("title", "Ghost quota doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", ghostToken, docId);
+        long fileSize = readCountLong("select FIL_SIZE_N from T_FILE where FIL_ID_C = '" + fileId + "'");
+        // A SURVIVING doc owned by admin, with a LIVE file uploaded by the ghost → retains the ghost.
+        String survivorDocId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Ghost retention doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("source", survivorDocId).param("perm", "WRITE")
+                        .param("target", "ghost_up").param("type", "USER")), JsonObject.class);
+        String retainedFileId = clientUtil.addFileToDocument("file/PIA00452.jpg", ghostToken, survivorDocId);
+
+        // Soft-delete the doomed doc + its purged file with a MATCHING deleteDate (so the reclaim credits
+        // the ghost), and soft-delete (retain) the ghost user. The retained LIVE file keeps the ghost row
+        // present through the user purge.
+        java.util.Date now = new java.util.Date();
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = null, DOC_DELETEDATE_D = :now where DOC_ID_C = :did",
+                java.util.Map.of("now", now, "did", docId));
+        executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
+                java.util.Map.of("now", now, "fid", fileId));
+        executeSql("update T_USER set USE_DELETEDATE_D = :now where USE_USERNAME_C = 'ghost_up'",
+                java.util.Map.of("now", new java.util.Date()));
+
+        // clean_storage must NOT throw crediting a retained soft-deleted uploader's quota after unlink.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "clean_storage must NOT throw crediting a retained soft-deleted (ghost) uploader (#74 blocker 3)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the ghost's doomed file was purged");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_FILE where FIL_ID_C = :id", "id", retainedFileId),
+                "the ghost's retained live file survives");
+        // The ghost row survives (retained by its live file) and its quota was credited without throwing.
+        Assertions.assertEquals(1L, readCount("select count(*) from T_USER where USE_ID_C = '" + ghostUserId + "'"),
+                "the retained soft-deleted ghost uploader row survives the run");
+        long ghostQuota = readCountLong("select USE_STORAGECURRENT_N from T_USER where USE_ID_C = '" + ghostUserId + "'");
+        Assertions.assertEquals(fileSize, ghostQuota,
+                "the ghost's quota was credited (dropped by the purged file's size, retained file's size remains)");
+    }
+
+    /**
+     * #74 BLOCKER 2 — single-run guard: the CLEAN_STORAGE_LOCK sentinel serializes concurrent
+     * clean_storage runs. This proves the lock primitive directly and deterministically: thread A takes
+     * the PESSIMISTIC_WRITE lock (ConfigDao.lockForUpdate) and HOLDS its transaction open; thread B tries
+     * to take the SAME lock and must BLOCK until A commits. We assert B does NOT acquire while A holds
+     * (so two clean_storage runs cannot proceed in parallel), then release A and confirm B acquires. If
+     * the lock were a no-op, B would acquire immediately while A holds — the mutation this catches.
+     */
+    @Test
+    public void testCleanStorageLockSerializesConcurrentRuns() throws Exception {
+        adminToken(); // ensure the app/context is initialized
+
+        final java.util.concurrent.CountDownLatch aHoldsLock = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch aMayRelease = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean bAcquiredWhileAHeld = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.concurrent.atomic.AtomicBoolean bAcquiredEventually = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.List<Throwable> errors = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+        Runnable threadA = () -> withOwnTransaction(() -> {
+            new com.sismics.docs.core.dao.ConfigDao().lockForUpdate(com.sismics.docs.core.constant.ConfigType.CLEAN_STORAGE_LOCK);
+            aHoldsLock.countDown();
+            try {
+                aMayRelease.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, errors);
+
+        Runnable threadB = () -> {
+            try {
+                aHoldsLock.await(30, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            withOwnTransaction(() -> {
+                // This BLOCKS until A commits (row lock). If it returns while A still holds, the lock is broken.
+                new com.sismics.docs.core.dao.ConfigDao().lockForUpdate(com.sismics.docs.core.constant.ConfigType.CLEAN_STORAGE_LOCK);
+                bAcquiredWhileAHeld.set(aMayRelease.getCount() > 0); // true = acquired BEFORE A released → broken
+                bAcquiredEventually.set(true);
+            }, errors);
+        };
+
+        Thread ta = new Thread(threadA);
+        Thread tb = new Thread(threadB);
+        ta.start();
+        tb.start();
+        // Give B a fair chance to (wrongly) acquire while A holds the lock.
+        Assertions.assertTrue(aHoldsLock.await(30, java.util.concurrent.TimeUnit.SECONDS), "A must acquire the lock");
+        Thread.sleep(1500);
+        Assertions.assertFalse(bAcquiredEventually.get(),
+                "B must NOT acquire the lock while A holds it — the two runs are serialized (#74 blocker 2)");
+        // Release A; B must then acquire.
+        aMayRelease.countDown();
+        ta.join(30_000);
+        tb.join(30_000);
+
+        Assertions.assertTrue(errors.isEmpty(), "no locking thread may throw: " + errors);
+        Assertions.assertTrue(bAcquiredEventually.get(), "B acquires the lock once A releases it");
+        Assertions.assertFalse(bAcquiredWhileAHeld.get(), "B never acquired while A still held the lock");
+    }
+
+    /**
+     * Runs a body inside its OWN committed transaction on a fresh EntityManager (restoring the ambient EM
+     * afterward), so a test can hold a row lock across threads.
+     */
+    private void withOwnTransaction(Runnable body, java.util.List<Throwable> errors) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            body.run();
+            tx.commit();
+        } catch (Throwable t) {
+            errors.add(t);
+        } finally {
+            try {
+                if (tx.isActive()) {
+                    tx.rollback();
+                }
+            } catch (Throwable ignored) {
+                // best-effort
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * Reads the caller's current storage usage (bytes) from GET /user.
+     */
+    private long getUserStorageCurrent(String userToken) {
+        return target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get(JsonObject.class).getJsonNumber("storage_current").longValue();
+    }
+
+    /**
+     * Reads a single scalar long from a no-parameter native query, in the {@link #readCount} pattern.
+     */
+    private long readCountLong(String sql) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            Object n = em.createNativeQuery(sql).getSingleResult();
+            tx.commit();
+            return ((Number) n).longValue();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * Concurrent-run accounting (finding #2): a file whose DB row is in this run's confirmed-deleted set
+     * but whose physical bytes were ALREADY removed (by a concurrent clean_storage) must NOT be counted
+     * in this run's reclaimed file_count. FileUtil.delete is exists-guarded (no throw on a missing file),
+     * so without the presence guard both runs would count the same file. Simulate the winning run by
+     * deleting the physical bytes before the (losing) run, and assert the loser reports file_count == 0.
+     */
+    @Test
+    public void testCleanStorageDoesNotCountAlreadyRemovedBytes() throws Exception {
+        String adminToken = adminToken();
+
+        // A document with one uploaded file; soft-delete the file so it is in the removal closure.
+        String docId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Concurrent accounting doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+        executeSql("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :did", java.util.Map.of("did", docId));
+        executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
+                java.util.Map.of("now", new java.util.Date(), "fid", fileId));
+
+        // Simulate a WINNING concurrent run that already unlinked this file's physical bytes.
+        java.nio.file.Path dir = DirectoryUtil.getStorageDirectory();
+        for (String suffix : new String[]{"", "_web", "_thumb"}) {
+            java.nio.file.Files.deleteIfExists(dir.resolve(fileId + suffix));
+        }
+        Assertions.assertFalse(java.nio.file.Files.exists(dir.resolve(fileId)),
+                "precondition: the physical bytes are already gone (as a concurrent run left them)");
+
+        // This (losing) run still hard-deletes the DB row, but must NOT count the already-gone file.
+        JsonObject realRun = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()), JsonObject.class);
+        Assertions.assertEquals(0L, realRun.getJsonNumber("file_count").longValue(),
+                "a file whose bytes were already removed must NOT be counted (no concurrent-run over-count)");
+        Assertions.assertEquals(0L, realRun.getJsonNumber("bytes").longValue(),
+                "no bytes are reported freed for an already-gone file");
+        // The DB row is still hard-deleted (the DB purge is idempotent).
+        Assertions.assertEquals(0L, readCount("select count(*) from T_FILE where FIL_ID_C = :id", "id", fileId),
+                "the DB row is still hard-deleted");
+    }
+
+    /**
+     * #60 COM_IDUSER_C ghost-holder RETENTION (symmetric to the live-file/route ghost-holder logic): a
+     * soft-deleted user who authored a LIVE comment on a SURVIVING document must be RETAINED by
+     * clean_storage — its purge is blocked by the live COM_IDUSER_C reference. Assert BOTH the comment
+     * and the (soft-deleted, invisible) user survive the run, and that clean_storage still completes.
+     */
+    @Test
+    public void testCleanStorageRetainsUserWithLiveCommentGhostHolder() throws Exception {
+        String adminToken = adminToken();
+
+        clientUtil.createUser("ghost_author");
+        String authorToken = clientUtil.login("ghost_author");
+        String authorUserId = readSingle("select USE_ID_C from T_USER where USE_USERNAME_C = 'ghost_author'");
+
+        // A surviving document owned by admin; the departing author writes a LIVE comment on it.
+        String survivorDocId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("title", "Ghost comment doc").param("language", "eng")), JsonObject.class)
+                .getString("id");
+        String commentId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_COMMENT (COM_ID_C, COM_IDDOC_C, COM_IDUSER_C, COM_CONTENT_C, COM_CREATEDATE_D)"
+                        + " values (:id, :did, :uid, :c, :now)",
+                java.util.Map.of("id", commentId, "did", survivorDocId, "uid", authorUserId,
+                        "c", "a live comment by the departing author", "now", new java.util.Date()));
+
+        // Soft-delete the author (as a user deletion would); leave the live comment on the survivor doc.
+        executeSql("update T_USER set USE_DELETEDATE_D = :now where USE_USERNAME_C = 'ghost_author'",
+                java.util.Map.of("now", new java.util.Date()));
+
+        // Purge: completes, and RETAINS the author because a live comment still references them.
+        Response response = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "clean_storage must complete with a live-comment ghost holder present");
+
+        // Both the live comment AND the retained (soft-deleted, invisible) author survive.
+        Assertions.assertEquals(1L, readCount("select count(*) from T_COMMENT where COM_ID_C = '" + commentId + "'"),
+                "the live comment on the surviving document is untouched");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_USER where USE_USERNAME_C = 'ghost_author'"),
+                "the soft-deleted author is RETAINED as a ghost holder while a live comment references them");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_USER where USE_USERNAME_C = 'ghost_author' and USE_DELETEDATE_D is not null"),
+                "the retained author stays soft-deleted (hidden), not resurrected");
+    }
+
+    /**
+     * #72 age-thresholded filesystem-orphan reclaim: a genuine orphan (bytes on disk, NO T_FILE row)
+     * that is OLD (mtime older than the threshold) IS reclaimed by clean_storage — original AND its
+     * {@code _web}/{@code _thumb} derivatives — and its actual on-disk bytes are counted in the run's
+     * reported/recorded totals. A FRESH orphan (no row, recent mtime — simulating an in-flight upload)
+     * SURVIVES. This asserts both behaviors in one run, plus the byte/protocol accounting.
+     */
+    @Test
+    public void testCleanStorageReclaimsOldFilesystemOrphansButSparesFresh() throws Exception {
+        String adminToken = adminToken();
+
+        long protocolBefore = readCount("select count(*) from T_CLEANUP_RUN");
+        long twoDaysAgo = System.currentTimeMillis() - 2L * 24L * 60L * 60L * 1000L;
+
+        // An OLD orphan: original + two derivatives on disk, no DB row, mtime 2 days ago (> 24h).
+        String oldOrphanId = java.util.UUID.randomUUID().toString();
+        long oldBytes = plantOrphan(oldOrphanId, new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, twoDaysAgo);
+
+        // A FRESH orphan: original on disk, no DB row, mtime now — simulates an in-flight upload.
+        String freshOrphanId = java.util.UUID.randomUUID().toString();
+        java.nio.file.Path freshOriginal = DirectoryUtil.getStorageDirectory().resolve(freshOrphanId);
+        java.nio.file.Files.write(freshOriginal, new byte[]{9, 9, 9});
+
+        JsonObject realRun = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()), JsonObject.class);
+
+        // The OLD orphan (all variants) is reclaimed...
+        Assertions.assertEquals(0L, onDiskFootprint(oldOrphanId), "the old orphan's bytes (all variants) are reclaimed");
+        // ...and the FRESH orphan SURVIVES (age gate — could be an in-flight upload).
+        Assertions.assertTrue(java.nio.file.Files.exists(freshOriginal),
+                "a fresh orphan (recent mtime) must NOT be reclaimed — it may be an in-flight upload");
+
+        // The reported bytes/count include the old orphan's ACTUAL on-disk footprint.
+        Assertions.assertTrue(realRun.getJsonNumber("file_count").longValue() >= 1,
+                "the reclaimed count includes the old orphan");
+        Assertions.assertTrue(realRun.getJsonNumber("bytes").longValue() >= oldBytes,
+                "the reclaimed bytes include the old orphan's actual on-disk footprint (" + oldBytes + ")");
+
+        // The protocol recorded the run (with the actual figures).
+        Assertions.assertEquals(protocolBefore + 1, readCount("select count(*) from T_CLEANUP_RUN"),
+                "the run wrote a protocol record");
+
+        // Cleanup the surviving fresh orphan.
+        java.nio.file.Files.deleteIfExists(freshOriginal);
+    }
+
+    /**
+     * #72 dry-run parity: the side-effect-free preview INCLUDES an old orphan and EXCLUDES a fresh one,
+     * mutating nothing (both files still on disk after the dry-run).
+     */
+    @Test
+    public void testCleanStorageDryRunIncludesOldOrphanExcludesFresh() throws Exception {
+        String adminToken = adminToken();
+        long twoDaysAgo = System.currentTimeMillis() - 2L * 24L * 60L * 60L * 1000L;
+
+        String oldOrphanId = java.util.UUID.randomUUID().toString();
+        plantOrphan(oldOrphanId, new byte[]{1, 2, 3, 4}, twoDaysAgo);
+        String freshOrphanId = java.util.UUID.randomUUID().toString();
+        java.nio.file.Path freshOriginal = DirectoryUtil.getStorageDirectory().resolve(freshOrphanId);
+        java.nio.file.Files.write(freshOriginal, new byte[]{7, 7, 7});
+
+        JsonObject dryRun = target().path("/app/batch/clean_storage/dry_run").queryParam("limit", 500).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+
+        java.util.Set<String> previewedIds = new java.util.HashSet<>();
+        for (jakarta.json.JsonValue v : dryRun.getJsonArray("files")) {
+            previewedIds.add(v.asJsonObject().getString("id"));
+        }
+        Assertions.assertTrue(previewedIds.contains(oldOrphanId),
+                "the dry-run manifest must include the OLD orphan");
+        Assertions.assertFalse(previewedIds.contains(freshOrphanId),
+                "the dry-run manifest must EXCLUDE the FRESH orphan (age gate)");
+
+        // Side-effect-free: both files still on disk after the dry-run.
+        Assertions.assertTrue(java.nio.file.Files.exists(DirectoryUtil.getStorageDirectory().resolve(oldOrphanId)),
+                "the dry-run must not remove the old orphan");
+        Assertions.assertTrue(java.nio.file.Files.exists(freshOriginal),
+                "the dry-run must not remove the fresh orphan");
+
+        // Cleanup: remove the planted orphans (the old one via a real run, the fresh one directly).
+        target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        java.nio.file.Files.deleteIfExists(freshOriginal);
+    }
+
+    /**
+     * Plants a filesystem orphan (original + {@code _web} + {@code _thumb}) with the given content and
+     * an explicit last-modified time on every variant, and returns its total on-disk footprint.
+     */
+    private long plantOrphan(String baseId, byte[] content, long mtimeMs) throws Exception {
+        java.nio.file.Path dir = DirectoryUtil.getStorageDirectory();
+        long total = 0L;
+        for (String suffix : new String[]{"", "_web", "_thumb"}) {
+            java.nio.file.Path p = dir.resolve(baseId + suffix);
+            java.nio.file.Files.write(p, content);
+            java.nio.file.Files.setLastModifiedTime(p, java.nio.file.attribute.FileTime.fromMillis(mtimeMs));
+            total += content.length;
+        }
+        return total;
+    }
+
+    /**
+     * Reads a single scalar String from a native query (no parameters), in the {@link #readCount} pattern.
+     */
+    private String readSingle(String sql) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            Object v = em.createNativeQuery(sql).getSingleResult();
+            tx.commit();
+            return v == null ? null : v.toString();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * Reads a COUNT(*) native query taking no parameters, in the {@link #readCount} pattern.
+     */
+    private long readCount(String sql) {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            Object n = em.createNativeQuery(sql).getSingleResult();
+            tx.commit();
+            return ((Number) n).longValue();
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
+
+    /**
+     * The set of file names currently present in the storage directory (used to prove the dry-run
+     * removes nothing from disk).
+     */
+    private java.util.Set<String> listStorageFiles() throws Exception {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        java.nio.file.Path dir = DirectoryUtil.getStorageDirectory();
+        if (dir != null && java.nio.file.Files.isDirectory(dir)) {
+            try (java.nio.file.DirectoryStream<java.nio.file.Path> stream = java.nio.file.Files.newDirectoryStream(dir)) {
+                for (java.nio.file.Path p : stream) {
+                    names.add(p.getFileName().toString());
+                }
+            }
+        }
+        return names;
     }
 
     private long countSavedFilters(String filterId) {
@@ -488,7 +1460,8 @@ public class TestAppResource extends BaseJerseyTest {
         Assertions.assertEquals(0, json.getJsonArray("sessions").size());
 
         // Guest cannot delete opened sessions
-        response = target().path("/user/session").request()
+        response = target().path("/user/session")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, guestToken)
                 .delete();
         Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus());

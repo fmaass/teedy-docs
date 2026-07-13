@@ -123,7 +123,8 @@ public class TestAuditLogResource extends BaseJerseyTest {
 
         // Delete auditlog1
         String adminToken = adminToken();
-        target().path("/user/auditlog1").request()
+        target().path("/user/auditlog1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -174,10 +175,12 @@ public class TestAuditLogResource extends BaseJerseyTest {
         }
 
         // Cleanup
-        target().path("/user/audit_victim").request()
+        target().path("/user/audit_victim")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/audit_attacker").request()
+        target().path("/user/audit_attacker")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

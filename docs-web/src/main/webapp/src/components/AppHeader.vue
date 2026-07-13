@@ -113,6 +113,15 @@ async function handleLogout() {
   gap: 0.125rem;
 }
 
+/* Header icon buttons already get an intrinsic square size from PrimeVue
+   (`button.icon.only.width`), but in the narrow mobile bar the default
+   `flex-shrink: 1` let the flex row squeeze them below it, so the left icons
+   crowded/collapsed (#67). Pinning `flex-shrink: 0` makes each icon hold its
+   token width as a stable, tappable target. */
+.action-bar :deep(.p-button.p-button-icon-only) {
+  flex-shrink: 0;
+}
+
 .user-name {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);

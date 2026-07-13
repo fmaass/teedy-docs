@@ -44,6 +44,19 @@ export interface ResizablePanelOptions {
   storageKey?: string
   /** Injectable viewport width source (defaults to window.innerWidth); keeps clampWidth testable. */
   viewportWidth?: () => number
+  /**
+   * Sizing envelope override. Defaults to the tag-sidebar envelope (200–480px,
+   * 40vw cap). The right document slide-over passes a wider one (min ~360px,
+   * 90vw cap) — reusing all drag/keyboard/persist logic with a different clamp.
+   */
+  clamp?: ClampCfg
+  /**
+   * Invert the drag/keyboard direction. The default (false) suits a handle on a
+   * panel's RIGHT edge (left sidebar): dragging right widens. A RIGHT-positioned
+   * drawer's handle sits on its LEFT edge, so dragging left must widen — pass
+   * true to flip the delta and the ArrowLeft/ArrowRight keys accordingly.
+   */
+  invert?: boolean
 }
 
 export function useResizablePanel(options: ResizablePanelOptions = {}): {
@@ -54,9 +67,11 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
 } {
   const storageKey = options.storageKey ?? DEFAULT_STORAGE_KEY
   const viewport = options.viewportWidth ?? (() => (typeof window !== 'undefined' ? window.innerWidth : 0))
+  const cfg = options.clamp ?? CLAMP_CFG
+  const dir = options.invert ? -1 : 1
 
   function apply(requested: number): number {
-    return clampWidth(requested, CLAMP_CFG, viewport())
+    return clampWidth(requested, cfg, viewport())
   }
 
   function load(): number {
@@ -67,7 +82,7 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
     } catch {
       // localStorage unavailable (private mode / SSR) — use default.
     }
-    return apply(Number.isFinite(stored) ? stored : DEFAULT_WIDTH)
+    return apply(Number.isFinite(stored) ? stored : cfg.defaultWidth)
   }
 
   const width = ref(load())
@@ -90,7 +105,7 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
   let dragStartWidth = 0
 
   function onPointerMove(e: PointerEvent) {
-    setWidth(dragStartWidth + (e.clientX - dragStartX))
+    setWidth(dragStartWidth + dir * (e.clientX - dragStartX))
   }
 
   // Idempotent: safe to call for pointerup, pointercancel, and unmount alike.
@@ -123,26 +138,26 @@ export function useResizablePanel(options: ResizablePanelOptions = {}): {
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowLeft') {
-      setWidth(width.value - KEY_STEP)
+      setWidth(width.value - dir * KEY_STEP)
       persist()
       e.preventDefault()
     } else if (e.key === 'ArrowRight') {
-      setWidth(width.value + KEY_STEP)
+      setWidth(width.value + dir * KEY_STEP)
       persist()
       e.preventDefault()
     } else if (e.key === 'Home') {
-      setWidth(MIN_WIDTH)
+      setWidth(cfg.minWidth)
       persist()
       e.preventDefault()
     } else if (e.key === 'End') {
-      setWidth(MAX_WIDTH)
+      setWidth(cfg.maxWidth)
       persist()
       e.preventDefault()
     }
   }
 
   function reset() {
-    setWidth(DEFAULT_WIDTH)
+    setWidth(cfg.defaultWidth)
     persist()
   }
 

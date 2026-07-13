@@ -121,7 +121,8 @@ public class TestFavoriteResource extends BaseJerseyTest {
         Assertions.assertEquals(1, listFavorites(adminToken).getJsonArray("favorites").size());
 
         delete(adminToken, documentId);
-        target().path("/user/fav_user1").request()
+        target().path("/user/fav_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
     }
 
@@ -160,7 +161,8 @@ public class TestFavoriteResource extends BaseJerseyTest {
 
         // Cleanup.
         delete(userToken, documentId);
-        target().path("/user/fav_acluser").request()
+        target().path("/user/fav_acluser")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken).delete();
     }
 

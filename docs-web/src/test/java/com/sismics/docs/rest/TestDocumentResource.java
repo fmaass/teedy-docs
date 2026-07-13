@@ -197,13 +197,25 @@ public class TestDocumentResource extends BaseJerseyTest {
         String highlight = json.getJsonArray("documents").getJsonObject(0).getString("highlight");
         Assertions.assertTrue(highlight.contains("<strong>"));
 
-        // Check suggestions
-        json = target().path("/document/list")
-                .queryParam("search", "docu")
-                .request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
-                .get(JsonObject.class);
-        String suggestion = json.getJsonArray("suggestions").getString(0);
+        // Check suggestions. The suggestion dictionary is built from the Lucene "title" field, which
+        // is populated by the ASYNC document-indexing listener after the create request returned — so
+        // under load the "document" token may not be in the index yet when this runs, and the fuzzy
+        // suggester returns a shorter/other match. Poll the real suggestion endpoint until the index
+        // reflects the indexed titles; the assertion (top suggestion is exactly "document") is
+        // unchanged and still proven.
+        final String[] lastSuggestion = {null};
+        awaitCondition(() -> "search=docu never suggested \"document\" (last top suggestion: "
+                + lastSuggestion[0] + ")", () -> {
+            JsonObject suggestJson = target().path("/document/list")
+                    .queryParam("search", "docu")
+                    .request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, document1Token)
+                    .get(JsonObject.class);
+            JsonArray suggestions = suggestJson.getJsonArray("suggestions");
+            lastSuggestion[0] = suggestions.isEmpty() ? null : suggestions.getString(0);
+            return "document".equals(lastSuggestion[0]);
+        });
+        String suggestion = lastSuggestion[0];
         Assertions.assertEquals("document", suggestion);
 
         // Search documents
@@ -2255,7 +2267,8 @@ public class TestDocumentResource extends BaseJerseyTest {
 
         // Cleanup
         String adminToken = adminToken();
-        target().path("/user/emptycreatedate").request()
+        target().path("/user/emptycreatedate")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

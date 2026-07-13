@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // Dark-mode toggle via the REAL header control (AppHeader "Dark mode" button).
 // Asserts a COMPUTED style change, not just a class attribute: teedy-theme.css maps

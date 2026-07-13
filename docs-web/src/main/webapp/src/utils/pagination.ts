@@ -10,6 +10,28 @@
 // non-loading refetch returns zero items while totalCount > 0 and offset > 0, and
 // only move the offset when it actually changes (so mid-page deletes are a no-op).
 
+// User-selectable page sizes for the document list (#52). The default matches the
+// historical fixed PAGE_SIZE (20) so existing behaviour is preserved when no choice
+// has been persisted.
+export const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+export const DEFAULT_PAGE_SIZE = 20
+
+/**
+ * Clamp an arbitrary (possibly persisted or user-supplied) page size to the nearest
+ * allowed option. A value below the smallest option maps to the smallest; above the
+ * largest maps to the largest; an exact allowed value passes through; anything
+ * in-between (or non-finite) resolves to the default. Pure function.
+ *
+ * @param value  The candidate page size (may be NaN, negative, or out of range).
+ */
+export function clampPageSize(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_PAGE_SIZE
+  const options = PAGE_SIZE_OPTIONS
+  if (value <= options[0]) return options[0]
+  if (value >= options[options.length - 1]) return options[options.length - 1]
+  return (options as readonly number[]).includes(value) ? value : DEFAULT_PAGE_SIZE
+}
+
 /**
  * Last valid page offset for a given total count and page size.
  *

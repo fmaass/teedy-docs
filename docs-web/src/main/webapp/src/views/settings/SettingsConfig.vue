@@ -3,7 +3,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import api from '../../api/client'
-import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, saveFooterLinks, type SmtpConfig, type SmtpEnvManagedField, type FooterLink } from '../../api/app'
+import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, cleanStorageDryRun, saveFooterLinks, type SmtpConfig, type SmtpEnvManagedField, type FooterLink } from '../../api/app'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { formatFileSize } from '../../utils/formatters'
 import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
@@ -185,16 +185,43 @@ const { mutate: saveFooter, isPending: savingFooter } = useMutation({
 const reindexing = ref(false)
 const cleaningStorage = ref(false)
 
-function handleCleanStorage() {
+async function handleCleanStorage() {
+  // First fetch a side-effect-free dry-run preview so the confirm can state exactly how many
+  // files would be deleted and how much space reclaimed BEFORE anything is mutated.
+  cleaningStorage.value = true
+  let preview
+  try {
+    preview = await cleanStorageDryRun()
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.config.clean_storage_preview_failed'), life: 3000 })
+    cleaningStorage.value = false
+    return
+  }
+  cleaningStorage.value = false
+
+  const summary = t('ui.config.clean_storage_summary', {
+    count: preview.total,
+    size: formatFileSize(preview.reclaimed_bytes),
+  })
+
   confirmDanger({
-    message: t('ui.config.clean_storage_confirm'),
+    message: preview.total === 0 ? t('ui.config.clean_storage_nothing') : summary,
     header: t('ui.config.clean_storage_header'),
     icon: 'pi pi-exclamation-triangle',
     accept: async () => {
       cleaningStorage.value = true
       try {
-        await cleanStorage()
-        toast.add({ severity: 'success', summary: t('ui.config.clean_storage_done'), life: 3000 })
+        const result = await cleanStorage()
+        toast.add({
+          severity: 'success',
+          summary: t('ui.config.clean_storage_done'),
+          detail: t('ui.config.clean_storage_summary', {
+            count: result.file_count,
+            size: formatFileSize(result.bytes),
+          }),
+          life: 5000,
+        })
+        invalidateAppInfo()
       } catch {
         toast.add({ severity: 'error', summary: t('ui.config.clean_storage_failed'), life: 3000 })
       } finally {
@@ -331,8 +358,8 @@ function handleReindex() {
       </div>
     </template></Card>
 
-    <Card class="mb-4" style="max-width: 520px"><template #content>
-      <h3>{{ t('ui.config.maintenance') }}</h3>
+    <Card class="mb-4 danger-zone" style="max-width: 520px"><template #content>
+      <h3 class="danger-zone-title"><i class="pi pi-exclamation-triangle" aria-hidden="true" />{{ t('ui.config.maintenance') }}</h3>
       <p class="section-hint">
         {{ t('ui.config.maintenance_hint') }}
       </p>
@@ -408,6 +435,18 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
 }
 .clean-storage-hint {
   margin: 0.75rem 0 0;
+}
+/* Danger zone: the destructive maintenance actions (reindex, clean storage) are
+   visually fenced with a red-tinted border + warning-coloured heading so an admin
+   registers the block as irreversible before acting. */
+.danger-zone {
+  border: 1px solid var(--p-red-400, #f87171);
+}
+.danger-zone-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--p-red-500, #ef4444);
 }
 .footer-link-row {
   display: flex;

@@ -1,7 +1,40 @@
 import { describe, it, expect } from 'vitest'
-import { clampOffset, lastPageOffset } from './pagination'
+import {
+  clampOffset,
+  lastPageOffset,
+  clampPageSize,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+} from './pagination'
 
 const PAGE_SIZE = 20
+
+describe('clampPageSize (#52)', () => {
+  it('passes through each allowed option unchanged', () => {
+    for (const opt of PAGE_SIZE_OPTIONS) {
+      expect(clampPageSize(opt)).toBe(opt)
+    }
+  })
+
+  it('clamps a below-range value up to the smallest option', () => {
+    expect(clampPageSize(1)).toBe(PAGE_SIZE_OPTIONS[0])
+    expect(clampPageSize(0)).toBe(PAGE_SIZE_OPTIONS[0])
+    expect(clampPageSize(-5)).toBe(PAGE_SIZE_OPTIONS[0])
+  })
+
+  it('clamps an above-range value down to the largest option', () => {
+    expect(clampPageSize(1000)).toBe(PAGE_SIZE_OPTIONS[PAGE_SIZE_OPTIONS.length - 1])
+  })
+
+  it('resolves an in-range-but-not-allowed value to the default', () => {
+    expect(clampPageSize(37)).toBe(DEFAULT_PAGE_SIZE)
+  })
+
+  it('resolves a non-finite value to the default', () => {
+    expect(clampPageSize(NaN)).toBe(DEFAULT_PAGE_SIZE)
+    expect(clampPageSize(Number('nope'))).toBe(DEFAULT_PAGE_SIZE)
+  })
+})
 
 describe('lastPageOffset', () => {
   it('returns 0 for an empty set', () => {
@@ -58,7 +91,10 @@ describe('clampOffset', () => {
     expect(clampOffset(0, 20, 100, PAGE_SIZE)).toBe(0)
   })
 
-  it('deleted last item overall while on page 2: total 0, clamps to 0', () => {
+  it('deleted last item overall while on page 2: total 0 → offset unchanged (empty-state owns it, no clamp)', () => {
+    // When totalCount is 0 there is nothing to page to; clampOffset leaves the
+    // offset as-is and the view renders its empty state rather than re-querying a
+    // clamped page. So the offset stays 20 (not clamped to 0).
     expect(clampOffset(20, 0, 0, PAGE_SIZE)).toBe(20)
   })
 })

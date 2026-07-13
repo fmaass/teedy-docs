@@ -23,6 +23,7 @@ defineProps<{
 const emit = defineEmits<{
   cardClick: [doc: DocumentListItem]
   cardDblclick: [doc: DocumentListItem]
+  cardContextMenu: [event: Event, doc: DocumentListItem]
 }>()
 
 // Track thumbs that failed to load so the card falls back to a file icon rather
@@ -58,6 +59,7 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
       v-for="doc in documents"
       :key="doc.id"
       class="doc-card"
+      @contextmenu="(e: MouseEvent) => emit('cardContextMenu', e, doc)"
     >
       <!-- Open/navigate action: covers the thumbnail + title + date region ONLY.
            The star and tag controls below are SIBLINGS of this link, never

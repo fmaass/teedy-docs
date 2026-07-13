@@ -97,5 +97,21 @@ public enum ConfigType {
     OIDC_JWKS_URI,
     OIDC_USERINFO_ENDPOINT,
     OIDC_USERNAME_CLAIM,
-    OIDC_EMAIL_CLAIM
+    OIDC_EMAIL_CLAIM,
+
+    /**
+     * When true, an OIDC user is provisioned with the sanitized {@code preferred_username}
+     * claim VERBATIM (no deterministic hash suffix), using the full username-length budget.
+     * Default OFF preserves the safe hash-suffix behaviour. See {@code OidcResource} and
+     * ADR-0018 (extends ADR-0015).
+     */
+    OIDC_USERNAME_VERBATIM,
+
+    /**
+     * Sentinel row used ONLY as a mutual-exclusion lock for {@code clean_storage} (#74). Its value is
+     * never read; the clean_storage endpoint acquires a {@code PESSIMISTIC_WRITE} row lock on it so two
+     * concurrent runs are serialized (a second run blocks until the first commits), preventing
+     * double-count / double-credit of the same file. Seeded by {@code dbupdate-052}.
+     */
+    CLEAN_STORAGE_LOCK
 }

@@ -233,7 +233,8 @@ public class TestTagResource extends BaseJerseyTest {
 
         // Deletes user tag1
         String adminToken = adminToken();
-        target().path("/user/tag1").request()
+        target().path("/user/tag1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -287,10 +288,12 @@ public class TestTagResource extends BaseJerseyTest {
         Assertions.assertEquals("#123456", json.getString("color"));
 
         // Cleanup
-        target().path("/user/tag_owner").request()
+        target().path("/user/tag_owner")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
-        target().path("/user/tag_stranger").request()
+        target().path("/user/tag_stranger")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

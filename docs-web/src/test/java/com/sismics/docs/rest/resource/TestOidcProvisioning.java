@@ -301,7 +301,102 @@ public class TestOidcProvisioning {
                 "case-variant collision must be detected by the case-insensitive precheck");
     }
 
+    // --- #59 verbatim provisioning (opt-in) + collision safety -----------------------------
+
+    /**
+     * Flag OFF (default): provisioning derives the hash-suffix username, byte-identical to today.
+     * This is the characterization that the opt-in must not disturb.
+     */
+    @Test
+    public void flagOffProvisionsHashSuffixUsername() throws Exception {
+        String subject = "sub-" + UUID.randomUUID();
+        User user = invokeProvisionMode("mallory", "mallory@example.com", subject, ISSUER, false);
+        track(user);
+        Assertions.assertNotNull(user);
+        Assertions.assertTrue(user.getUsername().matches("^mallory_[0-9a-f]{12}$"),
+                "flag OFF must keep the deterministic hash-suffix username: " + user.getUsername());
+    }
+
+    /**
+     * Flag ON: provisioning uses the sanitized preferred_username VERBATIM (no hash suffix) when
+     * the name is free.
+     */
+    @Test
+    public void flagOnProvisionsVerbatimUsername() throws Exception {
+        String verbatim = "verbatimuser_" + UUID.randomUUID().toString().substring(0, 8);
+        String subject = "sub-" + UUID.randomUUID();
+        User user = invokeProvisionMode(verbatim, verbatim + "@example.com", subject, ISSUER, true);
+        track(user);
+        Assertions.assertNotNull(user);
+        Assertions.assertEquals(verbatim, user.getUsername(),
+                "flag ON must provision the sanitized preferred_username verbatim (no hash suffix)");
+    }
+
+    /**
+     * The load-bearing safety test: with the flag ON, TWO distinct subjects whose claims force the
+     * SAME verbatim username end up with TWO DISTINCT usernames — the second falls back to the hash
+     * disambiguator on the active-unique-constraint violation. No duplicate active username, no 500.
+     */
+    @Test
+    public void verbatimCollisionBetweenTwoSubjectsYieldsDistinctUsernames() throws Exception {
+        String shared = "clash_" + UUID.randomUUID().toString().substring(0, 8);
+        String subjectA = "sub-A-" + UUID.randomUUID();
+        String subjectB = "sub-B-" + UUID.randomUUID();
+
+        User a = invokeProvisionMode(shared, shared + "-a@example.com", subjectA, ISSUER, true);
+        track(a);
+        Assertions.assertNotNull(a, "first verbatim provisioning must succeed");
+        Assertions.assertEquals(shared, a.getUsername(), "first subject takes the verbatim name");
+
+        User b = invokeProvisionMode(shared, shared + "-b@example.com", subjectB, ISSUER, true);
+        track(b);
+        Assertions.assertNotNull(b, "second verbatim provisioning must NOT fail (no 500) on the collision");
+        Assertions.assertNotEquals(a.getUsername(), b.getUsername(),
+                "a forced verbatim collision must yield two DISTINCT usernames, not a duplicate");
+        Assertions.assertTrue(b.getUsername().startsWith(shared.substring(0, Math.min(shared.length(), 8)))
+                        || b.getUsername().matches("^" + java.util.regex.Pattern.quote(shared) + "_[0-9a-f]{12,}$")
+                        || b.getUsername().contains("_"),
+                "the disambiguated name carries the hash suffix: " + b.getUsername());
+        // Both persisted, both distinct identities, exactly one row each.
+        Assertions.assertEquals(1, countOidcUsers(ISSUER, subjectA));
+        Assertions.assertEquals(1, countOidcUsers(ISSUER, subjectB));
+    }
+
+    /**
+     * The username-conflict classifier must recognize BOTH the app-precheck message and the
+     * DB-level active unique index name (the race backstop). A distinct message is not a conflict.
+     */
+    @Test
+    public void usernameConflictClassifierDetectsAppPrecheckAndDbIndex() throws Exception {
+        Assertions.assertTrue(invokeIsUsernameConflict(new Exception("AlreadyExistingUsername")));
+        Assertions.assertTrue(invokeIsUsernameConflict(
+                new RuntimeException(new Exception("Unique index violation: PUBLIC.IDX_USER_USERNAME_ACTIVE"))));
+        Assertions.assertTrue(invokeIsUsernameConflict(
+                new Exception("duplicate key value violates unique constraint \"idx_user_username_active\"")));
+        Assertions.assertFalse(invokeIsUsernameConflict(new Exception("some unrelated failure")),
+                "an unrelated failure must NOT be classified as a username conflict");
+    }
+
     // --- helpers ---------------------------------------------------------------------------
+
+    private static boolean invokeIsUsernameConflict(Throwable t) throws Exception {
+        Method m = OidcResource.class.getDeclaredMethod("isUsernameConflict", Throwable.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(null, t);
+    }
+
+    private User invokeProvisionMode(String usernameClaim, String email, String subject, String issuer,
+                                     boolean verbatim) throws Exception {
+        OidcResource resource = new OidcResource();
+        Method m = OidcResource.class.getDeclaredMethod("provisionOrRecover",
+                UserDao.class, String.class, String.class, String.class, String.class, boolean.class);
+        m.setAccessible(true);
+        try {
+            return (User) m.invoke(resource, new UserDao(), usernameClaim, email, subject, issuer, verbatim);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw (e.getCause() instanceof Exception) ? (Exception) e.getCause() : e;
+        }
+    }
 
     private static String invokeDerive(String stem, String issuer, String subject, int hashLen) throws Exception {
         Method m = OidcResource.class.getDeclaredMethod(

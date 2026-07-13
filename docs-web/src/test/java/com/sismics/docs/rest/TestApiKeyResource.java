@@ -117,7 +117,8 @@ public class TestApiKeyResource extends BaseJerseyTest {
         target().path("/apikey/" + adminKeyId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
-        target().path("/user/apikey_user1").request()
+        target().path("/user/apikey_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

@@ -138,8 +138,15 @@ const router = createRouter({
         {
           path: 'settings',
           component: () => import('../views/settings/SettingsLayout.vue'),
-          redirect: { name: 'settings-account' },
           children: [
+            // #64: /settings is a landing hub (grouped, annotated list) for EVERYONE
+            // — not an admin-only redirect. No requiresAdmin; the component gates the
+            // admin groups internally on auth.isAdmin.
+            {
+              path: '',
+              name: 'settings-hub',
+              component: () => import('../views/settings/SettingsHub.vue'),
+            },
             {
               path: 'account',
               name: 'settings-account',

@@ -70,12 +70,29 @@ function flatten(obj, prefix = '', out = {}) {
   return out
 }
 
-function loadKeys(locale) {
+function loadFlat(locale) {
   const raw = JSON.parse(readFileSync(join(localeDir, `${locale}.json`), 'utf8'))
-  return new Set(Object.keys(flatten(raw)))
+  return flatten(raw)
 }
 
-const referenceKeys = loadKeys(REFERENCE)
+function loadKeys(locale) {
+  return new Set(Object.keys(loadFlat(locale)))
+}
+
+// Placeholder MULTISET of a message: {name} -> occurrence count. Catches the
+// duplicate-interpolation class (#19: de had "{count} {count} gefunden" against
+// en's single "{count}") that a key-set comparison is blind to.
+function placeholderCounts(value) {
+  const counts = new Map()
+  if (typeof value !== 'string') return counts
+  const re = /\{(\w+)\}/g
+  let m
+  while ((m = re.exec(value))) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1)
+  return counts
+}
+
+const referenceFlat = loadFlat(REFERENCE)
+const referenceKeys = new Set(Object.keys(referenceFlat))
 const locales = readdirSync(localeDir)
   .filter((f) => f.endsWith('.json'))
   .map((f) => f.replace(/\.json$/, ''))
@@ -95,10 +112,35 @@ for (const strict of STRICT_LOCALES) {
 }
 
 for (const locale of locales) {
-  const keys = loadKeys(locale)
+  const localeFlat = loadFlat(locale)
+  const keys = new Set(Object.keys(localeFlat))
   const stale = [...keys].filter((k) => !referenceKeys.has(k)).sort()
   const missing = [...referenceKeys].filter((k) => !keys.has(k)).sort()
   const strict = STRICT_LOCALES.includes(locale)
+
+  // Placeholder-parity: for every key the locale shares with the reference, the
+  // {name} interpolation multiset must match — a missing/extra name (translator
+  // dropped or typo'd a placeholder) or a differing occurrence count (the #19
+  // duplicate) is a real UI defect. Plural messages (containing the vue-i18n `|`
+  // branch separator) legitimately vary placeholder counts across languages with
+  // different plural rules, so their COUNT is exempted (names still checked).
+  const placeholderIssues = []
+  for (const k of keys) {
+    if (!referenceKeys.has(k)) continue
+    const refVal = referenceFlat[k]
+    const locVal = localeFlat[k]
+    if (typeof refVal !== 'string' || typeof locVal !== 'string') continue
+    const refP = placeholderCounts(refVal)
+    const locP = placeholderCounts(locVal)
+    const isPlural = refVal.includes('|') || locVal.includes('|')
+    for (const name of new Set([...refP.keys(), ...locP.keys()])) {
+      const rc = refP.get(name) ?? 0
+      const lc = locP.get(name) ?? 0
+      if (rc === 0 && lc > 0) placeholderIssues.push(`${k}: extra {${name}} not in reference`)
+      else if (rc > 0 && lc === 0) placeholderIssues.push(`${k}: missing {${name}} (present in reference)`)
+      else if (rc !== lc && !isPlural) placeholderIssues.push(`${k}: {${name}} appears ${lc}× vs ${rc}× in reference`)
+    }
+  }
 
   if (stale.length) {
     hasError = true
@@ -114,7 +156,17 @@ for (const locale of locales) {
       console.warn(`  ${locale}: ${missing.length} missing key(s) — English fallback (best-effort locale)`)
     }
   }
-  if (!stale.length && !missing.length) console.log(`✓ ${locale}: complete`)
+  if (placeholderIssues.length) {
+    if (strict) {
+      hasError = true
+      console.error(`✗ ${locale}: ${placeholderIssues.length} placeholder mismatch(es):`)
+      for (const issue of placeholderIssues) console.error(`    ${issue}`)
+    } else {
+      console.warn(`  ${locale}: ${placeholderIssues.length} placeholder mismatch(es) (best-effort locale):`)
+      for (const issue of placeholderIssues) console.warn(`    ${issue}`)
+    }
+  }
+  if (!stale.length && !missing.length && !placeholderIssues.length) console.log(`✓ ${locale}: complete`)
 }
 
 // ── Unused-key report ────────────────────────────────────────────────────────

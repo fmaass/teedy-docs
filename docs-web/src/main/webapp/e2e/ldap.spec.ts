@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // The admin LDAP settings screen (/settings/ldap): the enabled toggle reveals the
 // fields; client-side validation blocks save (filter must contain USERNAME;

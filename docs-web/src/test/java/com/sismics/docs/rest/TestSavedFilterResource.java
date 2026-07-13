@@ -159,7 +159,8 @@ public class TestSavedFilterResource extends BaseJerseyTest {
         target().path("/savedfilter/" + adminFilterId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
-        target().path("/user/sfl_user1").request()
+        target().path("/user/sfl_user1")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

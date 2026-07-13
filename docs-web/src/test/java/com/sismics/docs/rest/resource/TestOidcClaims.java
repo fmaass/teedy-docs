@@ -79,6 +79,51 @@ public class TestOidcClaims {
         Assertions.assertTrue(u.matches("^[a-zA-Z0-9_]{3,50}$"), u);
     }
 
+    // --- #59 verbatim username derivation (opt-in) -----------------------------------------
+
+    /**
+     * CHARACTERIZATION of the DEFAULT (hash-suffix) derivation: for a fixed (stem, issuer,
+     * subject) the derived username is byte-identical and carries the deterministic hash suffix.
+     * This pins the flag-OFF contract that must remain unchanged (Codex B4).
+     */
+    @Test
+    public void hashSuffixDerivationIsByteIdenticalForIdentity() throws Exception {
+        String u1 = invokeDerive("alice", "https://iss.example", "sub-verb-1", 12);
+        String u2 = invokeDerive("alice", "https://iss.example", "sub-verb-1", 12);
+        Assertions.assertEquals(u1, u2, "hash-suffix derivation must be deterministic");
+        Assertions.assertTrue(u1.matches("^alice_[0-9a-f]{12}$"),
+                "flag-OFF username must be the stem plus a 12-hex hash suffix: " + u1);
+    }
+
+    /**
+     * Flag-ON: the sanitized preferred_username is used VERBATIM (no hash suffix) at the FULL
+     * username-length budget — no {@code _<hash>} tail, and a long claim keeps far more of the
+     * name than the hash-reserved truncation would (37-char cap vs 50-char cap).
+     */
+    @Test
+    public void verbatimSanitizesAtFullLengthWithoutHashSuffix() throws Exception {
+        Assertions.assertEquals("alice", invokeSanitizeVerbatim("alice"));
+        Assertions.assertEquals("alice_example_com", invokeSanitizeVerbatim("alice@example.com"));
+        // A 60-char claim: verbatim keeps 50 (full budget); the hash path would cap the stem at 37.
+        String longClaim = "a".repeat(60);
+        String verbatim = invokeSanitizeVerbatim(longClaim);
+        Assertions.assertEquals(50, verbatim.length(), "verbatim uses the FULL 50-char budget");
+        Assertions.assertFalse(verbatim.contains("_"), "verbatim carries no hash-suffix separator: " + verbatim);
+        Assertions.assertTrue(verbatim.matches("^[a-zA-Z0-9_]{3,50}$"), verbatim);
+    }
+
+    /**
+     * Verbatim sanitization returns null when nothing usable survives (all-symbol claim, or a
+     * sanitized result shorter than the 3-char username minimum), so provisioning falls back to
+     * the hash disambiguator rather than minting an invalid username.
+     */
+    @Test
+    public void verbatimReturnsNullWhenNothingUsableSurvives() throws Exception {
+        Assertions.assertNull(invokeSanitizeVerbatim("@@@"));
+        Assertions.assertNull(invokeSanitizeVerbatim(null));
+        Assertions.assertNull(invokeSanitizeVerbatim("ab"), "a <3-char stem cannot be a verbatim username");
+    }
+
     // --- Claim name configuration ---------------------------------------------------------
 
     @Test
@@ -259,6 +304,12 @@ public class TestOidcClaims {
                 "deriveUsername", String.class, String.class, String.class, int.class);
         m.setAccessible(true);
         return (String) m.invoke(null, stem, issuer, subject, hashLen);
+    }
+
+    private static String invokeSanitizeVerbatim(String raw) throws Exception {
+        Method m = OidcResource.class.getDeclaredMethod("sanitizeUsernameVerbatim", String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, raw);
     }
 
     /**

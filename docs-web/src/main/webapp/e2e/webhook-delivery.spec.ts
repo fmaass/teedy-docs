@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
 

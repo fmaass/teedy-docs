@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-import { unique, confirmDanger } from './helpers'
+import { test, expect, type Page } from './fixtures'
+import { unique, confirmDanger, toggleTagFilter } from './helpers'
 
 // #42: per-user saved filters. A user builds a filter (an included tag + free-text
 // search), SAVES it by name, CLEARS the filter, RE-APPLIES it from the search-bar
@@ -64,12 +64,11 @@ test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42)', 
   await expect(matchRow).toBeVisible()
   await expect(otherRow).toBeVisible()
 
-  // Build the filter: include the tag from the left panel + type the search term.
-  const panel = page.locator('.left-panel')
-  const tagNode = panel.getByRole('button', { name: new RegExp(tag) })
-  await expect(tagNode).toBeVisible()
-  await tagNode.click()
-  await expect(tagNode).toHaveAttribute('aria-pressed', 'true')
+  // Build the filter: include the tag from the tag tree (desktop side panel OR the
+  // mobile Drawer — toggleTagFilter opens the Drawer on mobile) + type the search
+  // term. On mobile, selecting the tag closes the Drawer, so re-derive the panel to
+  // read back aria-pressed.
+  await toggleTagFilter(page, new RegExp(tag))
   await expect(page).toHaveURL(/[?&]tags=/)
 
   await page.getByPlaceholder('Search', { exact: true }).fill(term)

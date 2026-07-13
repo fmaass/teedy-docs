@@ -8,6 +8,8 @@ import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.RequestContextFilter;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.glassfish.grizzly.http.server.HttpServer;
+import org.glassfish.grizzly.http.server.NetworkListener;
+import org.glassfish.grizzly.http.server.StaticHttpHandler;
 import org.glassfish.grizzly.servlet.ServletRegistration;
 import org.glassfish.grizzly.servlet.WebappContext;
 import org.glassfish.jersey.servlet.ServletContainer;
@@ -17,6 +19,7 @@ import org.glassfish.jersey.test.external.ExternalTestContainerFactory;
 import org.glassfish.jersey.test.spi.TestContainerException;
 import org.glassfish.jersey.test.spi.TestContainerFactory;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 
 import javax.mail.MessagingException;
@@ -25,8 +28,6 @@ import jakarta.ws.rs.core.Application;
 import jakarta.ws.rs.core.UriBuilder;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -81,10 +82,13 @@ public abstract class BaseJerseyTest extends JerseyTest {
     private static final long EMAIL_DELIVERY_TIMEOUT_MS = 5000;
 
     /**
-     * HTTP port for the Grizzly server, assigned by the OS (ephemeral) so parallel
-     * test suites on the same host do not collide on a fixed port.
+     * HTTP port the Grizzly server is bound to. Assigned in {@link #setUp()} by reading the
+     * real bound port back from the listener after {@code start()} — the server binds an
+     * OS-assigned ephemeral port (port 0) and never reserves-then-releases one up front, so
+     * there is no window in which another process/parallel suite can steal the port between
+     * allocation and bind. Mirrors the GreenMail SMTP handling below.
      */
-    private final int httpPort = findFreePort();
+    private int httpPort;
 
     /**
      * SMTP port the GreenMail server is bound to. Assigned in {@link #setUp()} by reading the
@@ -92,20 +96,6 @@ public abstract class BaseJerseyTest extends JerseyTest {
      * reserve-then-release window in which another process can steal the port.
      */
     private int smtpPort;
-
-    /**
-     * Find a free TCP port by binding to port 0 and letting the OS assign one.
-     *
-     * @return An available port number
-     */
-    private static int findFreePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            socket.setReuseAddress(true);
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to allocate a free port for the test server", e);
-        }
-    }
 
     /**
      * Returns the SMTP port the embedded GreenMail mail server is listening on. Mail-sending tests
@@ -147,14 +137,27 @@ public abstract class BaseJerseyTest extends JerseyTest {
     @Override
     @BeforeEach
     public void setUp() throws Exception {
-        super.setUp();
         System.setProperty("docs.header_authentication", "true");
         // Trust the Grizzly loopback client so the header-auth integration test can authenticate.
         System.setProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY, "127.0.0.1,::1,0:0:0:0:0:0:0:1");
 
-        clientUtil = new ClientUtil(target());
-
-        httpServer = HttpServer.createSimpleServer(getClass().getResource("/").getFile(), "localhost", httpPort);
+        // Bind the Grizzly server FIRST, on an OS-assigned ephemeral port (port 0), then read the
+        // real bound port back from its listener. There is no reserve-then-release window: the port
+        // is bound once and never handed out. The server MUST be started before super.setUp() runs,
+        // because super.setUp() creates the external Jersey test container from getBaseUri() (which
+        // reads httpPort) and captures that URI into the client — so httpPort has to hold the real
+        // bound port by then.
+        //
+        // Built by hand rather than via HttpServer.createSimpleServer(docroot, host, port): that
+        // overload wraps the int port in a PortRange, and PortRange rejects 0 ("Invalid range").
+        // A NetworkListener constructed with int port 0 binds an OS-assigned port directly and
+        // reports the real bound port after start(). This replicates createSimpleServer's setup
+        // (a static handler for the docroot plus the "grizzly" listener).
+        httpServer = new HttpServer();
+        httpServer.getServerConfiguration().addHttpHandler(
+                new StaticHttpHandler(getClass().getResource("/").getFile()), "/");
+        NetworkListener listener = new NetworkListener("grizzly", "localhost", 0);
+        httpServer.addListener(listener);
         WebappContext context = new WebappContext("GrizzlyContext", "/docs");
         context.addListener("com.sismics.util.listener.IIOProviderContextListener");
         context.addFilter("requestContextFilter", RequestContextFilter.class)
@@ -174,6 +177,12 @@ public abstract class BaseJerseyTest extends JerseyTest {
         reg.setAsyncSupported(true);
         context.deploy(httpServer);
         httpServer.start();
+        // Read the actual bound port back (Grizzly stores it on the listener after start), so
+        // getBaseUri()/target() below resolve to the port the server is truly listening on.
+        httpPort = listener.getPort();
+
+        super.setUp();
+        clientUtil = new ClientUtil(target());
 
         consumedEmailIndices.clear();
         greenMail = new GreenMail(ServerSetup.SMTP.dynamicPort());
@@ -203,6 +212,76 @@ public abstract class BaseJerseyTest extends JerseyTest {
             }
         }
         return null;
+    }
+
+    /**
+     * Default upper bound for {@link #awaitCondition}. Generous so a slow CI host clears the
+     * async-work window, yet the poll returns as soon as the condition holds, so a healthy run
+     * pays only a few milliseconds.
+     */
+    private static final long AWAIT_TIMEOUT_MS = 10_000;
+
+    /**
+     * Poll interval for {@link #awaitCondition}.
+     */
+    private static final long AWAIT_POLL_INTERVAL_MS = 100;
+
+    /**
+     * A condition evaluated by {@link #awaitCondition} that is allowed to throw — the REST reads it
+     * polls (a GET decoded into JSON or an image) declare checked exceptions.
+     */
+    @FunctionalInterface
+    protected interface ThrowingBooleanSupplier {
+        boolean getAsBoolean() throws Exception;
+    }
+
+    /**
+     * Bounded poll-until-ready: evaluate {@code condition} every {@link #AWAIT_POLL_INTERVAL_MS}
+     * until it holds, returning as soon as it does, or fail with {@code message} once
+     * {@link #AWAIT_TIMEOUT_MS} elapses. This replaces fixed sleeps around asynchronous work
+     * (raster (re)generation, Lucene indexing) that completes on a background thread after the
+     * triggering request returns: the assertion the caller cares about is preserved, but it is only
+     * evaluated once the observable ready-state the async work produces is in place — so a fast host
+     * proceeds immediately and a slow host waits just long enough, instead of racing a fixed delay.
+     *
+     * <p>An exception thrown by {@code condition} is treated as "not ready yet" and retried, so a
+     * transient error during the async window (e.g. a 503 while a raster is mid-swap) does not fail
+     * the test spuriously; the last exception is attached to the failure if the deadline passes.
+     *
+     * @param message   Failure message if the condition never holds within the deadline
+     * @param condition The ready-state predicate (may throw; a throw is retried, not fatal)
+     */
+    protected static void awaitCondition(String message, ThrowingBooleanSupplier condition) throws InterruptedException {
+        awaitCondition(() -> message, condition);
+    }
+
+    /**
+     * As {@link #awaitCondition(String, ThrowingBooleanSupplier)}, but the failure message is supplied
+     * lazily so it can report the LAST observed state (e.g. the top suggestion actually returned) —
+     * evaluated only if the deadline passes.
+     *
+     * @param message   Supplies the failure message, evaluated only on timeout
+     * @param condition The ready-state predicate (may throw; a throw is retried, not fatal)
+     */
+    protected static void awaitCondition(java.util.function.Supplier<String> message,
+                                         ThrowingBooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + AWAIT_TIMEOUT_MS * 1_000_000L;
+        Exception lastException = null;
+        while (true) {
+            try {
+                if (condition.getAsBoolean()) {
+                    return;
+                }
+                lastException = null;
+            } catch (Exception e) {
+                lastException = e;
+            }
+            if (System.nanoTime() >= deadline) {
+                Assertions.fail(message.get() + " (waited " + AWAIT_TIMEOUT_MS + "ms)", lastException);
+                return;
+            }
+            Thread.sleep(AWAIT_POLL_INTERVAL_MS);
+        }
     }
 
     @Override

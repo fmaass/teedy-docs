@@ -16,6 +16,33 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.6.0] - 2026-07-13
+
+Three database migrations this release: db.version moves from 49 to 52. `dbupdate-050` adds a case-insensitive unique index on active usernames, so verbatim OIDC provisioning relies on a database-level constraint instead of a race-prone application precheck (it aborts with a clear failure if duplicate active usernames already exist); `dbupdate-051` adds the storage-cleanup run-protocol table; `dbupdate-052` adds a single-run lock sentinel for storage cleanup. All portable across PostgreSQL 17 and H2 2.3.232.
+
+### Added
+- Reassign a deleted user's documents to a chosen user instead of trashing them: deleting a user can hand their documents to another account, and the files stay readable to the new owner without any re-encryption (#55).
+- A storage-cleanup dry-run: admins preview exactly what would be deleted and how much space would be reclaimed before running it, every run is recorded, and genuine on-disk orphans (files with no database row, safely older than a day) are reclaimed as well (#60, #72).
+- Optional verbatim OIDC usernames: an admin can opt in to using the OIDC `preferred_username` claim verbatim as the account name (#59). See ADR-0018.
+- Custom application title and favicon per instance, so each deployment can carry its own branding (#57).
+- A settings landing page with a grouped settings navigation, so settings open on an overview instead of jumping straight into the account page (#64, #61).
+- A configurable number of documents shown per page, plus a right-click menu to edit a document's tags directly from the gallery view (#52, #50).
+- The running application version is shown at the bottom of the settings navigation (#62).
+
+### Changed
+- Document search now matches partial words and tolerates small typos, so a partly-correct term still finds documents (#53).
+- The application now builds and runs on Java 25 (LTS) (#56).
+- Faster initial load: the frontend is code-split so the theme presets and the PDF viewer load on demand, cutting the initial bundle by roughly 70% (#77).
+- The tag tree now shows a rolled-up document count that includes documents on nested tags (#66).
+- Expanded automated testing: a full mobile-viewport end-to-end suite, English/German visual-regression checks, a real-browser smoke suite in CI, and a nightly regression monitor.
+
+### Fixed
+- Storage cleanup now completes reliably: it clears every restricting foreign-key reference into a soft-deleted document or user (a still-referenced file, comment, tag link, route step, or auth token) before deleting, so the purge no longer rolls back wholesale; it deletes files only after the database change is committed, so a concurrent upload or restore cannot lose its bytes; it reclaims the storage quota held by the purged files; and it serializes concurrent runs (#54, #69, #74).
+- Deletion side-effect events (webhooks, search de-indexing) no longer fire when the request that triggered them rolls back (#63).
+- The document count in the search bar no longer appears twice under German and several other locales, and a parity check now guards against duplicated translation placeholders (#19, #75).
+- The rich-text editor no longer shows doubled list markers, and the right-click tag menu no longer gets cut off — it is now a compact popover with a search field and the most-used tags (#70, #71).
+- Assorted mobile and slide-over layout glitches: the header action icons and the slide-over title no longer overlap on narrow screens (#67, #68).
+
 ## [3.5.2] - 2026-07-12
 
 One database migration this release: db.version moves from 48 to 49 (`dbupdate-049` adds `FIL_ROTATION_N` to store per-file rotation).
@@ -216,7 +243,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...v3.6.0
 [3.5.2]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...v3.5.2
 [3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
 [3.4.1]: https://github.com/fmaass/teedy-docs/releases/tag/v3.4.1

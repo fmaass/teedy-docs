@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { unique, confirmDanger } from './helpers'
+import { test, expect } from './fixtures'
+import { unique, confirmDanger, toggleTagFilter, expectTagNodeState, openNav } from './helpers'
 
 // Tag management (create/edit/delete on the /tag page) and the left-panel tag
 // filter — including the tri-state include/exclude toggle and the URL round-trip
@@ -90,20 +90,20 @@ test.describe('tag filter panel', () => {
     await expect(page).toHaveURL(/#\/document\/view\//)
 
     await page.goto('/#/document')
-    const panel = page.locator('.left-panel')
-    const incNode = panel.getByRole('button', { name: new RegExp(includeTag) })
-    const excNode = panel.getByRole('button', { name: new RegExp(excludeTag) })
-    await expect(incNode).toBeVisible()
-    await expect(excNode).toBeVisible()
+
+    // Drive the tag tree via the viewport-aware helpers: on desktop the panel stays
+    // open; on mobile each select CLOSES the Drawer, so toggleTagFilter re-opens it
+    // per click and expectTagNodeState re-opens it to read a node's state. The filter
+    // STATE MACHINE (URL + node aria/class) is asserted identically at both sizes.
 
     // INCLUDE the first tag (one click -> selected).
-    await incNode.click()
-    await expect(incNode).toHaveAttribute('aria-pressed', 'true')
+    await toggleTagFilter(page, new RegExp(includeTag))
+    await expectTagNodeState(page, new RegExp(includeTag), { pressed: 'true' })
     // EXCLUDE the second tag (two clicks: select then toggle to excluded).
-    await excNode.click()
-    await expect(excNode).toHaveAttribute('aria-pressed', 'true')
-    await excNode.click()
-    await expect(excNode).toHaveClass(/tag-excluded/)
+    await toggleTagFilter(page, new RegExp(excludeTag))
+    await expectTagNodeState(page, new RegExp(excludeTag), { pressed: 'true' })
+    await toggleTagFilter(page, new RegExp(excludeTag))
+    await expectTagNodeState(page, new RegExp(excludeTag), { excluded: true })
 
     // The URL must now carry BOTH dimensions.
     await expect(page).toHaveURL(/[?&]tags=/)
@@ -125,11 +125,9 @@ test.describe('tag filter panel', () => {
     await expect(page).toHaveURL(/#\/document/)
 
     // Included tag: back to a selected (aria-pressed) chip in the panel.
-    await expect(panel.getByRole('button', { name: new RegExp(includeTag) }))
-      .toHaveAttribute('aria-pressed', 'true')
+    await expectTagNodeState(page, new RegExp(includeTag), { pressed: 'true' })
     // Excluded tag: back to the struck-through excluded state.
-    await expect(panel.getByRole('button', { name: new RegExp(excludeTag) }))
-      .toHaveClass(/tag-excluded/)
+    await expectTagNodeState(page, new RegExp(excludeTag), { excluded: true })
 
     // And the URL the store re-serialized after hydration still carries BOTH ids
     // (a dropped `tags=` would leave only exclude= here).
@@ -158,35 +156,38 @@ test.describe('tag filter panel', () => {
     await expect(page).toHaveURL(/#\/document\/view\//)
 
     await page.goto('/#/document')
-    const panel = page.locator('.left-panel')
-    const node = panel.getByRole('button', { name: new RegExp(tagName) })
-    await expect(node).toBeVisible()
+
+    // Tri-state via the viewport-aware helper (each click re-opens the Drawer on
+    // mobile). The URL is the primary, viewport-agnostic assertion; the node's
+    // aria/class is read back via expectTagNodeState (which re-opens the Drawer on mobile and polls).
 
     // INCLUDE -> tags= in URL, aria-pressed.
-    await node.click()
+    await toggleTagFilter(page, new RegExp(tagName))
     await expect(page).toHaveURL(/[?&]tags=/)
-    await expect(node).toHaveAttribute('aria-pressed', 'true')
+    await expectTagNodeState(page, new RegExp(tagName), { pressed: 'true' })
 
     // EXCLUDE -> tags= drops, exclude= appears, struck through.
-    await node.click()
+    await toggleTagFilter(page, new RegExp(tagName))
     await expect(page).toHaveURL(/[?&]exclude=/)
     await expect(page).not.toHaveURL(/[?&]tags=/)
-    await expect(node).toHaveClass(/tag-excluded/)
+    await expectTagNodeState(page, new RegExp(tagName), { excluded: true })
 
     // CLEAR -> both drop.
-    await node.click()
+    await toggleTagFilter(page, new RegExp(tagName))
     await expect(page).not.toHaveURL(/[?&]exclude=/)
     await expect(page).not.toHaveURL(/[?&]tags=/)
-    await expect(node).toHaveAttribute('aria-pressed', 'false')
+    await expectTagNodeState(page, new RegExp(tagName), { pressed: 'false' })
 
     await deleteTag(page, tagName)
   })
 
   test('toggles between Tree and Facets view modes', async ({ page }) => {
     await page.goto('/#/document')
-    const panel = page.locator('.left-panel')
+    // The view-mode SelectButton lives in the tag panel — desktop side panel OR the
+    // mobile Drawer (openNav opens it on mobile). The Tree/Facets toggle does NOT
+    // close the Drawer (only a tag SELECT does), so both clicks run in one open pass.
+    const panel = await openNav(page)
 
-    // The view-mode SelectButton exposes Tree and Facets options.
     const treeBtn = panel.getByRole('button', { name: 'Tree' })
     const facetsBtn = panel.getByRole('button', { name: 'Facets' })
     await expect(treeBtn).toBeVisible()

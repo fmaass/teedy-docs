@@ -73,8 +73,14 @@ export function updateUser(
   return api.post(`/user/${username}`, params)
 }
 
-export function deleteUser(username: string) {
-  return api.delete(`/user/${username}`)
+// Deleting a user reassigns all their documents to `reassignToUsername` (a required,
+// distinct, active user) before the departing account is removed — the documents' content
+// is preserved and stays decryptable. The target is passed as a query parameter because a
+// DELETE request carries no body.
+export function deleteUser(username: string, reassignToUsername: string) {
+  return api.delete(`/user/${username}`, {
+    params: { reassign_to_username: reassignToUsername },
+  })
 }
 
 // Admin recovery for a TOTP-locked user: clears the user's TOTP key so they can

@@ -333,6 +333,35 @@ public class TestOidcConfig extends BaseJerseyTest {
                 "first-time setup must require a client secret");
     }
 
+    // =========================================================================================
+    // (h) #59 verbatim-username opt-in flag: defaults OFF, round-trips through POST/GET
+    // =========================================================================================
+
+    @Test
+    public void usernameVerbatimDefaultsOffAndRoundTrips() {
+        String adminToken = adminToken();
+
+        // Default OFF: a freshly-configured OIDC (no verbatim param) reports the flag false.
+        postConfig(adminToken, enabledForm("client_secret", "s3cr3t"));
+        Assertions.assertFalse(getConfig(adminToken).getBoolean("username_verbatim"),
+                "username_verbatim must default OFF");
+        Assertions.assertEquals("false",
+                inTx(() -> OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_VERBATIM)),
+                "the effective flag must be false by default");
+
+        // Turn it ON.
+        postConfig(adminToken, enabledForm("client_secret", "", "username_verbatim", "true"));
+        Assertions.assertTrue(getConfig(adminToken).getBoolean("username_verbatim"),
+                "username_verbatim must persist ON");
+        Assertions.assertEquals("true",
+                inTx(() -> OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_VERBATIM)));
+
+        // Turn it back OFF.
+        postConfig(adminToken, enabledForm("client_secret", "", "username_verbatim", "false"));
+        Assertions.assertFalse(getConfig(adminToken).getBoolean("username_verbatim"),
+                "username_verbatim must persist OFF");
+    }
+
     @Test
     public void configOidcRequiresAdmin() {
         // Anonymous GET is forbidden.

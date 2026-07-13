@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique } from './helpers'
 
 // Runs authenticated. Creates a document via the real Add-document form. On save,

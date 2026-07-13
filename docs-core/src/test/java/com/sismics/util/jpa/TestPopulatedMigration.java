@@ -29,7 +29,7 @@ import java.sql.Statement;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==48, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==52, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -38,8 +38,8 @@ import java.sql.Statement;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049). */
-    private static final int TARGET_VERSION = 49;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052). */
+    private static final int TARGET_VERSION = 52;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -69,6 +69,84 @@ public class TestPopulatedMigration {
                 runScenario(connection);
             }
         }
+    }
+
+    // --- migration 050 duplicate-active-username PRECONDITION ABORT (both dialects) ---------------
+
+    @Test
+    public void migration050AbortsOnDuplicateActiveUsernameH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration050abort;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runDuplicateAbortScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration050AbortsOnDuplicateActiveUsernamePostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-050 abort test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runDuplicateAbortScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Migration 050 adds a unique active-username constraint. If the DB already holds duplicate
+     * ACTIVE (case-insensitive) usernames — a should-never-happen anomaly the app precheck + OIDC
+     * hash suffix prevent — 050 must ABORT the whole upgrade (a controlled precondition failure)
+     * rather than silently rename rows. This seeds exactly that anomaly at v49 and asserts the 050
+     * step fails, DB_VERSION stays at 49 (transaction rolled back), and the index is NOT created.
+     */
+    private static void runDuplicateAbortScenario(Connection connection) throws Exception {
+        // Build the schema through v49 (the version immediately before 050).
+        buildSchemaToVersion(connection, 49);
+        Assertions.assertEquals(49, dbVersion(connection), "fixture must be at db.version 49 before 050");
+
+        // Seed a DUPLICATE ACTIVE (case-insensitive) username: 'dupe' and 'DUPE', both active.
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('dup-1','user','dupe','x','d1@localhost',NOW(),'pk1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('dup-2','user','DUPE','x','d2@localhost',NOW(),'pk2')");
+        }
+        connection.commit();
+
+        // Run ONLY the 050 step and assert it fails (the precondition abort fires).
+        final boolean[] failed = {false};
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=49 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                // open() passes newVersion = configured db.version (50); run just the 050 script.
+                executeAllScript(50);
+            }
+        };
+        try {
+            helper.open();
+        } catch (IllegalStateException expected) {
+            failed[0] = true;
+        }
+        Assertions.assertTrue(failed[0] || !helper.getExceptions().isEmpty(),
+                "migration 050 must ABORT when duplicate active usernames exist (precondition failure)");
+
+        // The failed upgrade transaction was rolled back: DB_VERSION stays at 49 and the index was
+        // not created (both dupes still present, unchanged — no silent rename).
+        Assertions.assertEquals(49, dbVersion(connection),
+                "a failed 050 upgrade must leave DB_VERSION at 49 (transaction rolled back)");
+        Assertions.assertFalse(indexExists(connection, "IDX_USER_USERNAME_ACTIVE", "T_USER"),
+                "the unique index must NOT exist after an aborted 050 upgrade");
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'dup-1' and USE_USERNAME_C = 'dupe'"),
+                "050 must NOT rename the duplicate rows (abort, not auto-rename)");
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'dup-2' and USE_USERNAME_C = 'DUPE'"),
+                "050 must NOT rename the duplicate rows (abort, not auto-rename)");
     }
 
     /**
@@ -102,7 +180,7 @@ public class TestPopulatedMigration {
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
-        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 49).
+        // 4. Run the REAL upgrade path. open() reads DB_VERSION=36 and runs onUpgrade(36, 50).
         DbOpenHelper helper = new DbOpenHelper(connection) {
             @Override
             public void onCreate() throws Exception {
@@ -119,11 +197,11 @@ public class TestPopulatedMigration {
         };
         helper.open();
         Assertions.assertTrue(helper.getExceptions().isEmpty(),
-                "migrations 037-049 must run cleanly on a populated database");
+                "migrations 037-050 must run cleanly on a populated database");
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 49 after the full upgrade path");
+                "DB_VERSION must be 50 after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -336,6 +414,40 @@ public class TestPopulatedMigration {
                     "049 must add FIL_ROTATION_N so a rotation value round-trips unchanged");
         }
 
+        // 5k. Migration 050 added the ACTIVE, CASE-INSENSITIVE unique username constraint
+        //     (IDX_USER_USERNAME_ACTIVE), expressed as a PG partial index or an H2 generated
+        //     column + plain unique index. The retained active user 'alice' (u-alice) already
+        //     holds that name. Prove on BOTH dialects that: (a) a second ACTIVE user with a
+        //     case-variant name 'ALICE' is REJECTED; (b) a SOFT-DELETED user may reuse 'alice'
+        //     (NULLs/partial-predicate exclude soft-deleted rows). The DAO/resource layer relies
+        //     on this as the race backstop for verbatim OIDC provisioning. Savepoint-guarded so a
+        //     PostgreSQL duplicate-key error is recovered before the final commit.
+        connection.commit();
+        Assertions.assertTrue(indexExists(connection, "IDX_USER_USERNAME_ACTIVE", "T_USER"),
+                "050 must create the IDX_USER_USERNAME_ACTIVE unique index on T_USER");
+
+        boolean activeDuplicateRejected = false;
+        java.sql.Savepoint dupSp = connection.setSavepoint("beforeUsernameDup");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) "
+                    + "values ('u-alice2','user','ALICE','x','alice2@localhost',NOW(),'pk-a2')");
+        } catch (java.sql.SQLException e) {
+            activeDuplicateRejected = true;
+            connection.rollback(dupSp);
+        }
+        Assertions.assertTrue(activeDuplicateRejected,
+                "050 constraint must reject a second ACTIVE user with a case-insensitive-duplicate username");
+
+        // A SOFT-DELETED user reusing the same name must be ACCEPTED (the constraint is active-only).
+        connection.commit();
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_DELETEDATE_D, USE_PRIVATEKEY_C) "
+                    + "values ('u-alice-del','user','alice','x','alicedel@localhost',NOW(),NOW(),'pk-ad')");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'u-alice-del'"),
+                "050 constraint must allow a SOFT-DELETED user to reuse an active username (NULLs don't collide)");
+
         connection.commit();
     }
 
@@ -370,6 +482,33 @@ public class TestPopulatedMigration {
         builder.open();
         Assertions.assertTrue(builder.getExceptions().isEmpty(), "building the v36 fixture schema must run cleanly");
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "fixture schema must be at db.version 36");
+    }
+
+    /**
+     * Build the schema up to an arbitrary {@code targetVersion} by running the real migration
+     * scripts {@code 0..targetVersion} in order (onCreate for script 0, then each upgrade step).
+     * Used by the migration-050 abort test to reach the state immediately before 050.
+     */
+    private static void buildSchemaToVersion(Connection connection, int targetVersion) throws Exception {
+        DbOpenHelper builder = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() throws Exception {
+                executeAllScript(0);
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                int cap = Math.min(newVersion, targetVersion);
+                for (int version = oldVersion + 1; version <= cap; version++) {
+                    executeAllScript(version);
+                }
+            }
+        };
+        builder.open();
+        Assertions.assertTrue(builder.getExceptions().isEmpty(),
+                "building the v" + targetVersion + " fixture schema must run cleanly");
+        Assertions.assertEquals(targetVersion, dbVersion(connection),
+                "fixture schema must be at db.version " + targetVersion);
     }
 
     /**
@@ -459,8 +598,13 @@ public class TestPopulatedMigration {
      * getIndexInfo requires the table name in the driver's stored case, so probe both.
      */
     private static boolean indexExists(Connection connection, String indexName) throws Exception {
-        for (String table : new String[]{"T_DOCUMENT_TAG", "t_document_tag"}) {
-            try (ResultSet rs = connection.getMetaData().getIndexInfo(null, null, table, false, false)) {
+        return indexExists(connection, indexName, "T_DOCUMENT_TAG");
+    }
+
+    /** As {@link #indexExists(Connection, String)} but probes an arbitrary table (both case variants). */
+    private static boolean indexExists(Connection connection, String indexName, String table) throws Exception {
+        for (String tableName : new String[]{table.toUpperCase(), table.toLowerCase()}) {
+            try (ResultSet rs = connection.getMetaData().getIndexInfo(null, null, tableName, false, false)) {
                 while (rs.next()) {
                     String name = rs.getString("INDEX_NAME");
                     if (name != null && name.equalsIgnoreCase(indexName)) {

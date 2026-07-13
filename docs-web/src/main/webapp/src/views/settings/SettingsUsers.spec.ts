@@ -144,6 +144,80 @@ describe('SettingsUsers — disable/enable toggle', () => {
   })
 })
 
+describe('SettingsUsers — delete with document reassignment (#55)', () => {
+  beforeEach(() => {
+    apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [ENABLED_USER, DISABLED_USER] } })
+    apiMock.deleteUser.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+    confirmDangerSpy.mockReset()
+  })
+
+  it('deleting no longer routes through the plain danger-confirm (a reassign target is required)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    ;(wrapper.vm as unknown as { openDeleteDialog: (u: UserListItem) => void }).openDeleteDialog(ENABLED_USER)
+    await flushPromises()
+
+    // The delete flow opens the reassignment dialog, it does NOT fire the old confirmDanger.
+    expect(confirmDangerSpy).not.toHaveBeenCalled()
+    const vm = wrapper.vm as unknown as { showDeleteDialog: boolean; reassignToUsername: string | null }
+    expect(vm.showDeleteDialog).toBe(true)
+    expect(vm.reassignToUsername).toBeNull()
+  })
+
+  it('offers every active user except the one being deleted as a reassignment target', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openDeleteDialog: (u: UserListItem) => void
+      reassignCandidates: UserListItem[]
+    }
+    vm.openDeleteDialog(ENABLED_USER)
+    await flushPromises()
+
+    const candidateNames = vm.reassignCandidates.map((u) => u.username)
+    expect(candidateNames).not.toContain(ENABLED_USER.username)
+    expect(candidateNames).toContain(DISABLED_USER.username)
+  })
+
+  it('deletes with the chosen target: calls deleteUser(username, reassignToUsername)', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openDeleteDialog: (u: UserListItem) => void
+      reassignToUsername: string | null
+      handleDelete: () => Promise<void>
+      showDeleteDialog: boolean
+    }
+    vm.openDeleteDialog(ENABLED_USER)
+    vm.reassignToUsername = 'bob'
+    await vm.handleDelete()
+    await flushPromises()
+
+    expect(apiMock.deleteUser).toHaveBeenCalledTimes(1)
+    expect(apiMock.deleteUser).toHaveBeenCalledWith('alice', 'bob')
+    expect(vm.showDeleteDialog).toBe(false)
+  })
+
+  it('does NOT call deleteUser when no reassignment target is chosen', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openDeleteDialog: (u: UserListItem) => void
+      handleDelete: () => Promise<void>
+    }
+    vm.openDeleteDialog(ENABLED_USER)
+    // reassignToUsername left null.
+    await vm.handleDelete()
+    await flushPromises()
+
+    expect(apiMock.deleteUser).not.toHaveBeenCalled()
+  })
+})
+
 describe('SettingsUsers — storage quota field', () => {
   beforeEach(() => {
     apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [ENABLED_USER] } })

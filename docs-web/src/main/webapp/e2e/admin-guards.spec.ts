@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { unique, login, confirmDanger } from './helpers'
+import { test, expect } from './fixtures'
+import { unique, login, confirmDanger, deleteUser } from './helpers'
 // unique, login, confirmDanger are used by both the non-admin guard test and the
 // behavior-B disabled-user tests below.
 
@@ -29,10 +29,12 @@ test('non-admin is redirected away from admin routes but can reach account setti
     const userPage = await userContext.newPage()
     await login(userPage, username, password)
 
-    // A non-admin route is reachable.
+    // A non-admin route is reachable. Assert on the account page's own H2 (main
+    // content, present at both viewports) rather than the brand link, which is
+    // hidden inside the closed Drawer on mobile.
     await userPage.goto('/#/settings/account')
     await expect(userPage).toHaveURL(/#\/settings\/account/)
-    await expect(userPage.getByRole('link', { name: 'teedy' }).first()).toBeVisible()
+    await expect(userPage.getByRole('heading', { name: 'User account' })).toBeVisible()
 
     // Admin-only /settings/ldap: the guard bounces to the documents list.
     await userPage.goto('/#/settings/ldap')
@@ -46,11 +48,7 @@ test('non-admin is redirected away from admin routes but can reach account setti
     await userContext.close()
   } finally {
     // --- Cleanup: delete the created user as admin. ---
-    await page.goto('/#/settings/users')
-    const row = page.getByRole('row', { name: new RegExp(username) })
-    await row.getByRole('button', { name: 'Delete' }).click()
-    await confirmDanger(page)
-    await expect(page.getByText('User deleted')).toBeVisible()
+    await deleteUser(page, username)
   }
 })
 
@@ -133,11 +131,7 @@ test('an admin can disable a user (login denied) and re-enable them (login resto
       await ctx.close()
     }
   } finally {
-    await page.goto('/#/settings/users')
-    const row = page.getByRole('row', { name: new RegExp(username) })
-    await row.getByRole('button', { name: 'Delete' }).click()
-    await confirmDanger(page)
-    await expect(page.getByText('User deleted')).toBeVisible()
+    await deleteUser(page, username)
   }
 })
 
@@ -177,10 +171,6 @@ test('the disable/enable toggle is hidden for the guest and admin rows', async (
     const userRow = page.getByRole('row', { name: new RegExp(username) })
     await expect(userRow.getByRole('button', { name: 'Disable account' })).toBeVisible()
   } finally {
-    await page.goto('/#/settings/users')
-    const row = page.getByRole('row', { name: new RegExp(username) })
-    await row.getByRole('button', { name: 'Delete' }).click()
-    await confirmDanger(page)
-    await expect(page.getByText('User deleted')).toBeVisible()
+    await deleteUser(page, username)
   }
 })

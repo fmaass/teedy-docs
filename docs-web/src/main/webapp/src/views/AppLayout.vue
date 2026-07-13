@@ -28,6 +28,9 @@ const modeOptions = computed<Array<{ label: string; value: 'and' | 'or' }>>(() =
 // renders today's exact chrome (nothing) when none are configured.
 const { data: appInfo } = useAppInfo()
 const footerLinks = computed(() => appInfo.value?.footer_links ?? [])
+// #62: running app version, shown as a muted label directly above the two
+// footer nav links (Manage Tags / Settings) in the settings/tag sidebar.
+const appVersion = computed(() => appInfo.value?.current_version ?? null)
 
 const isMobile = ref(false)
 const drawerOpen = ref(false)
@@ -64,20 +67,38 @@ const settingsNavItems = computed(() => [
   { label: t('ui.apikeys.title'), icon: 'pi pi-key', to: '/settings/api-keys', name: 'settings-api-keys' },
 ])
 
-const settingsAdminItems = computed(() => [
-  { label: t('ui.config.title'), icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
-  { label: t('ui.users.title'), icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
-  { label: t('ui.groups.title'), icon: 'pi pi-sitemap', to: '/settings/groups', name: 'settings-groups' },
-  { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
-  { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
-  { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
-  { label: t('ui.oidc.title'), icon: 'pi pi-id-card', to: '/settings/oidc', name: 'settings-oidc' },
-  { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
-  { label: t('ui.workflow_admin.title'), icon: 'pi pi-sitemap', to: '/settings/workflow', name: 'settings-workflow' },
-  { label: t('ui.vocabulary.title'), icon: 'pi pi-list', to: '/settings/vocabulary', name: 'settings-vocabulary' },
-  { label: t('ui.stats.title'), icon: 'pi pi-chart-bar', to: '/settings/stats', name: 'settings-stats' },
-  { label: t('ui.monitoring.title'), icon: 'pi pi-chart-line', to: '/settings/monitoring', name: 'settings-monitoring' },
-  { label: t('ui.inbox.title'), icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
+// The admin settings nav is grouped into three labelled sections (#61) instead of
+// one flat 13-item list. ROUTES ARE UNCHANGED — this is a pure presentation regroup
+// of the same nav items. Membership: Access & Users / Content Model / System.
+const settingsAdminGroups = computed(() => [
+  {
+    label: t('ui.nav.group_access'),
+    items: [
+      { label: t('ui.users.title'), icon: 'pi pi-users', to: '/settings/users', name: 'settings-users' },
+      { label: t('ui.groups.title'), icon: 'pi pi-sitemap', to: '/settings/groups', name: 'settings-groups' },
+      { label: t('ui.ldap.title'), icon: 'pi pi-server', to: '/settings/ldap', name: 'settings-ldap' },
+      { label: t('ui.oidc.title'), icon: 'pi pi-id-card', to: '/settings/oidc', name: 'settings-oidc' },
+    ],
+  },
+  {
+    label: t('ui.nav.group_content'),
+    items: [
+      { label: t('ui.metadata.title'), icon: 'pi pi-tags', to: '/settings/metadata', name: 'settings-metadata' },
+      { label: t('ui.vocabulary.title'), icon: 'pi pi-list', to: '/settings/vocabulary', name: 'settings-vocabulary' },
+      { label: t('ui.tag_rules.title'), icon: 'pi pi-bolt', to: '/settings/tag-rules', name: 'settings-tag-rules' },
+      { label: t('ui.workflow_admin.title'), icon: 'pi pi-sitemap', to: '/settings/workflow', name: 'settings-workflow' },
+    ],
+  },
+  {
+    label: t('ui.nav.group_system'),
+    items: [
+      { label: t('ui.config.title'), icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
+      { label: t('ui.inbox.title'), icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
+      { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
+      { label: t('ui.stats.title'), icon: 'pi pi-chart-bar', to: '/settings/stats', name: 'settings-stats' },
+      { label: t('ui.monitoring.title'), icon: 'pi pi-chart-line', to: '/settings/monitoring', name: 'settings-monitoring' },
+    ],
+  },
 ])
 
 const tagManageItems = computed(() => [
@@ -145,7 +166,7 @@ function handleMobileTagSelect(tagId: string) {
               :is-admin="auth.isAdmin"
               :current-route-name="route.name"
               :settings-nav-items="settingsNavItems"
-              :settings-admin-items="settingsAdminItems"
+              :settings-admin-groups="settingsAdminGroups"
               :tag-manage-items="tagManageItems"
               @back="tf.navigateToDocuments()"
             />
@@ -154,6 +175,7 @@ function handleMobileTagSelect(tagId: string) {
 
         <!-- Footer nav -->
         <div class="panel-footer">
+          <div v-if="appVersion && isAdminContext" class="panel-footer-version">{{ `v${appVersion}` }}</div>
           <router-link
             to="/tag"
             class="footer-link"
@@ -230,12 +252,13 @@ function handleMobileTagSelect(tagId: string) {
             :is-admin="auth.isAdmin"
             :current-route-name="route.name"
             :settings-nav-items="settingsNavItems"
-            :settings-admin-items="settingsAdminItems"
+            :settings-admin-groups="settingsAdminGroups"
             :tag-manage-items="tagManageItems"
             @back="tf.navigateToDocuments(); drawerOpen = false"
             @navigate="drawerOpen = false"
           />
           <div class="panel-footer">
+            <div v-if="appVersion && isAdminContext" class="panel-footer-version">{{ `v${appVersion}` }}</div>
             <router-link to="/tag" class="footer-link" @click="drawerOpen = false">
               <i class="pi pi-tags" /><span>{{ t('ui.manage_tags') }}</span>
             </router-link>
@@ -366,6 +389,13 @@ function handleMobileTagSelect(tagId: string) {
   flex-direction: column;
   gap: 0.125rem;
   flex-shrink: 0;
+}
+
+.panel-footer-version {
+  padding: 0.125rem 0.5rem 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--p-text-muted-color);
+  font-variant-numeric: tabular-nums;
 }
 
 .footer-link {

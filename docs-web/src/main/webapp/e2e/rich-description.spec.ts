@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique } from './helpers'
 
 // #38: rich (sanitized) HTML descriptions with server-side sanitization.

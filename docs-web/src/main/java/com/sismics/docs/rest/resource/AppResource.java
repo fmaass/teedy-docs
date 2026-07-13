@@ -3,20 +3,26 @@ package com.sismics.docs.rest.resource;
 import com.google.common.base.Strings;
 import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
+import com.sismics.docs.core.dao.CleanupRunDao;
 import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.StatsDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.dao.dto.CleanupFileDto;
 import com.sismics.docs.core.dao.dto.UserStorageDto;
 import com.sismics.docs.core.event.RebuildIndexAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.model.jpa.CleanupRun;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.TrashPurgeService;
+import com.sismics.docs.core.util.CleanupStorageUtil;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.StatsBucketUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
 import com.sismics.docs.core.util.jpa.PaginatedLists;
@@ -25,6 +31,7 @@ import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.log4j.LogCriteria;
@@ -49,8 +56,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
 import java.text.MessageFormat;
 import java.util.*;
 
@@ -65,6 +70,25 @@ public class AppResource extends BaseResource {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(AppResource.class);
+
+    /**
+     * Test seam (#69): a hook fired inside {@link #batchCleanStorage()} immediately BEFORE the
+     * post-DB-delete commit checkpoint and the filesystem sweep. It is invoked ONLY when
+     * {@link EnvironmentUtil#isUnitTest()} is true, so it is a genuine no-op in the running webapp
+     * regardless of this field's value. A test sets it to throw, proving that a DB/commit-phase failure
+     * aborts the run with the physical files still intact — the sweep only runs after a successful
+     * commit, so a rollback never loses bytes.
+     */
+    static volatile Runnable cleanStorageBeforeCommitHook = null;
+
+    /**
+     * Test seam (concurrent-restore): a hook fired inside {@link #batchCleanStorage()} AFTER the commit
+     * checkpoint but BEFORE the physical sweep, invoked ONLY when {@link EnvironmentUtil#isUnitTest()}
+     * is true (a genuine no-op in the running webapp). A test uses it to revive a soft-deleted file's
+     * row (simulating a concurrent restore between the manifest snapshot and the sweep), proving the
+     * sweep skips any candidate that is no longer gone from the DB and never deletes a live file's bytes.
+     */
+    static volatile Runnable cleanStorageBeforeSweepHook = null;
 
     /**
      * Returns information about the application.
@@ -871,12 +895,91 @@ public class AppResource extends BaseResource {
     }
 
     /**
+     * Preview a storage cleanup (dry run): what a real clean_storage run would reclaim, WITHOUT
+     * mutating any database row or filesystem file.
+     *
+     * @api {get} /app/batch/clean_storage/dry_run Preview the file and DB storage cleanup
+     * @apiName GetAppBatchCleanStorageDryRun
+     * @apiGroup App
+     * @apiParam {Number} [limit=100] Maximum number of affected files to return
+     * @apiParam {Number} [offset=0] Pagination offset into the affected files
+     * @apiSuccess {Number} total Total number of file resources the run would remove (complete closure)
+     * @apiSuccess {Number} reclaimed_bytes Disk bytes the run would free (actual on-disk footprint of the removal closure + age-eligible orphans)
+     * @apiSuccess {Number} primary_pointer_cleared_count Document main-file pointers that would be cleared
+     * @apiSuccess {Number} limit Effective page size
+     * @apiSuccess {Number} offset Effective page offset
+     * @apiSuccess {Object[]} files Page of affected files
+     * @apiSuccess {String} files.id File ID
+     * @apiSuccess {String} files.document_id Owning document ID (may be null)
+     * @apiSuccess {String} files.document_title Owning document title (may be null)
+     * @apiSuccess {Number} files.size File size in bytes
+     * @apiSuccess {String} files.reason Eligibility reason (soft_deleted, orphan_uploader, attached_to_deleted_document, filesystem_orphan)
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission admin
+     * @apiVersion 1.13.0
+     *
+     * @param limit Page size
+     * @param offset Page offset
+     * @return Response
+     */
+    @GET
+    @Path("batch/clean_storage/dry_run")
+    public Response batchCleanStorageDryRun(
+            @QueryParam("limit") Integer limit,
+            @QueryParam("offset") Integer offset) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Clamp pagination to a sane range: never dump the full list unpaginated.
+        int effectiveLimit = limit == null ? 100 : Math.max(1, Math.min(limit, 500));
+        int effectiveOffset = offset == null ? 0 : Math.max(0, offset);
+
+        // Side-effect-free: SELECTs + a read-only directory listing. No DB or filesystem mutation.
+        CleanupStorageUtil.Manifest manifest = CleanupStorageUtil.computeManifest();
+
+        List<CleanupFileDto> allFiles = manifest.getFiles();
+        JsonArrayBuilder filesJson = Json.createArrayBuilder();
+        int from = Math.min(effectiveOffset, allFiles.size());
+        int to = Math.min(from + effectiveLimit, allFiles.size());
+        for (CleanupFileDto file : allFiles.subList(from, to)) {
+            JsonObjectBuilder fileJson = Json.createObjectBuilder()
+                    .add("id", file.getId())
+                    .add("size", file.getSize())
+                    .add("reason", file.getReason());
+            if (file.getDocumentId() != null) {
+                fileJson.add("document_id", file.getDocumentId());
+            } else {
+                fileJson.addNull("document_id");
+            }
+            if (file.getDocumentTitle() != null) {
+                fileJson.add("document_title", file.getDocumentTitle());
+            } else {
+                fileJson.addNull("document_title");
+            }
+            filesJson.add(fileJson);
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("total", manifest.getTotalCount())
+                .add("reclaimed_bytes", manifest.getReclaimedBytes())
+                .add("primary_pointer_cleared_count", manifest.getPrimaryPointerClearedCount())
+                .add("limit", effectiveLimit)
+                .add("offset", effectiveOffset)
+                .add("files", filesJson);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
      * Clean storage.
      *
      * @api {post} /app/batch/clean_storage Clean the file and DB storage
      * @apiName PostAppBatchCleanStorage
      * @apiGroup App
      * @apiSuccess {String} status Status OK
+     * @apiSuccess {Number} file_count Number of file resources removed by this run (complete closure)
+     * @apiSuccess {Number} bytes Disk bytes freed by this run
      * @apiError (client) ForbiddenError Access denied
      * @apiError (server) FileError Error deleting orphan files
      * @apiPermission admin
@@ -892,28 +995,44 @@ public class AppResource extends BaseResource {
         }
         checkBaseFunction(BaseFunction.ADMIN);
 
-        // Get all files
-        FileDao fileDao = new FileDao();
-        List<File> fileList = fileDao.findAll(0, Integer.MAX_VALUE);
-        Map<String, File> fileMap = new HashMap<>();
-        for (File file : fileList) {
-            fileMap.put(file.getId(), file);
+        // SINGLE-RUN GUARD (#74): acquire a PESSIMISTIC_WRITE row lock on the CLEAN_STORAGE_LOCK sentinel
+        // FIRST, before reading the eligibility snapshot or mutating anything. The lock is held for the
+        // whole DB-mutating transaction (until the TransactionUtil.commit checkpoint below), so a second
+        // concurrent clean_storage BLOCKS here until the first run commits, then proceeds against the
+        // already-cleaned state — the two runs are serialized, never parallel, so the same file can never
+        // be counted or quota-credited twice. (The presence guards in the post-commit sweep remain as a
+        // second line of defence for the filesystem side.)
+        //
+        // FAIL CLOSED: if the sentinel row is absent (a database that never ran migration 052), the
+        // guard cannot be evaluated, so we refuse the destructive run rather than proceed unlocked —
+        // an unguarded run could double-credit quota under concurrency. The row is always seeded by
+        // migration 052, so this only fires on a genuinely un-migrated database.
+        if (!new ConfigDao().lockForUpdate(ConfigType.CLEAN_STORAGE_LOCK)) {
+            throw new ServerException("CleanStorageError",
+                    "The clean_storage single-run lock is unavailable (missing CLEAN_STORAGE_LOCK row — is the database migrated?)");
         }
-        log.info("Checking {} files", fileMap.size());
 
-        // Check if each stored file is valid
-        try (DirectoryStream<java.nio.file.Path> storedFileList = Files.newDirectoryStream(DirectoryUtil.getStorageDirectory())) {
-            for (java.nio.file.Path storedFile : storedFileList) {
-                String fileName = storedFile.getFileName().toString();
-                String[] fileNameArray = fileName.split("_");
-                if (!fileMap.containsKey(fileNameArray[0])) {
-                    log.info("Deleting orphan files at this location: {}", storedFile);
-                    Files.delete(storedFile);
-                }
-            }
-        } catch (IOException e) {
-            throw new ServerException("FileError", "Error deleting orphan files", e);
+        // Capture the eligibility SNAPSHOT before mutating anything — the same side-effect-free
+        // computation the dry-run preview uses (so the dry-run estimate matches this state). The file
+        // ids here are the CANDIDATES this run intends to hard-delete; the physical sweep below narrows
+        // them to the set CONFIRMED gone from the DB after commit (a concurrent restore can revive a
+        // candidate), and the recorded protocol reflects what was ACTUALLY unlinked, not this estimate.
+        CleanupStorageUtil.Manifest manifest = CleanupStorageUtil.computeManifest();
+        List<String> reclaimedFileIds = new ArrayList<>();
+        for (CleanupFileDto f : manifest.getFiles()) {
+            reclaimedFileIds.add(f.getId());
         }
+
+        // #69: the physical filesystem deletion MUST happen only AFTER the DB deletions are durably
+        // committed. Deleting bytes before commit means a rollback (e.g. a later FK abort or a commit
+        // failure) would leave files gone while their DB rows survive — irrecoverable data loss. So we do
+        // ALL the DB work first, commit, and only THEN sweep the filesystem. A leftover physical file
+        // whose DB row still exists is never deleted (the sweep keys on committed-gone rows); a leftover
+        // physical file with no DB row is reclaimed by the age-thresholded orphan sweep (#72). This
+        // method runs inside the request transaction the RequestContextFilter commits at end-of-request;
+        // we take an explicit commit checkpoint (TransactionUtil.commit) before the sweep. The durable
+        // T_CLEANUP_RUN protocol row is written AFTER the sweep (with the ACTUAL reclaimed figures) and
+        // commits with the request's end-of-request transaction.
 
         // Hard delete orphan audit logs
         EntityManager em = ThreadLocalContext.get().getEntityManager();
@@ -961,26 +1080,147 @@ public class AppResource extends BaseResource {
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan tags", q.executeUpdate());
 
-        // Soft delete orphan documents
-        q = em.createNativeQuery("update T_DOCUMENT set DOC_DELETEDATE_D = :dateNow where DOC_ID_C in (select d.DOC_ID_C from T_DOCUMENT d left join T_USER u on u.USE_ID_C = d.DOC_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
+        // Soft delete orphan documents. Only stamp docs that are STILL LIVE (DOC_DELETEDATE_D is null):
+        // an already-trashed document keeps its original trash timestamp, which its cascade-trashed files
+        // share (file.deleteDate == doc.deleteDate) — re-stamping it would break that equality and defeat
+        // the #74 quota reclaim's document-deleteDate matching for such docs.
+        q = em.createNativeQuery("update T_DOCUMENT set DOC_DELETEDATE_D = :dateNow where DOC_DELETEDATE_D is null and DOC_ID_C in (select d.DOC_ID_C from T_DOCUMENT d left join T_USER u on u.USE_ID_C = d.DOC_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan documents", q.executeUpdate());
 
-        // Soft delete orphan files
-        q = em.createNativeQuery("update T_FILE set FIL_DELETEDATE_D = :dateNow where FIL_ID_C in (select f.FIL_ID_C from T_FILE f left join T_USER u on u.USE_ID_C = f.FIL_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
+        // #74 QUOTA RECLAMATION — for every soft-deleted document about to be hard-deleted, reclaim its
+        // uploaders' storage quota EXACTLY as the retention purge does (TrashPurgeService →
+        // FileUtil.reclaimQuotaForDeletedDocumentFiles(files, document.getDeleteDate())). This closes the
+        // quota LEAK: trashing a document (DocumentDao.delete) does NOT reclaim quota — it only sets
+        // deleteDate on the doc and its files — so a trashed file still HOLDS quota until the retention
+        // purge; when clean_storage hard-deletes it FIRST (bypassing TrashPurgeService), it must reclaim
+        // or the bytes leak forever. This MUST run HERE — right after the orphan-document soft-delete but
+        // BEFORE the orphan-file / #54 file-attachment passes below — because those passes stamp a FRESH
+        // deleteDate on a doomed doc's still-live files, which would then differ from the document's
+        // deleteDate and be wrongly skipped. At this point a doomed doc's files still carry their
+        // held-quota state: deleteDate == doc.deleteDate (trashed with the doc) or null (a stranded
+        // collaborator upload) → reclaimed; a file individually deleted earlier (deleteDate != null &&
+        // != doc.deleteDate — FileResource.delete already reclaimed it) → skipped, so no double-subtract.
+        // Runs in the committed DB transaction (with the hard-delete), not the post-commit sweep. Ghost-
+        // uploader-safe via FileUtil.reclaimUserQuota → UserDao.updateQuotaById (never throws for a
+        // retained soft-deleted uploader).
+        @SuppressWarnings("unchecked")
+        List<Object[]> doomedDocs = em.createNativeQuery(
+                "select d.DOC_ID_C, d.DOC_DELETEDATE_D from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null")
+                .getResultList();
+        FileDao quotaFileDao = new FileDao();
+        int quotaDocs = 0;
+        for (Object[] doomed : doomedDocs) {
+            String doomedDocId = (String) doomed[0];
+            Date doomedDeleteDate = doomed[1] instanceof Date ? (Date) doomed[1]
+                    : (doomed[1] == null ? null : new Date(((java.sql.Timestamp) doomed[1]).getTime()));
+            FileUtil.reclaimQuotaForDeletedDocumentFiles(
+                    quotaFileDao.getAllByDocumentId(doomedDocId), doomedDeleteDate);
+            quotaDocs++;
+        }
+        log.info("Reclaimed storage quota for files of {} soft deleted documents about to be hard-deleted", quotaDocs);
+
+        // Soft delete orphan files. A file is orphaned when its uploader is gone (soft-deleted or
+        // absent) — EXCEPT a file that still backs a LIVE (non-deleted) document is NEVER an orphan,
+        // regardless of uploader state. This is the invariant that keeps a document reassigned away
+        // from a departing user intact: its files keep FIL_IDUSER_C = the departing (now soft-deleted)
+        // uploader so their bytes stay decryptable, and the live document they back holds them alive.
+        q = em.createNativeQuery("update T_FILE set FIL_DELETEDATE_D = :dateNow where FIL_ID_C in ("
+                + " select f.FIL_ID_C from T_FILE f"
+                + " left join T_USER u on u.USE_ID_C = f.FIL_IDUSER_C and u.USE_DELETEDATE_D is null"
+                + " left join T_DOCUMENT d on d.DOC_ID_C = f.FIL_IDDOC_C and d.DOC_DELETEDATE_D is null"
+                + " where u.USE_ID_C is null and d.DOC_ID_C is null)");
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan files", q.executeUpdate());
 
-        // Hard delete saved filters owned by soft-deleted users before the user hard-delete
-        // (T_SAVED_FILTER.FK_SFL_IDUSER_C is ON DELETE RESTRICT, so a lingering filter would abort the purge)
+        // ── Clear every ON DELETE RESTRICT edge into a soft-deleted document BEFORE the document
+        // hard-delete below, so the parent delete can never abort mid-transaction. This is the
+        // structural fix for the whole class of FK aborts (the historical DOC_IDFILE_C, saved-filter,
+        // route-user, and now #54 FIL_IDDOC_C cases). A "document about to be hard-deleted" is any row
+        // with DOC_DELETEDATE_D is not null AT THIS POINT — which includes both API-trashed documents
+        // and the orphan documents this method just soft-deleted above.
+        //
+        // Inbound RESTRICT FKs into T_DOCUMENT (grepped from db/update/*.sql `on delete restrict`):
+        //   FK_FIL_IDDOC_C  (T_FILE.FIL_IDDOC_C)            → soft-deleted here, then hard-deleted + swept
+        //   FK_DME_IDDOCUMENT_C (T_DOCUMENT_METADATA)       → hard-deleted here (no soft-delete column)
+        //   FK_FAV_IDDOCUMENT_C (T_FAVORITE)                → hard-deleted here (no soft-delete column)
+        //   FK_RTE_IDDOCUMENT_C (T_ROUTE) + FK_RTP_IDROUTE_C(T_ROUTE_STEP) → hard-deleted here (child first)
+        //   FK_COM_IDDOC_C  (T_COMMENT)                     → already soft-deleted by the orphan-comment pass
+        //   FK_DOT_IDDOCUMENT_C (T_DOCUMENT_TAG)            → already soft-deleted by the orphan-tag-link pass
+        // (T_RELATION references documents but carries NO FK constraint, so it cannot abort the delete.)
+
+        // #54 fix: a still-LIVE file attached to a soon-hard-deleted document (e.g. a collaborator's
+        // file whose uploader is live, or any file on an orphan document this run just soft-deleted)
+        // would keep FIL_IDDOC_C pointing at that document and abort the doc hard-delete (FK_FIL_IDDOC_C
+        // is ON DELETE RESTRICT). Soft-delete those files HERE — before the file hard-delete + the
+        // filesystem sweep below reclaim them — so the document becomes deletable and no bytes leak.
+        q = em.createNativeQuery("update T_FILE set FIL_DELETEDATE_D = :dateNow"
+                + " where FIL_DELETEDATE_D is null"
+                + " and FIL_IDDOC_C in (select d.DOC_ID_C from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null)");
+        q.setParameter("dateNow", new Date());
+        log.info("Soft deleting {} live files attached to soft deleted documents (FIL_IDDOC_C RESTRICT)", q.executeUpdate());
+
+        // Hard delete document metadata of soft-deleted documents (T_DOCUMENT_METADATA has no
+        // soft-delete column; a lingering row would abort the doc delete via FK_DME_IDDOCUMENT_C).
+        q = em.createNativeQuery("delete from T_DOCUMENT_METADATA"
+                + " where DME_IDDOCUMENT_C in (select d.DOC_ID_C from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null)");
+        log.info("Deleting {} metadata rows of soft deleted documents (DME_IDDOCUMENT_C RESTRICT)", q.executeUpdate());
+
+        // Hard delete favorites pointing at soft-deleted documents (no soft-delete column;
+        // FK_FAV_IDDOCUMENT_C would otherwise abort the doc delete).
+        q = em.createNativeQuery("delete from T_FAVORITE"
+                + " where FAV_IDDOCUMENT_C in (select d.DOC_ID_C from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null)");
+        log.info("Deleting {} favorites of soft deleted documents (FAV_IDDOCUMENT_C RESTRICT)", q.executeUpdate());
+
+        // Hard delete routes (and their steps first) attached to soft-deleted documents. A route is
+        // only ENDED (status CANCELLED) when its document is trashed — its RTE_DELETEDATE_D stays null
+        // and RTE_IDDOCUMENT_C keeps pointing at the doc, so FK_RTE_IDDOCUMENT_C would abort the doc
+        // delete. Steps go first (FK_RTP_IDROUTE_C is RESTRICT into T_ROUTE).
+        q = em.createNativeQuery("delete from T_ROUTE_STEP where RTP_IDROUTE_C in ("
+                + " select r.RTE_ID_C from T_ROUTE r"
+                + " where r.RTE_IDDOCUMENT_C in (select d.DOC_ID_C from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null))");
+        log.info("Deleting {} route steps of routes on soft deleted documents (RTP_IDROUTE_C RESTRICT)", q.executeUpdate());
+        q = em.createNativeQuery("delete from T_ROUTE"
+                + " where RTE_IDDOCUMENT_C in (select d.DOC_ID_C from T_DOCUMENT d where d.DOC_DELETEDATE_D is not null)");
+        log.info("Deleting {} routes of soft deleted documents (RTE_IDDOCUMENT_C RESTRICT)", q.executeUpdate());
+
+        // ── Clear the remaining ON DELETE RESTRICT edges into T_USER for every soft-deleted user, so
+        // the user hard-delete below cannot abort. UserDao.delete clears these on the normal delete
+        // path, but clean_storage also hard-deletes users its OWN orphan passes soft-delete (owner
+        // gone) and must not rely on any particular deletion path having run. Inbound user RESTRICT FKs:
+        //   FK_SFL_IDUSER_C  (T_SAVED_FILTER)         → deleted here
+        //   FK_AUT_IDUSER_C  (T_AUTHENTICATION_TOKEN) → deleted here
+        //   FK_FAV_IDUSER_C  (T_FAVORITE)             → deleted here
+        //   FK_TAG_IDUSER_C  (T_TAG)                  → soft-deleted+hard-deleted by the tag passes
+        //   FK_DOC_IDUSER_C  (T_DOCUMENT)             → soft-deleted+hard-deleted by the document passes
+        //   FK_FIL_IDUSER_C / FK_RTE_IDUSER_C / FK_RTP_IDVALIDATORUSER_C / FK_COM_IDUSER_C → the
+        //       userPurge below RETAINS any user still referenced by a LIVE file/route/route-step/
+        //       comment (ghost key-holder); soft-deleted routes/steps referencing the user are hard-
+        //       deleted just before the purge, and soft-deleted comments by the comment hard-delete
+        //       pass — so those never abort.
         q = em.createNativeQuery("delete from T_SAVED_FILTER where SFL_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
         log.info("Deleting {} saved filters of soft deleted users", q.executeUpdate());
+        q = em.createNativeQuery("delete from T_AUTHENTICATION_TOKEN where AUT_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
+        log.info("Deleting {} authentication tokens of soft deleted users (AUT_IDUSER_C RESTRICT)", q.executeUpdate());
+        q = em.createNativeQuery("delete from T_FAVORITE where FAV_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
+        log.info("Deleting {} favorites of soft deleted users (FAV_IDUSER_C RESTRICT)", q.executeUpdate());
 
         // Clear main-file pointers to soft-deleted files before the file hard-delete
         // (T_DOCUMENT.FK_DOC_IDFILE_C is ON DELETE RESTRICT, so a document still pointing at a
         // soft-deleted file would abort the whole purge)
         q = em.createNativeQuery("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_IDFILE_C in (select FIL_ID_C from T_FILE where FIL_DELETEDATE_D is not null)");
         log.info("Clearing {} main-file pointers to soft deleted files", q.executeUpdate());
+
+        // Soft-delete any STILL-LIVE document-tag link whose TAG is soft-deleted, before the tag
+        // hard-delete (FK_DOT_IDTAG_C RESTRICT). The orphan-tag-link pass above runs BEFORE the
+        // orphan-tag pass, so a departing user's tag that is linked to a SURVIVING (live) document
+        // leaves a live link pointing at a now-soft-deleted tag; without this the tag hard-delete
+        // aborts. Marking the link deleted here folds it into the DocumentTag hard-delete below.
+        q = em.createNativeQuery("update T_DOCUMENT_TAG set DOT_DELETEDATE_D = :dateNow"
+                + " where DOT_DELETEDATE_D is null"
+                + " and DOT_IDTAG_C in (select t.TAG_ID_C from T_TAG t where t.TAG_DELETEDATE_D is not null)");
+        q.setParameter("dateNow", new Date());
+        log.info("Soft deleting {} live tag links pointing at soft deleted tags (DOT_IDTAG_C RESTRICT)", q.executeUpdate());
 
         // Hard delete softly deleted data
         log.info("Deleting {} soft deleted document tag links", em.createQuery("delete DocumentTag where deleteDate is not null").executeUpdate());
@@ -990,12 +1230,188 @@ public class AppResource extends BaseResource {
         log.info("Deleting {} soft deleted comments", em.createQuery("delete Comment where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted files", em.createQuery("delete File where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted documents", em.createQuery("delete Document where deleteDate is not null").executeUpdate());
-        log.info("Deleting {} soft deleted users", em.createQuery("delete User where deleteDate is not null").executeUpdate());
+
+        // Hard-delete soft-deleted routes (of soft-deleted users) and all their steps, before the user
+        // purge. A route/step keeps its RTE_IDUSER_C / RTP_IDVALIDATORUSER_C FK row regardless of its own
+        // deleteDate, and routes are otherwise never hard-deleted — so a soft-deleted route (or step)
+        // initiated/validated by the departing user would still block the T_USER delete (the userPurge
+        // below only accounts for LIVE routes/steps).
+        //
+        // The set of "doomed routes" is the soft-deleted routes owned by a soft-deleted user. We delete
+        // ALL of their steps FIRST — REGARDLESS of each step's own RTP_DELETEDATE_D — so a LIVE step on a
+        // doomed route cannot abort the route delete on FK_RTP_IDROUTE_C (same class as the #54
+        // FIL_IDDOC_C bug). Today the only route-soft-delete path (RouteDao.deleteRoute) atomically
+        // soft-deletes a route's steps before the route, so (soft-deleted route + live step) is not
+        // reachable via the app; this is a defensive close of the RESTRICT edge that does not rely on
+        // that atomicity. We ALSO clear the separate validator-user edge: any soft-deleted step whose
+        // validator is a departing user (independent of its route's state).
+        q = em.createNativeQuery("delete from T_ROUTE_STEP where"
+                // every step of a doomed route (regardless of the step's own deleteDate)
+                + " RTP_IDROUTE_C in (select r.RTE_ID_C from T_ROUTE r where r.RTE_DELETEDATE_D is not null"
+                + "   and r.RTE_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null))"
+                // plus any soft-deleted step validated by a departing user (its route may not be doomed)
+                + " or (RTP_DELETEDATE_D is not null and RTP_IDVALIDATORUSER_C in"
+                + "   (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null))");
+        log.info("Deleting {} route steps of doomed routes / validated by soft deleted users (RTP_IDROUTE_C + RTP_IDVALIDATORUSER_C RESTRICT)", q.executeUpdate());
+        q = em.createNativeQuery("delete from T_ROUTE where RTE_DELETEDATE_D is not null"
+                + " and RTE_IDUSER_C in (select u.USE_ID_C from T_USER u where u.USE_DELETEDATE_D is not null)");
+        log.info("Deleting {} soft deleted routes referencing soft deleted users (RTE_IDUSER_C RESTRICT)", q.executeUpdate());
+
+        // Hard delete soft-deleted users, EXCEPT any that live data still references under an ON DELETE
+        // RESTRICT foreign key — hard-deleting such a user would abort the whole purge. A user whose
+        // documents were reassigned away is retained here as a hidden ghost key-holder: soft-deleted and
+        // invisible, kept solely so its privateKey still decrypts the reassigned files it originally
+        // uploaded and so it does not orphan the (surviving) routes it initiated / comments it authored.
+        // It becomes purgeable once no live data references it. The referencing live FKs are:
+        //   - T_FILE.FK_FIL_IDUSER_C           — a live file's uploader (the retained decryption key)
+        //   - T_ROUTE.FK_RTE_IDUSER_C          — a live route's initiator (NOT NULL)
+        //   - T_ROUTE_STEP.FK_RTP_IDVALIDATORUSER_C — a live route step's validator (nullable)
+        //   - T_COMMENT.FK_COM_IDUSER_C        — a live comment's author (on a surviving document)
+        // (RTP_IDTARGET_C is a name-resolved principal, not a T_USER FK, so it does not restrict.)
+        // Soft-deleted routes/steps/comments referencing the user were removed above / by the soft-delete
+        // hard-delete passes, so only LIVE references retain the user here.
+        Query userPurge = em.createNativeQuery("delete from T_USER where USE_DELETEDATE_D is not null"
+                + " and USE_ID_C not in (select f.FIL_IDUSER_C from T_FILE f where f.FIL_DELETEDATE_D is null)"
+                + " and USE_ID_C not in (select r.RTE_IDUSER_C from T_ROUTE r where r.RTE_DELETEDATE_D is null)"
+                + " and USE_ID_C not in (select rs.RTP_IDVALIDATORUSER_C from T_ROUTE_STEP rs where rs.RTP_IDVALIDATORUSER_C is not null and rs.RTP_DELETEDATE_D is null)"
+                + " and USE_ID_C not in (select c.COM_IDUSER_C from T_COMMENT c where c.COM_DELETEDATE_D is null)");
+        log.info("Deleting {} soft deleted users", userPurge.executeUpdate());
         log.info("Deleting {} soft deleted groups", em.createQuery("delete Group where deleteDate is not null").executeUpdate());
+
+        // (The durable T_CLEANUP_RUN protocol row is written AFTER the sweep below, with the ACTUAL
+        // count/bytes unlinked — not the pre-sweep estimate — so the record matches what happened.)
+
+        // Test seam (#69): simulate a DB/commit-phase failure right before the checkpoint. GUARDED to
+        // unit-test mode only, so it is inert (a genuine no-op) in the running webapp even if the field
+        // were ever set. When it throws, the method aborts BEFORE the commit + sweep, so the request
+        // transaction rolls back and the filesystem is never touched.
+        if (EnvironmentUtil.isUnitTest()) {
+            Runnable beforeCommit = cleanStorageBeforeCommitHook;
+            if (beforeCommit != null) {
+                beforeCommit.run();
+            }
+        }
+
+        // #69: COMMIT CHECKPOINT. Durably commit every DB deletion above BEFORE touching the filesystem.
+        // TransactionUtil.commit() commits and begins a fresh (empty) transaction so the
+        // RequestContextFilter's end-of-request commit still finds an active tx. If this commit throws
+        // (e.g. a deferred FK check fails), it propagates out and NO physical file has been deleted — the
+        // DB simply rolls back and no bytes are lost. Only after the commit succeeds do we sweep the
+        // filesystem; the T_CLEANUP_RUN protocol row is written AFTER the sweep, in the fresh
+        // transaction, with the ACTUAL reclaimed figures.
+        TransactionUtil.commit();
+
+        // Test seam: simulate a CONCURRENT RESTORE (a doc un-soft-deleted between the manifest snapshot
+        // and the sweep) right after the commit. Unit-test mode only; a genuine no-op in the webapp.
+        if (EnvironmentUtil.isUnitTest()) {
+            Runnable beforeSweep = cleanStorageBeforeSweepHook;
+            if (beforeSweep != null) {
+                beforeSweep.run();
+            }
+        }
+
+        // POST-COMMIT precise physical delete over the CONFIRMED-DELETED set. The reclaim snapshot
+        // (reclaimedFileIds) was computed BEFORE the DB deletes; between then and now a document could
+        // have been RESTORED (un-soft-deleted) concurrently, in which case its file rows survived the DB
+        // delete and are still LIVE — deleting their bytes would leave a live T_FILE row with no content.
+        // So we re-query, in the committed post-transaction state, which of the snapshot ids no longer
+        // have a T_FILE row, and unlink ONLY those. A concurrently-restored file still has its row →
+        // excluded → its bytes are never touched. (This also intrinsically excludes any concurrent
+        // upload, whose id was never in the snapshot.)
+        //
+        // Accounting: the recorded/reported count and bytes reflect ONLY files whose physical unlink
+        // SUCCEEDED — we measure each confirmed-deleted file's on-disk footprint, unlink it, and count it
+        // only on success. A committed-deleted row whose unlink fails/crashes leaves a no-DB-row residue;
+        // that residue is reclaimed by the age-thresholded filesystem-orphan sweep below (#72) on a
+        // later run, not retried here — we simply do not over-report bytes we did not actually free.
+        Set<String> confirmedDeleted = new HashSet<>();
+        if (!reclaimedFileIds.isEmpty()) {
+            EntityManager postEm = ThreadLocalContext.get().getEntityManager();
+            @SuppressWarnings("unchecked")
+            List<String> stillPresent = postEm.createNativeQuery(
+                    "select f.FIL_ID_C from T_FILE f where f.FIL_ID_C in (:ids)")
+                    .setParameter("ids", reclaimedFileIds)
+                    .getResultList();
+            Set<String> stillPresentSet = new HashSet<>(stillPresent);
+            for (String id : reclaimedFileIds) {
+                if (!stillPresentSet.contains(id)) {
+                    confirmedDeleted.add(id);
+                }
+            }
+        }
+
+        java.nio.file.Path storageDir = DirectoryUtil.getStorageDirectory();
+        long actualCount = 0L;
+        long actualBytes = 0L;
+        for (String confirmedId : confirmedDeleted) {
+            // Count a reclaim ONLY when THIS run actually saw the bytes present. FileUtil.delete is
+            // exists-guarded (no throw on a missing file), so without this guard two concurrent
+            // clean_storage runs would BOTH count the same already-gone file (its footprint is 0, so
+            // bytes stay correct, but the file COUNT would over-report). Gating on presence makes the
+            // count reflect what THIS run truly freed. (Quota was already reclaimed in the committed DB
+            // phase above, keyed on the document's deleteDate — not here.)
+            boolean present = CleanupStorageUtil.physicalFileExists(storageDir, confirmedId);
+            long footprint = present ? CleanupStorageUtil.onDiskSizeForFile(storageDir, confirmedId) : 0L;
+            try {
+                FileUtil.delete(confirmedId);
+                if (present) {
+                    actualCount++;
+                    actualBytes += footprint;
+                }
+            } catch (IOException e) {
+                // Do NOT abort the run or over-count: this row is already committed-gone, so a failed
+                // unlink is harmless residue reclaimed by a later run's age-thresholded orphan sweep (#72).
+                log.error("Failed to unlink physical file {} during clean_storage; left for a later orphan sweep", confirmedId, e);
+            }
+        }
+
+        // #72 AGE-THRESHOLDED FILESYSTEM-ORPHAN RECLAIM: also unlink genuine orphans — on-disk base ids
+        // with NO T_FILE row (any state) whose variants are all OLDER than the age threshold. This is
+        // enumerated against the COMMITTED post-transaction state (a fresh EM read after commit) with a
+        // fresh clock, so a base id that gained a row concurrently, or a file still fresh (a possible
+        // in-flight upload whose row has not committed), is skipped — the age gate is what makes this
+        // safe. Success-only accounting, consistent with the confirmed-deleted files above.
+        EntityManager sweepEm = ThreadLocalContext.get().getEntityManager();
+        long nowMs = System.currentTimeMillis();
+        for (CleanupStorageUtil.OrphanCandidate orphan : CleanupStorageUtil.findAgeEligibleOrphans(sweepEm, storageDir, nowMs)) {
+            // Same concurrent-run guard as above: count only if the bytes are still present at unlink
+            // time (a parallel run may have removed this orphan between enumeration and here).
+            boolean present = CleanupStorageUtil.physicalFileExists(storageDir, orphan.baseId);
+            long footprint = present ? CleanupStorageUtil.onDiskSizeForFile(storageDir, orphan.baseId) : 0L;
+            try {
+                FileUtil.delete(orphan.baseId);
+                if (present) {
+                    actualCount++;
+                    actualBytes += footprint;
+                }
+            } catch (IOException e) {
+                log.error("Failed to unlink orphan file {} during clean_storage; left for a later orphan sweep", orphan.baseId, e);
+            }
+        }
+        log.info("clean_storage unlinked {} files total ({} bytes freed)", actualCount, actualBytes);
+
+        // (Quota reclamation was performed in the committed DB phase above — keyed on each soon-hard-
+        // deleted document's deleteDate, mirroring TrashPurgeService — NOT here in the filesystem sweep.)
+
+        // Durable protocol: record this run's ACTUAL outcome (files unlinked + bytes freed) in
+        // T_CLEANUP_RUN — written here, after the sweep, so the record matches reality rather than the
+        // pre-sweep estimate. This table is NEVER swept by clean_storage (unlike an audit-log entry,
+        // whose orphan-audit-log delete would purge it), so the next cleanup preserves it. The acting
+        // admin is stored as a plain value snapshot, not an FK, so the record survives that admin's
+        // later deletion. It commits with the request's end-of-request transaction.
+        new CleanupRunDao().create(new CleanupRun()
+                .setFileCount(actualCount)
+                .setBytes(actualBytes)
+                .setUserId(principal.getId())
+                .setUsername(principal.getName())
+                .setCreateDate(new Date()));
+        log.info("Recorded clean_storage protocol: {} files, {} bytes reclaimed", actualCount, actualBytes);
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("status", "ok");
+                .add("status", "ok")
+                .add("file_count", actualCount)
+                .add("bytes", actualBytes);
         return Response.ok().entity(response.build()).build();
     }
 
@@ -1222,6 +1638,8 @@ public class AppResource extends BaseResource {
                 .add("userinfo_endpoint", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERINFO_ENDPOINT)))
                 .add("username_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_CLAIM)))
                 .add("email_claim", nullToEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.EMAIL_CLAIM)))
+                .add("username_verbatim",
+                        Boolean.parseBoolean(OidcResource.oidcConfig(OidcResource.OidcKey.USERNAME_VERBATIM)))
                 .add("sources", sources);
 
         return Response.ok().entity(response.build()).build();
@@ -1230,7 +1648,7 @@ public class AppResource extends BaseResource {
     /**
      * Configures the OIDC authentication (provider/claim settings only, per the ADR-0015 fence).
      *
-     * <p>Writes each of the twelve OIDC config values to T_CONFIG (DB-first precedence: a stored
+     * <p>Writes each of the OIDC config values to T_CONFIG (DB-first precedence: a stored
      * value overrides the {@code docs.oidc_*} JVM property). The client secret is write-only: an
      * EMPTY {@code client_secret} preserves the stored secret; an explicit
      * {@code client_secret_reset=true} clears it (the write-only contract stays intact — the GET
@@ -1252,6 +1670,7 @@ public class AppResource extends BaseResource {
      * @apiParam {String} userinfo_endpoint UserInfo endpoint (optional)
      * @apiParam {String} username_claim Username claim name
      * @apiParam {String} email_claim Email claim name
+     * @apiParam {Boolean} username_verbatim If true, provision the sanitized preferred_username verbatim (no hash suffix)
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
      * @apiPermission admin
@@ -1273,7 +1692,8 @@ public class AppResource extends BaseResource {
                                @FormParam("jwks_uri") String jwksUri,
                                @FormParam("userinfo_endpoint") String userinfoEndpoint,
                                @FormParam("username_claim") String usernameClaim,
-                               @FormParam("email_claim") String emailClaim) {
+                               @FormParam("email_claim") String emailClaim,
+                               @FormParam("username_verbatim") Boolean usernameVerbatim) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -1325,6 +1745,9 @@ public class AppResource extends BaseResource {
             configDao.update(ConfigType.OIDC_USERINFO_ENDPOINT, Strings.nullToEmpty(userinfoEndpoint));
             configDao.update(ConfigType.OIDC_USERNAME_CLAIM, usernameClaim);
             configDao.update(ConfigType.OIDC_EMAIL_CLAIM, emailClaim);
+            // Verbatim-username opt-in (default OFF preserves the safe hash-suffix behaviour).
+            configDao.update(ConfigType.OIDC_USERNAME_VERBATIM,
+                    Boolean.toString(usernameVerbatim != null && usernameVerbatim));
             // Secret last: an explicit reset clears it; a non-empty value overwrites; a blank
             // value with no reset leaves the stored secret untouched (write-only keep-on-empty).
             if (resetSecret) {

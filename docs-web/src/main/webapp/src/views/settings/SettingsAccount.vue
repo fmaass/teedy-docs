@@ -139,8 +139,8 @@ async function handleLocaleChange(locale: string) {
   toast.add({ severity: 'success', summary: t('ui.account.language_updated'), life: 2000 })
 }
 
-function handleThemeChange(name: string) {
-  switchTheme(name)
+async function handleThemeChange(name: string) {
+  await switchTheme(name)
   toast.add({ severity: 'success', summary: t('ui.account.theme_switched', { name }), life: 2000 })
 }
 

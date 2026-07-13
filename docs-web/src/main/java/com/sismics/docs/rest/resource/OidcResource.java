@@ -91,7 +91,7 @@ public class OidcResource extends BaseResource {
     private static final long JWKS_MIN_REFRESH_INTERVAL_MS = 60 * 1000;
 
     /**
-     * Validation memo keyed by a hash of all 12 effective config values. {@code validateConfig}
+     * Validation memo keyed by a hash of all effective config values. {@code validateConfig}
      * records the hash of the config it last validated OK; a login whose effective config hashes
      * to the same value skips re-validation, but ANY change (a DB override saved, a property
      * flipped) yields a new hash and forces a fresh validation. Replaces the old
@@ -149,7 +149,7 @@ public class OidcResource extends BaseResource {
     private static final String DEFAULT_SCOPE = "openid profile email";
 
     /**
-     * The twelve OIDC configuration keys. Each binds a {@link ConfigType} (DB-backed value),
+     * The OIDC configuration keys. Each binds a {@link ConfigType} (DB-backed value),
      * the legacy {@code docs.oidc_*} system property, and a built-in default (nullable). This
      * is the SINGLE source of truth for the key set — the accessor, the endpoints, the caches,
      * and the source-scan completeness guard all enumerate it.
@@ -166,7 +166,8 @@ public class OidcResource extends BaseResource {
         JWKS_URI(ConfigType.OIDC_JWKS_URI, "docs.oidc_jwks_uri", null),
         USERINFO_ENDPOINT(ConfigType.OIDC_USERINFO_ENDPOINT, "docs.oidc_userinfo_endpoint", null),
         USERNAME_CLAIM(ConfigType.OIDC_USERNAME_CLAIM, "docs.oidc_username_claim", DEFAULT_USERNAME_CLAIM),
-        EMAIL_CLAIM(ConfigType.OIDC_EMAIL_CLAIM, "docs.oidc_email_claim", DEFAULT_EMAIL_CLAIM);
+        EMAIL_CLAIM(ConfigType.OIDC_EMAIL_CLAIM, "docs.oidc_email_claim", DEFAULT_EMAIL_CLAIM),
+        USERNAME_VERBATIM(ConfigType.OIDC_USERNAME_VERBATIM, "docs.oidc_username_verbatim", "false");
 
         private final ConfigType configType;
         private final String propertyName;
@@ -237,7 +238,7 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * An immutable, request-scoped snapshot of all twelve effective OIDC values, read ONCE via
+     * An immutable, request-scoped snapshot of all effective OIDC values, read ONCE via
      * {@link #oidcConfig(OidcKey)} at the start of a request that needs OIDC config (login,
      * callback). Every read for the rest of that request goes through the snapshot, so a config
      * save landing mid-request can never produce a torn config (issuer=old but client_id=new)
@@ -260,6 +261,11 @@ public class OidcResource extends BaseResource {
             return Boolean.parseBoolean(get(OidcKey.ENABLED));
         }
 
+        /** True when verbatim-username provisioning is enabled (default OFF). */
+        boolean usernameVerbatim() {
+            return Boolean.parseBoolean(get(OidcKey.USERNAME_VERBATIM));
+        }
+
         /** The discovery-document URL derived from the snapshotted issuer (the discovery cache key). */
         String discoveryUrl() {
             String issuer = get(OidcKey.ISSUER);
@@ -269,7 +275,7 @@ public class OidcResource extends BaseResource {
             return issuer.replaceAll("/+$", "") + "/.well-known/openid-configuration";
         }
 
-        /** SHA-256 hex of the twelve snapshotted values (NUL-delimited, enum order) — the memo key. */
+        /** SHA-256 hex of the snapshotted values (NUL-delimited, enum order) — the memo key. */
         String hash() {
             StringBuilder sb = new StringBuilder();
             for (OidcKey key : OidcKey.values()) {
@@ -280,7 +286,7 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Builds a request-scoped snapshot of all twelve effective values. The DB tier is read in ONE
+     * Builds a request-scoped snapshot of all effective values. The DB tier is read in ONE
      * atomic query (a single {@code SELECT ... WHERE CFG_ID_C IN (...)}), so the snapshot cannot be
      * torn by a save that commits between two per-key reads — every DB value in the snapshot is from
      * the same committed instant. The property/default tiers are then applied per key via the single
@@ -297,7 +303,7 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Reads all twelve OIDC {@code T_CONFIG} rows in ONE query, so the DB tier of a snapshot is a
+     * Reads all OIDC {@code T_CONFIG} rows in ONE query, so the DB tier of a snapshot is a
      * single atomic read (no interleaved commit can split it). Returns an empty map outside a
      * transactional context (e.g. a unit test with no EM), matching {@link ConfigDao}'s null-safe
      * behavior — the property/default tiers then apply.
@@ -521,7 +527,7 @@ public class OidcResource extends BaseResource {
             // Security: do NOT auto-link to existing local accounts by username/email.
             // First OIDC login always provisions a new user to prevent account takeover.
             if (!repeatLogin) {
-                user = provisionOrRecover(userDao, usernameClaim, email, subject, issuer);
+                user = provisionOrRecover(userDao, usernameClaim, email, subject, issuer, cfg.usernameVerbatim());
                 if (user == null) {
                     // The OIDC subject is PII and must stay out of ERROR (DEBUG-only policy).
                     log.error("Failed to provision OIDC user (subject at DEBUG)");
@@ -905,6 +911,21 @@ public class OidcResource extends BaseResource {
      * @return A sanitized stem in the username charset, or null when nothing survives
      */
     static String sanitizeUsernameStem(String raw) {
+        // Hash-suffix mode: reserve room for the '_' separator + hash suffix.
+        return sanitizeUsernameStem(raw, USERNAME_MAX_LENGTH - 1 - USERNAME_HASH_LEN);
+    }
+
+    /**
+     * Normalizes a raw claim into a username stem truncated to {@code budget} characters. The
+     * hash-suffix path passes the hash-reserved budget; the verbatim path
+     * ({@link #sanitizeUsernameVerbatim(String)}) passes the FULL {@link #USERNAME_MAX_LENGTH}
+     * so the sanitized {@code preferred_username} is used at its full length (Codex B4).
+     *
+     * @param raw Raw claim value (may contain {@code @ /} whitespace, Unicode — Core §5.1)
+     * @param budget Maximum stem length to keep
+     * @return A sanitized stem in the username charset, or null when nothing survives
+     */
+    static String sanitizeUsernameStem(String raw, int budget) {
         if (raw == null) {
             return null;
         }
@@ -916,12 +937,34 @@ public class OidcResource extends BaseResource {
         if (stem.isEmpty()) {
             return null;
         }
-        // Reserve room for the '_' separator + hash suffix.
-        int stemBudget = USERNAME_MAX_LENGTH - 1 - USERNAME_HASH_LEN;
-        if (stem.length() > stemBudget) {
-            stem = stem.substring(0, stemBudget);
+        if (stem.length() > budget) {
+            stem = stem.substring(0, budget);
         }
-        return stem;
+        return stem.isEmpty() ? null : stem;
+    }
+
+    /**
+     * Sanitizes a raw claim into a VERBATIM username candidate at the FULL username-length
+     * budget (no hash suffix reserved). Used only when {@code docs.oidc_username_verbatim} is
+     * ON. The result is the sanitized {@code preferred_username} itself (charset-normalized),
+     * or null when nothing survives sanitization. Uniqueness is then enforced by the DB
+     * constraint (dbupdate-050); a collision falls back to the deterministic hash disambiguator.
+     *
+     * @param raw Raw claim value
+     * @return A sanitized verbatim username, or null when nothing survives
+     */
+    static String sanitizeUsernameVerbatim(String raw) {
+        String stem = sanitizeUsernameStem(raw, USERNAME_MAX_LENGTH);
+        if (stem == null) {
+            return null;
+        }
+        // A trailing '_' can survive a full-budget truncation; trim it so the verbatim name is tidy.
+        stem = stem.replaceAll("_+$", "");
+        if (stem.isEmpty()) {
+            return null;
+        }
+        // A pure-numeric-collapse could yield a <3-char stem; the pattern requires >=3.
+        return stem.matches(USERNAME_PATTERN) ? stem : null;
     }
 
     /**
@@ -985,6 +1028,13 @@ public class OidcResource extends BaseResource {
      * would fail the repeated token exchange with {@code invalid_grant}).
      */
     private User provisionOrRecover(UserDao userDao, String usernameClaim, String email, String subject, String issuer) {
+        // Read the effective verbatim flag from the request snapshot. The 6-arg overload takes an
+        // explicit flag so a test can force either mode deterministically without DB config.
+        return provisionOrRecover(userDao, usernameClaim, email, subject, issuer, snapshot().usernameVerbatim());
+    }
+
+    private User provisionOrRecover(UserDao userDao, String usernameClaim, String email, String subject,
+                                    String issuer, boolean verbatim) {
         String stem = sanitizeUsernameStem(usernameClaim);
         if (stem == null) {
             stem = sanitizeUsernameStem(email);
@@ -996,6 +1046,10 @@ public class OidcResource extends BaseResource {
             stem = "user";
         }
 
+        // Verbatim candidate (full-length sanitized preferred_username); null when the claim is
+        // absent/unsanitizable, in which case verbatim provisioning falls back to the hash suffix.
+        String verbatimUsername = verbatim ? sanitizeUsernameVerbatim(usernameClaim) : null;
+
         String userEmail = (email != null && isValidEmail(email)) ? email : stem + "@oidc.local";
         if (!isValidEmail(userEmail)) {
             log.warn("OIDC provisioning rejected: invalid email");
@@ -1003,7 +1057,7 @@ public class OidcResource extends BaseResource {
         }
 
         try {
-            return provisionUserFreshTx(stem, userEmail, subject, issuer);
+            return provisionUserFreshTx(stem, verbatimUsername, userEmail, subject, issuer);
         } catch (ConstraintViolationRetry retry) {
             // A concurrent first login won the IDX_USER_OIDC insert. Re-read on a clean
             // transaction and continue with the winner.
@@ -1075,10 +1129,47 @@ public class OidcResource extends BaseResource {
      * Provisions the user on a fresh transaction. The commit is where a concurrent insert
      * of the same {@code (issuer, subject)} surfaces the {@code IDX_USER_OIDC} violation; we
      * detect it and translate to {@link ConstraintViolationRetry} for the recovery path.
-     * On a residual username collision (distinct subjects sanitizing to the same stem AND
-     * the same hash prefix) the hash suffix is extended deterministically before retrying.
+     *
+     * <p>Two username strategies converge here:
+     * <ul>
+     *   <li><b>Verbatim (opt-in):</b> when {@code verbatimUsername} is non-null it is tried FIRST,
+     *       at the full username length with no hash suffix. Uniqueness is enforced by the
+     *       active-case-insensitive unique constraint (dbupdate-050): on a collision (another
+     *       active user already owns that name, or a true-race second insert) we do NOT retry the
+     *       verbatim name (it is deterministic and would collide forever) — we DETERMINISTICALLY
+     *       fall back to the hash-suffix disambiguator below (no duplicate, no 500).</li>
+     *   <li><b>Hash suffix (default):</b> the sanitized stem plus a {@code _}+SHA-256 prefix of
+     *       {@code issuer+NUL+subject}. On a residual collision (distinct subjects sanitizing to
+     *       the same stem AND hash prefix) the hash suffix is extended deterministically and
+     *       retried.</li>
+     * </ul>
+     * A username conflict is detected BOTH from {@link UserDao#create}'s case-insensitive
+     * app-precheck ({@code AlreadyExistingUsername}) AND from the DB-level active unique index
+     * ({@code IDX_USER_USERNAME_ACTIVE}) — the latter is the race backstop the app-precheck cannot
+     * cover (see {@link #isUsernameConflict}).
      */
-    private User provisionUserFreshTx(String stem, String userEmail, String subject, String issuer) {
+    private User provisionUserFreshTx(String stem, String verbatimUsername, String userEmail,
+                                      String subject, String issuer) {
+        // Verbatim attempt (opt-in) FIRST, if a candidate survived sanitization.
+        if (verbatimUsername != null) {
+            try {
+                return insertOidcUserFreshTx(verbatimUsername, userEmail, subject, issuer);
+            } catch (RuntimeException e) {
+                if (isOidcSubjectConflict(e)) {
+                    throw new ConstraintViolationRetry(e);
+                }
+                if (isUsernameConflict(e)) {
+                    // The verbatim name is taken (existing active user or a true-race second
+                    // insert). It is deterministic, so retrying it would collide forever — fall
+                    // through to the hash-suffix disambiguator below.
+                    log.warn("OIDC verbatim username collision on '{}', falling back to hash disambiguator",
+                            verbatimUsername);
+                } else {
+                    throw e;
+                }
+            }
+        }
+
         int hashLen = USERNAME_HASH_LEN;
         while (hashLen <= 64) {
             String username = deriveUsername(stem, issuer, subject, hashLen);
@@ -1087,27 +1178,7 @@ public class OidcResource extends BaseResource {
                 return null;
             }
             try {
-                final String finalUsername = username;
-                return runOnFreshTransaction(em -> {
-                    User user = new User();
-                    user.setRoleId(Constants.DEFAULT_USER_ROLE);
-                    user.setUsername(finalUsername);
-                    user.setEmail(userEmail);
-                    user.setOidcIssuer(issuer);
-                    user.setOidcSubject(subject);
-                    user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
-                            .orElse("1073741824")));
-                    user.setPassword(UUID.randomUUID().toString());
-                    user.setOnboarding(true);
-                    try {
-                        new UserDao().create(user, finalUsername);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                    log.info("Provisioned new OIDC user: {} (subject at DEBUG)", finalUsername);
-                    log.debug("Provisioned new OIDC user: {} (issuer={}, sub={})", finalUsername, issuer, subject);
-                    return user;
-                });
+                return insertOidcUserFreshTx(username, userEmail, subject, issuer);
             } catch (RuntimeException e) {
                 if (isOidcSubjectConflict(e)) {
                     throw new ConstraintViolationRetry(e);
@@ -1124,6 +1195,35 @@ public class OidcResource extends BaseResource {
         log.error("OIDC provisioning exhausted username disambiguation (subject at DEBUG)");
         log.debug("OIDC provisioning exhausted username disambiguation for sub={}", subject);
         return null;
+    }
+
+    /**
+     * Inserts one OIDC user with the given username on a fresh committed transaction. Any
+     * persistence failure (unique-index violation on {@code IDX_USER_OIDC} or
+     * {@code IDX_USER_USERNAME_ACTIVE}, or the app-precheck) surfaces as a {@link RuntimeException}
+     * the caller classifies via {@link #isOidcSubjectConflict}/{@link #isUsernameConflict}.
+     */
+    private User insertOidcUserFreshTx(String username, String userEmail, String subject, String issuer) {
+        return runOnFreshTransaction(em -> {
+            User user = new User();
+            user.setRoleId(Constants.DEFAULT_USER_ROLE);
+            user.setUsername(username);
+            user.setEmail(userEmail);
+            user.setOidcIssuer(issuer);
+            user.setOidcSubject(subject);
+            user.setStorageQuota(Long.parseLong(ofNullable(System.getenv(Constants.GLOBAL_QUOTA_ENV))
+                    .orElse("1073741824")));
+            user.setPassword(UUID.randomUUID().toString());
+            user.setOnboarding(true);
+            try {
+                new UserDao().create(user, username);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            log.info("Provisioned new OIDC user: {} (subject at DEBUG)", username);
+            log.debug("Provisioned new OIDC user: {} (issuer={}, sub={})", username, issuer, subject);
+            return user;
+        });
     }
 
     private User readOidcUserFreshTx(String issuer, String subject) {
@@ -1149,10 +1249,20 @@ public class OidcResource extends BaseResource {
         return false;
     }
 
-    /** True when the throwable chain is the username-unicity precheck from {@link UserDao#create}. */
+    /**
+     * True when the throwable chain indicates a username collision — from EITHER the
+     * case-insensitive app-precheck in {@link UserDao#create} ({@code AlreadyExistingUsername}) OR
+     * the DB-level active unique index {@code IDX_USER_USERNAME_ACTIVE} (dbupdate-050). The DB
+     * index is the race backstop the app-precheck cannot cover: two concurrent first logins whose
+     * prechecks both pass still contend at flush, and exactly one must be treated as a collision.
+     */
     private static boolean isUsernameConflict(Throwable t) {
         for (Throwable c = t; c != null; c = c.getCause()) {
-            if ("AlreadyExistingUsername".equals(c.getMessage())) {
+            String msg = c.getMessage();
+            if ("AlreadyExistingUsername".equals(msg)) {
+                return true;
+            }
+            if (msg != null && msg.toUpperCase().contains("IDX_USER_USERNAME_ACTIVE")) {
                 return true;
             }
         }
@@ -1198,7 +1308,7 @@ public class OidcResource extends BaseResource {
 
     /**
      * Validates OIDC configuration from a request snapshot. Returns an error message if invalid,
-     * null if OK. Memoized by the snapshot's hash of the twelve EFFECTIVE values: a repeat login on
+     * null if OK. Memoized by the snapshot's hash of the EFFECTIVE values: a repeat login on
      * the same config skips the work, but any config change (a DB override saved, a property
      * flipped) yields a new hash and forces a fresh validation on the NEXT login — no restart and
      * no invalidation hook. Because the whole request reads from ONE snapshot, the config validated

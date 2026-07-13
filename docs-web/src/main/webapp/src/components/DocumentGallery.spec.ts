@@ -184,4 +184,18 @@ describe('DocumentGallery — cards', () => {
     const wrapper = await mountGallery([])
     expect(wrapper.findAll('article.doc-card')).toHaveLength(0)
   })
+
+  it('emits cardContextMenu with the event + document on a right-click of the card (#50)', async () => {
+    const doc = makeDoc({ id: 'rc' })
+    const wrapper = await mountGallery([doc])
+    // Right-clicking anywhere on the card surfaces the quick-tag context menu; the
+    // component forwards the native event (so the parent can position the menu) and
+    // the document the menu should act on.
+    await wrapper.find('article.doc-card').trigger('contextmenu')
+    const emitted = wrapper.emitted('cardContextMenu')
+    expect(emitted).toBeTruthy()
+    const [event, emittedDoc] = (emitted as unknown[][])[0]
+    expect(event).toBeInstanceOf(Event)
+    expect(emittedDoc).toMatchObject({ id: 'rc' })
+  })
 })

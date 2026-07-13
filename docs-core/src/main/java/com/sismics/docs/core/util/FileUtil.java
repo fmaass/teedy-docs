@@ -316,13 +316,17 @@ public class FileUtil {
             return;
         }
         UserDao userDao = new UserDao();
+        // getById finds by primary key regardless of delete state, so a RETAINED soft-deleted uploader
+        // (the #55 ghost key-holder) is found here. The write goes through updateQuotaById, which — unlike
+        // updateQuota — does NOT filter on deleteDate and so never throws NoResultException for such a
+        // uploader. This makes BOTH clean_storage AND the retention purge (which also routes through here)
+        // safe: a quota reclaim can never throw AFTER destructive work has removed the bytes.
         User user = userDao.getById(userId);
         if (user == null) {
             return;
         }
         long current = user.getStorageCurrent() == null ? 0L : user.getStorageCurrent();
-        user.setStorageCurrent(Math.max(0L, current - bytes));
-        userDao.updateQuota(user);
+        userDao.updateQuotaById(userId, Math.max(0L, current - bytes));
     }
 
     /**

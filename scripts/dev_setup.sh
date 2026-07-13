@@ -1,8 +1,8 @@
 #!/bin/bash
 
 install_macos_dependencies() {
-  brew install openjdk@21
-  export JAVA_HOME="$(brew --prefix)/opt/openjdk@21"
+  brew install openjdk@25
+  export JAVA_HOME="$(brew --prefix)/opt/openjdk@25"
   brew install node
   brew install tesseract
   brew install ffmpeg
@@ -11,11 +11,11 @@ install_macos_dependencies() {
 
 install_ubuntu_debian_dependencies() {
   sudo apt update
-  sudo apt install -y openjdk-21-jdk nodejs npm tesseract-ocr ffmpeg mediainfo
+  sudo apt install -y openjdk-25-jdk nodejs npm tesseract-ocr ffmpeg mediainfo
 }
 
 install_fedora_dependencies() {
-  sudo dnf install -y java-21-openjdk-devel nodejs npm tesseract ffmpeg mediainfo
+  sudo dnf install -y java-25-openjdk-devel nodejs npm tesseract ffmpeg mediainfo
 }
 
 echo "Installing dependencies..."

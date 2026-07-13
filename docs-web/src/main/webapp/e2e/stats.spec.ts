@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { unique, login } from './helpers'
 
 // #40: admin-only global statistics dashboard. As admin, seed a document (so the totals and

@@ -2,8 +2,10 @@ package com.sismics.docs.rest.resource;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Sets;
+import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
+import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.*;
 import com.sismics.docs.core.dao.criteria.GroupCriteria;
 import com.sismics.docs.core.dao.criteria.UserCriteria;
@@ -534,22 +536,28 @@ public class UserResource extends BaseResource {
      * Deletes a user.
      *
      * @api {delete} /user/:username Delete a user
-     * @apiDescription All associated entities will be deleted as well.
+     * @apiDescription The departing user's documents are reassigned to the required target user
+     * (their content is preserved, decryption keeps using the departing user's retained key), then
+     * the departing user is soft-deleted along with their remaining associated entities.
      * @apiName DeleteUserUsername
      * @apiGroup User
      * @apiParam {String} username Username
+     * @apiParam {String} reassign_to_username Query parameter: username of the surviving user to reassign this user's documents to (required)
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or the user cannot be deleted
      * @apiError (client) UserNotFound The user does not exist
+     * @apiError (client) ValidationError The reassignment target is missing, inactive, or the departing user itself
      * @apiPermission admin
      * @apiVersion 1.5.0
      *
      * @param username Username
+     * @param reassignToUsername Username of the surviving user to reassign the departing user's documents to
      * @return Response
      */
     @DELETE
     @Path("{username: [a-zA-Z0-9_@.-]+}")
-    public Response delete(@PathParam("username") String username) {
+    public Response delete(@PathParam("username") String username,
+            @QueryParam("reassign_to_username") String reassignToUsername) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
@@ -566,7 +574,7 @@ public class UserResource extends BaseResource {
         if (user == null) {
             throw new ClientException("UserNotFound", "The user does not exist");
         }
-        
+
         // Ensure that the admin user is not deleted
         RoleBaseFunctionDao roleBaseFunctionDao = new RoleBaseFunctionDao();
         Set<String> baseFunctionSet = roleBaseFunctionDao.findByRoleId(Sets.newHashSet(user.getRoleId()));
@@ -574,19 +582,56 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "The admin user cannot be deleted");
         }
 
+        // Validate the reassignment target: it must be provided, resolve to an active (non-deleted)
+        // user, and be DISTINCT from the departing user. The departing user's documents are reassigned
+        // to it, so an absent/inactive/self target is rejected before any mutation.
+        reassignToUsername = ValidationUtil.validateLength(reassignToUsername, "reassign_to_username", 1, 50, false);
+        User reassignTarget = userDao.getActiveByUsername(reassignToUsername);
+        if (reassignTarget == null) {
+            throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
+        }
+        if (reassignTarget.getId().equals(user.getId())) {
+            throw new ClientException("ValidationError", "Cannot reassign a user's documents to the user being deleted");
+        }
+
         // Gracefully handle workflow references (never blocks): collect affected route models and
         // cancel active routes with an open step targeting this user.
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
         PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
-        // Find linked data
-        DocumentDao documentDao = new DocumentDao();
-        List<Document> documentList = documentDao.findByUserId(user.getId());
-        FileDao fileDao = new FileDao();
-        List<File> fileList = fileDao.findByUserId(user.getId());
+        // Re-validate the target under a row lock held to commit, closing the TOCTOU between the
+        // active-check above and the reassignment below: a concurrent deletion of the target must not
+        // leave documents owned by a now-soft-deleted user (which clean_storage would later purge). If
+        // the target was concurrently deleted, this returns null and the delete fails cleanly with no
+        // reassignment performed.
+        User lockedTarget = userDao.getActiveByIdForUpdate(reassignTarget.getId());
+        if (lockedTarget == null) {
+            throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
+        }
 
-        // Delete the user
-        userDao.delete(user.getUsername(), principal.getId());
+        // Reassign the departing user's ACTIVE documents (and the departing user's tags linked to them)
+        // to the target, then grant the target READ+WRITE access on each reassigned document. This must
+        // run BEFORE the user soft-delete and BEFORE the deletion events so the reassigned documents and
+        // their files are excluded from destruction.
+        Set<String> reassignedDocumentIds = new java.util.HashSet<>(
+                userDao.reassignOwnedDocuments(user.getId(), lockedTarget.getId()));
+        grantOwnershipAcls(reassignedDocumentIds, lockedTarget.getId());
+
+        // Find linked data, EXCLUDING the reassigned documents and their files: firing
+        // DocumentDeletedAsyncEvent would remove a now-live document from Lucene, and
+        // FileDeletedAsyncEvent would physically delete the (retained) encrypted bytes.
+        DocumentDao documentDao = new DocumentDao();
+        List<Document> documentList = documentDao.findByUserId(user.getId()).stream()
+                .filter(document -> !reassignedDocumentIds.contains(document.getId()))
+                .collect(Collectors.toList());
+        FileDao fileDao = new FileDao();
+        List<File> fileList = fileDao.findByUserId(user.getId()).stream()
+                .filter(file -> file.getDocumentId() == null || !reassignedDocumentIds.contains(file.getDocumentId()))
+                .collect(Collectors.toList());
+
+        // Delete the user, sparing the files that back the reassigned documents from the owner-scoped
+        // soft-delete inside UserDao.delete.
+        userDao.delete(user.getUsername(), principal.getId(), reassignedDocumentIds);
 
         sendDeletionEvents(documentList, fileList);
 
@@ -595,6 +640,38 @@ public class UserResource extends BaseResource {
                 .add("status", "ok");
         addRouteModelsAffected(response, affectedRouteModels);
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Grant the target user READ + WRITE USER ACLs on each reassigned document. Ownership
+     * (DOC_IDUSER_C) does NOT by itself grant access in Teedy — access is entirely ACL-driven — so a
+     * reassigned owner cannot open their new documents until these direct grants exist.
+     *
+     * <p>Idempotency is keyed on the existence of a DIRECT USER ACL row (via
+     * {@link AclDao#hasDirectUserAcl}), NOT on effective permission: {@code checkPermission} can return
+     * true through admin-bypass, tag inheritance, or a transient ROUTING ACL — none of which is a
+     * durable direct grant. Skipping creation on that basis would lock the new owner out the moment the
+     * transient/inherited access ends. So a direct READ and a direct WRITE row are created unless those
+     * exact rows already exist (a collaborator already directly shared the document keeps a single
+     * grant).</p>
+     *
+     * @param documentIds Reassigned document IDs
+     * @param targetUserId The surviving user that becomes the owner
+     */
+    private void grantOwnershipAcls(Set<String> documentIds, String targetUserId) {
+        AclDao aclDao = new AclDao();
+        for (String documentId : documentIds) {
+            for (PermType perm : new PermType[] { PermType.READ, PermType.WRITE }) {
+                if (!aclDao.hasDirectUserAcl(documentId, perm, targetUserId)) {
+                    Acl acl = new Acl();
+                    acl.setPerm(perm);
+                    acl.setType(AclType.USER);
+                    acl.setSourceId(documentId);
+                    acl.setTargetId(targetUserId);
+                    aclDao.create(acl, principal.getId());
+                }
+            }
+        }
     }
 
     /**

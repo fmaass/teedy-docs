@@ -1,4 +1,4 @@
-import { test, expect, type ConsoleMessage, type Request } from '@playwright/test'
+import { test, expect, type ConsoleMessage, type Request } from './fixtures'
 
 // /apidoc/ serves the vendored Swagger UI (swagger-ui-dist) + the build-time
 // static OpenAPI spec (issue #15). It is a REAL path (not the SPA hash router),

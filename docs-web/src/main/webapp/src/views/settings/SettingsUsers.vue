@@ -10,6 +10,8 @@ import Password from 'primevue/password'
 import Dialog from 'primevue/dialog'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import Select from 'primevue/select'
+import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { formatDate, formatStorage, BYTES_PER_GB } from '../../utils/formatters'
@@ -135,20 +137,42 @@ async function handleEdit() {
   }
 }
 
-function confirmDelete(user: UserListItem) {
-  confirmDanger({
-    message: t('ui.users.delete_confirm', { username: user.username }),
-    header: t('ui.users.delete_user'),
-    accept: async () => {
-      try {
-        await deleteUser(user.username)
-        queryClient.invalidateQueries({ queryKey: ['users'] })
-        toast.add({ severity: 'success', summary: t('ui.users.user_deleted'), life: 2000 })
-      } catch {
-        toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
-      }
-    },
-  })
+// Delete user dialog. Deleting a user reassigns all their documents to a required target
+// user (their content is preserved), so the admin must pick a surviving, distinct, active
+// user before the departing account is removed.
+const showDeleteDialog = ref(false)
+const deleteTarget = ref<UserListItem | null>(null)
+const reassignToUsername = ref<string | null>(null)
+const deleteLoading = ref(false)
+
+// Candidate reassignment targets: every active user except the one being deleted (a user
+// cannot be reassigned to itself, and the backend rejects it too).
+const reassignCandidates = computed(() =>
+  users.value.filter((u) => u.username !== deleteTarget.value?.username),
+)
+
+function openDeleteDialog(user: UserListItem) {
+  deleteTarget.value = user
+  reassignToUsername.value = null
+  showDeleteDialog.value = true
+}
+
+async function handleDelete() {
+  if (!deleteTarget.value || !reassignToUsername.value) {
+    toast.add({ severity: 'warn', summary: t('ui.users.reassign_required'), life: 2500 })
+    return
+  }
+  deleteLoading.value = true
+  try {
+    await deleteUser(deleteTarget.value.username, reassignToUsername.value)
+    queryClient.invalidateQueries({ queryKey: ['users'] })
+    showDeleteDialog.value = false
+    toast.add({ severity: 'success', summary: t('ui.users.user_deleted'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
+  } finally {
+    deleteLoading.value = false
+  }
 }
 
 // Disable or re-enable an account. Disabling is a soft, per-request block that
@@ -279,7 +303,7 @@ function canToggleDisabled(data: UserListItem): boolean {
               :aria-label="data.disabled ? t('ui.users.enable_user_btn') : t('ui.users.disable_user_btn')"
             />
             <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="t('edit')" :aria-label="t('edit')" />
-            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="confirmDelete(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
+            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="openDeleteDialog(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
           </span>
         </template>
       </Column>
@@ -336,6 +360,40 @@ function canToggleDisabled(data: UserListItem): boolean {
       <template #footer>
         <Button :label="t('cancel')" severity="secondary" text @click="showEditDialog = false" />
         <Button :label="t('save')" icon="pi pi-check" :loading="editLoading" @click="handleEdit" />
+      </template>
+    </Dialog>
+
+    <!-- Delete user dialog: reassign the departing user's documents to a required target -->
+    <Dialog v-model:visible="showDeleteDialog" :header="t('ui.users.delete_user')" :style="{ width: '440px' }" modal>
+      <div class="dialog-form">
+        <Message severity="warn" :closable="false" class="delete-warning">
+          {{ t('ui.users.delete_reassign_intro', { username: deleteTarget?.username }) }}
+        </Message>
+        <div class="form-field">
+          <label for="reassign-target">{{ t('ui.users.reassign_to') }} *</label>
+          <Select
+            v-model="reassignToUsername"
+            inputId="reassign-target"
+            :options="reassignCandidates"
+            optionLabel="username"
+            optionValue="username"
+            :placeholder="t('ui.users.reassign_placeholder')"
+            class="w-full"
+            filter
+          />
+          <small class="field-hint">{{ t('ui.users.reassign_hint') }}</small>
+        </div>
+      </div>
+      <template #footer>
+        <Button :label="t('cancel')" severity="secondary" text @click="showDeleteDialog = false" />
+        <Button
+          :label="t('delete')"
+          icon="pi pi-trash"
+          severity="danger"
+          :loading="deleteLoading"
+          :disabled="!reassignToUsername"
+          @click="handleDelete"
+        />
       </template>
     </Dialog>
   </div>
@@ -424,6 +482,10 @@ function canToggleDisabled(data: UserListItem): boolean {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--p-text-color);
+}
+
+.delete-warning {
+  margin-bottom: 1rem;
 }
 
 </style>

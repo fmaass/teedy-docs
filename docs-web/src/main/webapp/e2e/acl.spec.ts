@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { test, expect } from './fixtures'
+import { unique, createDocument, confirmDanger, deleteUser } from './helpers'
 
 // Document permissions (ACL) end to end via DocumentViewPermissions:
 //   1. Admin creates a second user (SettingsUsers).
@@ -64,12 +64,11 @@ test('grant READ on a document to a second user, see it listed, then revoke it',
         await confirmDanger(page)
       }
     }
-    // Cleanup the second user.
+    // Cleanup the second user (delete now reassigns their docs to a target — admin).
     await page.goto('/#/settings/users')
     const userRow = page.getByRole('row', { name: new RegExp(username) })
     if (await userRow.isVisible().catch(() => false)) {
-      await userRow.getByRole('button', { name: 'Delete', exact: true }).click()
-      await confirmDanger(page)
+      await deleteUser(page, username)
     }
   }
 })

@@ -8,14 +8,14 @@ ENV LC_ALL=C.UTF-8
 # OpenJDK path suffix; default keeps a plain `docker build` (e.g. compose) on amd64.
 # Note: the runtime launches `java` from PATH, so JAVA_HOME is informational only.
 ARG TARGETARCH=amd64
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}/
+ENV JAVA_HOME=/usr/lib/jvm/java-25-openjdk-${TARGETARCH}/
 ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 ENV JETTY_VERSION=12.0.21
 ENV JETTY_HOME=/opt/jetty
 
 RUN apt-get update && \
     apt-get -y -q --no-install-recommends install \
-    procps curl unzip wget tzdata openjdk-21-jre-headless \
+    procps curl unzip wget tzdata openjdk-25-jre-headless \
     ffmpeg \
     mediainfo \
     tesseract-ocr \

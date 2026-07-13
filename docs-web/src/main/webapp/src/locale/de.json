@@ -34,7 +34,7 @@
     "type": "Typ",
     "coverage": "Geltungsbereich",
     "rights": "Rechte",
-    "count": "{count} {count} gefunden",
+    "count": "{count} Dokumente gefunden",
     "search_help": {
       "title": "Suchhilfe",
       "contents_hint": "Die Suche durchsucht den gesamten Inhalt Ihrer Dokumente – einschließlich des per OCR aus PDFs und Bildern extrahierten Textes – nicht nur die Titel.",
@@ -118,8 +118,8 @@
       "folder": "IMAP-Ordner",
       "tag": "Folgendes Tag zu importierten Dokumenten hinzufügen",
       "test": "Konfiguration testen",
-      "last_sync": "Letzte Synchronisation: {data.date}, {data.count} {data} importiert",
-      "test_success": "Die Verbindung zum Posteingang war erfolgreich ({count} <strong>ungelesene</strong> {count})",
+      "last_sync": "Letzte Synchronisation: {date}, {count} Nachricht importiert",
+      "test_success": "Die Verbindung zum Posteingang war erfolgreich ({count} <strong>ungelesene</strong> Nachricht)",
       "test_fail": "Beim Verbinden mit dem Posteingang ist ein Fehler aufgetreten, bitte überprüfen Sie die Einstellungen",
       "saved": "IMAP-Konfiguration erfolgreich gespeichert",
       "autoTagsEnabled": "Automatisches Hinzufügen von Tags aus der mit # markierten Betreffzeile",
@@ -172,6 +172,16 @@
     "item_document": "Dokument",
     "context_add_tag": "Tag hinzufügen",
     "context_remove_tag": "Tag entfernen",
+    "tag_menu": {
+      "search": "Tags suchen…",
+      "all_assigned": "Alle Tags bereits hinzugefügt",
+      "add_named": "Tag {name} hinzufügen"
+    },
+    "quick_filter": {
+      "placeholder": "Geladene Ergebnisse filtern…",
+      "aria_label": "Geladene Ergebnisse nach Titel filtern",
+      "count": "{visible} von {total} angezeigt"
+    },
     "new_document": "Neues Dokument",
     "edit_document": "Dokument bearbeiten",
     "title_required": "Titel ist erforderlich",
@@ -400,6 +410,11 @@
       "username_taken": "Benutzername ist bereits vergeben",
       "delete_confirm": "Benutzer \"{username}\" löschen? Dies kann nicht rückgängig gemacht werden.",
       "delete_user": "Benutzer löschen",
+      "delete_reassign_intro": "Beim Löschen von \"{username}\" werden alle Dokumente dieses Benutzers einem anderen Benutzer zugewiesen. Die Dokumente und ihre Dateien bleiben erhalten. Dies kann nicht rückgängig gemacht werden.",
+      "reassign_to": "Dokumente zuweisen an",
+      "reassign_placeholder": "Benutzer auswählen",
+      "reassign_hint": "Der ausgewählte Benutzer wird Eigentümer der Dokumente des gelöschten Benutzers und erhält Lese-/Schreibzugriff darauf.",
+      "reassign_required": "Bitte einen Benutzer auswählen, dem die Dokumente zugewiesen werden",
       "edit_user": "{username} bearbeiten",
       "all_fields_required": "Alle Felder sind erforderlich",
       "new_password_hint": "leer lassen, um das aktuelle beizubehalten",
@@ -729,6 +744,9 @@
       "clean_storage": "Speicher bereinigen",
       "clean_storage_hint": "Dateien auf der Festplatte löschen, die zu keinem Dokument mehr gehören, und verwaiste Datenbankeinträge entfernen. Führen Sie dies aus, um nach unerwarteten Abstürzen oder manuellen Dateiänderungen Speicherplatz freizugeben.",
       "clean_storage_confirm": "Dadurch werden verwaiste Dateien dauerhaft von der Festplatte gelöscht und die Datenbank bereinigt. Dokumente und ihre Dateien sind davon nicht betroffen. Fortfahren?",
+      "clean_storage_summary": "Dadurch werden {count} Datei(en) dauerhaft gelöscht und etwa {size} freigegeben. Dokumente und ihre Dateien sind davon nicht betroffen. Fortfahren?",
+      "clean_storage_nothing": "Nichts zu bereinigen: Es wurden keine verwaisten Dateien oder Datenbankeinträge gefunden. Trotzdem ausführen?",
+      "clean_storage_preview_failed": "Vorschau der Speicherbereinigung fehlgeschlagen",
       "clean_storage_header": "Speicher bereinigen",
       "clean_storage_done": "Speicherbereinigung abgeschlossen",
       "clean_storage_failed": "Speicherbereinigung fehlgeschlagen",
@@ -831,6 +849,8 @@
       "userinfo_endpoint": "UserInfo-Endpunkt",
       "username_claim": "Benutzernamen-Claim",
       "email_claim": "E-Mail-Claim",
+      "username_verbatim": "Benutzernamen-Claim unverändert übernehmen",
+      "username_verbatim_hint": "Wenn aktiviert, behalten bereitgestellte OIDC-Benutzer ihren preferred_username unverändert (ohne eindeutigen Hash-Suffix). Ein späteres, anderes Konto mit demselben Namen wird automatisch eindeutig gemacht.",
       "from_property": "Derzeit über eine JVM-Eigenschaft gesetzt — beim Speichern wird eine Datenbank-Überschreibung angelegt.",
       "url_invalid": "Muss eine http(s)-URL sein.",
       "issuer_required": "Issuer-URL ist erforderlich.",
@@ -870,7 +890,34 @@
     },
     "nav": {
       "settings": "Einstellungen",
-      "administration": "Administration"
+      "personal": "Persönlich",
+      "administration": "Administration",
+      "group_access": "Zugriff & Benutzer",
+      "group_content": "Inhaltsmodell",
+      "group_system": "System"
+    },
+    "settings": {
+      "hub": {
+        "heading": "Einstellungen",
+        "intro": "Verwalten Sie Ihr Konto und konfigurieren Sie – als Administrator – die gesamte Teedy-Instanz.",
+        "desc": {
+          "account": "Ihr Profil, Passwort, Sprache, Zwei-Faktor-Authentifizierung und aktive Sitzungen.",
+          "apikeys": "Persönliche API-Schlüssel für Skripte und Integrationen von Drittanbietern.",
+          "users": "Benutzerkonten erstellen, bearbeiten, deaktivieren und löschen.",
+          "groups": "Benutzer in Gruppen für gemeinsame Berechtigungen organisieren.",
+          "ldap": "Benutzer gegen ein externes LDAP-Verzeichnis authentifizieren.",
+          "oidc": "Anmeldung über einen externen OpenID-Connect-Identitätsanbieter.",
+          "metadata": "Benutzerdefinierte Metadatenfelder für Dokumente definieren.",
+          "vocabulary": "Die von Dokumentfeldern genutzten kontrollierten Vokabulare pflegen.",
+          "tag_rules": "Tags automatisch auf Dokumente anwenden, die einer Regel entsprechen.",
+          "workflow": "Mehrstufige Prüf- und Freigabe-Arbeitsabläufe gestalten.",
+          "config": "Instanzweite Einstellungen: Sprache, Uploads, OCR, E-Mail und mehr.",
+          "inbox": "Dokumente automatisch aus einem IMAP-Postfach importieren.",
+          "webhooks": "Externe Dienste benachrichtigen, wenn sich Dokumente ändern.",
+          "stats": "Nutzungsstatistiken und Speicherverbrauch pro Benutzer.",
+          "monitoring": "Server-Protokoll und Laufzeitzustand einsehen."
+        }
+      }
     },
     "date": "Datum",
     "user": "Benutzer",
@@ -893,10 +940,12 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "favorites": "Markiere Dokumente mit einem Stern als Favoriten und filtere die Dokumentliste anschließend auf nur deine Favoriten.",
-        "gallery": "Schalte die Dokumentliste in eine Galerieansicht um, die Dokumente als Vorschaukacheln anordnet.",
-        "rich_descriptions": "Verfasse Dokumentbeschreibungen in einem Rich-Text-Editor mit Formatierungsleiste für Überschriften, Listen, Links und mehr.",
-        "admin_stats": "Ein neues Administrations-Statistik-Dashboard fasst Dokumente, Speicher, Benutzer und Aktivität auf einen Blick zusammen."
+        "fuzzy_search": "Die Dokumentsuche findet jetzt auch Teilwörter und verzeiht kleine Tippfehler, sodass du Dokumente selbst dann findest, wenn ein Begriff nur teilweise stimmt.",
+        "reassign_documents": "Beim Löschen eines Benutzers kannst du dessen Dokumente einem anderen Benutzer übertragen, statt sie in den Papierkorb zu verschieben.",
+        "settings_home": "Die Einstellungen öffnen sich auf einer Übersichtsseite mit gruppierter Navigation, statt direkt in dein Konto zu springen.",
+        "oidc_verbatim_username": "Administratoren können optional den OIDC-preferred_username unverändert als Kontonamen übernehmen.",
+        "custom_branding": "Gib jeder Instanz einen eigenen Anwendungstitel und ein eigenes Favicon.",
+        "page_size_gallery_tags": "Lege fest, wie viele Dokumente pro Seite angezeigt werden, und bearbeite die Tags eines Dokuments direkt über ein Rechtsklick-Menü in der Galerie."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",
@@ -917,7 +966,9 @@
     "view": {
       "list": "Liste",
       "gallery": "Galerie",
-      "toggle_label": "Dokumentansicht"
+      "toggle_label": "Dokumentansicht",
+      "per_page": "{count} / Seite",
+      "per_page_label": "Einträge pro Seite"
     },
     "facets_overflow": "…und {count} weitere",
     "mode_and": "UND",

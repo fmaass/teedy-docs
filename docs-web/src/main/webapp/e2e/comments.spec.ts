@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 import { unique, createDocument, confirmDanger } from './helpers'
 
 // Add and delete a comment on a document (the Comments tab of the document view).

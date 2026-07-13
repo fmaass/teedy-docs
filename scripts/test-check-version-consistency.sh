@@ -56,6 +56,16 @@ root="$tmp_dir/agree"
 write_fixture "$root" "3.0.0" "3.0.0"
 expect "tag==pom==package all 3.0.0 passes" 0 "$root" "v3.0.0"
 
+# Pre-release tag whose base version matches pom/package -> pass (rc suffix stripped).
+root="$tmp_dir/rc-agree"
+write_fixture "$root" "3.6.0" "3.6.0"
+expect "rc tag v3.6.0-rc.1 matches pom/package 3.6.0" 0 "$root" "v3.6.0-rc.1"
+
+# A pre-release whose BASE version disagrees still fails (suffix strip is not a bypass).
+root="$tmp_dir/rc-mismatch"
+write_fixture "$root" "3.6.0" "3.6.0"
+expect "rc tag v3.6.1-rc.1 mismatches pom/package 3.6.0" 1 "$root" "v3.6.1-rc.1"
+
 # pom disagrees with package -> fail.
 root="$tmp_dir/pom-mismatch"
 write_fixture "$root" "3.0.1" "3.0.0"

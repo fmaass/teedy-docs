@@ -6,8 +6,7 @@ import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
 import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
-import ContextMenu from 'primevue/contextmenu'
-import type { MenuItem } from 'primevue/menuitem'
+import TagQuickMenu from '../../components/TagQuickMenu.vue'
 import type { DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
@@ -18,6 +17,9 @@ import SavedFilters from '../../components/SavedFilters.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import ToggleButton from 'primevue/togglebutton'
 import SelectButton from 'primevue/selectbutton'
+import InputText from 'primevue/inputtext'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
 import Paginator from 'primevue/paginator'
 import type { PageState } from 'primevue/paginator'
 import DocumentTable from '../../components/DocumentTable.vue'
@@ -32,6 +34,8 @@ import {
   type BulkResult,
 } from '../../utils/bulkOps'
 import { useClampedOffset } from '../../composables/useClampedOffset'
+import { clampPageSize, DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../../utils/pagination'
+import Select from 'primevue/select'
 import { queryKeys, tagCountKeys } from '../../api/queryKeys'
 
 const { t } = useI18n()
@@ -45,7 +49,26 @@ const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
 
-const PAGE_SIZE = 20
+// Items-per-page is user-selectable (#52) and persisted to localStorage exactly like
+// the view mode below. The stored value is clamped to an allowed option on load so a
+// stale/tampered value can never drive an out-of-range page size. Changing it resets
+// the offset to page 1 (a smaller page would otherwise strand the offset past the end).
+const PAGE_SIZE_KEY = 'teedy_document_page_size'
+const pageSize = ref<number>(
+  clampPageSize(Number(localStorage.getItem(PAGE_SIZE_KEY) ?? DEFAULT_PAGE_SIZE)),
+)
+watch(pageSize, (v) => {
+  localStorage.setItem(PAGE_SIZE_KEY, String(v))
+  pageOffset.value = 0
+})
+
+const pageSizeOptions = PAGE_SIZE_OPTIONS.map((value) => ({ label: String(value), value }))
+
+function onPageSizeChange(value: number | null) {
+  if (value == null) return
+  pageSize.value = clampPageSize(value)
+}
+
 const pageOffset = ref(0)
 const sortField = ref<string>('create_date')
 const sortOrder = ref<number>(-1)
@@ -162,12 +185,13 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
     workflowMe: workflowMe.value,
     favoritesMe: favoritesMe.value,
     offset: pageOffset.value,
+    limit: pageSize.value,
     sortField: sortField.value,
     sortOrder: sortOrder.value,
   }]),
   queryFn: () =>
     listDocuments({
-      limit: PAGE_SIZE,
+      limit: pageSize.value,
       offset: pageOffset.value,
       sort_column: SORT_FIELD_MAP[sortField.value] ?? 3,
       asc: sortOrder.value === 1,
@@ -182,10 +206,30 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
 
+// --- Client-side quick filter (#53) ---
+//
+// A purely LOCAL, instant filter over the already-loaded page of results — it never
+// hits the server and does not touch pagination or the server-side search. It narrows
+// the visible rows by a case-insensitive substring match on the document title, so a
+// user staring at a loaded page can zero in on a row without a round-trip. Cleared
+// automatically whenever a new server result set arrives (a new page / search) so a
+// stale local filter never hides a fresh page.
+const quickFilter = ref('')
+
+const visibleDocuments = computed(() => {
+  const needle = quickFilter.value.trim().toLowerCase()
+  if (!needle) return documents.value
+  return documents.value.filter((d) => (d.title ?? '').toLowerCase().includes(needle))
+})
+
+watch(documents, () => {
+  quickFilter.value = ''
+})
+
 // Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
 // the server returns zero rows while total is still positive — a false-empty page
 // with no paginator to escape. Clamp back to the last valid page when that happens.
-useClampedOffset(documentsData, isLoading, pageOffset, PAGE_SIZE)
+useClampedOffset(documentsData, isLoading, pageOffset, pageSize)
 
 // The single hoisted Paginator (rendered by this view) drives pagination for BOTH
 // the table and the gallery — the tables no longer own a paginator. PageState.first
@@ -200,7 +244,12 @@ function onSort(event: DataTableSortEvent) {
   pageOffset.value = 0
 }
 
-// --- Quick tagging context menu ---
+// --- Quick tagging context menu (#71) ---
+//
+// A compact popover (TagQuickMenu): a searchable tag select + top-5 most-used
+// quick-add chips for ADD, and the doc's assigned tags as removable chips for
+// REMOVE. Replaces the former full-tag-tree ContextMenu, which overflowed and got
+// cut off. Add/remove reuse the shared useDocumentTags mutations.
 
 const contextMenuDoc = ref<DocumentListItem | null>(null)
 const contextMenu = ref()
@@ -216,14 +265,12 @@ async function quickAddTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
   await addTag(doc.id, tagId)
-  contextMenu.value?.hide()
 }
 
 async function quickRemoveTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
   await removeTag(doc.id, tagId)
-  contextMenu.value?.hide()
 }
 
 // --- Slide-over panel ---
@@ -345,32 +392,6 @@ onBeforeUnmount(() => {
     clearTimeout(pendingSingleClick)
     pendingSingleClick = null
   }
-})
-
-const contextMenuItems = computed(() => {
-  const doc = contextMenuDoc.value
-  if (!doc) return [] as MenuItem[]
-  const currentTagIds = new Set((doc.tags ?? []).map((t) => t.id))
-  const addItems: MenuItem[] = tf.allTags
-    .filter((t) => !currentTagIds.has(t.id))
-    .map((tag) => ({
-      label: tag.name,
-      icon: 'pi pi-plus',
-      command: () => quickAddTag(tag.id),
-    }))
-  const removeItems: MenuItem[] = (doc.tags ?? []).map((tag) => ({
-    label: tag.name,
-    icon: 'pi pi-minus',
-    command: () => quickRemoveTag(tag.id),
-  }))
-
-  const items: MenuItem[] = []
-  if (addItems.length) items.push({ label: t('ui.context_add_tag'), items: addItems })
-  if (removeItems.length) {
-    if (items.length) items.push({ separator: true })
-    items.push({ label: t('ui.context_remove_tag'), items: removeItems })
-  }
-  return items
 })
 
 // --- Bulk operations ---
@@ -517,6 +538,19 @@ function bulkDelete() {
             <span class="view-mode-label">{{ option.label }}</span>
           </template>
         </SelectButton>
+        <Select
+          :model-value="pageSize"
+          :options="pageSizeOptions"
+          optionLabel="label"
+          optionValue="value"
+          :aria-label="t('ui.view.per_page_label')"
+          class="per-page-select"
+          @update:model-value="onPageSizeChange"
+        >
+          <template #value="{ value }">
+            {{ t('ui.view.per_page', { count: value }) }}
+          </template>
+        </Select>
       </div>
     </div>
 
@@ -537,14 +571,31 @@ function bulkDelete() {
 
     <!-- Document list / gallery — both render the SAME paginated result set. -->
     <div class="doc-area">
+      <!-- Client-side quick filter: instantly narrows the loaded page by title (#53). -->
+      <div v-if="documents.length" class="quick-filter-row">
+        <IconField>
+          <InputIcon class="pi pi-filter" />
+          <InputText
+            v-model="quickFilter"
+            :placeholder="t('ui.quick_filter.placeholder')"
+            :aria-label="t('ui.quick_filter.aria_label')"
+            class="quick-filter-input"
+            size="small"
+          />
+        </IconField>
+        <span v-if="quickFilter.trim()" class="quick-filter-count">
+          {{ t('ui.quick_filter.count', { visible: visibleDocuments.length, total: documents.length }) }}
+        </span>
+      </div>
+
       <template v-if="documents.length || isLoading">
         <DocumentTable
           v-if="viewMode === 'list'"
           v-model:selection="selectedDocs"
           selectable
-          :documents="documents"
+          :documents="visibleDocuments"
           :totalRecords="totalCount"
-          :rows="PAGE_SIZE"
+          :rows="pageSize"
           :first="pageOffset"
           :loading="isLoading"
           :sortField="sortField"
@@ -557,17 +608,18 @@ function bulkDelete() {
 
         <DocumentGallery
           v-else
-          :documents="documents"
+          :documents="visibleDocuments"
           :loading="isLoading"
           @card-click="openDocument"
           @card-dblclick="openDocumentFull"
+          @card-context-menu="onDocContextMenu"
         />
 
         <!-- One hoisted Paginator serves BOTH modes (the tables no longer own one). -->
         <Paginator
-          v-if="totalCount > PAGE_SIZE"
+          v-if="totalCount > pageSize"
           :first="pageOffset"
-          :rows="PAGE_SIZE"
+          :rows="pageSize"
           :totalRecords="totalCount"
           class="doc-paginator"
           @page="onPage"
@@ -585,7 +637,14 @@ function bulkDelete() {
       />
     </div>
 
-    <ContextMenu ref="contextMenu" :model="contextMenuItems" />
+    <TagQuickMenu
+      ref="contextMenu"
+      :document="contextMenuDoc"
+      :all-tags="tf.allTags"
+      :tag-counts="tf.tagCounts"
+      @add-tag="quickAddTag"
+      @remove-tag="quickRemoveTag"
+    />
 
     <DocumentSlideOver
       v-model:visible="slideOverOpen"
@@ -629,6 +688,25 @@ function bulkDelete() {
 .bulk-bar-wrap {
   padding: 0 1.5rem;
   flex-shrink: 0;
+}
+
+/* --- Client-side quick filter --- */
+
+.quick-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.quick-filter-input {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.quick-filter-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 
 /* --- Document area --- */

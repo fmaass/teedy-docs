@@ -20,6 +20,7 @@ import {
   saveInboxConfig,
   testInbox,
   cleanStorage,
+  cleanStorageDryRun,
   saveFooterLinks,
 } from './app'
 
@@ -223,10 +224,37 @@ describe('clean storage api', () => {
     clientMock.post.mockReset().mockResolvedValue({ data: {} })
   })
 
-  it('cleanStorage POSTs /app/batch/clean_storage with no body', async () => {
-    await cleanStorage()
+  it('cleanStorage POSTs /app/batch/clean_storage and unwraps the result', async () => {
+    clientMock.post.mockResolvedValueOnce({ data: { status: 'ok', file_count: 3, bytes: 4096 } })
+    const result = await cleanStorage()
     expect(clientMock.post).toHaveBeenCalledWith('/app/batch/clean_storage')
     expect(clientMock.post.mock.calls[0].length).toBe(1)
+    expect(result).toEqual({ status: 'ok', file_count: 3, bytes: 4096 })
+  })
+
+  it('cleanStorageDryRun GETs the dry-run endpoint with pagination and unwraps data', async () => {
+    const payload = {
+      total: 2,
+      reclaimed_bytes: 8192,
+      primary_pointer_cleared_count: 1,
+      limit: 100,
+      offset: 0,
+      files: [{ id: 'f1', document_id: 'd1', document_title: 'Doc', size: 4096, reason: 'soft_deleted' }],
+    }
+    clientMock.get.mockResolvedValueOnce({ data: payload })
+    const result = await cleanStorageDryRun()
+    expect(clientMock.get).toHaveBeenCalledWith('/app/batch/clean_storage/dry_run', {
+      params: { limit: 100, offset: 0 },
+    })
+    expect(result).toEqual(payload)
+  })
+
+  it('cleanStorageDryRun forwards custom limit/offset', async () => {
+    clientMock.get.mockResolvedValueOnce({ data: { total: 0, reclaimed_bytes: 0, primary_pointer_cleared_count: 0, limit: 50, offset: 10, files: [] } })
+    await cleanStorageDryRun(50, 10)
+    expect(clientMock.get).toHaveBeenCalledWith('/app/batch/clean_storage/dry_run', {
+      params: { limit: 50, offset: 10 },
+    })
   })
 })
 

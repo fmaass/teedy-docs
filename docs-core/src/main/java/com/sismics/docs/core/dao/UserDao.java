@@ -15,10 +15,13 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
+import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.Constants;
+import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.criteria.UserCriteria;
 import com.sismics.docs.core.dao.dto.UserDto;
+import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
@@ -97,11 +100,44 @@ public class UserDao {
         user.setPrivateKey(EncryptionUtil.generatePrivateKey());
         user.setStorageCurrent(0L);
         em.persist(user);
-        
+
+        // Force the INSERT now so the active-username unique index (IDX_USER_USERNAME_ACTIVE,
+        // dbupdate-050) is checked HERE — inside create(), synchronously — rather than surfacing
+        // later as an unhandled PersistenceException at request-transaction commit (a 500). The
+        // case-insensitive precheck above already rejects the common case; this flush is the race
+        // backstop that closes the window between the precheck SELECT and the commit. A violation
+        // of THIS index is translated to the same "AlreadyExistingUsername" the precheck throws, so
+        // every creation path (local, LDAP, OIDC) gets one clean signal. Any OTHER constraint
+        // violation (e.g. IDX_USER_OIDC on the OIDC path) is left to propagate unchanged so its own
+        // handler still sees it.
+        try {
+            em.flush();
+        } catch (jakarta.persistence.PersistenceException e) {
+            if (isActiveUsernameConflict(e)) {
+                throw new Exception("AlreadyExistingUsername", e);
+            }
+            throw e;
+        }
+
         // Create audit log
         AuditLogUtil.create(user, AuditLogType.CREATE, userId);
-        
+
         return user.getId();
+    }
+
+    /**
+     * True when the throwable chain is a violation of the active-username unique index
+     * {@code IDX_USER_USERNAME_ACTIVE} (dbupdate-050). Detected by index name so it is dialect
+     * agnostic (H2 names it in the message; PostgreSQL reports the lowercase constraint name).
+     */
+    private static boolean isActiveUsernameConflict(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            String msg = c.getMessage();
+            if (msg != null && msg.toUpperCase().contains("IDX_USER_USERNAME_ACTIVE")) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /**
@@ -139,7 +175,7 @@ public class UserDao {
      */
     public void updateQuota(User user) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        
+
         // Get the user
         Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
         q.setParameter("id", user.getId());
@@ -147,6 +183,28 @@ public class UserDao {
 
         // Update the user
         userDb.setStorageCurrent(user.getStorageCurrent());
+    }
+
+    /**
+     * Sets a user's current storage usage by ID, REGARDLESS of the user's active state, and is a no-op
+     * if the user row does not exist. Unlike {@link #updateQuota(User)} — which filters on
+     * {@code deleteDate is null} and throws {@code NoResultException} for a soft-deleted user — this is
+     * safe to call for a RETAINED soft-deleted uploader (the #55 ghost key-holder, kept because a
+     * document was reassigned away from it). A storage-quota reclaim on such a uploader must never throw
+     * after destructive work; it credits the (still-present) row or skips cleanly if the row is gone.
+     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimUserQuota} so BOTH clean_storage and the
+     * retention purge are safe against a ghost uploader.
+     *
+     * @param userId User ID (any delete state)
+     * @param storageCurrent New storage_current value
+     */
+    public void updateQuotaById(String userId, long storageCurrent) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        User userDb = em.find(User.class, userId);
+        if (userDb == null) {
+            return;
+        }
+        userDb.setStorageCurrent(storageCurrent);
     }
     
     /**
@@ -229,8 +287,34 @@ public class UserDao {
     }
     
     /**
+     * Gets an active (non-deleted) user by ID, locking its row FOR UPDATE for the remainder of the
+     * caller's transaction (dialect-portable {@code PESSIMISTIC_WRITE} — H2 and Postgres both emit
+     * SELECT ... FOR UPDATE). This exists to close the reassignment-target TOCTOU: the delete-with-
+     * reassignment flow validates the target active, then reassigns documents to it. Without a lock a
+     * concurrent deletion of the target could commit in between, leaving documents owned by a
+     * soft-deleted user (which clean_storage would later purge). Locking + re-checking active here
+     * means a concurrent target-deletion either has not committed (this blocks until it does) or has
+     * committed (the row is now soft-deleted and this returns null), so the caller fails cleanly rather
+     * than stranding documents on a dead owner.
+     *
+     * @param id User ID
+     * @return The locked active user, or null if it does not exist or is soft-deleted
+     */
+    public User getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
      * Gets an active user by its username.
-     * 
+     *
      * @param username User's username
      * @return User
      */
@@ -323,14 +407,114 @@ public class UserDao {
     }
 
     /**
+     * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves the
+     * departing user's tags that are linked to those documents to the target so no tag link is lost.
+     *
+     * <p>Only {@code DOC_IDUSER_C} (document ownership) is reassigned — NEVER a file's
+     * {@code FIL_IDUSER_C}. Each file is encrypted with its uploader's key and is never re-encrypted,
+     * so decryption must keep resolving through the original (soft-deleted, retained) uploader
+     * (see {@code FileResource} decryption via {@code file.getUserId()}). Reassigning the file's
+     * uploader column would break decryption of already-stored bytes.</p>
+     *
+     * <p>Ownership does NOT by itself grant the target access (access is ACL-driven): the caller must
+     * create READ+WRITE ACLs for the target on each returned document.</p>
+     *
+     * @param departingUserId The user being deleted, whose documents are reassigned away
+     * @param targetUserId The surviving user who becomes the new owner
+     * @return The IDs of the documents that were reassigned (may be empty, never null)
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> reassignOwnedDocuments(String departingUserId, String targetUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        // Snapshot the departing user's ACTIVE documents up front. Every subsequent mutation is scoped
+        // to EXACTLY this snapshot (never a broad `where userId = departing`), so the set returned to the
+        // caller — used to spare files and exclude deletion events — cannot diverge from the set actually
+        // reassigned. A document created concurrently after this snapshot is not in it, is not reassigned,
+        // and follows the normal owner-scoped trash path (its file soft-deleted with the user): consistent,
+        // no orphan, no file destroyed out from under a reassigned document.
+        Query q = em.createQuery("select d.id from Document d where d.userId = :departingUserId and d.deleteDate is null");
+        q.setParameter("departingUserId", departingUserId);
+        List<String> reassignedDocumentIds = q.getResultList();
+        if (reassignedDocumentIds.isEmpty()) {
+            return reassignedDocumentIds;
+        }
+
+        // Capture the departing user's tags that are linked (via a live document-tag row) to the
+        // snapshotted documents, BEFORE moving ownership (once moved they are indistinguishable from the
+        // target's own tags). These are moved to the target so clean_storage's orphan-tag purge — keyed
+        // on the tag owner being soft-deleted — does not soft- then hard-delete them and cascade the loss
+        // of the surviving reassigned document's tag links (the #54-class FK / tag-loss failure). Only
+        // tags OWNED by the departing user are moved; a shared tag owned by someone else is untouched.
+        Query tagSel = em.createQuery("select distinct t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null and t.id in ("
+                + " select dt.tagId from DocumentTag dt where dt.documentId in :docIds and dt.deleteDate is null)");
+        tagSel.setParameter("departingUserId", departingUserId);
+        tagSel.setParameter("docIds", reassignedDocumentIds);
+        List<String> reassignedTagIds = tagSel.getResultList();
+
+        // Move those tags' ownership to the target.
+        if (!reassignedTagIds.isEmpty()) {
+            Query tagUpd = em.createQuery("update Tag t set t.userId = :targetUserId where t.id in :tagIds and t.deleteDate is null");
+            tagUpd.setParameter("targetUserId", targetUserId);
+            tagUpd.setParameter("tagIds", reassignedTagIds);
+            tagUpd.executeUpdate();
+
+            // A tag's access is ACL-driven (its owner gets direct READ+WRITE USER ACLs at creation). The
+            // departing user's tag ACLs are soft-deleted with the user (delete() clears all ACLs targeting
+            // the departing user), so without this the target would OWN the moved tag but be unable to
+            // read/use/delete it. Grant the target the same direct READ+WRITE USER ACLs on each moved tag,
+            // idempotently (skip a permission the target already has a direct USER ACL row for).
+            AclDao aclDao = new AclDao();
+            for (String tagId : reassignedTagIds) {
+                for (PermType perm : new PermType[] { PermType.READ, PermType.WRITE }) {
+                    if (!aclDao.hasDirectUserAcl(tagId, perm, targetUserId)) {
+                        Acl acl = new Acl();
+                        acl.setPerm(perm);
+                        acl.setType(AclType.USER);
+                        acl.setSourceId(tagId);
+                        acl.setTargetId(targetUserId);
+                        aclDao.create(acl, targetUserId);
+                    }
+                }
+            }
+        }
+
+        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot.
+        Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
+        docUpd.setParameter("targetUserId", targetUserId);
+        docUpd.setParameter("docIds", reassignedDocumentIds);
+        docUpd.executeUpdate();
+
+        return reassignedDocumentIds;
+    }
+
+    /**
      * Deletes a user.
-     * 
+     *
      * @param username User's username
      * @param userId User ID
      */
     public void delete(String username, String userId) {
+        delete(username, userId, java.util.Collections.emptySet());
+    }
+
+    /**
+     * Deletes a user, optionally sparing the files that back documents reassigned to another user.
+     *
+     * <p>When a departing user's documents were reassigned to a surviving target (see
+     * {@link #reassignOwnedDocuments(String, String)}), the files backing those documents must NOT be
+     * soft-deleted here: they keep {@code FIL_IDUSER_C = departing} (the encryption key holder) and
+     * stay live so the target can still open/decrypt them. Their document ids are supplied in
+     * {@code reassignedDocumentIds} and excluded from the owner-scoped file soft-delete below.</p>
+     *
+     * @param username User's username
+     * @param userId User ID
+     * @param reassignedDocumentIds IDs of documents reassigned to a surviving user; their files are
+     *        spared from the owner-scoped soft-delete (may be empty, never null)
+     */
+    public void delete(String username, String userId, java.util.Set<String> reassignedDocumentIds) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-            
+
         // Get the user
         Query q = em.createQuery("select u from User u where u.username = :username and u.deleteDate is null");
         q.setParameter("username", username);
@@ -391,10 +575,23 @@ public class UserDao {
         q.setParameter("dateNow", dateNow);
         q.executeUpdate();
 
-        q = em.createQuery("update File f set f.deleteDate = :dateNow where f.userId = :userId and f.deleteDate is null");
-        q.setParameter("userId", userDb.getId());
-        q.setParameter("dateNow", dateNow);
-        q.executeUpdate();
+        // Soft-delete the departing user's OWN files, EXCEPT those backing a document reassigned to a
+        // surviving user: those files stay live (with FIL_IDUSER_C = departing, the retained key
+        // holder) so the target can still open/decrypt the reassigned document's content. A file with
+        // a null documentId (never attached to a document) is always eligible for soft-delete.
+        if (reassignedDocumentIds == null || reassignedDocumentIds.isEmpty()) {
+            q = em.createQuery("update File f set f.deleteDate = :dateNow where f.userId = :userId and f.deleteDate is null");
+            q.setParameter("userId", userDb.getId());
+            q.setParameter("dateNow", dateNow);
+            q.executeUpdate();
+        } else {
+            q = em.createQuery("update File f set f.deleteDate = :dateNow where f.userId = :userId and f.deleteDate is null"
+                    + " and (f.documentId is null or f.documentId not in :reassignedDocumentIds)");
+            q.setParameter("userId", userDb.getId());
+            q.setParameter("dateNow", dateNow);
+            q.setParameter("reassignedDocumentIds", reassignedDocumentIds);
+            q.executeUpdate();
+        }
         
         q = em.createQuery("update Acl a set a.deleteDate = :dateNow where a.targetId = :userId and a.deleteDate is null");
         q.setParameter("userId", userDb.getId());

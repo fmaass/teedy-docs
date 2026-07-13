@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -11,7 +11,9 @@ import {
   type DocumentListItem,
 } from '../../api/document'
 import { queryKeys } from '../../api/queryKeys'
-import PdfViewer from '../../components/PdfViewer.vue'
+// pdf.js (~pulled in by PdfViewer) is heavy and only needed when a PDF file is
+// actually displayed, so the viewer is loaded on demand into its own chunk.
+const PdfViewer = defineAsyncComponent(() => import('../../components/PdfViewer.vue'))
 import EmptyState from '../../components/EmptyState.vue'
 import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
@@ -561,6 +563,10 @@ function confirmDelete(file: { id: string; name: string }) {
   color: var(--p-text-color);
   line-height: 1.6;
 }
+/* Read-only description prose: sanitized to plain <ol>/<ul>; pin native markers
+   and indent so lists show numbers / bullets exactly once, never clipped (#70). */
+.doc-description :deep(ol) { list-style: decimal outside; padding-left: 1.5em; }
+.doc-description :deep(ul) { list-style: disc outside; padding-left: 1.5em; }
 
 .doc-metadata {
   margin: 0 0 1.5rem;

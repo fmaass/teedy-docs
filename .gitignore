@@ -35,6 +35,7 @@ teedy-docs-specification.pdf
 
 # Per-worktree isolated Maven repo (orchestrated multi-agent builds)
 .m2-local/
+.m2repo/
 .teedy-design-audit/
 
 # Browser-harness e2e artifacts (scripts/e2e-browser-harness.sh)

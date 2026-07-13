@@ -605,6 +605,38 @@
         }
       }
     },
+    "/app/batch/clean_storage/dry_run": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Preview the file and DB storage cleanup (dry run, side-effect-free)",
+        "operationId": "get_app_batch_clean_storage_dry_run",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/app/batch/clean_storage": {
       "post": {
         "tags": [
@@ -748,6 +780,9 @@
                     "type": "string"
                   },
                   "email_claim": {
+                    "type": "string"
+                  },
+                  "username_verbatim": {
                     "type": "string"
                   }
                 }
@@ -3366,6 +3401,15 @@
             "name": "username",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reassign_to_username",
+            "in": "query",
+            "required": true,
+            "description": "Username of the surviving user to reassign this user's documents to",
             "schema": {
               "type": "string"
             }

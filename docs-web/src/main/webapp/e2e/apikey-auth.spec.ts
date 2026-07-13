@@ -1,4 +1,4 @@
-import { test, expect, request as playwrightRequest } from '@playwright/test'
+import { test, expect, request as playwrightRequest } from './fixtures'
 import { unique } from './helpers'
 
 // API-key bearer authentication, end to end against the REAL server.

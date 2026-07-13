@@ -1,5 +1,5 @@
-import { test, expect, type APIRequestContext } from '@playwright/test'
-import { unique } from './helpers'
+import { test, expect, type APIRequestContext } from './fixtures'
+import { unique, tagTreePanel } from './helpers'
 
 // #34: tag chips on a document view are clickable filter actions. Clicking a tag
 // chip in the document header applies a positive filter for that tag and lands on
@@ -68,9 +68,12 @@ test('clicking a tag chip in the document view filters the list by that tag (#34
     await expect(page).toHaveURL(/#\/document\?/)
     await expect(page).toHaveURL(new RegExp(`[?&]tags=${tagId}`))
 
-    // The sidebar filter chip for this tag reads as active (aria-pressed).
+    // The sidebar filter chip for this tag reads as active (aria-pressed). The tag
+    // tree lives in the desktop side panel OR the mobile Drawer — tagTreePanel()
+    // opens the Drawer on mobile and resolves to the live container either way.
+    const tree = await tagTreePanel(page)
     await expect(
-      page.locator('.left-panel').getByRole('button', { name: new RegExp(tagName) }),
+      tree.getByRole('button', { name: new RegExp(tagName) }),
     ).toHaveAttribute('aria-pressed', 'true')
 
     // The filtered list shows the tagged document and no longer shows the

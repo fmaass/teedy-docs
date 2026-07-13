@@ -76,7 +76,8 @@ public class TestSecurity extends BaseJerseyTest {
 
         // Delete the user
         String adminToken = adminToken();
-        target().path("/user/testsecurity").request()
+        target().path("/user/testsecurity")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -107,7 +108,8 @@ public class TestSecurity extends BaseJerseyTest {
         
         // Delete the user
         String adminToken = adminToken();
-        target().path("/user/header_auth_test").request()
+        target().path("/user/header_auth_test")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
@@ -167,7 +169,8 @@ public class TestSecurity extends BaseJerseyTest {
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
 
         // Cleanup
-        target().path("/user/pwdtest5").request()
+        target().path("/user/pwdtest5")
+                .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }

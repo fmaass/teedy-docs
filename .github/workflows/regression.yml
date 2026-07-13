@@ -1,0 +1,365 @@
+name: Scheduled Regression
+
+# Nightly (and on-demand) full-regression MONITOR — NOT a merge gate.
+#
+# Builds the production WAR + Docker image from a chosen ref (default: the
+# repository default branch `main`, i.e. the released/shipped state), then runs
+# the same end-to-end suites the `build-deploy.yml` publish pipeline gates on:
+#   - `e2e`         : Playwright FUNCTIONAL suite (desktop + mobile) via scripts/e2e-run.sh
+#   - `e2e-visual`  : @visual pixel-regression specs in the pinned Playwright jammy
+#                     container (scripts/e2e-run.sh E2E_VISUAL_ONLY=1)
+#   - `e2e-harness` : trimmed real-Chrome (CDP) browser-harness smoke (scripts/e2e-harness-run.sh)
+#
+# This workflow is a monitor: it gates NOTHING (no other workflow `needs` it, no
+# branch protection references it). Its only side effect on failure is to file (or
+# comment on) a `regression-failure` tracking issue so a silent regression in the
+# shipped app surfaces as a ticket. The boot/build steps mirror build-deploy.yml's
+# `build` / `e2e` / `e2e-visual` / `e2e-harness` jobs exactly (same action SHAs,
+# same war-artifact reuse, same container-network approach).
+
+on:
+  schedule:
+    # 03:12 UTC nightly — off-peak, and off the top of the hour to avoid the
+    # cron-scheduling thundering herd GitHub warns about.
+    - cron: "12 3 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch/tag/SHA) to run the regression against. Defaults to the repository default branch."
+        required: false
+        default: ""
+
+# Read-only by default; the issue-filing job elevates `issues: write` locally.
+permissions:
+  contents: read
+
+# One scheduled regression at a time — a manual dispatch landing mid-nightly (or a
+# slow run overrunning into the next night) would otherwise double-build and race
+# the de-dup issue search.
+concurrency:
+  group: regression-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # Resolve the ref under test ONCE so every downstream checkout uses the same value.
+  # workflow_dispatch may override it; schedule/empty falls back to the default branch.
+  resolve-ref:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - name: Pick the ref under test
+        id: pick
+        env:
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_REF}" ]; then
+            ref="${INPUT_REF}"
+          else
+            ref="${DEFAULT_BRANCH}"
+          fi
+          echo "Regression will run against ref: ${ref}"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
+  build:
+    # Build the production WAR from the resolved ref, once, and hand it to the e2e
+    # jobs as an artifact (mirrors build-deploy.yml's `build` job — the Dockerfile
+    # COPYs this pre-built WAR rather than compiling inside the image).
+    runs-on: ubuntu-latest
+    needs: [resolve-ref]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          java-version: "25"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        run: cd docs-web/src/main/webapp && npm ci
+
+      - name: Build with Maven
+        run: ./mvnw --batch-mode -Pprod clean install -DskipTests
+
+      - name: Upload war artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target/docs*.war
+
+  e2e:
+    # Playwright FUNCTIONAL suite (desktop + mobile projects) against the real prod
+    # image (embedded H2, admin/admin), booted + torn down by scripts/e2e-run.sh —
+    # exactly build-deploy.yml's `e2e` job.
+    runs-on: ubuntu-latest
+    needs: [resolve-ref, build]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Build e2e Docker image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-e2e:local
+
+      - name: Install e2e dependencies
+        run: cd docs-web/src/main/webapp && npm ci
+
+      - name: Install Playwright browser
+        run: cd docs-web/src/main/webapp && npx playwright install --with-deps chromium
+
+      - name: Run e2e suite (boots container, tears down)
+        env:
+          E2E_IMAGE: teedy-e2e:local
+        run: bash scripts/e2e-run.sh
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report
+          path: docs-web/src/main/webapp/playwright-report
+          retention-days: 7
+
+  e2e-visual:
+    # @visual pixel-regression gate: boots the SAME RC image and runs ONLY the
+    # @visual specs INSIDE the pinned Playwright jammy container (the exact OS/font
+    # environment the committed *-linux.png baselines match) — build-deploy.yml's
+    # `e2e-visual` job.
+    runs-on: ubuntu-latest
+    needs: [resolve-ref, build]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Build e2e Docker image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-e2e:local
+
+      - name: Install e2e dependencies
+        run: cd docs-web/src/main/webapp && npm ci
+
+      # No `npx playwright install`: the @visual specs run INSIDE the jammy Playwright
+      # container, which ships the matching browser. `npm ci` above provides the
+      # OS-agnostic @playwright/test JS the mounted specs import.
+      - name: Run visual gate (@visual specs in jammy container)
+        env:
+          E2E_IMAGE: teedy-e2e:local
+          E2E_VISUAL_ONLY: "1"
+        run: bash scripts/e2e-run.sh
+
+      - name: Upload Playwright HTML report (visual)
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-report-visual
+          path: docs-web/src/main/webapp/playwright-report
+          retention-days: 7
+
+  e2e-harness:
+    # Real-Chrome (CDP) browser-harness smoke suite against the SAME RC image —
+    # build-deploy.yml's `e2e-harness` job. Non-gating there; here it is simply one
+    # more regression signal that feeds the failure ticket.
+    runs-on: ubuntu-latest
+    needs: [resolve-ref, build]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install browser-harness
+        run: python -m pip install --upgrade "browser-harness==0.1.4"
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Build e2e Docker image (amd64, load)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: teedy-e2e:local
+
+      - name: Set up Google Chrome
+        uses: browser-actions/setup-chrome@b94431e051d1c52dcbe9a7092a4f10f827795416 # v2.1.0
+        with:
+          chrome-version: stable
+        id: setup-chrome
+
+      - name: Run browser-harness smoke suite (boots container, tears down)
+        env:
+          E2E_IMAGE: teedy-e2e:local
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: bash scripts/e2e-harness-run.sh
+
+      - name: Upload harness artifacts
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: browser-harness-artifacts
+          path: e2e-artifacts/browser-harness
+          retention-days: 7
+
+  report-failure:
+    # AUTO-TICKETING (P15): if ANY of the build/e2e/visual/harness jobs failed, open
+    # a `regression-failure` tracking issue — or, if one is already OPEN, comment on
+    # it instead (de-dup, so a run of red nights can't spam a pile of duplicates).
+    #
+    # `if: failure()` fires when at least one job in `needs` failed OR was cancelled;
+    # on an all-green run this job is skipped and no issue is touched.
+    runs-on: ubuntu-latest
+    needs: [resolve-ref, build, e2e, e2e-visual, e2e-harness]
+    if: failure()
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Open or update the regression-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REF_UNDER_TEST: ${{ needs.resolve-ref.outputs.ref }}
+          # Per-job results so the ticket names WHICH suite regressed.
+          R_BUILD: ${{ needs.build.result }}
+          R_E2E: ${{ needs.e2e.result }}
+          R_VISUAL: ${{ needs.e2e-visual.result }}
+          R_HARNESS: ${{ needs.e2e-harness.result }}
+        run: |
+          set -euo pipefail
+
+          LABEL="regression-failure"
+
+          # Ensure the tracking label exists (idempotent; the repo ships `bug` but not
+          # this one). `gh label create` errors if it already exists, so tolerate that.
+          gh label create "${LABEL}" \
+            --color B60205 \
+            --description "Automated: a scheduled regression run failed" \
+            --repo "${REPO}" 2>/dev/null || true
+
+          # Summarize which jobs failed (a job is "failed" unless it succeeded or was
+          # skipped — cancelled/timed_out count as failures worth a ticket).
+          failed=""
+          for entry in "build=${R_BUILD}" "e2e=${R_E2E}" "e2e-visual=${R_VISUAL}" "e2e-harness=${R_HARNESS}"; do
+            name="${entry%%=*}"
+            result="${entry#*=}"
+            if [ "${result}" != "success" ] && [ "${result}" != "skipped" ]; then
+              failed="${failed} - \`${name}\`: ${result}"$'\n'
+            fi
+          done
+          if [ -z "${failed}" ]; then
+            failed=" - (no individual job reported a non-success result; see the run for details)"$'\n'
+          fi
+
+          DATE_UTC="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
+          BODY_FILE="$(mktemp)"
+          cat > "${BODY_FILE}" <<EOF
+          The scheduled regression run failed on **${DATE_UTC}**.
+
+          - **Ref under test:** \`${REF_UNDER_TEST}\`
+          - **Failed run:** ${RUN_URL}
+
+          **Failing job(s):**
+          ${failed}
+          **Artifacts** (attached to the failed run above — open the run, scroll to *Artifacts*):
+          - \`playwright-report\` — functional Playwright HTML report (desktop + mobile)
+          - \`playwright-report-visual\` — visual-diff report (expected/actual/diff PNGs for any \`@visual\` mismatch)
+          - \`browser-harness-artifacts\` — real-Chrome harness output
+
+          _Filed automatically by the \`Scheduled Regression\` workflow. This issue tracks
+          the recurring signal — subsequent failures are appended as comments rather than
+          new issues. Close it once the regression is resolved and a run goes green._
+          EOF
+
+          # DE-DUP: if an OPEN issue with this label already exists, comment on the
+          # newest one instead of opening a duplicate. `--json number -q` yields the
+          # bare issue number (empty string when none open).
+          existing="$(gh issue list \
+            --repo "${REPO}" \
+            --label "${LABEL}" \
+            --state open \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${existing}" ]; then
+            echo "Open ${LABEL} issue #${existing} exists — commenting instead of opening a duplicate."
+            {
+              echo "Another scheduled regression run failed on **${DATE_UTC}**."
+              echo
+              echo "- **Ref under test:** \`${REF_UNDER_TEST}\`"
+              echo "- **Failed run:** ${RUN_URL}"
+              echo
+              echo "**Failing job(s):**"
+              printf '%s' "${failed}"
+            } > "${BODY_FILE}"
+            gh issue comment "${existing}" --repo "${REPO}" --body-file "${BODY_FILE}"
+          else
+            echo "No open ${LABEL} issue — opening a new one."
+            gh issue create \
+              --repo "${REPO}" \
+              --title "Scheduled regression failed — ${DATE_UTC}" \
+              --label "${LABEL}" \
+              --label "bug" \
+              --body-file "${BODY_FILE}"
+          fi

@@ -10,12 +10,17 @@ interface NavItem {
   name: string
 }
 
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
 const props = defineProps<{
   mode: 'settings' | 'tag'
   isAdmin: boolean
   currentRouteName?: string | symbol | null
   settingsNavItems: NavItem[]
-  settingsAdminItems: NavItem[]
+  settingsAdminGroups: NavGroup[]
   tagManageItems: NavItem[]
 }>()
 
@@ -52,7 +57,7 @@ function isNavActive(name: string) {
     </template>
 
     <template v-else>
-      <div class="admin-nav-section">{{ t('ui.nav.settings') }}</div>
+      <div class="admin-nav-section">{{ t('ui.nav.personal') }}</div>
       <router-link
         v-for="item in settingsNavItems"
         :key="item.name"
@@ -65,18 +70,20 @@ function isNavActive(name: string) {
         <span>{{ item.label }}</span>
       </router-link>
       <template v-if="isAdmin">
-        <div class="admin-nav-section">{{ t('ui.nav.administration') }}</div>
-        <router-link
-          v-for="item in settingsAdminItems"
-          :key="item.name"
-          :to="item.to"
-          class="admin-nav-link"
-          :class="{ active: isNavActive(item.name) }"
-          @click="emit('navigate')"
-        >
-          <i :class="item.icon" />
-          <span>{{ item.label }}</span>
-        </router-link>
+        <template v-for="group in settingsAdminGroups" :key="group.label">
+          <div class="admin-nav-section">{{ group.label }}</div>
+          <router-link
+            v-for="item in group.items"
+            :key="item.name"
+            :to="item.to"
+            class="admin-nav-link"
+            :class="{ active: isNavActive(item.name) }"
+            @click="emit('navigate')"
+          >
+            <i :class="item.icon" />
+            <span>{{ item.label }}</span>
+          </router-link>
+        </template>
       </template>
     </template>
   </div>

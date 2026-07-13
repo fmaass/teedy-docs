@@ -234,8 +234,43 @@ export function testInbox() {
   return api.post<InboxTestResult>('/app/test_inbox').then((r) => r.data)
 }
 
-// POST /api/app/batch/clean_storage removes orphaned files and DB rows. Fire-and-
-// confirm like batch/reindex — no params, returns { status: 'ok' }.
+// GET /api/app/batch/clean_storage/dry_run previews what a real cleanup would reclaim
+// WITHOUT mutating anything. The UI reads total + reclaimed_bytes to show a summary confirm
+// before the real run. The paginated files array is available but the confirm only needs
+// the totals.
+export interface CleanStorageDryRunFile {
+  id: string
+  document_id: string | null
+  document_title: string | null
+  size: number
+  reason: string
+}
+
+export interface CleanStorageDryRun {
+  total: number
+  // Disk bytes the run would free — the actual on-disk footprint of the removal closure plus any
+  // age-eligible filesystem orphans (#72).
+  reclaimed_bytes: number
+  primary_pointer_cleared_count: number
+  limit: number
+  offset: number
+  files: CleanStorageDryRunFile[]
+}
+
+export function cleanStorageDryRun(limit = 100, offset = 0) {
+  return api
+    .get<CleanStorageDryRun>('/app/batch/clean_storage/dry_run', { params: { limit, offset } })
+    .then((r) => r.data)
+}
+
+// POST /api/app/batch/clean_storage removes orphaned files and DB rows. Returns
+// { status: 'ok', file_count, bytes } — the count/bytes actually reclaimed by the run.
+export interface CleanStorageResult {
+  status: string
+  file_count: number
+  bytes: number
+}
+
 export function cleanStorage() {
-  return api.post('/app/batch/clean_storage')
+  return api.post<CleanStorageResult>('/app/batch/clean_storage').then((r) => r.data)
 }

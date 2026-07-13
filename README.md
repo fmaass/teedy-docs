@@ -81,7 +81,7 @@ A preconfigured Docker image (with OCR and media-conversion tools) listens on po
 `8080`. With no `DATABASE_URL`, Teedy uses an embedded H2 database — **for testing
 only**; use the PostgreSQL configuration in production.
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.5.2`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.6.0`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data` — mount a volume on it — and `DOCS_BASE_URL` must be
@@ -128,7 +128,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.5.2
+    image: ghcr.io/fmaass/teedy-docs:v3.6.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -187,7 +187,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.5.2
+    image: ghcr.io/fmaass/teedy-docs:v3.6.0
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -204,7 +204,7 @@ services:
 
 ## Requirements
 
-- Java 21
+- Java 21 or Java 25 (both LTS; Teedy builds and runs on either)
 - Tesseract 4+ for OCR
 - ffmpeg for video thumbnails
 - mediainfo for video metadata extraction
@@ -217,7 +217,7 @@ The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/r
 
 ## How to build Teedy from the sources
 
-Prerequisites: JDK 21, Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Tesseract 4+
+Prerequisites: JDK 21 or JDK 25 (both LTS), Maven 3.9+ (or use the included `./mvnw` wrapper), NPM, Tesseract 4+
 
 Teedy is organized in several Maven modules:
 

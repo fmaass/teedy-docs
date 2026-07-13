@@ -117,6 +117,31 @@ public class AclDao {
     }
 
     /**
+     * Check whether a DIRECT, non-deleted USER-type ACL row grants {@code perm} on {@code sourceId} to
+     * {@code targetId}. Unlike {@link #checkPermission(String, PermType, List)} — which answers the
+     * broader "is this accessible?" question and returns true via admin-bypass, tag inheritance, or a
+     * transient ROUTING ACL — this checks only for the literal direct grant row. It is the correct
+     * idempotency probe when the intent is to guarantee a durable direct grant exists (e.g. handing a
+     * reassigned document's ownership to a new owner): a transient/inherited access ending must not
+     * leave the new owner locked out.
+     *
+     * @param sourceId ACL source entity ID
+     * @param perm Permission
+     * @param targetId Target ID
+     * @return True if a direct, non-deleted USER ACL row already grants that permission
+     */
+    public boolean hasDirectUserAcl(String sourceId, PermType perm, String targetId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select count(a.id) from Acl a where a.sourceId = :sourceId and a.perm = :perm"
+                + " and a.targetId = :targetId and a.type = :type and a.deleteDate is null");
+        q.setParameter("sourceId", sourceId);
+        q.setParameter("perm", perm);
+        q.setParameter("targetId", targetId);
+        q.setParameter("type", AclType.USER);
+        return ((Number) q.getSingleResult()).longValue() > 0;
+    }
+
+    /**
      * Check if a source is accessible to a target.
      *
      * @param sourceId ACL source entity ID
