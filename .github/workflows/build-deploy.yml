@@ -290,21 +290,41 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
-      # Publish policy (standard branch/tag split):
-      #   - tag  v* : PUBLISH, multi-arch (amd64+arm64) — the distributable release image.
+      # Publish policy (three-way branch/tag split):
+      #   - pre-release tag v*-* (name contains a hyphen: -rc.N / -beta.N / -alpha.N):
+      #                PUBLISH, single-arch amd64 ONLY, as a GitHub *pre-release*. Never moves
+      #                `latest`. Slow arm64 QEMU is skipped — RC checkpoints ship amd64 only.
+      #   - final tag v* (no hyphen): PUBLISH, multi-arch (amd64+arm64) — the distributable
+      #                release image. Does not move `latest` (matches prior behavior).
       #   - main    : PUBLISH, multi-arch — the rolling `latest`.
-      #   - release/*: smoke-boot ONLY (single-arch amd64), never published — the RC image is
-      #                gated behind a version tag, and cross-arch emulation is skipped on every
-      #                RC push (slow arm64 QEMU builds run only where the image is actually shipped).
+      #   - release/*, fix/*: smoke-boot ONLY (single-arch amd64), never published — RC images
+      #                are gated behind a version tag, and cross-arch emulation is skipped there.
       - name: Resolve publish policy
         id: cfg
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/heads/main ]]; then
+          tag="${GITHUB_REF#refs/tags/}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* && "${tag}" == *-* ]]; then
+            # Pre-release tag (vX.Y.Z-rc.N / -beta.N / -alpha.N): amd64-only, GitHub pre-release, no latest.
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/heads/main ]]; then
+            # Final release tag or main: multi-arch. `latest` only on main (unchanged).
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "platforms=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+              echo "latest=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "latest=false" >> "$GITHUB_OUTPUT"
+            fi
           else
+            # release/**, fix/**: smoke-boot only, never published.
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download war artifact
@@ -357,7 +377,7 @@ jobs:
             latest=false
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ steps.cfg.outputs.latest == 'true' }}
 
       - name: Build and push (multi-arch)
         if: steps.cfg.outputs.publish == 'true'
