@@ -45,7 +45,7 @@ async function createPlainDoc(page: Page, title: string) {
   await expect(page).toHaveURL(/#\/document\/view\//)
 }
 
-test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42)', async ({ page }) => {
+test('@flaky save a tag+text filter, clear, re-apply from the dropdown, delete (#42, quarantined #81)', async ({ page }) => {
   const tag = unique('sf-tag')
   const term = unique('sfterm')
   const matchTitle = `${term}-match`

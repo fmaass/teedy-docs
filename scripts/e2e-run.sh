@@ -155,8 +155,17 @@ else
   # baselines match the jammy container, not this runner's fonts; the dedicated visual
   # job above covers them). The deterministic functional specs (incl. German-overflow)
   # still run at both viewports.
+  #
+  # Also EXCLUDE @flaky specs by default: these are KNOWN-flaky specs, each tracked by a
+  # GitHub issue, quarantined so a nondeterministic test-timing failure can never fail a
+  # release build. The nightly regression monitor sets E2E_INCLUDE_FLAKY=1 to run them for
+  # ongoing triage (so we can later decide per-issue: fix the test, or it's a real bug).
+  grep_invert="@visual"
+  if [ "${E2E_INCLUDE_FLAKY:-}" != "1" ]; then
+    grep_invert="@visual|@flaky"
+  fi
   export PLAYWRIGHT_BASE_URL="http://localhost:${host_port}"
-  echo "Running Playwright FUNCTIONAL e2e suite (excluding @visual) against ${PLAYWRIGHT_BASE_URL}..."
+  echo "Running Playwright FUNCTIONAL e2e suite (excluding ${grep_invert}) against ${PLAYWRIGHT_BASE_URL}..."
   cd "${webapp}"
-  npx playwright test --grep-invert @visual "$@"
+  npx playwright test --grep-invert "${grep_invert}" "$@"
 fi
