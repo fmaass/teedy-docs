@@ -3372,6 +3372,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "reassign_to_username",
+            "in": "query",
+            "required": true,
+            "description": "Username of the surviving user to reassign this user's documents to",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
