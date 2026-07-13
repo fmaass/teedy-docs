@@ -31,7 +31,7 @@
     "type": "Tipo",
     "coverage": "Cobertura",
     "rights": "Direitos",
-    "count": "{count} documento{count} encontrado{count}",
+    "count": "{count} documento encontrado",
     "view": {
       "delete_comment_title": "Apagar comentário",
       "delete_comment_message": "Tem a certeza que pretende apagar este comentário?",

@@ -31,7 +31,7 @@
     "type": "Lloji",
     "coverage": "Mbulimi",
     "rights": "Të drejtat",
-    "count": "{count} dokument{count} gjetur",
+    "count": "{count} dokument gjetur",
     "view": {
       "delete_comment_title": "Fshi komentin",
       "delete_comment_message": "Dëshiron vërtet ta fshish këtë koment?",

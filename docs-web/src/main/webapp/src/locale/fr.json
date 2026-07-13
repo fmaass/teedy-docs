@@ -31,7 +31,7 @@
     "type": "Type",
     "coverage": "Couverture",
     "rights": "Droits",
-    "count": "{count} document{count} trouvé{count}",
+    "count": "{count} document trouvé",
     "view": {
       "delete_comment_title": "Supprimer un commentaire",
       "delete_comment_message": "Etes-vous sûr de vouloir supprimer ce commentaire ?",

@@ -31,7 +31,7 @@
     "type": "Rodzaj",
     "coverage": "Okładka",
     "rights": "Prawa",
-    "count": "{count} dokument{count} znaleziony",
+    "count": "{count} dokument znaleziony",
     "view": {
       "delete_comment_title": "Usuń komentarz",
       "delete_comment_message": "Naprawdę chcesz usunąć ten komentarz?",
