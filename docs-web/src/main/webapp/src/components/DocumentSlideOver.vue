@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
 import { getFileUrl } from '../api/file'
@@ -7,6 +7,7 @@ import { type DocumentDetail } from '../api/document'
 import { type Tag } from '../api/tag'
 import { languageLabel } from '../constants/languages'
 import { formatDate, formatFileSize } from '../utils/formatters'
+import { useResizablePanel, type ClampCfg } from '../composables/useResizablePanel'
 import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
@@ -63,6 +64,44 @@ function onTagSelect(tagId: string) {
 const tagOptions = computed(() =>
   props.availableTags.map((tag) => ({ label: tag.name, value: tag.id })),
 )
+
+// --- Drag-resizable width (#68) ---
+// Reuse the sidebar's resize composable with a slide-over envelope: wider than
+// the tag panel (default 500px, min 360px) and capped at 90vw so it never
+// exceeds the viewport. Persisted under its own localStorage key.
+const SLIDE_OVER_CLAMP: ClampCfg = {
+  defaultWidth: 500,
+  minWidth: 360,
+  maxWidth: 1000,
+  maxViewportFraction: 0.9,
+}
+const {
+  width: slideOverWidth,
+  startDrag: startResize,
+  onKeydown: onResizeKey,
+  reset: resetWidth,
+} = useResizablePanel({ storageKey: 'teedy_slide_over_width', clamp: SLIDE_OVER_CLAMP, invert: true })
+
+// Below the drawer's own responsive breakpoint the CSS keeps it at min(500px,
+// 90vw) (near full-width) and the resize handle is hidden — matching the
+// sidebar's mobile behaviour where resize is desktop-only.
+const isMobile = ref(false)
+let mql: MediaQueryList | null = null
+function onMediaChange(e: MediaQueryListEvent | MediaQueryList) {
+  isMobile.value = e.matches
+}
+onMounted(() => {
+  mql = window.matchMedia('(max-width: 1024px)')
+  isMobile.value = mql.matches
+  mql.addEventListener('change', onMediaChange)
+})
+onBeforeUnmount(() => mql?.removeEventListener('change', onMediaChange))
+
+// Drive the drawer width only on desktop; on mobile leave the CSS default so it
+// stays near full-width and non-resizable.
+const drawerStyle = computed(() =>
+  isMobile.value ? {} : { width: slideOverWidth.value + 'px' },
+)
 </script>
 
 <template>
@@ -72,12 +111,31 @@ const tagOptions = computed(() =>
     position="right"
     class="doc-slide-over"
     :showCloseIcon="true"
+    :pt="{ root: { style: drawerStyle } }"
   >
     <template #header>
       <div class="slide-over-header">
         <span class="slide-over-title">{{ document?.title ?? t('directive.auditlog.Document') }}</span>
       </div>
     </template>
+    <!-- Drag handle on the drawer's LEFT edge: widens/narrows the slide-over,
+         reusing the sidebar's resize composable. Desktop-only (hidden on mobile,
+         where the drawer stays near full-width). -->
+    <div
+      v-if="!isMobile"
+      class="slide-over-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      tabindex="0"
+      :aria-label="t('ui.resize_panel')"
+      :aria-valuenow="slideOverWidth"
+      aria-valuemin="360"
+      aria-valuemax="1000"
+      :style="{ right: slideOverWidth + 'px' }"
+      @pointerdown="startResize"
+      @keydown="onResizeKey"
+      @dblclick="resetWidth"
+    />
     <div v-if="loading" class="slide-over-loading">
       <Skeleton height="10rem" class="mb-3" />
       <Skeleton height="1.5rem" width="60%" class="mb-2" />
@@ -158,9 +216,45 @@ const tagOptions = computed(() =>
 </template>
 
 <style scoped>
+/* Mobile / fallback width. On desktop the width is driven inline by the resize
+   composable via the drawer root `:pt` style, which overrides this. */
 .doc-slide-over :deep(.p-drawer) { width: min(500px, 90vw); }
-.slide-over-header { min-width: 0; }
-.slide-over-title { font-size: 1.125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Drag handle pinned to the drawer's LEFT edge (its `right` offset === the
+   current drawer width, kept in sync inline). Mirrors the sidebar `.panel-resizer`
+   affordance. */
+.slide-over-resizer {
+  position: fixed;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  margin-right: -3px;
+  cursor: col-resize;
+  z-index: 1200;
+  background: transparent;
+  touch-action: none;
+}
+.slide-over-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.12s;
+}
+.slide-over-resizer:hover::after,
+.slide-over-resizer:focus-visible::after {
+  background: var(--p-primary-color);
+}
+.slide-over-resizer:focus-visible { outline: none; }
+/* The header slot shares the flex `.p-drawer-header` row with the close button.
+   `flex: 1; min-width: 0` lets a long title truncate (ellipsis below) instead of
+   pushing into / overlapping the close button, which keeps its intrinsic size (#68). */
+.slide-over-header { flex: 1; min-width: 0; }
+.slide-over-title { display: block; min-width: 0; font-size: 1.125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-slide-over :deep(.p-drawer-close-button) { flex-shrink: 0; }
 .slide-over-loading { padding: 1rem 0; }
 .slide-over-body { display: flex; flex-direction: column; gap: 1rem; }
 .slide-preview { margin: -1rem -1.25rem 0; max-height: 200px; overflow: hidden; background: var(--p-content-hover-background); display: flex; align-items: center; justify-content: center; }

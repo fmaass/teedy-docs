@@ -130,6 +130,81 @@ describe('TagTreePanel — bounded dense render (#12)', () => {
   })
 })
 
+describe('TagTreePanel — parent count roll-up (#66)', () => {
+  // A tree-mode node's own document count is sourced from the flat `tagCounts`
+  // map (server /tag/stats — per-tag, NO hierarchical roll-up). An unused tag
+  // has no entry. The bug: a PARENT whose descendants carry documents showed
+  // only its own (often absent) count, so a parent of used-but-nested tags
+  // rendered blank. The fix rolls descendants up (unused = 0).
+  //
+  //   parent (own: none)
+  //   ├─ usedChild        (3 docs)
+  //   └─ midParent (own: none)
+  //      └─ deepUsed       (2 docs)
+  //   lonelyParent (own: none)
+  //   └─ unusedChild       (no docs)
+  //   soloUsed             (5 docs, no children)
+  //   soloUnused           (no docs, no children)
+  function nestedNodes() {
+    const mk = (key: string, label: string, children: unknown[] = []) =>
+      ({ key, label, data: { id: key, name: label, color: '#111', parent: null }, children })
+    return [
+      mk('parent', 'parent', [
+        mk('usedChild', 'usedChild'),
+        mk('midParent', 'midParent', [mk('deepUsed', 'deepUsed')]),
+      ]),
+      mk('lonelyParent', 'lonelyParent', [mk('unusedChild', 'unusedChild')]),
+      mk('soloUsed', 'soloUsed'),
+      mk('soloUnused', 'soloUnused'),
+    ]
+  }
+
+  const tagCounts = { usedChild: 3, deepUsed: 2, soloUsed: 5 }
+
+  // Map a tag key → its rendered `.tag-count` text (or null when the row shows
+  // no count badge). Every node is expanded so the whole subtree renders.
+  function countByKey(wrapper: ReturnType<typeof mountPanel>): Record<string, string | null> {
+    const out: Record<string, string | null> = {}
+    for (const row of wrapper.findAll('.tag-tree-node[role="button"]')) {
+      const key = row.find('.tag-name').text()
+      const badge = row.find('.tag-count')
+      out[key] = badge.exists() ? badge.text().trim() : null
+    }
+    return out
+  }
+
+  const allExpanded = { parent: true, midParent: true, lonelyParent: true }
+
+  it('a parent of used (nested) tags shows the rolled-up sum, not blank', async () => {
+    const wrapper = mountPanel(nestedNodes(), { tagCounts, expandedKeys: allExpanded })
+    await flushPromises()
+    const counts = countByKey(wrapper)
+    // parent = usedChild(3) + midParent-subtree(deepUsed 2) = 5
+    expect(counts.parent).toBe('5')
+    // midParent = deepUsed(2)
+    expect(counts.midParent).toBe('2')
+  })
+
+  it('leaves keep own counts; unused leaves stay blank', async () => {
+    const wrapper = mountPanel(nestedNodes(), { tagCounts, expandedKeys: allExpanded })
+    await flushPromises()
+    const counts = countByKey(wrapper)
+    expect(counts.usedChild).toBe('3')
+    expect(counts.deepUsed).toBe('2')
+    expect(counts.soloUsed).toBe('5')
+    // Unused leaf: no badge (the reporter's accepted "no 0" behavior).
+    expect(counts.soloUnused).toBeNull()
+    expect(counts.unusedChild).toBeNull()
+  })
+
+  it('a parent whose whole subtree is unused stays blank (roll-up is 0)', async () => {
+    const wrapper = mountPanel(nestedNodes(), { tagCounts, expandedKeys: allExpanded })
+    await flushPromises()
+    const counts = countByKey(wrapper)
+    expect(counts.lonelyParent).toBeNull()
+  })
+})
+
 describe('TagTreePanel — overflow node is non-interactive (#12 blocker)', () => {
   // A single root with 25 co-occurring neighbours => 19 real + 1 overflow.
   function overflowFixture() {
