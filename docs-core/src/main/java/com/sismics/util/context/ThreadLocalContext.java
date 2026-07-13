@@ -99,4 +99,16 @@ public class ThreadLocalContext {
             AppContext.getInstance().getAsyncEventBus().post(asyncEvent);
         }
     }
+
+    /**
+     * Discard all pending async events without firing them.
+     *
+     * <p>Used when the request transaction rolled back (or the commit failed): the queued
+     * events describe modifications that never reached the database, so firing them would
+     * physically delete file bytes or mutate the Lucene index for changes that did not
+     * commit.</p>
+     */
+    public void discardAsyncEvents() {
+        asyncEventList.clear();
+    }
 }
