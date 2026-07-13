@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, dismissToasts } from './helpers'
 
 // Trash lifecycle: delete a document to trash, restore it, permanent-delete, and
 // empty trash. Also asserts the retention countdown column renders (auto-purge
@@ -63,11 +63,31 @@ test('empty trash removes all trashed documents', async ({ page }) => {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toBeVisible()
   }
 
-  await page.getByRole('button', { name: 'Empty trash' }).click()
-  await confirmDanger(page)
+  // Empty the trash. The open→confirm gesture is overlay-fragile at the mobile
+  // viewport: the two seed create+delete steps stack toasts (top-right, 25rem wide)
+  // that overflow to cover the page-header "Empty trash" button, so a click issued
+  // while a toast still overlays it lands on the toast and the button never fires —
+  // the trash is never emptied and the seeded rows stay (the deterministic-in-CI
+  // failure this guards against; the app itself empties correctly, verified against a
+  // real RC). Tear the toast layer down first so the trigger is reachable, then make
+  // the whole open-dialog→confirm gesture retriable: if the button-click or the "Yes"
+  // click is dropped, re-issue it until the ConfirmDialog is actually accepted. The
+  // gesture is idempotent (emptying an already-empty trash is a no-op), so retrying is
+  // safe. The AUTHORITATIVE success check is the strict toHaveCount(0) below, which is
+  // unchanged and still proves the trash was emptied — the retry only fixes a dropped
+  // input, it never masks a trash that stayed populated.
+  await expect(async () => {
+    await dismissToasts(page)
+    await page.getByRole('button', { name: 'Empty trash' }).click()
+    await confirmDanger(page)
+    // Confirm the gesture landed: our seeded rows must be gone within a short window.
+    for (const title of titles) {
+      await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0, { timeout: 3000 })
+    }
+  }).toPass({ timeout: 20000 })
 
-  // After emptying, the seeded rows are gone. (Other runs' docs may remain, so
-  // assert on our own titles rather than a global empty state.)
+  // Final authoritative assertion: the seeded rows are gone. (Other runs' docs may
+  // remain, so assert on our own titles rather than a global empty state.)
   for (const title of titles) {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0)
   }

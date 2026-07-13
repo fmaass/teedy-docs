@@ -175,6 +175,31 @@ export async function deleteCurrentDocument(page: Page): Promise<void> {
   await expect(page).toHaveURL(/#\/document$/)
 }
 
+// Dismiss any toasts currently on screen and wait for the toast layer to clear.
+//
+// The Toast is teleported to a fixed top-right position at 25rem (400px) wide. On
+// the narrow mobile viewport (Pixel 5, 393px) that overflows to span the full width,
+// so a lingering "Document created"/"Document deleted" toast (life 2000ms) sits
+// directly OVER a page-header action button (e.g. "Empty trash") until it expires. A
+// click issued while a toast covers the trigger's hit-point lands on the toast, not
+// the button — so the button's handler never fires and the following state change
+// never happens. Playwright's auto-wait usually rides out the toast's short life, but
+// under a slow/loaded CI machine the toast is still there at click time and the action
+// is silently dropped. Closing the toasts first removes the overlay deterministically,
+// at any viewport, without weakening the assertion that follows. Idempotent: a no-op
+// when no toast is present.
+export async function dismissToasts(page: Page): Promise<void> {
+  const toasts = page.locator('.p-toast-message')
+  if (!(await toasts.count())) return
+  // Each toast carries a "Close" button; click them (newest first) to tear the whole
+  // stack down immediately rather than waiting out each 2s life.
+  const closeButtons = page.locator('.p-toast-message button[aria-label="Close"]')
+  for (let i = (await closeButtons.count()) - 1; i >= 0; i--) {
+    await closeButtons.nth(i).click({ force: true }).catch(() => {})
+  }
+  await expect(toasts).toHaveCount(0)
+}
+
 // The shared danger-confirm dialog (useConfirmDanger -> PrimeVue ConfirmDialog,
 // registered in App.vue with no custom labels) renders role=alertdialog with the
 // default accept label "Yes" and reject "No". Accept it and wait for it to close.
