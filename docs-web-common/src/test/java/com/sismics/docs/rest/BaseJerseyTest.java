@@ -17,6 +17,7 @@ import org.glassfish.jersey.test.external.ExternalTestContainerFactory;
 import org.glassfish.jersey.test.spi.TestContainerException;
 import org.glassfish.jersey.test.spi.TestContainerFactory;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 
 import javax.mail.MessagingException;
@@ -203,6 +204,76 @@ public abstract class BaseJerseyTest extends JerseyTest {
             }
         }
         return null;
+    }
+
+    /**
+     * Default upper bound for {@link #awaitCondition}. Generous so a slow CI host clears the
+     * async-work window, yet the poll returns as soon as the condition holds, so a healthy run
+     * pays only a few milliseconds.
+     */
+    private static final long AWAIT_TIMEOUT_MS = 10_000;
+
+    /**
+     * Poll interval for {@link #awaitCondition}.
+     */
+    private static final long AWAIT_POLL_INTERVAL_MS = 100;
+
+    /**
+     * A condition evaluated by {@link #awaitCondition} that is allowed to throw — the REST reads it
+     * polls (a GET decoded into JSON or an image) declare checked exceptions.
+     */
+    @FunctionalInterface
+    protected interface ThrowingBooleanSupplier {
+        boolean getAsBoolean() throws Exception;
+    }
+
+    /**
+     * Bounded poll-until-ready: evaluate {@code condition} every {@link #AWAIT_POLL_INTERVAL_MS}
+     * until it holds, returning as soon as it does, or fail with {@code message} once
+     * {@link #AWAIT_TIMEOUT_MS} elapses. This replaces fixed sleeps around asynchronous work
+     * (raster (re)generation, Lucene indexing) that completes on a background thread after the
+     * triggering request returns: the assertion the caller cares about is preserved, but it is only
+     * evaluated once the observable ready-state the async work produces is in place — so a fast host
+     * proceeds immediately and a slow host waits just long enough, instead of racing a fixed delay.
+     *
+     * <p>An exception thrown by {@code condition} is treated as "not ready yet" and retried, so a
+     * transient error during the async window (e.g. a 503 while a raster is mid-swap) does not fail
+     * the test spuriously; the last exception is attached to the failure if the deadline passes.
+     *
+     * @param message   Failure message if the condition never holds within the deadline
+     * @param condition The ready-state predicate (may throw; a throw is retried, not fatal)
+     */
+    protected static void awaitCondition(String message, ThrowingBooleanSupplier condition) throws InterruptedException {
+        awaitCondition(() -> message, condition);
+    }
+
+    /**
+     * As {@link #awaitCondition(String, ThrowingBooleanSupplier)}, but the failure message is supplied
+     * lazily so it can report the LAST observed state (e.g. the top suggestion actually returned) —
+     * evaluated only if the deadline passes.
+     *
+     * @param message   Supplies the failure message, evaluated only on timeout
+     * @param condition The ready-state predicate (may throw; a throw is retried, not fatal)
+     */
+    protected static void awaitCondition(java.util.function.Supplier<String> message,
+                                         ThrowingBooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + AWAIT_TIMEOUT_MS * 1_000_000L;
+        Exception lastException = null;
+        while (true) {
+            try {
+                if (condition.getAsBoolean()) {
+                    return;
+                }
+                lastException = null;
+            } catch (Exception e) {
+                lastException = e;
+            }
+            if (System.nanoTime() >= deadline) {
+                Assertions.fail(message.get() + " (waited " + AWAIT_TIMEOUT_MS + "ms)", lastException);
+                return;
+            }
+            Thread.sleep(AWAIT_POLL_INTERVAL_MS);
+        }
     }
 
     @Override

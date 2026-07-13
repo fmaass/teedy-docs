@@ -109,6 +109,41 @@ public class TestFileRotationResource extends BaseJerseyTest {
         return ImageIO.read(new ByteArrayInputStream(fetchWebRasterBytes(fileId, token)));
     }
 
+    private enum Orientation {
+        LANDSCAPE, PORTRAIT;
+
+        boolean matches(BufferedImage image) {
+            return this == LANDSCAPE ? image.getWidth() > image.getHeight()
+                    : image.getHeight() > image.getWidth();
+        }
+    }
+
+    /**
+     * Poll the served {@code _web} raster until it decodes to the expected orientation, then return
+     * that raster. The {@code _web} derivative is produced by ASYNC raster (re)generation — the
+     * initial upload processing on a background thread, and (defensively) any regeneration — so
+     * immediately after an upload/rotate the served bytes can transiently be the not-yet-regenerated
+     * raster, a decode-in-progress swap (a 503 from {@code /file/{id}/data}, retried here as
+     * not-ready), or the generic placeholder. Waiting on the OBSERVABLE ready state — a real raster of
+     * the expected orientation — proves the same orientation the callers assert, without a fixed sleep
+     * that races the async work. The orientation check IS the assertion; nothing is weakened.
+     *
+     * @param fileId      File ID
+     * @param token       Auth token
+     * @param orientation The orientation the regenerated raster must show
+     * @return The served web raster once it shows {@code orientation}
+     */
+    private BufferedImage awaitWebRaster(String fileId, String token, Orientation orientation) throws Exception {
+        BufferedImage[] latest = {null};
+        awaitCondition("web raster never reached expected orientation " + orientation
+                + " for file " + fileId, () -> {
+            BufferedImage image = fetchWebRaster(fileId, token);
+            latest[0] = image;
+            return image != null && orientation.matches(image);
+        });
+        return latest[0];
+    }
+
     /**
      * Fetch the served ORIGINAL (unrotated, size=null) decrypted file bytes.
      */
@@ -166,9 +201,15 @@ public class TestFileRotationResource extends BaseJerseyTest {
         String documentId = clientUtil.createDocument(token);
         String fileId = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, documentId);
 
-        // Baseline: no rotation, the web raster is landscape (source is 1500x881).
+        // Await the async upload processing before rotating: the rotate endpoint rejects with a 500
+        // ProcessingError while the file is still processing (FileResource.isProcessingFile guard), so
+        // rotating before initial processing completes is a race under load.
+        waitProcessingDone(documentId, token);
+
+        // Baseline: no rotation, the web raster is landscape (source is 1500x881). Await the async
+        // upload raster generation to land the real derivative before asserting its orientation.
         Assertions.assertEquals(0, listedRotation(documentId, fileId, token));
-        BufferedImage upright = fetchWebRaster(fileId, token);
+        BufferedImage upright = awaitWebRaster(fileId, token, Orientation.LANDSCAPE);
         Assertions.assertTrue(upright.getWidth() > upright.getHeight(),
                 "baseline web raster must be landscape (source is 1500x881)");
 
@@ -185,7 +226,7 @@ public class TestFileRotationResource extends BaseJerseyTest {
 
         // Regenerated raster is now PORTRAIT — the full content was preserved with swapped axes
         // (a cropping rotation would have kept the landscape box).
-        BufferedImage rotated = fetchWebRaster(fileId, token);
+        BufferedImage rotated = awaitWebRaster(fileId, token, Orientation.PORTRAIT);
         Assertions.assertTrue(rotated.getHeight() > rotated.getWidth(),
                 "after 90° the web raster must be portrait (no crop, axes swapped)");
     }
@@ -197,6 +238,9 @@ public class TestFileRotationResource extends BaseJerseyTest {
         String documentId = clientUtil.createDocument(token);
         String fileId = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, documentId);
 
+        // Await initial async processing before rotating (the rotate endpoint 500s while processing).
+        waitProcessingDone(documentId, token);
+
         // Rotate 90° then back to 0.
         target().path("/file/" + fileId + "/rotation").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
@@ -206,7 +250,7 @@ public class TestFileRotationResource extends BaseJerseyTest {
                 .post(Entity.form(new Form().param("rotation", "0")), JsonObject.class);
 
         Assertions.assertEquals(0, listedRotation(documentId, fileId, token));
-        BufferedImage upright = fetchWebRaster(fileId, token);
+        BufferedImage upright = awaitWebRaster(fileId, token, Orientation.LANDSCAPE);
         Assertions.assertTrue(upright.getWidth() > upright.getHeight(),
                 "rotate→0 must regenerate the upright (landscape) raster");
     }
@@ -221,14 +265,14 @@ public class TestFileRotationResource extends BaseJerseyTest {
         target().path("/file/" + fileId + "/rotation").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .post(Entity.form(new Form().param("rotation", "90")), JsonObject.class);
-        BufferedImage first = fetchWebRaster(fileId, token);
+        BufferedImage first = awaitWebRaster(fileId, token, Orientation.PORTRAIT);
 
         // Apply the SAME absolute value again: rotation must not compound (still portrait, same dims).
         target().path("/file/" + fileId + "/rotation").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .post(Entity.form(new Form().param("rotation", "90")), JsonObject.class);
         Assertions.assertEquals(90, listedRotation(documentId, fileId, token));
-        BufferedImage second = fetchWebRaster(fileId, token);
+        BufferedImage second = awaitWebRaster(fileId, token, Orientation.PORTRAIT);
 
         Assertions.assertEquals(first.getWidth(), second.getWidth(), "re-rotating the same value must not compound");
         Assertions.assertEquals(first.getHeight(), second.getHeight(), "re-rotating the same value must not compound");
@@ -262,7 +306,7 @@ public class TestFileRotationResource extends BaseJerseyTest {
 
         Assertions.assertEquals(90, listedRotation(documentId, fileId, token),
                 "reprocess must not revert the stored rotation");
-        BufferedImage rotated = fetchWebRaster(fileId, token);
+        BufferedImage rotated = awaitWebRaster(fileId, token, Orientation.PORTRAIT);
         Assertions.assertTrue(rotated.getHeight() > rotated.getWidth(),
                 "reprocess must re-bake the rotation (portrait), not revert to upright");
     }
