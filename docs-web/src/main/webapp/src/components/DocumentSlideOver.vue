@@ -267,6 +267,13 @@ const drawerStyle = computed(() =>
 .slide-label { margin: 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--p-text-muted-color); }
 .slide-description { font-size: 0.875rem; line-height: 1.5; color: var(--p-text-color); }
 .slide-description :deep(p) { margin: 0 0 0.5rem; }
+/* Read-only description prose: the stored HTML is sanitized to plain semantic
+   <ol>/<ul> (no Quill data-list/.ql-ui), so lists rely on native browser markers.
+   Pin the marker + indent explicitly so an ordered list shows numbers and an
+   unordered list shows bullets, exactly once, and the outside marker is never
+   clipped by a zero padding (#70). */
+.slide-description :deep(ol) { list-style: decimal outside; padding-left: 1.5em; margin: 0 0 0.5rem; }
+.slide-description :deep(ul) { list-style: disc outside; padding-left: 1.5em; margin: 0 0 0.5rem; }
 .slide-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .meta-item { display: flex; flex-direction: column; gap: 0.125rem; }
 .meta-key { font-size: 0.6875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; color: var(--p-text-muted-color); }

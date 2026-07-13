@@ -561,6 +561,10 @@ function confirmDelete(file: { id: string; name: string }) {
   color: var(--p-text-color);
   line-height: 1.6;
 }
+/* Read-only description prose: sanitized to plain <ol>/<ul>; pin native markers
+   and indent so lists show numbers / bullets exactly once, never clipped (#70). */
+.doc-description :deep(ol) { list-style: decimal outside; padding-left: 1.5em; }
+.doc-description :deep(ul) { list-style: disc outside; padding-left: 1.5em; }
 
 .doc-metadata {
   margin: 0 0 1.5rem;

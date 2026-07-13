@@ -172,6 +172,11 @@
     "item_document": "document",
     "context_add_tag": "Add tag",
     "context_remove_tag": "Remove tag",
+    "tag_menu": {
+      "search": "Search tags…",
+      "all_assigned": "All tags already added",
+      "add_named": "Add tag {name}"
+    },
     "quick_filter": {
       "placeholder": "Filter loaded results…",
       "aria_label": "Filter the loaded results by title",

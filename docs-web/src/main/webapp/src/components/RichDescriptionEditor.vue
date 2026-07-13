@@ -87,6 +87,21 @@ const value = computed({
   color: var(--p-text-color);
 }
 
+/* Fix double list markers (#70). PrimeVue's `primevue/editor` ships Quill-1-era
+   list CSS (in @layer primevue) that draws the marker on `.ql-editor ol/ul > li::before`.
+   The runtime is Quill 2, which uses a different model: BOTH ordered and bullet lists
+   render as <ol> with `<li data-list="ordered|bullet">`, and Quill's own (unlayered)
+   CSS draws the marker on the injected `.ql-ui::before` span. Both pseudo-elements
+   then render at once — e.g. a bullet item shows PrimeVue's "1." AND Quill's "•".
+   Suppress PrimeVue's `li::before` marker so only Quill 2's `.ql-ui::before` remains
+   (ordered = numbers, bullet = dots). This scoped rule is unlayered, so it wins over
+   the layered PrimeVue rule regardless of specificity. Verified against real Quill 2
+   output in Chromium. */
+.rich-description-editor :deep(.ql-editor ol > li::before),
+.rich-description-editor :deep(.ql-editor ul > li::before) {
+  content: none;
+}
+
 /* The Quill "snow" theme hardcodes light-theme colours (#444 icons, #fff
    popovers). Map the toolbar and its overlays onto the app's semantic tokens
    so the editor stays legible in dark mode. */

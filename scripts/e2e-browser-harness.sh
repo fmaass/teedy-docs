@@ -90,9 +90,9 @@
 #  23. Settings nav regroup (v3.6.0 #61) — admin #/settings/account renders the renamed
 #      "Personal" header + the three labelled admin groups (Access & Users / Content
 #      Model / System) with Users under the first and Config under the last       [browser]
-#  24. Gallery right-click tags (v3.6.0 #50) — right-click a gallery card, click a tag
-#      in the context menu, and verify the tag lands on the document via
-#      GET /api/document/:id (authoritative)                                     [browser+api]
+#  24. Gallery right-click tags (v3.6.0 #50/#71) — right-click a gallery card, add a
+#      tag via the compact TagQuickMenu popover (quick-add chip or search Select),
+#      and verify the tag lands on the document via GET /api/document/:id           [browser+api]
 #  26. Settings landing hub (v3.6.0 #64) — admin #/settings renders the grouped,
 #      annotated HUB (H1 "Settings" + the Personal/Access/Content/System section H2s +
 #      a one-line description per entry), NOT the old Account form; a hub entry then
@@ -1083,10 +1083,11 @@ hub_ok = (
 )
 results["settings_hub"] = (hub_ok, f"h1={hub_state.get('h1')!r} h2s={_h2s} descCount={hub_state.get('descCount')} account_form={hub_state.get('accountForm')} leaf_url={hub_leaf_url}")
 
-# --- Check 24 (#50): right-click a gallery card adds a tag (authoritative API) ---
+# --- Check 24 (#50/#71): right-click a gallery card adds a tag (authoritative API) ---
 # Create a fresh tag NOT on the seeded doc, switch the list to Gallery, right-click
-# the seeded doc's card, click the tag in the context menu, then verify the tag is
-# on the document via GET /api/document/<id> (authoritative, not a DOM claim).
+# the seeded doc's card, add the tag via the compact TagQuickMenu popover (#71:
+# quick-add chip, or the search Select as fallback), then verify the tag is on the
+# document via GET /api/document/<id> (authoritative, not a DOM claim).
 rc_tag_name = run + "-rc"
 rc_tag_id = js("""
   return (() => fetch(location.origin + '/api/tag', {
@@ -1123,16 +1124,44 @@ rc_menu_opened = js("""
 """.replace("arg_title", json.dumps(doc_title)))
 time.sleep(1.0)
 shot("24a-gallery-contextmenu")
-# Click the new tag's entry in the open PrimeVue ContextMenu (teleported to body).
+# Add the tag via the compact TagQuickMenu popover (#71 redesign: search + top-5
+# quick-add chips replaced the full-tree ContextMenu). Prefer the tag's quick-add
+# chip; if it is not among the top-5 chips, fall back to typing it into the search
+# Select's filter and clicking the matching option. Both live in the teleported
+# PrimeVue Popover (.p-popover) / Select overlay (.p-select-overlay).
 rc_clicked = js("""
   return (() => {
-    const items = [...document.querySelectorAll('.p-contextmenu .p-menuitem-link, .p-contextmenu [role=menuitem]')];
-    const target = items.find(i => (i.textContent||'').includes(arg_name));
-    if (!target) return false;
-    target.click();
-    return true;
+    // 1) Quick-add chip in the popover.
+    const chip = [...document.querySelectorAll('.p-popover .tqm-chip')]
+      .find(c => (c.textContent||'').includes(arg_name));
+    if (chip) { chip.click(); return true; }
+    // 2) Fall back to the search Select: open it, type the name, click the option.
+    const trigger = document.querySelector('.p-popover .tqm-select');
+    if (!trigger) return false;
+    (trigger.querySelector('.p-select-label') || trigger).click();
+    return 'opened-select';
   })();
 """.replace("arg_name", json.dumps(rc_tag_name)))
+time.sleep(0.6)
+if rc_clicked == 'opened-select':
+    # Type into the Select filter, then click the matching option.
+    js("""
+      (() => {
+        const f = document.querySelector('.p-select-overlay .p-select-filter, .p-select-overlay input');
+        if (f) { f.value = arg_name; f.dispatchEvent(new Event('input', {bubbles:true})); }
+      })();
+    """.replace("arg_name", json.dumps(rc_tag_name)))
+    time.sleep(0.6)
+    rc_clicked = js("""
+      return (() => {
+        const opt = [...document.querySelectorAll('.p-select-overlay .p-select-option')]
+          .find(o => (o.textContent||'').includes(arg_name));
+        if (!opt) return false;
+        opt.click();
+        return true;
+      })();
+    """.replace("arg_name", json.dumps(rc_tag_name)))
+rc_clicked = bool(rc_clicked)
 time.sleep(1.2)
 # Authoritative read-back: the tag is now on the document.
 rc_tag_present = js("""

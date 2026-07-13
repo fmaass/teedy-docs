@@ -172,6 +172,11 @@
     "item_document": "Dokument",
     "context_add_tag": "Tag hinzufügen",
     "context_remove_tag": "Tag entfernen",
+    "tag_menu": {
+      "search": "Tags suchen…",
+      "all_assigned": "Alle Tags bereits hinzugefügt",
+      "add_named": "Tag {name} hinzufügen"
+    },
     "quick_filter": {
       "placeholder": "Geladene Ergebnisse filtern…",
       "aria_label": "Geladene Ergebnisse nach Titel filtern",

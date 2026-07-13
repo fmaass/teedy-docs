@@ -6,8 +6,7 @@ import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
 import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
-import ContextMenu from 'primevue/contextmenu'
-import type { MenuItem } from 'primevue/menuitem'
+import TagQuickMenu from '../../components/TagQuickMenu.vue'
 import type { DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
@@ -245,7 +244,12 @@ function onSort(event: DataTableSortEvent) {
   pageOffset.value = 0
 }
 
-// --- Quick tagging context menu ---
+// --- Quick tagging context menu (#71) ---
+//
+// A compact popover (TagQuickMenu): a searchable tag select + top-5 most-used
+// quick-add chips for ADD, and the doc's assigned tags as removable chips for
+// REMOVE. Replaces the former full-tag-tree ContextMenu, which overflowed and got
+// cut off. Add/remove reuse the shared useDocumentTags mutations.
 
 const contextMenuDoc = ref<DocumentListItem | null>(null)
 const contextMenu = ref()
@@ -261,14 +265,12 @@ async function quickAddTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
   await addTag(doc.id, tagId)
-  contextMenu.value?.hide()
 }
 
 async function quickRemoveTag(tagId: string) {
   const doc = contextMenuDoc.value
   if (!doc) return
   await removeTag(doc.id, tagId)
-  contextMenu.value?.hide()
 }
 
 // --- Slide-over panel ---
@@ -390,32 +392,6 @@ onBeforeUnmount(() => {
     clearTimeout(pendingSingleClick)
     pendingSingleClick = null
   }
-})
-
-const contextMenuItems = computed(() => {
-  const doc = contextMenuDoc.value
-  if (!doc) return [] as MenuItem[]
-  const currentTagIds = new Set((doc.tags ?? []).map((t) => t.id))
-  const addItems: MenuItem[] = tf.allTags
-    .filter((t) => !currentTagIds.has(t.id))
-    .map((tag) => ({
-      label: tag.name,
-      icon: 'pi pi-plus',
-      command: () => quickAddTag(tag.id),
-    }))
-  const removeItems: MenuItem[] = (doc.tags ?? []).map((tag) => ({
-    label: tag.name,
-    icon: 'pi pi-minus',
-    command: () => quickRemoveTag(tag.id),
-  }))
-
-  const items: MenuItem[] = []
-  if (addItems.length) items.push({ label: t('ui.context_add_tag'), items: addItems })
-  if (removeItems.length) {
-    if (items.length) items.push({ separator: true })
-    items.push({ label: t('ui.context_remove_tag'), items: removeItems })
-  }
-  return items
 })
 
 // --- Bulk operations ---
@@ -661,7 +637,14 @@ function bulkDelete() {
       />
     </div>
 
-    <ContextMenu ref="contextMenu" :model="contextMenuItems" />
+    <TagQuickMenu
+      ref="contextMenu"
+      :document="contextMenuDoc"
+      :all-tags="tf.allTags"
+      :tag-counts="tf.tagCounts"
+      @add-tag="quickAddTag"
+      @remove-tag="quickRemoveTag"
+    />
 
     <DocumentSlideOver
       v-model:visible="slideOverOpen"

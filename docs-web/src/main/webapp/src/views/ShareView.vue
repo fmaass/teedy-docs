@@ -131,6 +131,10 @@ function formatDate(ts: number) {
   line-height: 1.6;
   color: var(--p-text-color);
 }
+/* Read-only description prose: sanitized to plain <ol>/<ul>; pin native markers
+   and indent so lists show numbers / bullets exactly once, never clipped (#70). */
+.share-description :deep(ol) { list-style: decimal outside; padding-left: 1.5em; }
+.share-description :deep(ul) { list-style: disc outside; padding-left: 1.5em; }
 
 .share-files {
   margin-top: 1.5rem;

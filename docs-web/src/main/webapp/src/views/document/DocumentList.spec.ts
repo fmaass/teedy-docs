@@ -104,9 +104,10 @@ vi.mock('../../stores/tagFilter', async () => {
       get selectedTags() { return filterHolder.state.selectedTags },
       excludedTags: [],
       relatedTags: [],
-      // A candidate tag not yet on the seeded docs, so the quick-tag context menu
-      // renders an "add" entry (#50).
+      // A candidate tag not yet on the seeded docs, so the quick-tag menu
+      // renders an "add" entry (#50/#71).
       allTags: [{ id: 'tag-ctx', name: 'urgent', color: '#cc0000' }],
+      tagCounts: { 'tag-ctx': 3 },
       get debouncedText() { return filterHolder.state.debouncedText },
       hasActiveFilters: false,
       searchText: '',
@@ -235,37 +236,49 @@ const DocumentGalleryStub = defineComponent({
   },
 })
 
-// ContextMenu stub: renders the leaf commands from its `model` (walking nested
-// `items` groups) as buttons keyed by label, so a test can invoke the add/remove
-// command exactly as a real menu click would.
-const ContextMenuStub = defineComponent({
-  props: ['model'],
-  setup(props, { expose }) {
+// TagQuickMenu stub (#71): the compact popover that replaced the full-tree
+// ContextMenu. It exposes show/hide (the parent drives it via a ref) and mirrors the
+// real add/remove contract — an "add" button per assignable (not-yet-assigned) tag,
+// and a "remove" button per assigned tag — so a test can invoke either path exactly
+// as a real popover click would, and assert both round-trip through addTag/removeTag.
+const TagQuickMenuStub = defineComponent({
+  props: ['document', 'allTags', 'tagCounts'],
+  emits: ['addTag', 'removeTag'],
+  setup(props, { expose, emit }) {
     expose({ show: () => {}, hide: () => {} })
-    function leaves(items: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
-      const out: Array<Record<string, unknown>> = []
-      for (const it of items) {
-        if (Array.isArray(it.items)) out.push(...leaves(it.items as Array<Record<string, unknown>>))
-        else if (typeof it.command === 'function') out.push(it)
-      }
-      return out
-    }
-    return () =>
-      h(
-        'div',
-        { class: 'context-menu-stub' },
-        leaves(props.model as Array<Record<string, unknown>>).map((it) =>
+    return () => {
+      const assignedIds = new Set(
+        ((props.document?.tags ?? []) as Array<{ id: string }>).map((tt) => tt.id),
+      )
+      const assignable = (props.allTags as Array<{ id: string; name: string }>).filter(
+        (tt) => !assignedIds.has(tt.id),
+      )
+      const assigned = (props.document?.tags ?? []) as Array<{ id: string; name: string }>
+      return h('div', { class: 'tag-quick-menu-stub' }, [
+        ...assignable.map((tt) =>
           h(
             'button',
             {
-              class: 'ctx-item',
-              'data-label': it.label as string,
-              onClick: () => (it.command as () => void)(),
+              class: 'tqm-add',
+              'data-label': tt.name,
+              onClick: () => emit('addTag', tt.id),
             },
-            it.label as string,
+            tt.name,
           ),
         ),
-      )
+        ...assigned.map((tt) =>
+          h(
+            'button',
+            {
+              class: 'tqm-remove',
+              'data-label': tt.name,
+              onClick: () => emit('removeTag', tt.id),
+            },
+            tt.name,
+          ),
+        ),
+      ])
+    }
   },
 })
 
@@ -356,7 +369,7 @@ function mountView() {
         BulkActionBar: { template: '<div class="bulk-bar-stub" />' },
         EmptyState: passthrough,
         ErrorState: passthrough,
-        ContextMenu: ContextMenuStub,
+        TagQuickMenu: TagQuickMenuStub,
         ToggleButton: passthrough,
       },
       directives: { tooltip: {} },
@@ -956,11 +969,11 @@ describe('DocumentList — right-click tags in gallery (#50)', () => {
     const wrapper = mountView()
     // Confirm we are in gallery mode (the right-click surface #50 targets).
     expect(wrapper.find('.doc-gallery-stub').exists()).toBe(true)
-    // Right-click the first card → the shared ContextMenu is populated for that doc.
+    // Right-click the first card → the compact TagQuickMenu is populated for that doc.
     await wrapper.find('.card-context').trigger('click')
     await flushPromises()
-    // The candidate tag 'urgent' is not on the doc, so the menu shows an add entry.
-    const addItem = wrapper.find('.ctx-item[data-label="urgent"]')
+    // The candidate tag 'urgent' is not on the doc, so the add popover offers it.
+    const addItem = wrapper.find('.tqm-add[data-label="urgent"]')
     expect(addItem.exists()).toBe(true)
     await addItem.trigger('click')
     await flushPromises()
@@ -969,12 +982,12 @@ describe('DocumentList — right-click tags in gallery (#50)', () => {
   })
 
   it('right-clicking a gallery card then choosing an existing tag removes it (round-trip)', async () => {
-    // Seed a tag on the first doc so the menu offers a remove entry.
+    // Seed a tag on the first doc so the REMOVE section offers it.
     doc.tags = [{ id: 'tag-on', name: 'keep', color: '#00aa00' }]
     const wrapper = mountView()
     await wrapper.find('.card-context').trigger('click')
     await flushPromises()
-    const removeItem = wrapper.find('.ctx-item[data-label="keep"]')
+    const removeItem = wrapper.find('.tqm-remove[data-label="keep"]')
     expect(removeItem.exists()).toBe(true)
     await removeItem.trigger('click')
     await flushPromises()

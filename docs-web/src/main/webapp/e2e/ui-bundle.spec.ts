@@ -64,8 +64,9 @@ test('items-per-page selection persists across a reload (#52)', async ({ page, r
   }
 })
 
-// #50 — right-clicking a gallery card adds a tag (verified via authoritative API).
-test('gallery right-click adds a tag to the document (#50)', async ({ page, request }) => {
+// #50/#71 — right-clicking a gallery card adds a tag via the compact TagQuickMenu
+// popover (search + top-5 quick-add chips), verified via authoritative API.
+test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, request }) => {
   const tagName = unique('rc-tag').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const title = unique('rc-doc')
   const tagId = await apiCreateTag(request, tagName)
@@ -82,11 +83,21 @@ test('gallery right-click adds a tag to the document (#50)', async ({ page, requ
     })
     await expect(card).toBeVisible()
 
-    // Right-click the card → the quick-tag context menu opens; choose the tag to add.
+    // Right-click the card → the compact TagQuickMenu popover opens (#71).
     await card.click({ button: 'right' })
-    const menu = page.getByRole('menu')
-    await expect(menu).toBeVisible()
-    await menu.getByText(tagName, { exact: true }).click()
+    const popover = page.locator('.p-popover')
+    await expect(popover).toBeVisible()
+
+    // Add the tag: prefer its quick-add chip; else pick it from the search Select.
+    const chip = popover.locator('.tqm-chip', { hasText: tagName })
+    if (await chip.count()) {
+      await chip.first().click()
+    } else {
+      await popover.locator('.tqm-select').click()
+      const filter = page.locator('.p-select-overlay input')
+      await filter.fill(tagName)
+      await page.locator('.p-select-option', { hasText: tagName }).first().click()
+    }
 
     // ACCEPTANCE: authoritative read-back shows the tag now on the document.
     await expect
