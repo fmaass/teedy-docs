@@ -87,8 +87,8 @@
       "folder": "Carpeta IMAP",
       "tag": "Etiqueta añadida a documentos importado",
       "test": "Comprobar parámetros",
-      "last_sync": "Última sincronización: {data.date}, {data.count} mensaje{data} importado{data}",
-      "test_success": "La conexión con la bandeja de entrada es correcta ({count} mensaje{count} <strong>no leido{count}</strong>)",
+      "last_sync": "Última sincronización: {date}, {count} mensaje importado",
+      "test_success": "La conexión con la bandeja de entrada es correcta ({count} mensaje <strong>no leido</strong>)",
       "test_fail": "Ha ocurrido un error al conectar con la bandeja de entrada, por favor, compruebe los parámetros",
       "saved": "Configuración IMAP guardada correctamente"
     },

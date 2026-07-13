@@ -84,7 +84,7 @@
       "folder": "IMAP 件夹中",
       "tag": "标签添加到导入的文档",
       "test": "测试参数",
-      "last_sync": "上次同步：{data.date}，{data.count}消息导入",
+      "last_sync": "上次同步：{date}，{count}消息导入",
       "test_success": "与收件箱的连接成功（{count}消息）",
       "test_fail": "连接到收件箱时发生错误，请检查参数"
     },
