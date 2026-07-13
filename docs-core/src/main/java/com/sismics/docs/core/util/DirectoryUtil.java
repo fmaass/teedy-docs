@@ -21,23 +21,7 @@ public class DirectoryUtil {
      * @return Base data directory
      */
     public static Path getBaseDataDirectory() {
-        Path baseDataDir = null;
-        if (StringUtils.isNotBlank(EnvironmentUtil.getTeedyHome())) {
-            // If the docs.home property is set then use it
-            baseDataDir = Paths.get(EnvironmentUtil.getTeedyHome());
-        } else if (EnvironmentUtil.isUnitTest()) {
-            // For unit testing, use a temporary directory
-            baseDataDir = Paths.get(System.getProperty("java.io.tmpdir"));
-        } else {
-            // We are in a webapp environment and nothing is specified, use the default directory for this OS
-            if (EnvironmentUtil.isUnix()) {
-                baseDataDir = Paths.get("/var/docs");
-            } if (EnvironmentUtil.isWindows()) {
-                baseDataDir = Paths.get(EnvironmentUtil.getWindowsAppData() + "\\Sismics\\Docs");
-            } else if (EnvironmentUtil.isMacOs()) {
-                baseDataDir = Paths.get(EnvironmentUtil.getMacOsUserHome() + "/Library/Sismics/Docs");
-            }
-        }
+        Path baseDataDir = resolveBaseDataDirectory();
 
         if (baseDataDir != null && !Files.isDirectory(baseDataDir)) {
             try {
@@ -48,6 +32,46 @@ public class DirectoryUtil {
         }
 
         return baseDataDir;
+    }
+
+    /**
+     * Resolves the base data directory path WITHOUT creating it. Used by strictly read-only callers
+     * (e.g. the clean_storage dry-run) that must not touch the filesystem.
+     *
+     * @return Base data directory path (may not exist)
+     */
+    private static Path resolveBaseDataDirectory() {
+        if (StringUtils.isNotBlank(EnvironmentUtil.getTeedyHome())) {
+            // If the docs.home property is set then use it
+            return Paths.get(EnvironmentUtil.getTeedyHome());
+        } else if (EnvironmentUtil.isUnitTest()) {
+            // For unit testing, use a temporary directory
+            return Paths.get(System.getProperty("java.io.tmpdir"));
+        } else {
+            // We are in a webapp environment and nothing is specified, use the default directory for this OS
+            Path baseDataDir = null;
+            if (EnvironmentUtil.isUnix()) {
+                baseDataDir = Paths.get("/var/docs");
+            } if (EnvironmentUtil.isWindows()) {
+                baseDataDir = Paths.get(EnvironmentUtil.getWindowsAppData() + "\\Sismics\\Docs");
+            } else if (EnvironmentUtil.isMacOs()) {
+                baseDataDir = Paths.get(EnvironmentUtil.getMacOsUserHome() + "/Library/Sismics/Docs");
+            }
+            return baseDataDir;
+        }
+    }
+
+    /**
+     * Resolves the storage directory path WITHOUT creating the base or storage directory — a strictly
+     * read-only variant of {@link #getStorageDirectory()}. The returned path may not exist; callers
+     * must check {@link Files#isDirectory(Path, java.nio.file.LinkOption...)} before listing it. Used
+     * by the clean_storage dry-run, which must be free of any filesystem side effect.
+     *
+     * @return Storage directory path (may not exist), or null if no base directory resolves
+     */
+    public static Path getStorageDirectoryReadOnly() {
+        Path baseDataDir = resolveBaseDataDirectory();
+        return baseDataDir == null ? null : baseDataDir.resolve("storage");
     }
     
     /**

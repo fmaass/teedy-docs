@@ -175,7 +175,7 @@ public class UserDao {
      */
     public void updateQuota(User user) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        
+
         // Get the user
         Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
         q.setParameter("id", user.getId());
@@ -183,6 +183,28 @@ public class UserDao {
 
         // Update the user
         userDb.setStorageCurrent(user.getStorageCurrent());
+    }
+
+    /**
+     * Sets a user's current storage usage by ID, REGARDLESS of the user's active state, and is a no-op
+     * if the user row does not exist. Unlike {@link #updateQuota(User)} — which filters on
+     * {@code deleteDate is null} and throws {@code NoResultException} for a soft-deleted user — this is
+     * safe to call for a RETAINED soft-deleted uploader (the #55 ghost key-holder, kept because a
+     * document was reassigned away from it). A storage-quota reclaim on such a uploader must never throw
+     * after destructive work; it credits the (still-present) row or skips cleanly if the row is gone.
+     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimUserQuota} so BOTH clean_storage and the
+     * retention purge are safe against a ghost uploader.
+     *
+     * @param userId User ID (any delete state)
+     * @param storageCurrent New storage_current value
+     */
+    public void updateQuotaById(String userId, long storageCurrent) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        User userDb = em.find(User.class, userId);
+        if (userDb == null) {
+            return;
+        }
+        userDb.setStorageCurrent(storageCurrent);
     }
     
     /**

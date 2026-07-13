@@ -207,4 +207,38 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
         Assertions.assertEquals(Long.valueOf(0L), userDao.getById(collab.getId()).getStorageCurrent(),
                 "stranded collaborator file must reclaim quota to its own uploader on purge");
     }
+
+    /**
+     * #74 blocker 3 — {@link FileUtil#reclaimUserQuota} (via {@link UserDao#updateQuotaById}) must credit
+     * a RETAINED SOFT-DELETED uploader's quota WITHOUT throwing. {@code UserDao.updateQuota} filters on
+     * {@code deleteDate is null} and throws {@code NoResultException} for such a user; the ghost-tolerant
+     * path must not. This is the shared fix that also protects the retention-purge path.
+     */
+    @Test
+    public void reclaimUserQuotaToleratesSoftDeletedUploader() throws Exception {
+        User user = createUser("reclaimGhost");
+        UserDao userDao = new UserDao();
+        String userId = user.getId();
+        user = userDao.getById(userId);
+        user.setStorageCurrent(10_000L);
+        userDao.updateQuota(user);
+        // Soft-delete the user (retained ghost key-holder state).
+        User toDelete = userDao.getById(userId);
+        toDelete.setDeleteDate(new Date());
+
+        // Must NOT throw, and must credit the (still-present) soft-deleted row.
+        Assertions.assertDoesNotThrow(() -> FileUtil.reclaimUserQuota(userId, 4_000L),
+                "reclaiming quota for a retained soft-deleted uploader must not throw");
+        Assertions.assertEquals(Long.valueOf(6_000L), userDao.getById(userId).getStorageCurrent(),
+                "the soft-deleted uploader's quota was credited (10000 - 4000)");
+    }
+
+    /**
+     * {@link UserDao#updateQuotaById} is a no-op (no throw) when the user row does not exist.
+     */
+    @Test
+    public void updateQuotaByIdIsNoOpForMissingUser() {
+        Assertions.assertDoesNotThrow(() -> new UserDao().updateQuotaById("no-such-user-id", 123L),
+                "updateQuotaById on a missing user must be a graceful no-op");
+    }
 }

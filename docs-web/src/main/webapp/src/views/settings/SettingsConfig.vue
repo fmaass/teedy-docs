@@ -3,7 +3,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import api from '../../api/client'
-import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, saveFooterLinks, type SmtpConfig, type SmtpEnvManagedField, type FooterLink } from '../../api/app'
+import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, cleanStorageDryRun, saveFooterLinks, type SmtpConfig, type SmtpEnvManagedField, type FooterLink } from '../../api/app'
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { formatFileSize } from '../../utils/formatters'
 import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
@@ -185,16 +185,43 @@ const { mutate: saveFooter, isPending: savingFooter } = useMutation({
 const reindexing = ref(false)
 const cleaningStorage = ref(false)
 
-function handleCleanStorage() {
+async function handleCleanStorage() {
+  // First fetch a side-effect-free dry-run preview so the confirm can state exactly how many
+  // files would be deleted and how much space reclaimed BEFORE anything is mutated.
+  cleaningStorage.value = true
+  let preview
+  try {
+    preview = await cleanStorageDryRun()
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.config.clean_storage_preview_failed'), life: 3000 })
+    cleaningStorage.value = false
+    return
+  }
+  cleaningStorage.value = false
+
+  const summary = t('ui.config.clean_storage_summary', {
+    count: preview.total,
+    size: formatFileSize(preview.reclaimed_bytes),
+  })
+
   confirmDanger({
-    message: t('ui.config.clean_storage_confirm'),
+    message: preview.total === 0 ? t('ui.config.clean_storage_nothing') : summary,
     header: t('ui.config.clean_storage_header'),
     icon: 'pi pi-exclamation-triangle',
     accept: async () => {
       cleaningStorage.value = true
       try {
-        await cleanStorage()
-        toast.add({ severity: 'success', summary: t('ui.config.clean_storage_done'), life: 3000 })
+        const result = await cleanStorage()
+        toast.add({
+          severity: 'success',
+          summary: t('ui.config.clean_storage_done'),
+          detail: t('ui.config.clean_storage_summary', {
+            count: result.file_count,
+            size: formatFileSize(result.bytes),
+          }),
+          life: 5000,
+        })
+        invalidateAppInfo()
       } catch {
         toast.add({ severity: 'error', summary: t('ui.config.clean_storage_failed'), life: 3000 })
       } finally {
