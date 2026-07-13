@@ -106,6 +106,11 @@
 #      page), then RELOAD and assert GET /api/document/:id?files=true reports the file's
 #      rotation==90 — the authoritative read-back proving the value is server-persisted
 #      (not transient); a failed or non-persisted rotation FAILS the check         [browser+api]
+#  23. Forgiving search + quick filter (v3.6.0 #53) — a bare PARTIAL of a longer
+#      COMPOUND title finds the compound document via the real server-side search
+#      (no explicit wildcard, no reindex), which the stock parser could not; then the
+#      client-side quick-filter box narrows the loaded list to a sibling instantly,
+#      without a server round-trip                                                [browser+api]
 #  12. Session restore (verified) — after the logged-out checks 10-11 + 16-17, the
 #      admin session is restored and confirmed live via GET /api/user
 #      (username=admin, not anonymous). Those checks run inside try/finally so this
@@ -252,6 +257,22 @@ rich_doc_id="$(api_put --data-urlencode "title=${rich_doc_title}" \
   -d "language=eng" "${base_url}/api/document" | json_field id || true)"
 [ -z "${rich_doc_id}" ] && note FAIL "seed: could not create rich-description document"
 
+# --- Seed for the v3.6.0 forgiving-search check (#53) -------------------------
+# Forgiving search (#53): a document whose title is a longer COMPOUND token, plus a
+# sibling sharing the run token. The check proves (a) a bare PARTIAL of the compound
+# finds it with no explicit wildcard (the stock parser could not), and (b) the
+# client-side quick-filter box narrows the loaded list without a server round-trip.
+# The compound carries a run-unique prefix so the search is deterministic.
+fs_token="fscompound${run_token}"
+fs_compound_title="${fs_token}Ausbildervertrag"
+fs_other_title="${fs_token}Randnotiz"
+fs_compound_id="$(api_put --data-urlencode "title=${fs_compound_title}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${fs_compound_id}" ] && note FAIL "seed: could not create forgiving-search compound document"
+fs_other_id="$(api_put --data-urlencode "title=${fs_other_title}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${fs_other_id}" ] && note FAIL "seed: could not create forgiving-search sibling document"
+
 # --- Seed for the v3.5.2 persisted-rotation check (#35) -----------------------
 # Rotation is a PER-FILE property, so the check needs a document with a real, rotatable
 # IMAGE file. Create a RUN-stamped document, then upload wide.png (60x20 — the same
@@ -283,6 +304,8 @@ echo "[seed] stats_user=${stats_user} fav_doc=${fav_doc_id} rich_doc=${rich_doc_
   | tee -a "${art_dir}/checks.log"
 echo "[seed] rot_doc=${rot_doc_id} rot_file=${rot_file_id}" \
   | tee -a "${art_dir}/checks.log"
+echo "[seed] fs_compound=${fs_compound_id} fs_other=${fs_other_id} fs_token=${fs_token}" \
+  | tee -a "${art_dir}/checks.log"
 
 # --- Checks 2-17: real-browser flow -------------------------------------------
 BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
@@ -296,6 +319,7 @@ BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_FAV_DOC_ID="${fav_doc_id}" BH_FAV_DOC_TITLE="${fav_doc_title}" \
   BH_RICH_DOC_ID="${rich_doc_id}" \
   BH_ROT_DOC_ID="${rot_doc_id}" BH_ROT_FILE_ID="${rot_file_id}" BH_ROT_DOC_TITLE="${rot_doc_title}" \
+  BH_FS_TOKEN="${fs_token}" BH_FS_COMPOUND_TITLE="${fs_compound_title}" BH_FS_OTHER_TITLE="${fs_other_title}" \
   browser-harness <<'PY'
 import json, os, time, urllib.parse, hmac, hashlib, base64, struct
 
@@ -324,6 +348,9 @@ rich_doc_id = os.environ.get("BH_RICH_DOC_ID", "")
 rot_doc_id = os.environ.get("BH_ROT_DOC_ID", "")
 rot_file_id = os.environ.get("BH_ROT_FILE_ID", "")
 rot_doc_title = os.environ.get("BH_ROT_DOC_TITLE", "")
+fs_token = os.environ.get("BH_FS_TOKEN", "")
+fs_compound_title = os.environ.get("BH_FS_COMPOUND_TITLE", "")
+fs_other_title = os.environ.get("BH_FS_OTHER_TITLE", "")
 results = {}
 
 # RFC-6238 TOTP: recompute the SAME 6-digit code the server verifies (Base32 secret,
@@ -458,6 +485,67 @@ found = js("""
 """.replace("arguments0", json.dumps(run)))
 results["documents_crud"] = (bool(found), f"searched '{doc_title}' -> row visible={found}")
 shot("04-documents-search")
+
+# --- Check 25 (#53): forgiving search + client-side quick filter --------------
+# (a) A bare PARTIAL of a longer COMPOUND title finds the compound document via the
+# real server-side search (no explicit wildcard) — the core #53 acceptance the stock
+# parser could not satisfy. (b) The client-side quick-filter box narrows the loaded
+# list instantly, without a server round-trip.
+fs_ok = False
+fs_detail = "skipped (missing forgiving-search seed)"
+if fs_token and fs_compound_title and fs_other_title:
+    # Wait out async indexing on the compound, then search a bare PARTIAL of it. The
+    # partial is a prefix of the single compound token, NOT the whole token, and
+    # carries no wildcard — only forgiving search resolves it.
+    wait_for_doc_searchable(fs_compound_title)
+    fs_partial = fs_token + "Ausbild"
+    goto_url(base + "/#/document?search=" + urllib.parse.quote(fs_partial))
+    time.sleep(1.5); wait_for_load()
+    partial_deadline = time.time() + 8
+    bare_partial_found = False
+    while time.time() < partial_deadline:
+        bare_partial_found = js("""
+          return (() => [...document.querySelectorAll('.doc-title')]
+            .some(e => (e.textContent||'').includes(arg_title)))();
+        """.replace("arg_title", json.dumps(fs_compound_title)))
+        if bare_partial_found:
+            break
+        time.sleep(0.8)
+    shot("25a-forgiving-search-bare-partial")
+
+    # Now load BOTH seeded docs (search the shared run token), then drive the
+    # client-side quick-filter box to narrow the VISIBLE rows to the sibling only.
+    goto_url(base + "/#/document?search=" + urllib.parse.quote(fs_token))
+    time.sleep(1.8); wait_for_load()
+    both_loaded = js("""
+      return (() => {
+        const titles = [...document.querySelectorAll('.doc-title')].map(e => e.textContent||'');
+        return titles.some(t => t.includes(arg_compound)) && titles.some(t => t.includes(arg_other));
+      })();
+    """.replace("arg_compound", json.dumps(fs_compound_title)).replace("arg_other", json.dumps(fs_other_title)))
+    # Type "Randnotiz" into the quick-filter input (class .quick-filter-input) and fire
+    # the input event so the Vue v-model updates and the visible set recomputes.
+    js("""
+      (() => {
+        const box = document.querySelector('.quick-filter-input');
+        if (!box) return;
+        box.value = 'Randnotiz';
+        box.dispatchEvent(new Event('input', {bubbles:true}));
+      })();
+    """)
+    time.sleep(1.0)
+    filter_narrowed = js("""
+      return (() => {
+        const titles = [...document.querySelectorAll('.doc-title')].map(e => e.textContent||'');
+        const showsOther = titles.some(t => t.includes(arg_other));
+        const hidesCompound = !titles.some(t => t.includes(arg_compound));
+        return showsOther && hidesCompound;
+      })();
+    """.replace("arg_compound", json.dumps(fs_compound_title)).replace("arg_other", json.dumps(fs_other_title)))
+    shot("25b-quick-filter-narrowed")
+    fs_ok = bool(bare_partial_found) and bool(both_loaded) and bool(filter_narrowed)
+    fs_detail = f"bare_partial_found={bare_partial_found} both_loaded={both_loaded} quick_filter_narrowed={filter_narrowed}"
+results["forgiving_search"] = (fs_ok, fs_detail)
 
 # --- Check 5: tags + facets — Facets sidebar shows the seeded tag + count -----
 goto_url(base + "/#/document"); time.sleep(1.5); wait_for_load()
@@ -1353,6 +1441,7 @@ labels = {
     "stats_dashboard": "check20: admin stats dashboard rendered totals/chart/storage + window refetch, and a non-admin got 403 (context-isolated) (#40)",
     "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",
     "rotation_persist": "check22: file rotation persists across reload — POST/UI rotate then GET document files[].rotation==90 (#35/v3.5.2)",
+    "forgiving_search": "check25: bare partial term finds a longer compound via server-side forgiving search + client-side quick-filter narrows the loaded list (#53/v3.6.0)",
     "session_restored": "check12: admin session restored + verified live after the anonymous checks",
 }
 order = list(labels.keys())
@@ -1375,7 +1464,7 @@ PY
 # Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
 # never collides with a later run. The top-of-script cookie_jar admin session is
 # still valid (the harness restored admin at the end of its logged-out region).
-for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}" "${rot_doc_id:-}"; do
+for d in "${doc_id:-}" "${ovf_doc_id:-}" "${fav_doc_id:-}" "${rich_doc_id:-}" "${rot_doc_id:-}" "${fs_compound_id:-}" "${fs_other_id:-}"; do
   [ -n "${d}" ] || continue
   curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
     && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \

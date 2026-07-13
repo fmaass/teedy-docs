@@ -172,6 +172,11 @@
     "item_document": "Dokument",
     "context_add_tag": "Tag hinzufügen",
     "context_remove_tag": "Tag entfernen",
+    "quick_filter": {
+      "placeholder": "Geladene Ergebnisse filtern…",
+      "aria_label": "Geladene Ergebnisse nach Titel filtern",
+      "count": "{visible} von {total} angezeigt"
+    },
     "new_document": "Neues Dokument",
     "edit_document": "Dokument bearbeiten",
     "title_required": "Titel ist erforderlich",

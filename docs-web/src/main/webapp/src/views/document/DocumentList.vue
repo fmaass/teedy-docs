@@ -18,6 +18,9 @@ import SavedFilters from '../../components/SavedFilters.vue'
 import TagFilterChips from '../../components/TagFilterChips.vue'
 import ToggleButton from 'primevue/togglebutton'
 import SelectButton from 'primevue/selectbutton'
+import InputText from 'primevue/inputtext'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
 import Paginator from 'primevue/paginator'
 import type { PageState } from 'primevue/paginator'
 import DocumentTable from '../../components/DocumentTable.vue'
@@ -203,6 +206,26 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
 
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
+
+// --- Client-side quick filter (#53) ---
+//
+// A purely LOCAL, instant filter over the already-loaded page of results — it never
+// hits the server and does not touch pagination or the server-side search. It narrows
+// the visible rows by a case-insensitive substring match on the document title, so a
+// user staring at a loaded page can zero in on a row without a round-trip. Cleared
+// automatically whenever a new server result set arrives (a new page / search) so a
+// stale local filter never hides a fresh page.
+const quickFilter = ref('')
+
+const visibleDocuments = computed(() => {
+  const needle = quickFilter.value.trim().toLowerCase()
+  if (!needle) return documents.value
+  return documents.value.filter((d) => (d.title ?? '').toLowerCase().includes(needle))
+})
+
+watch(documents, () => {
+  quickFilter.value = ''
+})
 
 // Bulk-deleting the last item of a page > 1 refetches with a now-stale offset and
 // the server returns zero rows while total is still positive — a false-empty page
@@ -572,12 +595,29 @@ function bulkDelete() {
 
     <!-- Document list / gallery — both render the SAME paginated result set. -->
     <div class="doc-area">
+      <!-- Client-side quick filter: instantly narrows the loaded page by title (#53). -->
+      <div v-if="documents.length" class="quick-filter-row">
+        <IconField>
+          <InputIcon class="pi pi-filter" />
+          <InputText
+            v-model="quickFilter"
+            :placeholder="t('ui.quick_filter.placeholder')"
+            :aria-label="t('ui.quick_filter.aria_label')"
+            class="quick-filter-input"
+            size="small"
+          />
+        </IconField>
+        <span v-if="quickFilter.trim()" class="quick-filter-count">
+          {{ t('ui.quick_filter.count', { visible: visibleDocuments.length, total: documents.length }) }}
+        </span>
+      </div>
+
       <template v-if="documents.length || isLoading">
         <DocumentTable
           v-if="viewMode === 'list'"
           v-model:selection="selectedDocs"
           selectable
-          :documents="documents"
+          :documents="visibleDocuments"
           :totalRecords="totalCount"
           :rows="pageSize"
           :first="pageOffset"
@@ -592,7 +632,7 @@ function bulkDelete() {
 
         <DocumentGallery
           v-else
-          :documents="documents"
+          :documents="visibleDocuments"
           :loading="isLoading"
           @card-click="openDocument"
           @card-dblclick="openDocumentFull"
@@ -665,6 +705,25 @@ function bulkDelete() {
 .bulk-bar-wrap {
   padding: 0 1.5rem;
   flex-shrink: 0;
+}
+
+/* --- Client-side quick filter --- */
+
+.quick-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.quick-filter-input {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.quick-filter-count {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
 }
 
 /* --- Document area --- */

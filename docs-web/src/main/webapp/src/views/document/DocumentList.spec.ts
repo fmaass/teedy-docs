@@ -201,6 +201,11 @@ const DocumentTableStub = defineComponent({
         // parent's selectedDocs (and thus the bulk toolbar) reflects it — used by the
         // B2 gallery-clears-selection test.
         h('button', { class: 'select-one', onClick: () => emit('update:selection', [props.documents[0]]) }, 'select'),
+        // Render each row title so a test can assert WHICH documents reach the table
+        // (used by the #53 client-side quick-filter tests).
+        ...props.documents.map((d: { id: string; title: string }) =>
+          h('span', { class: 'row-title', 'data-id': d.id }, d.title),
+        ),
       ])
   },
 })
@@ -312,6 +317,23 @@ import DocumentList from './DocumentList.vue'
 import { listDocuments } from '../../api/document'
 const listDocumentsMock = listDocuments as unknown as ReturnType<typeof vi.fn>
 
+// InputText stub: a native input that re-emits update:modelValue so a test can drive
+// the client-side quick filter (#53) exactly as a user typing would.
+const InputTextStub = defineComponent({
+  props: ['modelValue'],
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () =>
+      h('input', {
+        class: 'quick-filter-stub',
+        value: props.modelValue,
+        onInput: (e: Event) => emit('update:modelValue', (e.target as HTMLInputElement).value),
+      })
+  },
+})
+// IconField / InputIcon are pure presentational wrappers — render their default slot.
+const slotWrapper = defineComponent({ setup: (_p, { slots }) => () => h('div', slots.default?.()) })
+
 function mountView() {
   return mount(DocumentList, {
     global: {
@@ -320,6 +342,9 @@ function mountView() {
         DocumentGallery: DocumentGalleryStub,
         SelectButton: SelectButtonStub,
         Select: PageSizeSelectStub,
+        InputText: InputTextStub,
+        IconField: slotWrapper,
+        InputIcon: passthrough,
         Paginator: PaginatorStub,
         DocumentSlideOver: {
           props: ['visible', 'document'],
@@ -761,6 +786,65 @@ describe('DocumentList — list ⇄ gallery view mode (#39)', () => {
     await wrapper.find('.to-list').trigger('click')
     await flushPromises()
     expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
+  })
+})
+
+// --- #53: the client-side quick filter. A purely LOCAL, instant filter over the
+//     already-loaded page — it narrows the visible rows by a case-insensitive title
+//     substring match, never hits the server, and resets when a new page arrives. ---
+describe('DocumentList — client-side quick filter (#53)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    localStorage.clear()
+  })
+
+  function tableTitles(wrapper: ReturnType<typeof mountView>) {
+    return wrapper.findAll('.doc-table-stub .row-title').map((n) => n.text())
+  }
+
+  it('with no filter text, every loaded row is visible', () => {
+    const wrapper = mountView()
+    // Both mock docs reach the table.
+    expect(tableTitles(wrapper)).toEqual(['Doc doc-42', 'Doc doc-99'])
+  })
+
+  it('typing a substring narrows the VISIBLE rows to the matching document', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.quick-filter-stub').setValue('99')
+    await flushPromises()
+    expect(tableTitles(wrapper)).toEqual(['Doc doc-99'])
+    // The server was NOT re-queried — the filter is purely client-side (only the
+    // mount-time listDocuments call exists).
+    expect(listDocumentsMock.mock.calls.length).toBe(1)
+  })
+
+  it('the filter is case-insensitive', async () => {
+    const wrapper = mountView()
+    // Upper-case query still matches the lower-case "doc" in every title.
+    await wrapper.find('.quick-filter-stub').setValue('DOC')
+    await flushPromises()
+    expect(tableTitles(wrapper)).toEqual(['Doc doc-42', 'Doc doc-99'])
+
+    // A non-matching query hides every row.
+    await wrapper.find('.quick-filter-stub').setValue('nonesuch')
+    await flushPromises()
+    expect(tableTitles(wrapper)).toEqual([])
+  })
+
+  it('clearing the filter text restores all loaded rows', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.quick-filter-stub').setValue('99')
+    await flushPromises()
+    expect(tableTitles(wrapper)).toEqual(['Doc doc-99'])
+    await wrapper.find('.quick-filter-stub').setValue('')
+    await flushPromises()
+    expect(tableTitles(wrapper)).toEqual(['Doc doc-42', 'Doc doc-99'])
   })
 })
 

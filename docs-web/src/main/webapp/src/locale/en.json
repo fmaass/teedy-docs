@@ -172,6 +172,11 @@
     "item_document": "document",
     "context_add_tag": "Add tag",
     "context_remove_tag": "Remove tag",
+    "quick_filter": {
+      "placeholder": "Filter loaded results…",
+      "aria_label": "Filter the loaded results by title",
+      "count": "{visible} of {total} shown"
+    },
     "new_document": "New document",
     "edit_document": "Edit document",
     "title_required": "Title is required",

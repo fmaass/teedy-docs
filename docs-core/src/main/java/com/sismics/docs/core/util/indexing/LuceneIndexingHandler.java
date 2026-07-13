@@ -33,7 +33,6 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
@@ -492,20 +491,25 @@ public class LuceneIndexingHandler implements IndexingHandler {
         // Build search query
         Analyzer analyzer = new StandardAnalyzer();
 
-        // Search on documents and files
+        // Search on documents and files.
+        // Free-text fields go through the forgiving query builder (#53): a bare partial term finds
+        // a longer compound token and small typos are tolerated, while any operator-bearing query
+        // (| + - " * ~ ( ) \) is routed unchanged through SimpleQueryParser to preserve OR/NOT/
+        // precedence/phrase/explicit-wildcard/fuzzy/escape. No index-time / analyzer change.
+        String contentQuery = Strings.isNullOrEmpty(fullSearchQuery) ? searchQuery : fullSearchQuery;
         BooleanQuery query = new BooleanQuery.Builder()
-                .add(buildQueryParser(analyzer, "title").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "description").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "subject").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "identifier").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "publisher").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "format").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "source").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "type").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "coverage").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "rights").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "filename").parse(searchQuery), BooleanClause.Occur.SHOULD)
-                .add(buildQueryParser(analyzer, "content").parse(Strings.isNullOrEmpty(fullSearchQuery) ? searchQuery : fullSearchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "title", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "description", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "subject", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "identifier", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "publisher", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "format", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "source", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "type", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "coverage", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "rights", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "filename", searchQuery), BooleanClause.Occur.SHOULD)
+                .add(LuceneSearchQueryBuilder.build(analyzer, "content", contentQuery), BooleanClause.Occur.SHOULD)
                 .build();
 
         // Search
@@ -545,19 +549,6 @@ public class LuceneIndexingHandler implements IndexingHandler {
         }
 
         return documentMap;
-    }
-
-    /**
-     * Build a query parser for searching.
-     *
-     * @param analyzer Analyzer
-     * @param field Field
-     * @return Query parser
-     */
-    private SimpleQueryParser buildQueryParser(Analyzer analyzer, String field) {
-        SimpleQueryParser simpleQueryParser = new SimpleQueryParser(analyzer, field);
-        simpleQueryParser.setDefaultOperator(BooleanClause.Occur.MUST); // AND all the terms
-        return simpleQueryParser;
     }
 
     /**
