@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { unique } from './helpers'
+import { unique, openNav } from './helpers'
 
 // #12: the facet (co-occurrence) tree bounds dense children — a node with more
 // than 20 eligible children shows the top 19 by co-occurrence plus one terminal,
@@ -57,13 +57,18 @@ test('a dense facet root caps children at 19 + a non-interactive overflow node (
 
     await page.goto('/#/document')
 
-    // Switch the sidebar tag panel to Facets mode (SelectButton option).
-    await page.getByRole('button', { name: 'Facets', exact: true }).click()
+    // The tag panel lives in the desktop side panel OR the mobile Drawer; openNav
+    // resolves to the live container (opening the Drawer on mobile) so the facet
+    // interactions below run identically at both viewports.
+    const nav = await openNav(page)
+
+    // Switch the tag panel to Facets mode (SelectButton option).
+    await nav.getByRole('button', { name: 'Facets', exact: true }).click()
 
     // Locate OUR root tree item (the node content carries the exact tag name) and
     // expand it via the PrimeVue toggler. Scoping by the unique per-run tag name
     // keeps the spec independent of other specs' leftovers in a full-suite run.
-    const rootNode = page
+    const rootNode = nav
       .locator('.tag-tree-node')
       .filter({ hasText: new RegExp(`^\\s*${tagNames[0]}`) })
       .first()

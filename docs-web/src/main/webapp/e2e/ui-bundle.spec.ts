@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { unique } from './helpers'
+import { unique, openNav, isMobileViewport } from './helpers'
 
 // v3.6.0 UI bundle e2e (#57 title/favicon, #61 settings regroup, #52 items-per-page,
 // #50 right-click tags in gallery). Each test drives the real running instance and
@@ -27,7 +27,10 @@ async function apiDocTagIds(request: APIRequestContext, docId: string): Promise<
 // #61 — the settings admin nav renders THREE labelled groups with the right membership.
 test('settings admin nav shows three labelled groups (#61)', async ({ page }) => {
   await page.goto('/#/settings/account')
-  const nav = page.locator('.admin-nav')
+  // The admin nav renders in the desktop side panel OR the mobile Drawer — openNav
+  // opens the Drawer on mobile so the same assertions hold at both viewports.
+  const container = await openNav(page)
+  const nav = container.locator('.admin-nav')
   await expect(nav).toBeVisible()
   // The personal section header was renamed "Settings" -> "Personal".
   await expect(nav.locator('.admin-nav-section', { hasText: 'Personal' })).toBeVisible()
@@ -66,7 +69,13 @@ test('items-per-page selection persists across a reload (#52)', async ({ page, r
 
 // #50/#71 — right-clicking a gallery card adds a tag via the compact TagQuickMenu
 // popover (search + top-5 quick-add chips), verified via authoritative API.
+// DESKTOP-ONLY interaction: a right-click / contextmenu has no equivalent on a touch
+// device (Pixel 5: isMobile+hasTouch) — neither a right-button click nor a dispatched
+// `contextmenu` opens the popover; it is a pointer-only affordance with no long-press
+// handler. Skipping on mobile is correct (UX gap by design, not a layout bug); the
+// desktop project covers it.
 test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, request }) => {
+  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance (no mobile touch equivalent)')
   const tagName = unique('rc-tag').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const title = unique('rc-doc')
   const tagId = await apiCreateTag(request, tagName)

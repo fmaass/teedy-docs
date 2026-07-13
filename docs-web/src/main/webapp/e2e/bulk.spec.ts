@@ -36,13 +36,35 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page 
     await expect(bar.getByText('2 selected')).toBeVisible()
   }
 
+  // Open a bulk action's PrimeVue Popover, pick an option from its Select, and Apply.
+  // The whole open→select→apply chain is wrapped in ONE `toPass` because on the narrow
+  // mobile viewport each teleported/repositioning overlay is individually flaky: the
+  // trigger's `toggle(event)` sometimes does not open the Popover on the first click,
+  // and the Select's overlay can be un-wired for a beat after the Popover opens. Making
+  // the whole sequence retriable recovers from a dropped popover-open OR a dropped
+  // select-open without the test failing. `force` bypasses the stability wait on the
+  // perpetually-micro-nudging overlays; the authoritative success signal ("Bulk action
+  // complete" toast + bar hidden) is still asserted AFTER, so this never masks a real
+  // failure to apply.
+  async function bulkPick(triggerName: string, optionName: string | RegExp) {
+    const popover = page.locator('.bulk-popover')
+    await expect(async () => {
+      if (!(await popover.isVisible().catch(() => false))) {
+        await bar.getByRole('button', { name: triggerName }).click({ timeout: 2000 })
+        await expect(popover).toBeVisible({ timeout: 1500 })
+      }
+      const combo = popover.getByRole('combobox')
+      await combo.click({ force: true, timeout: 2000 })
+      await expect(page.getByRole('listbox')).toBeVisible({ timeout: 1500 })
+    }).toPass({ timeout: 20000 })
+    await page.getByRole('option', { name: optionName }).click()
+    await popover.getByRole('button', { name: 'Apply' }).click()
+  }
+
   // Bulk add tag: open the popover, pick the tag, apply. Success surfaces the
   // "Bulk action complete" summary toast, then the selection clears (bar hides).
   await selectBoth()
-  await bar.getByRole('button', { name: 'Add tag' }).click()
-  await page.locator('.bulk-popover').getByRole('combobox').click()
-  await page.getByRole('option', { name: tagName }).click()
-  await page.locator('.bulk-popover').getByRole('button', { name: 'Apply' }).click()
+  await bulkPick('Add tag', tagName)
   await expect(page.getByText('Bulk action complete').first()).toBeVisible()
   await expect(bar).toBeHidden()
 
@@ -58,10 +80,7 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page 
   // Bulk set language.
   await page.goto('/#/document')
   await selectBoth()
-  await bar.getByRole('button', { name: 'Set language' }).click()
-  await page.locator('.bulk-popover').getByRole('combobox').click()
-  await page.getByRole('option', { name: 'Français' }).click()
-  await page.locator('.bulk-popover').getByRole('button', { name: 'Apply' }).click()
+  await bulkPick('Set language', 'Français')
   await expect(page.getByText('Bulk action complete').first()).toBeVisible()
   await expect(bar).toBeHidden()
 

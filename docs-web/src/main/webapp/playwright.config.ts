@@ -17,7 +17,22 @@ export default defineConfig({
   workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   timeout: 30_000,
-  expect: { timeout: 10_000 },
+  expect: {
+    timeout: 10_000,
+    // Visual-regression tolerance for the responsive.spec screenshots. Baselines
+    // are RENDERER/OS-sensitive: a macOS-generated PNG will not pixel-match the
+    // Linux CI renderer. The functional assertions in responsive.spec are the HARD
+    // gate; the toHaveScreenshot calls are a soft glitch-detector whose AUTHORITATIVE
+    // baselines must be generated ON the Linux CI runner (see responsive.spec.ts and
+    // e2e/COVERAGE.md). A generous maxDiffPixelRatio absorbs sub-pixel AA noise once a
+    // Linux baseline exists; do NOT commit macOS baselines as the source of truth.
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.02,
+      // Anti-alias / hinting differences on individual pixels shouldn't trip a diff.
+      threshold: 0.2,
+      animations: 'disabled',
+    },
+  },
   use: {
     baseURL,
     trace: 'on-first-retry',
@@ -26,11 +41,45 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      // DESKTOP: Desktop Chrome (1280×720). Runs the FULL spec set unchanged —
+      // this is the existing behaviour (project was named `chromium`; renamed to
+      // `desktop` now that a sibling `mobile` project exists). It ignores only the
+      // mobile-only responsive spec, which asserts the isMobile branch and would be
+      // meaningless at desktop width.
+      name: 'desktop',
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'e2e/.auth/admin.json',
       },
+      testIgnore: /responsive\.spec\.ts/,
+    },
+    {
+      // MOBILE: a real Playwright device descriptor (Pixel 5 — 393×851, touch,
+      // DPR 2.75) so AppLayout's `matchMedia('(max-width: 1024px)')` branch (Drawer
+      // + hamburger instead of the desktop side-panel) actually renders. Reuses the
+      // SAME admin storageState global-setup produces, so it starts logged in exactly
+      // like desktop.
+      //
+      // This project re-runs the ENTIRE spec set at the mobile viewport (a full
+      // mobile REGRESSION suite to catch app-wide mobile CSS glitches), EXCEPT the
+      // explicitly-listed desktop-only specs below. The shared specs are made
+      // viewport-agnostic by routing their navigation through the openNav/tagTreePanel
+      // helpers (e2e/helpers.ts), which open the Drawer on mobile.
+      //
+      // MOBILE EXCLUSIONS (testIgnore) — each with its reason:
+      //   * docs-screenshots.spec.ts — DELIBERATELY pins a fixed 1280×800 viewport
+      //     (VIEWPORT const) to capture desktop marketing/doc screenshots at a stable
+      //     frame; it is a capture tool, not a responsive behaviour test, and running
+      //     it on mobile would fight its own setViewportSize and produce desktop-framed
+      //     shots under the mobile project. Its assertions are already proven on desktop.
+      // (responsive.spec.ts is NOT excluded here — it is the mobile-only spec and MUST
+      //  run under this project; testMatch is not needed because it's ignored on desktop.)
+      name: 'mobile',
+      use: {
+        ...devices['Pixel 5'],
+        storageState: 'e2e/.auth/admin.json',
+      },
+      testIgnore: [/docs-screenshots\.spec\.ts/],
     },
   ],
 })

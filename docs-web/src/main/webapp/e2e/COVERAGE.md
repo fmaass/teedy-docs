@@ -6,6 +6,94 @@ and clean up after themselves so reruns never collide. Auth: a persisted admin
 `storageState` (see `global-setup.ts`); login-form / anonymous / guest specs opt out
 of it per-test.
 
+## Two viewports: `desktop` + `mobile` projects
+
+`playwright.config.ts` defines **two** projects, both driving the SAME booted app and
+the SAME admin `storageState`:
+
+- **`desktop`** — Desktop Chrome (1280×720). Runs the FULL spec set (this is the
+  original behaviour; the project was renamed from `chromium`). Ignores only the
+  mobile-only `responsive.spec.ts`.
+- **`mobile`** — Playwright's `Pixel 5` device descriptor (393×851, touch, DPR 2.75),
+  so AppLayout's `matchMedia('(max-width: 1024px)')` branch renders the PrimeVue
+  Drawer + hamburger instead of the desktop side-panel. Re-runs the ENTIRE spec set
+  at the mobile viewport as a **regression suite against app-wide mobile CSS
+  glitches**, plus the dedicated `responsive.spec.ts`.
+
+Running `scripts/e2e-run.sh` (no `--project`) runs BOTH projects, so CI gains the
+mobile regression pass automatically. Run one with `--project=mobile` /
+`--project=desktop`.
+
+### Viewport-agnostic navigation (no spec forks)
+
+The shared specs are NOT forked per viewport. On mobile the desktop side-panel is
+replaced by a Drawer that is closed by default; the tag tree, the settings/admin nav,
+and the footer links all live inside it. `e2e/helpers.ts` exposes viewport-aware
+helpers that the specs route their navigation through so ONE spec works at both sizes:
+
+- `isMobileViewport(page)` — true under the mobile project (viewport ≤ 1024px).
+- `openNav(page)` — opens the mobile Drawer (no-op on desktop) and returns the live
+  nav container (`aside.left-panel` on desktop, the Drawer `dialog` on mobile).
+- `tagTreePanel(page)` — the `.tag-tree` scoped to that live container.
+- `toggleTagFilter(page, name)` — click a tag node (re-opens the Drawer per click on
+  mobile, where a select CLOSES the Drawer — the real mobile flow).
+- `tagNodeState(page, name)` — read a tag node's `aria-pressed` / excluded state,
+  re-opening the Drawer on mobile. The tri-state filter specs assert the URL
+  (viewport-agnostic) as the primary signal and read node state via this helper.
+
+Brand-link / footer-link / side-panel anchors that are hidden inside the closed
+Drawer on mobile were replaced in the shared specs with header controls that render at
+both viewports (e.g. the header **Logout** / **About** buttons) or with main-content
+headings.
+
+### Mobile exclusions / skips (with reasons)
+
+- **`docs-screenshots.spec.ts`** — excluded from the `mobile` project (config
+  `testIgnore`). It deliberately pins a fixed **1280×800** viewport to capture desktop
+  marketing/doc screenshots; it is a capture tool, not a responsive test, and running
+  it on mobile would fight its own `setViewportSize`. Its assertions already run on
+  desktop.
+- **`ui-bundle.spec.ts` #50 (gallery right-click adds a tag)** — `test.skip` on mobile
+  only. A right-click / `contextmenu` has **no touch equivalent** on a mobile device
+  (verified: neither a right-button click nor a dispatched `contextmenu` opens the
+  quick-tag menu on Pixel 5). This is a UX affordance gap by design, not a layout bug;
+  the desktop project covers it.
+
+## Mobile responsive coverage — `responsive.spec.ts`
+
+Runs ONLY under the `mobile` project. Functional (hard-gate) assertions at the Pixel 5
+viewport, all environment-independent:
+
+- the desktop side-panel is absent and the header hamburger is visible (exercises the
+  `isMobile` branch);
+- opening the Drawer reveals the nav and a nav link is reachable + inside the viewport;
+- the four header action icons (#67) are all visible, hold a tappable width, and do
+  not overlap in the narrow bar;
+- the document slide-over (#68): a long title truncates and its bounding box does not
+  overlap the (clickable) close button, both within the viewport.
+
+### Visual regression (soft, baseline generated on CI-Linux)
+
+`responsive.spec.ts` also has `toHaveScreenshot` checks on two mobile screens (the
+document list + the slide-over) — the CSS-glitch class the #67/#68 fixes belong to.
+These are **NOT the hard gate**:
+
+- `toHaveScreenshot` baselines are renderer/OS-sensitive — a macOS-generated PNG will
+  not pixel-match the Linux CI renderer — so **no baseline PNGs are committed from a
+  macOS dev run**. `playwright.config.ts` sets a generous
+  `maxDiffPixelRatio`/`threshold` to absorb sub-pixel AA noise once a Linux baseline
+  exists.
+- The whole `visual regression` block is gated on `E2E_VISUAL=1` and skipped by
+  default, so a missing baseline never blocks the functional gate.
+- **To generate the authoritative baselines**, run once on the Linux CI runner (or via
+  the Playwright Docker image) and commit the produced PNGs:
+
+      E2E_VISUAL=1 scripts/e2e-run.sh --project=mobile --update-snapshots
+      # commit the generated e2e/responsive.spec.ts-snapshots/*-linux.png
+
+  Once Linux baselines are committed, CI can set `E2E_VISUAL=1` on every mobile run to
+  make the visual diff a standing gate.
+
 | Spec | Feature proven |
 | --- | --- |
 | `smoke.spec.ts` | App boots and the authenticated shell renders. |
@@ -34,7 +122,8 @@ of it per-test.
 | `webhook-delivery.spec.ts` | **Webhook delivery OBSERVED (not just CRUD)**: an in-test HTTP listener on an ephemeral port is registered as a `DOCUMENT_CREATED` webhook (via `host.docker.internal`, reachable through the harness `--add-host` + `DOCS_WEBHOOK_ALLOW_PRIVATE=true`); creating a document drives the async `WebhookAsyncListener` POST, and the listener asserts the delivery is a POST to the registered path with the payload shape `{"event":"DOCUMENT_CREATED","id":<the created doc id>}`. The harness guarantees the topology, so a rejected registration (allow-flag dropped, alias unresolvable) FAILS the spec — no silent skip. |
 | `i18n.spec.ts` | **UI language switch (de)**: the real Settings → Account language Select flips rendered strings to German (verbatim `de.json` values: Benutzerkonto / Darstellung / Passwort ändern), a reload proves persistence (localStorage `teedy-locale`), and switching back to English restores them (English present, German gone). |
 | `dark-mode.spec.ts` | **Dark-mode toggle (computed style)**: the real header "Dark mode" control flips `getComputedStyle(document.body).backgroundColor` to an actually-dark value (low luminance, darker than light) and adds `.dark-mode`; a reload proves persistence (localStorage `teedy-dark-mode`, restored in `main.ts`); toggling back restores the light background exactly. |
-| `ui-bundle.spec.ts` | **v3.6.0 UI bundle**: (#61) the settings admin nav renders the renamed "Personal" header plus the three labelled admin groups (Access & Users / Content Model / System) with correct membership; (#52) the items-per-page Select choice persists to localStorage `teedy_document_page_size` across a full reload; (#50) right-clicking a gallery card and choosing a tag from the context menu lands that tag on the document (authoritative `/api/document/:id` read-back); (#57) setting a custom theme name via `POST /api/theme` makes `document.title` (the browser tab) reflect it, restored in teardown. |
+| `ui-bundle.spec.ts` | **v3.6.0 UI bundle**: (#61) the settings admin nav renders the renamed "Personal" header plus the three labelled admin groups (Access & Users / Content Model / System) with correct membership; (#52) the items-per-page Select choice persists to localStorage `teedy_document_page_size` across a full reload; (#50) right-clicking a gallery card and choosing a tag from the context menu lands that tag on the document (authoritative `/api/document/:id` read-back — **desktop only**, `test.skip` on mobile: right-click has no touch equivalent); (#57) setting a custom theme name via `POST /api/theme` makes `document.title` (the browser tab) reflect it, restored in teardown. |
+| `responsive.spec.ts` | **Mobile / responsive (mobile project only)**: at the Pixel 5 viewport the desktop side-panel is hidden and the header hamburger is shown (isMobile branch); opening the Drawer reveals a reachable, in-viewport nav link; the four header action icons (#67) stay visible, tappable, and non-overlapping in the narrow bar; the slide-over (#68) truncates a long title without overlapping the clickable close button. Plus soft `toHaveScreenshot` visual checks (doc list + slide-over) gated behind `E2E_VISUAL=1` with CI-Linux-generated baselines (see the "Two viewports" section above). |
 
 ## Not covered by Playwright (by design)
 

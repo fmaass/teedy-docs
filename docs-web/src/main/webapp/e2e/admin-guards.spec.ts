@@ -29,10 +29,12 @@ test('non-admin is redirected away from admin routes but can reach account setti
     const userPage = await userContext.newPage()
     await login(userPage, username, password)
 
-    // A non-admin route is reachable.
+    // A non-admin route is reachable. Assert on the account page's own H2 (main
+    // content, present at both viewports) rather than the brand link, which is
+    // hidden inside the closed Drawer on mobile.
     await userPage.goto('/#/settings/account')
     await expect(userPage).toHaveURL(/#\/settings\/account/)
-    await expect(userPage.getByRole('link', { name: 'teedy' }).first()).toBeVisible()
+    await expect(userPage.getByRole('heading', { name: 'User account' })).toBeVisible()
 
     // Admin-only /settings/ldap: the guard bounces to the documents list.
     await userPage.goto('/#/settings/ldap')

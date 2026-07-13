@@ -13,9 +13,9 @@ test.describe('authentication', () => {
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page).toHaveURL(/#\/document$/)
-    // Authenticated shell: the left-panel brand + logout control only render when
-    // a real session exists.
-    await expect(page.getByRole('link', { name: 'teedy' }).first()).toBeVisible()
+    // Authenticated shell: the header Logout control only renders when a real
+    // session exists, and (unlike the side-panel/Drawer brand link) it is present
+    // in the header at BOTH the desktop and mobile viewports.
     await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
   })
 
