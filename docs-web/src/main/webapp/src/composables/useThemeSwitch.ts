@@ -1,21 +1,16 @@
 import { usePrimeVue } from 'primevue/config'
 import { definePreset } from '@primeuix/themes'
-import Aura from '@primeuix/themes/aura'
-import Lara from '@primeuix/themes/lara'
-import Material from '@primeuix/themes/material'
-import Nora from '@primeuix/themes/nora'
 import { teedyPrimary } from '../theme/primary'
 import { DARK_MODE_SELECTOR } from '../constants/theme'
+import { loadPreset, themeNames, getStoredTheme } from '../theme/presets'
 
-const presets: Record<string, typeof Lara> = { Aura, Lara, Material, Nora }
-
-export const themeNames = Object.keys(presets)
+export { themeNames, getStoredTheme }
 
 export function useThemeSwitch() {
   const PrimeVue = usePrimeVue()
 
-  function switchTheme(name: string) {
-    const base = presets[name] ?? Lara
+  async function switchTheme(name: string) {
+    const base = await loadPreset(name)
     const preset = definePreset(base, { semantic: { primary: teedyPrimary } })
     PrimeVue.config.theme = {
       preset,
@@ -25,8 +20,4 @@ export function useThemeSwitch() {
   }
 
   return { switchTheme, themeNames }
-}
-
-export function getStoredTheme(): string {
-  return localStorage.getItem('teedy-theme') || 'Lara'
 }

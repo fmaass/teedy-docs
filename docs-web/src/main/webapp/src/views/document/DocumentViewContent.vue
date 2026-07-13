@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -11,7 +11,9 @@ import {
   type DocumentListItem,
 } from '../../api/document'
 import { queryKeys } from '../../api/queryKeys'
-import PdfViewer from '../../components/PdfViewer.vue'
+// pdf.js (~pulled in by PdfViewer) is heavy and only needed when a PDF file is
+// actually displayed, so the viewer is loaded on demand into its own chunk.
+const PdfViewer = defineAsyncComponent(() => import('../../components/PdfViewer.vue'))
 import EmptyState from '../../components/EmptyState.vue'
 import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'

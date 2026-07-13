@@ -3,10 +3,6 @@ import { createPinia } from 'pinia'
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import PrimeVue from 'primevue/config'
 import Tooltip from 'primevue/tooltip'
-import Aura from '@primeuix/themes/aura'
-import Lara from '@primeuix/themes/lara'
-import Material from '@primeuix/themes/material'
-import Nora from '@primeuix/themes/nora'
 import { definePreset } from '@primeuix/themes'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
@@ -15,6 +11,7 @@ import './assets/teedy-tokens.css'
 import './assets/teedy-theme.css'
 import { teedyPrimary } from './theme/primary'
 import { DARK_MODE_SELECTOR } from './constants/theme'
+import { getStoredTheme, loadPreset } from './theme/presets'
 
 import App from './App.vue'
 import router from './router'
@@ -28,9 +25,9 @@ if (localStorage.getItem('teedy-dark-mode') === 'true') {
   document.documentElement.classList.add('dark-mode')
 }
 
-const presets: Record<string, typeof Lara> = { Aura, Lara, Material, Nora }
-const savedTheme = localStorage.getItem('teedy-theme') || 'Lara'
-const basePreset = presets[savedTheme] ?? Lara
+// Only the active theme's preset is fetched at startup (its own lazy chunk),
+// keeping the other three presets out of the initial bundle.
+const basePreset = await loadPreset(getStoredTheme())
 
 const TeedyPreset = definePreset(basePreset, {
   semantic: {
