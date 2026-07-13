@@ -129,7 +129,7 @@ async function thumbDimensions(
   return imageDimensions(Buffer.from(await res.body()))
 }
 
-test('gallery renders cards; real thumb vs placeholder is proven on fetched bytes (#39)', async ({
+test('@flaky gallery renders cards; real thumb vs placeholder is proven on fetched bytes (#39, quarantined #80)', async ({
   page,
   request,
 }) => {

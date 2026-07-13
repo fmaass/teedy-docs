@@ -140,6 +140,9 @@ jobs:
       - name: Run e2e suite (boots container, tears down)
         env:
           E2E_IMAGE: teedy-e2e:local
+          # The nightly monitor also runs the quarantined @flaky specs (excluded from the
+          # release-gating e2e job) so their flakiness stays visible for triage.
+          E2E_INCLUDE_FLAKY: "1"
         run: bash scripts/e2e-run.sh
 
       - name: Upload Playwright HTML report
