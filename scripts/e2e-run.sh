@@ -9,15 +9,34 @@
 # The Playwright login uses Teedy's NATIVE form login (admin/admin) — NOT Authelia
 # (Authelia only fronts production).
 #
+# Two run modes (OS-consistent visual baselines — see below):
+#   DEFAULT (functional):  runs the whole suite on the HOST via `npx playwright test`,
+#                          but EXCLUDES the pixel-comparison visual specs (`--grep-invert
+#                          @visual`). The host runner (GitHub ubuntu-latest = Noble) has
+#                          different system fonts than the jammy container the visual
+#                          baselines were generated in, so a host pixel-diff would flake.
+#                          The deterministic FUNCTIONAL specs (incl. the German-overflow
+#                          checks) still run here at both viewports.
+#   VISUAL-ONLY (E2E_VISUAL_ONLY=1): runs ONLY the `@visual` specs INSIDE the
+#                          `mcr.microsoft.com/playwright:v1.<ver>-jammy` container joined to
+#                          the app container's network namespace (so the app is reachable
+#                          as http://localhost:8080 — Teedy's session cookie only sticks on
+#                          a `localhost` origin). This is the EXACT environment the
+#                          committed `*-linux.png` baselines match, so the diff is a real,
+#                          reliable gate. The Playwright image tag is pinned to the repo's
+#                          @playwright/test version (from package-lock.json).
+#
 # Usage:
-#   scripts/e2e-run.sh                 # build the image, then run e2e
-#   E2E_IMAGE=teedy:local scripts/e2e-run.sh   # reuse an already-built image
+#   scripts/e2e-run.sh                          # build image, run FUNCTIONAL suite on host
+#   E2E_IMAGE=teedy:local scripts/e2e-run.sh    # reuse an already-built image
+#   E2E_VISUAL_ONLY=1 E2E_IMAGE=teedy:local scripts/e2e-run.sh   # visual gate in jammy container
 #
 # Env:
 #   E2E_IMAGE     image ref to boot (default: build ./ as teedy-e2e:local)
 #   E2E_PORT      host port to expose 8080 on (default 8080)
 #   E2E_TIMEOUT   seconds to wait for /api/user readiness (default 180)
 #   E2E_ALLOW_STALE_WAR   set to 1 to skip the reused-WAR/pom version match check
+#   E2E_VISUAL_ONLY       set to 1 to run ONLY the @visual pixel specs in the jammy container
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -106,7 +125,38 @@ while true; do
   sleep 3
 done
 
-export PLAYWRIGHT_BASE_URL="http://localhost:${host_port}"
-echo "Running Playwright e2e suite against ${PLAYWRIGHT_BASE_URL}..."
-cd "${webapp}"
-npx playwright test "$@"
+if [ "${E2E_VISUAL_ONLY:-}" = "1" ]; then
+  # VISUAL GATE: run ONLY the @visual pixel specs INSIDE the pinned Playwright jammy
+  # container, joined to the app container's network namespace so the app is reachable
+  # as http://localhost:8080 (Teedy's session cookie only sticks on a `localhost`
+  # origin — a non-localhost host makes the post-login /api/user come back anonymous
+  # and the form login never completes). This is the exact OS/font environment the
+  # committed *-linux.png baselines were generated in, so the diff is reliable.
+  #
+  # The image tag is pinned to the repo's resolved @playwright/test version so the
+  # browser/renderer matches the baselines. Derive it from package-lock.json.
+  pw_version="$(node -e "process.stdout.write(require('${webapp}/package-lock.json').packages['node_modules/@playwright/test'].version)")"
+  if [ -z "${pw_version}" ]; then
+    echo "FAIL: could not resolve @playwright/test version from package-lock.json." >&2
+    exit 1
+  fi
+  pw_image="mcr.microsoft.com/playwright:v${pw_version}-jammy"
+  echo "Running @visual specs in ${pw_image} (shared netns with ${container}, base http://localhost:8080)..."
+  # --ipc=host avoids Chromium /dev/shm exhaustion; --network container: shares the
+  # app's netns; mount the repo so the specs + committed baselines are visible.
+  docker run --rm --ipc=host --network "container:${container}" \
+    -v "${repo_root}:/work" -w /work/docs-web/src/main/webapp \
+    -e PLAYWRIGHT_BASE_URL="http://localhost:8080" \
+    -e CI="${CI:-}" \
+    "${pw_image}" \
+    npx playwright test visual.spec --grep @visual "$@"
+else
+  # FUNCTIONAL suite on the host — EXCLUDE the pixel-comparison @visual specs (their
+  # baselines match the jammy container, not this runner's fonts; the dedicated visual
+  # job above covers them). The deterministic functional specs (incl. German-overflow)
+  # still run at both viewports.
+  export PLAYWRIGHT_BASE_URL="http://localhost:${host_port}"
+  echo "Running Playwright FUNCTIONAL e2e suite (excluding @visual) against ${PLAYWRIGHT_BASE_URL}..."
+  cd "${webapp}"
+  npx playwright test --grep-invert @visual "$@"
+fi

@@ -72,27 +72,84 @@ viewport, all environment-independent:
 - the document slide-over (#68): a long title truncates and its bounding box does not
   overlap the (clickable) close button, both within the viewport.
 
-### Visual regression (soft, baseline generated on CI-Linux)
+The pixel-comparison for these CSS-glitch classes is owned by the **standing visual
+gate** (`visual.spec.ts`) — `responsive.spec.ts` keeps only the environment-independent
+functional assertions as the mobile hard gate.
 
-`responsive.spec.ts` also has `toHaveScreenshot` checks on two mobile screens (the
-document list + the slide-over) — the CSS-glitch class the #67/#68 fixes belong to.
-These are **NOT the hard gate**:
+## Visual-regression gate — `visual.spec.ts` (key screens × {desktop,mobile} × {en,de})
 
-- `toHaveScreenshot` baselines are renderer/OS-sensitive — a macOS-generated PNG will
-  not pixel-match the Linux CI renderer — so **no baseline PNGs are committed from a
-  macOS dev run**. `playwright.config.ts` sets a generous
-  `maxDiffPixelRatio`/`threshold` to absorb sub-pixel AA noise once a Linux baseline
-  exists.
-- The whole `visual regression` block is gated on `E2E_VISUAL=1` and skipped by
-  default, so a missing baseline never blocks the functional gate.
-- **To generate the authoritative baselines**, run once on the Linux CI runner (or via
-  the Playwright Docker image) and commit the produced PNGs:
+A **default-on, standing** visual gate (no `E2E_VISUAL` opt-in). It captures the six
+key screens most prone to layout/overflow, each rendered in **English then German**
+(German UI strings run ~30% longer — the #1 overflow cause), under **both** the
+`desktop` and `mobile` projects → 4 combos/screen. Determinism: animations disabled
+(config `toHaveScreenshot.animations`) + a transition/caret-killing stylesheet, and
+every volatile region is `mask`ed (`.doc-meta` per-row dates, `.about-version` badge)
+so a diff only ever reflects a real CSS/layout change.
 
-      E2E_VISUAL=1 scripts/e2e-run.sh --project=mobile --update-snapshots
-      # commit the generated e2e/responsive.spec.ts-snapshots/*-linux.png
+Key screens covered:
 
-  Once Linux baselines are committed, CI can set `E2E_VISUAL=1` on every mobile run to
-  make the visual diff a standing gate.
+1. **Document list** (`/#/document`, seeded corpus with tag chips).
+2. **Gallery view** (same corpus, `teedy_document_view_mode=gallery`).
+3. **Document slide-over with a long title** (the #68 truncation area).
+4. **Settings hub** (`/#/settings`) and **Settings › Config form** (`/#/settings/config`).
+5. **Rich-text description editor** with an ordered + an unordered list (the #70 area).
+6. **About dialog** (version badge masked).
+
+It also has three **functional German-overflow assertions** (the HARD gate, not pixel
+comparison): German header action buttons stay inside the viewport, German footer nav
+labels stay inside their nav container, and German settings-hub cards don't overflow —
+a German label that overflows its container is a real bug.
+
+Locale is set by seeding `localStorage['teedy-locale']` before a reload (the key
+`main.ts` reads at boot), which renders the whole screen in the target locale without
+a per-screen Settings click.
+
+### Authoritative Linux baselines (the operational crux)
+
+Playwright name-spaces baselines by OS (`*-linux.png`); **CI runs Linux, so a macOS
+baseline is useless and MUST NOT be committed.** Only the `*-linux.png` files under
+`e2e/visual.spec.ts-snapshots/` are authoritative and committed. A screen with no
+committed Linux baseline **fails loudly** ("missing snapshot" — Playwright's default),
+so a new un-baselined screen is caught; the committed baselines make CI green.
+
+Generate/refresh the baselines with the official Playwright Docker image whose tag
+**matches the repo's `@playwright/test` version** (currently `1.61.1`), pointed at the
+booted RC app. The Playwright container MUST join the app container's **network
+namespace** so the app is reachable as `http://localhost:8080` — Teedy's session cookie
+only sticks on a `localhost` origin, so via `host.docker.internal`/a container DNS name
+the post-login `GET /api/user` comes back anonymous and the form login never completes:
+
+    # 1. Build the prod WAR and Teedy image, boot it (embedded H2, admin/admin).
+    ./mvnw -Pprod -DskipTests clean install
+    docker build -t teedy-visual:local .
+    docker run -d --name teedy-visual-app teedy-visual:local
+    # 2. Run the matching Playwright container in the app's netns, updating snapshots.
+    docker run --rm --ipc=host --network container:teedy-visual-app \
+      -v "$PWD/docs-web/src/main/webapp":/work -w /work \
+      -e PLAYWRIGHT_BASE_URL="http://localhost:8080" -e CI=1 \
+      mcr.microsoft.com/playwright:v1.61.1-jammy \
+      bash -lc "npm ci && npx playwright test visual.spec --update-snapshots"
+    # 3. Commit ONLY e2e/visual.spec.ts-snapshots/*-linux.png
+
+### CI wiring — OS-consistent (the reliability crux)
+
+Playwright baselines are renderer/font-sensitive, and the baselines above come from the
+**jammy** container (Ubuntu 22.04 fonts) — NOT the GitHub `ubuntu-latest` (Noble)
+runner. A host `npx playwright test` on Noble would flake the pixel diffs. So the CI
+run is split by a `@visual` grep tag (on the pixel-comparison `describe` in
+`visual.spec.ts`):
+
+- **Host functional run** — `scripts/e2e-run.sh` (default) runs the whole suite on the
+  runner but appends `--grep-invert @visual`, so the deterministic functional specs —
+  including the three German-overflow checks in `visual.spec.ts` — run at both viewports
+  as before; the pixel specs do NOT run on the mismatched-font host. This is the `e2e`
+  job.
+- **Visual gate** — a dedicated `e2e-visual` CI job boots the SAME RC image and runs
+  `scripts/e2e-run.sh` with `E2E_VISUAL_ONLY=1`, which runs ONLY the `@visual` specs
+  INSIDE the pinned jammy container (image tag derived from `package-lock.json`), joined
+  to the app's netns at `http://localhost:8080` — the exact OS/font environment the
+  committed baselines match. A visual diff fails this job, and the image-publish
+  (`docker`) job gates on it. Default-on, real gate, no macOS/Noble baseline mismatch.
 
 | Spec | Feature proven |
 | --- | --- |
@@ -123,7 +180,8 @@ These are **NOT the hard gate**:
 | `i18n.spec.ts` | **UI language switch (de)**: the real Settings → Account language Select flips rendered strings to German (verbatim `de.json` values: Benutzerkonto / Darstellung / Passwort ändern), a reload proves persistence (localStorage `teedy-locale`), and switching back to English restores them (English present, German gone). |
 | `dark-mode.spec.ts` | **Dark-mode toggle (computed style)**: the real header "Dark mode" control flips `getComputedStyle(document.body).backgroundColor` to an actually-dark value (low luminance, darker than light) and adds `.dark-mode`; a reload proves persistence (localStorage `teedy-dark-mode`, restored in `main.ts`); toggling back restores the light background exactly. |
 | `ui-bundle.spec.ts` | **v3.6.0 UI bundle**: (#61) the settings admin nav renders the renamed "Personal" header plus the three labelled admin groups (Access & Users / Content Model / System) with correct membership; (#52) the items-per-page Select choice persists to localStorage `teedy_document_page_size` across a full reload; (#50) right-clicking a gallery card and choosing a tag from the context menu lands that tag on the document (authoritative `/api/document/:id` read-back — **desktop only**, `test.skip` on mobile: right-click has no touch equivalent); (#57) setting a custom theme name via `POST /api/theme` makes `document.title` (the browser tab) reflect it, restored in teardown. |
-| `responsive.spec.ts` | **Mobile / responsive (mobile project only)**: at the Pixel 5 viewport the desktop side-panel is hidden and the header hamburger is shown (isMobile branch); opening the Drawer reveals a reachable, in-viewport nav link; the four header action icons (#67) stay visible, tappable, and non-overlapping in the narrow bar; the slide-over (#68) truncates a long title without overlapping the clickable close button. Plus soft `toHaveScreenshot` visual checks (doc list + slide-over) gated behind `E2E_VISUAL=1` with CI-Linux-generated baselines (see the "Two viewports" section above). |
+| `responsive.spec.ts` | **Mobile / responsive (mobile project only)**: at the Pixel 5 viewport the desktop side-panel is hidden and the header hamburger is shown (isMobile branch); opening the Drawer reveals a reachable, in-viewport nav link; the four header action icons (#67) stay visible, tappable, and non-overlapping in the narrow bar; the slide-over (#68) truncates a long title without overlapping the clickable close button. Functional hard gate only — pixel comparison is owned by `visual.spec.ts`. |
+| `visual.spec.ts` | **Standing visual-regression + i18n gate**: the six key screens most prone to layout/overflow (document list, gallery, slide-over with a long title, settings hub + Config form, rich-text editor with ordered+unordered lists (#70), About dialog) captured in **English and German** under **both** the `desktop` and `mobile` projects (4 combos/screen) against committed `*-linux.png` baselines; volatile regions (dates, version badge) masked; animations disabled. Plus three **functional German-overflow** assertions (header buttons / nav labels / settings-hub cards stay within their container at both viewports) — the German hard gate. Default-on (no `E2E_VISUAL`); a missing Linux baseline fails loudly. |
 
 ## Not covered by Playwright (by design)
 

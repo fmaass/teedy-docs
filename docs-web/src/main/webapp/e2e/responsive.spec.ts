@@ -1,21 +1,18 @@
 import { test, expect, type Locator } from '@playwright/test'
 import { createDocument, unique } from './helpers'
 
-// Mobile / responsive coverage. This spec runs ONLY under the `mobile-chrome`
-// project (Pixel 5 viewport, testMatch in playwright.config.ts), so every test
-// here executes at 393×851 with touch — the viewport that trips AppLayout's
-// `matchMedia('(max-width: 1024px)')` branch (AppLayout.vue:49). The desktop
-// `chromium` project testIgnores this file, so these assertions never run at the
-// desktop viewport (where they'd be meaningless).
+// Mobile / responsive coverage. This spec runs ONLY under the `mobile`
+// project (Pixel 5 viewport; the `desktop` project testIgnores this file), so every
+// test here executes at 393×851 with touch — the viewport that trips AppLayout's
+// `matchMedia('(max-width: 1024px)')` branch (AppLayout.vue:49). At the desktop
+// viewport these assertions would be meaningless.
 //
-// Two kinds of assertion live here:
-//   1. FUNCTIONAL (the hard gate): environment-independent structural checks that
-//      the mobile branch renders correctly and the shipped mobile fixes (#67 nav
-//      icon width, #68 slide-over header) hold. These MUST pass in CI.
-//   2. VISUAL (soft, baseline-pending): toHaveScreenshot glitch detectors on two
-//      key mobile screens. Baselines are renderer/OS-sensitive and MUST be
-//      generated on the Linux CI runner — see the note at the bottom of this file
-//      and e2e/COVERAGE.md. They are NOT the hard gate.
+// This spec holds ONLY environment-independent FUNCTIONAL assertions (the mobile hard
+// gate): structural checks that the mobile branch renders correctly and the shipped
+// mobile fixes (#67 nav icon width, #68 slide-over header) hold. The pixel-level
+// visual-regression comparison for these CSS-glitch classes is owned by the standing
+// visual gate in `visual.spec.ts` (key screens × {desktop,mobile} × {en,de}, with
+// committed Linux baselines) — see e2e/COVERAGE.md.
 
 // A pixel-geometry overlap check used by several assertions: two elements' bounding
 // boxes must not intersect. Returns true when they are disjoint (no overlap).
@@ -183,41 +180,11 @@ test.describe('mobile layout (Pixel 5 viewport)', () => {
     await expect(slideOver).toBeHidden()
   })
 
-  // --- VISUAL REGRESSION (soft, baseline-pending) ----------------------------
-  // These are the CSS-glitch class the #67/#68 fixes belong to. They are NOT the
-  // hard gate: toHaveScreenshot baselines are renderer/OS-sensitive, so a macOS
-  // baseline flakes on Linux CI. Approach:
-  //   * config sets a generous maxDiffPixelRatio/threshold (playwright.config.ts).
-  //   * NO baseline PNGs are committed from macOS. On the first CI run the
-  //     authoritative Linux baselines are generated with `--update-snapshots`
-  //     (see e2e/COVERAGE.md), then committed from that run.
-  //   * Until a Linux baseline exists a bare `playwright test` on a fresh checkout
-  //     reports these as "missing snapshot". To keep the FUNCTIONAL assertions the
-  //     hard gate and prevent a missing baseline from blocking, this whole block is
-  //     gated on E2E_VISUAL=1 — CI's baseline-generation/verify step sets it; the
-  //     default e2e run skips it. Once Linux baselines are committed, flip CI to set
-  //     E2E_VISUAL=1 on every run to make the visual diff a standing gate.
-  test.describe('visual regression', () => {
-    test.skip(process.env.E2E_VISUAL !== '1',
-      'visual snapshots run only when E2E_VISUAL=1 (Linux baselines required — see e2e/COVERAGE.md)')
-
-    test('document list — mobile', async ({ page }) => {
-      await page.goto('/#/document')
-      // The header Logout action is the always-visible shell anchor on mobile (the
-      // brand link is hidden inside the closed Drawer), so wait on it before capture.
-      await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
-      await expect(page).toHaveScreenshot('mobile-document-list.png', { fullPage: true })
-    })
-
-    test('slide-over — mobile', async ({ page }) => {
-      const title = unique('Visual-Slide-Over-Doc')
-      await createDocument(page, title)
-      await page.goto('/#/document')
-      await page.getByRole('cell', { name: title }).click()
-      const slideOver = page.getByRole('dialog')
-      await expect(slideOver).toBeVisible()
-      await expect(page.locator('.slide-over-title')).toHaveText(title)
-      await expect(slideOver).toHaveScreenshot('mobile-slide-over.png')
-    })
-  })
+  // NOTE: the toHaveScreenshot glitch-detectors that once lived here (gated behind
+  // E2E_VISUAL=1, no committed baselines) were REPLACED by the standing, default-on
+  // visual-regression gate in `visual.spec.ts`, which covers the document list and the
+  // slide-over (and four more key screens) across {desktop,mobile} × {en,de} with
+  // committed Linux baselines. This spec keeps ONLY the environment-independent
+  // FUNCTIONAL assertions above as the mobile hard gate; the pixel comparison is owned
+  // by visual.spec.ts so there is a single place baselines are generated and committed.
 })
