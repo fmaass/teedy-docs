@@ -7,10 +7,13 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 /**
  * Data-loss guardrail for the destructive forward-only retirement migrations 037-039
@@ -147,6 +150,607 @@ public class TestPopulatedMigration {
                 "050 must NOT rename the duplicate rows (abort, not auto-rename)");
         Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'dup-2' and USE_USERNAME_C = 'DUPE'"),
                 "050 must NOT rename the duplicate rows (abort, not auto-rename)");
+    }
+
+    // --- migration 050 Java preflight: NAMED collision diagnostic + fail-closed (both dialects) ----
+
+    @Test
+    public void migration050PreflightNamesCollisionsH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration050preflight;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runPreflightNamedDiagnosticScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration050PreflightNamesCollisionsPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-050 preflight test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runPreflightNamedDiagnosticScenario(connection);
+            }
+        }
+    }
+
+    @Test
+    public void migration050PreflightIgnoresSoftDeletedH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration050softdel;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runPreflightSoftDeletedNotFlaggedScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration050PreflightIgnoresSoftDeletedPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-050 soft-delete test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runPreflightSoftDeletedNotFlaggedScenario(connection);
+            }
+        }
+    }
+
+    @Test
+    public void migration050PreflightFiresBeforeAnyDdlFromBelow49H2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration050below49;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runPreflightFiresBeforeAnyDdlScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration050PreflightFiresBeforeAnyDdlFromBelow49Postgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-050 below-49 preflight test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runPreflightFiresBeforeAnyDdlScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Fix #1 proof: on a MULTI-version jump that crosses 50 from BELOW v49 (seed at v46), the
+     * preflight must fire BEFORE any migration script runs — so the intervening scripts' DDL
+     * (e.g. 047's T_FAVORITE) never executes and the "no database changes were applied" diagnostic
+     * is TRUE. Seed a case-collision at v46, run the full upgrade to the configured target, and
+     * assert: it throws {@link MigrationPreconditionException}; DB_VERSION stays 46; the 050 index
+     * is absent; AND the 047 table T_FAVORITE was NOT created (proving no partial schema).
+     */
+    private static void runPreflightFiresBeforeAnyDdlScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 46);
+        Assertions.assertEquals(46, dbVersion(connection), "fixture must be at db.version 46");
+        // The 050 index does not exist yet at v46, so a case-collision can be seeded directly.
+        Assertions.assertFalse(tableExists(connection, "T_FAVORITE"),
+                "T_FAVORITE (created by 047) must not exist at v46");
+
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('b49-1','user','Nina','x','n1@localhost',NOW(),'pk-n1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('b49-2','user','NINA','x','n2@localhost',NOW(),'pk-n2')");
+        }
+        connection.commit();
+
+        MigrationPreconditionException thrown = null;
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=46 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                // If the preflight did NOT fire before this loop, 047's DDL would run and create
+                // T_FAVORITE, leaving a partial schema after rollback on H2. The assertions below
+                // prove that did not happen.
+                for (int version = oldVersion + 1; version <= newVersion; version++) {
+                    executeAllScript(version);
+                }
+            }
+        };
+        try {
+            helper.open();
+        } catch (IllegalStateException wrapped) {
+            Throwable cause = wrapped.getCause();
+            Assertions.assertInstanceOf(MigrationPreconditionException.class, cause,
+                    "a below-49 upgrade that crosses 50 with a collision must fail with a MigrationPreconditionException cause");
+            thrown = (MigrationPreconditionException) cause;
+        }
+        Assertions.assertNotNull(thrown, "the preflight must throw on a below-49 upgrade that crosses 50");
+        Assertions.assertTrue(thrown.getMessage().contains("No database changes were applied"),
+                "the diagnostic must state no changes were applied; was: " + thrown.getMessage());
+        Assertions.assertTrue(thrown.getMessage().contains("Nina") && thrown.getMessage().contains("NINA"),
+                "the diagnostic must name both colliding usernames; was: " + thrown.getMessage());
+
+        // NO migration DDL ran: version unchanged, 050 index absent, AND the 047 table was never
+        // created (the load-bearing proof the preflight fired before the loop, not inside 050).
+        Assertions.assertEquals(46, dbVersion(connection),
+                "a preflight abort from v46 must leave DB_VERSION at 46 (no migration ran)");
+        Assertions.assertFalse(indexExists(connection, "IDX_USER_USERNAME_ACTIVE", "T_USER"),
+                "the 050 index must NOT exist after a preflight-aborted below-49 upgrade");
+        Assertions.assertFalse(tableExists(connection, "T_FAVORITE"),
+                "047's T_FAVORITE must NOT exist — the preflight must fire BEFORE any migration DDL");
+    }
+
+    @Test
+    public void migration050IdempotentAfterResolutionH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration050idem;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runPreflightIdempotencyScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration050IdempotentAfterResolutionPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-050 idempotency test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runPreflightIdempotencyScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Seed a 2-way (MaxMuster + maxmuster) AND a 3-way (Foo/FOO/foo) active collision at v49, then
+     * run the 050 step. The Java preflight must throw a {@link MigrationPreconditionException} whose
+     * message NAMES each colliding group's usernames AND user IDs, states no changes were applied,
+     * and points at the remediation doc — and NO schema change may result (DB_VERSION stays 49, the
+     * index is absent, and no row was renamed).
+     */
+    private static void runPreflightNamedDiagnosticScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 49);
+        Assertions.assertEquals(49, dbVersion(connection), "fixture must be at db.version 49 before 050");
+
+        try (Statement s = connection.createStatement()) {
+            // 2-way collision.
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('mm-1','user','MaxMuster','x','mm1@localhost',NOW(),'pk-mm1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('mm-2','user','maxmuster','x','mm2@localhost',NOW(),'pk-mm2')");
+            // 3-way collision.
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-1','user','Foo','x','foo1@localhost',NOW(),'pk-foo1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-2','user','FOO','x','foo2@localhost',NOW(),'pk-foo2')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-3','user','foo','x','foo3@localhost',NOW(),'pk-foo3')");
+        }
+        connection.commit();
+
+        MigrationPreconditionException thrown = null;
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=49 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(50);
+            }
+        };
+        try {
+            helper.open();
+        } catch (IllegalStateException wrapped) {
+            // open() wraps the preflight exception as the cause of an IllegalStateException.
+            Throwable cause = wrapped.getCause();
+            Assertions.assertInstanceOf(MigrationPreconditionException.class, cause,
+                    "the 050 preflight must fail closed with a MigrationPreconditionException cause");
+            thrown = (MigrationPreconditionException) cause;
+        }
+        Assertions.assertNotNull(thrown, "the 050 preflight must throw MigrationPreconditionException on active collisions");
+
+        String msg = thrown.getMessage();
+        // Names every colliding username AND user id for both groups.
+        for (String needle : new String[]{
+                "MaxMuster", "maxmuster", "mm-1", "mm-2",
+                "Foo", "FOO", "foo", "foo-1", "foo-2", "foo-3"}) {
+            Assertions.assertTrue(msg.contains(needle),
+                    "preflight message must name '" + needle + "'; was: " + msg);
+        }
+        Assertions.assertTrue(msg.contains("No database changes were applied"),
+                "preflight message must state no changes were applied; was: " + msg);
+        Assertions.assertTrue(msg.contains("README-username-collision"),
+                "preflight message must point at the remediation doc; was: " + msg);
+
+        // NO schema change: version unchanged, index absent, no rename.
+        Assertions.assertEquals(49, dbVersion(connection),
+                "a preflight-aborted 050 upgrade must leave DB_VERSION at 49");
+        Assertions.assertFalse(indexExists(connection, "IDX_USER_USERNAME_ACTIVE", "T_USER"),
+                "the unique index must NOT exist after a preflight-aborted 050 upgrade");
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'mm-1' and USE_USERNAME_C = 'MaxMuster'"),
+                "050 preflight must NOT rename the colliding rows");
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'foo-2' and USE_USERNAME_C = 'FOO'"),
+                "050 preflight must NOT rename the colliding rows");
+
+        // Direct helper contract: two groups, with the expected members.
+        connection.commit();
+        List<UsernameCollisionPreflight.CollisionGroup> groups =
+                UsernameCollisionPreflight.findActiveCollisions(connection);
+        Assertions.assertEquals(2, groups.size(), "exactly two active collision groups expected");
+        UsernameCollisionPreflight.CollisionGroup maxGroup = groups.stream()
+                .filter(g -> g.foldedUsername.equals("maxmuster")).findFirst().orElseThrow();
+        Assertions.assertEquals(2, maxGroup.usernames.size(), "the maxmuster group has 2 members");
+        Assertions.assertTrue(maxGroup.userIds.containsAll(java.util.List.of("mm-1", "mm-2")),
+                "the maxmuster group names both user ids");
+        UsernameCollisionPreflight.CollisionGroup fooGroup = groups.stream()
+                .filter(g -> g.foldedUsername.equals("foo")).findFirst().orElseThrow();
+        Assertions.assertEquals(3, fooGroup.usernames.size(), "the foo group has 3 members");
+    }
+
+    /**
+     * A case-variant where exactly ONE row is soft-deleted must NOT be flagged: the 050 constraint
+     * is active-only. Seed active 'alice' + soft-deleted 'Alice' at v49; the preflight must find no
+     * collision and the full 050 step must proceed (DB_VERSION advances, index created).
+     */
+    private static void runPreflightSoftDeletedNotFlaggedScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 49);
+        Assertions.assertEquals(49, dbVersion(connection), "fixture must be at db.version 49 before 050");
+
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('al-active','user','alice','x','al1@localhost',NOW(),'pk-al1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_DELETEDATE_D, USE_PRIVATEKEY_C) values ('al-deleted','user','Alice','x','al2@localhost',NOW(),NOW(),'pk-al2')");
+        }
+        connection.commit();
+
+        // Helper contract: no active collision (the soft-deleted variant is excluded).
+        Assertions.assertTrue(UsernameCollisionPreflight.findActiveCollisions(connection).isEmpty(),
+                "a soft-deleted case variant must NOT be flagged as an active collision");
+
+        // Run just the 050 step: it must proceed cleanly.
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=49 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(50);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(),
+                "050 must proceed when the only case variant is soft-deleted");
+        Assertions.assertEquals(50, dbVersion(connection),
+                "050 must advance DB_VERSION to 50 when no active collision exists");
+        Assertions.assertTrue(indexExists(connection, "IDX_USER_USERNAME_ACTIVE", "T_USER"),
+                "050 must create the active-username unique index when no active collision exists");
+    }
+
+    /**
+     * Idempotency: (a) after collisions are resolved the same 050 path proceeds, and (b) a DB
+     * already at db.version &gt;= 50 does NOT re-run 050 (so the preflight never re-fires on an
+     * already-migrated DB even if a later re-introduced collision would trip it).
+     */
+    private static void runPreflightIdempotencyScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 49);
+
+        // Seed a collision, resolve it (rename one), then confirm 050 proceeds.
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('idem-1','user','Sam','x','s1@localhost',NOW(),'pk-s1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('idem-2','user','sam','x','s2@localhost',NOW(),'pk-s2')");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, UsernameCollisionPreflight.findActiveCollisions(connection).size(),
+                "seeded collision must be detected");
+
+        // Resolve: rename one (the supported remediation outcome).
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_USER set USE_USERNAME_C = 'sam2' where USE_ID_C = 'idem-2'");
+        }
+        connection.commit();
+        Assertions.assertTrue(UsernameCollisionPreflight.findActiveCollisions(connection).isEmpty(),
+                "no collision must remain after the rename");
+
+        // The same path now proceeds to 050.
+        DbOpenHelper up = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                for (int version = oldVersion + 1; version <= 50; version++) {
+                    executeAllScript(version);
+                }
+            }
+        };
+        up.open();
+        Assertions.assertTrue(up.getExceptions().isEmpty(), "050 must proceed after resolution");
+        Assertions.assertEquals(50, dbVersion(connection), "DB advanced to 50 after resolution");
+
+        // (b) Already at >=50 with a case-collision PRESENT in the data: the preflight must be
+        //     SKIPPED (oldVersion >= 50), so an upgrade to the target does NOT throw. To create a
+        //     genuine active case-collision at v50 we must first drop the 050 unique index (which
+        //     would otherwise reject the second active insert); the collision then exists in the
+        //     rows exactly as a re-introduced anomaly would, yet the >=50 upgrade completes cleanly
+        //     because the crossing-50 preflight never fires. This is the real proof of the skip.
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("drop index IDX_USER_USERNAME_ACTIVE");
+        }
+        connection.commit();
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('reintro-1','user','Kim','x','k1@localhost',NOW(),'pk-k1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('reintro-2','user','KIM','x','k2@localhost',NOW(),'pk-k2')");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, UsernameCollisionPreflight.findActiveCollisions(connection).size(),
+                "a genuine active case-collision must be present at v50 for this to prove the skip");
+
+        DbOpenHelper rerun = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                Assertions.assertTrue(oldVersion >= 50,
+                        "an already-migrated DB must report oldVersion >= 50 so the crossing-50 preflight is skipped");
+                for (int version = oldVersion + 1; version <= newVersion; version++) {
+                    executeAllScript(version);
+                }
+            }
+        };
+        // The whole point: this must NOT throw even though a case-collision is present, because the
+        // crossing-50 preflight is skipped for oldVersion >= 50.
+        rerun.open();
+        Assertions.assertTrue(rerun.getExceptions().isEmpty(),
+                "an upgrade from >=50 must skip the preflight and complete cleanly despite a present collision");
+        int target = Integer.parseInt(ConfigUtil.getConfigBundle().getString("db.version"));
+        Assertions.assertEquals(target, dbVersion(connection),
+                "the DB lands on the configured target version without re-running (or re-firing) the 050 preflight");
+    }
+
+    // --- remediation SCRIPTS: H2 leaves DB unchanged on bad input; N-way group resolvable ----------
+
+    /**
+     * FIX #1 proof (H2 script). Running the real H2 remediation Section-2 block through a
+     * stop-on-error runner (H2 {@code RunScript}) with BAD input must leave T_USER UNCHANGED —
+     * no rename persisted. Two bad inputs are proven, each on a fresh v49 fixture:
+     * (a) a missing target USE_ID_C, and (b) a new name that case-insensitively collides with
+     * another active user. In both cases the pre-check guard forces a NOT-NULL-PK violation that
+     * halts the run BEFORE the rename and BEFORE COMMIT, so nothing is committed.
+     *
+     * <p>H2 only: the mechanism is the RunScript stop-on-error halt. On PostgreSQL the equivalent
+     * guard {@code RAISE}s and aborts the transaction (covered structurally by the script design);
+     * this behavioural test exercises the H2-specific abort mechanism that FIX #1 addresses.
+     */
+    @Test
+    public void remediationH2BadInputLeavesDbUnchanged() throws Exception {
+        // (a) missing target id.
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:remH2badTarget;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            seedThreeWayCollisionAtV49(connection);
+            String block = h2Section2()
+                    .replace("<TARGET_ID>", "no-such-id")
+                    .replace("<NEW_NAME>", "foo_one")
+                    .replace("<OLD_NAME>", "Foo");
+            boolean halted = runH2Section2ExpectingHalt(connection, block);
+            Assertions.assertTrue(halted,
+                    "the H2 remediation must HALT on a missing target id (pre-check guard fires)");
+            assertUsernameUnchanged(connection, "foo-1", "Foo");
+            assertUsernameUnchanged(connection, "foo-2", "FOO");
+            assertUsernameUnchanged(connection, "foo-3", "foo");
+        }
+
+        // (b) new name collides case-insensitively with another active user.
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:remH2badCollide;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            seedThreeWayCollisionAtV49(connection);
+            String block = h2Section2()
+                    .replace("<TARGET_ID>", "foo-1")
+                    .replace("<NEW_NAME>", "FOO")   // collides (case-insensitively) with foo-2 'FOO'
+                    .replace("<OLD_NAME>", "Foo");
+            boolean halted = runH2Section2ExpectingHalt(connection, block);
+            Assertions.assertTrue(halted,
+                    "the H2 remediation must HALT when the new name collides with another active user");
+            assertUsernameUnchanged(connection, "foo-1", "Foo");
+            assertUsernameUnchanged(connection, "foo-2", "FOO");
+            assertUsernameUnchanged(connection, "foo-3", "foo");
+        }
+    }
+
+    /**
+     * FIX #2 proof (H2 script). A genuine 3-way ACTIVE collision (Foo/FOO/foo) is fully resolved by
+     * TWO successive single-member renames to distinct non-colliding names, with NO spurious abort
+     * (the old-name "still collides" check was removed), and the global Section-3 check then reports
+     * zero remaining collisions. Proven against the REAL H2 remediation Section-2 block via RunScript.
+     */
+    @Test
+    public void remediationH2ThreeWayCollisionResolvesOneAtATime() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:remH2threeway;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            seedThreeWayCollisionAtV49(connection);
+            String block = h2Section2();
+
+            // Rename #1: foo-1 (Foo) -> foo_one. foo-2/foo-3 still collide; this must NOT abort.
+            org.h2.tools.RunScript.execute(connection, new java.io.StringReader(
+                    block.replace("<TARGET_ID>", "foo-1")
+                         .replace("<NEW_NAME>", "foo_one")
+                         .replace("<OLD_NAME>", "Foo")));
+            assertUsernameUnchanged(connection, "foo-1", "foo_one");
+
+            // Rename #2: foo-2 (FOO) -> foo_two. Now no group collides.
+            org.h2.tools.RunScript.execute(connection, new java.io.StringReader(
+                    block.replace("<TARGET_ID>", "foo-2")
+                         .replace("<NEW_NAME>", "foo_two")
+                         .replace("<OLD_NAME>", "FOO")));
+            assertUsernameUnchanged(connection, "foo-2", "foo_two");
+            assertUsernameUnchanged(connection, "foo-3", "foo");   // the kept member is untouched
+
+            // Global Section-3 check: zero colliding active groups remain.
+            Assertions.assertEquals(0, scalarCount(connection,
+                    "select count(*) from (select lower(USE_USERNAME_C) un from T_USER "
+                            + "where USE_DELETEDATE_D is null group by lower(USE_USERNAME_C) having count(*) > 1) g"),
+                    "after two single-member renames the global collision check must report zero groups");
+        }
+    }
+
+    /**
+     * FIX #2 proof (PostgreSQL script), when Docker is available. The same 3-way collision is
+     * resolved one member at a time by running the REAL PostgreSQL Section-2 block (with the psql
+     * {@code :'var'} variables pre-substituted, since JDBC has no psql variable layer) — no spurious
+     * abort — and the global check then reports zero collisions. Skipped (not failed) without Docker.
+     */
+    @Test
+    public void remediationPostgresThreeWayCollisionResolvesOneAtATime() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the remediation-script test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(true);   // let each pg Section-2 block manage its own BEGIN/COMMIT
+                seedThreeWayCollisionAtV49Postgres(connection);
+
+                runPgSection2(connection, "foo-1", "foo_one", "Foo");
+                assertUsernameUnchanged(connection, "foo-1", "foo_one");
+                runPgSection2(connection, "foo-2", "foo_two", "FOO");
+                assertUsernameUnchanged(connection, "foo-2", "foo_two");
+                assertUsernameUnchanged(connection, "foo-3", "foo");
+
+                Assertions.assertEquals(0, scalarCount(connection,
+                        "select count(*) from (select lower(USE_USERNAME_C) un from T_USER "
+                                + "where USE_DELETEDATE_D is null group by lower(USE_USERNAME_C) having count(*) > 1) g"),
+                        "after two single-member renames the global collision check must report zero groups (PG)");
+
+                // Bad input on PG: a colliding new name must RAISE and abort — nothing renamed.
+                boolean aborted = false;
+                try {
+                    runPgSection2(connection, "foo-3", "foo_two", "foo");   // 'foo_two' now taken by foo-2
+                } catch (SQLException e) {
+                    aborted = true;
+                    // The block's own BEGIN left the transaction aborted after the RAISE; clear it so
+                    // the read-back below runs on a clean transaction (an operator would ROLLBACK too).
+                    try (Statement s = connection.createStatement()) {
+                        s.execute("ROLLBACK");
+                    }
+                }
+                Assertions.assertTrue(aborted,
+                        "the PostgreSQL remediation must abort when the new name collides with another active user");
+                assertUsernameUnchanged(connection, "foo-3", "foo");
+            }
+        }
+    }
+
+    /** Extract the Section-2 block (SET AUTOCOMMIT OFF; .. COMMIT;) from the real H2 remediation script. */
+    private static String h2Section2() throws Exception {
+        return section2Block(readRemediationScript("username-collision-h2.sql"));
+    }
+
+    /**
+     * Run the H2 Section-2 block via {@link org.h2.tools.RunScript} (stop-on-error) and report whether
+     * it HALTED on an error. On a halt the connection is rolled back to the last committed state,
+     * exactly as an operator discarding a failed run would leave it.
+     */
+    private static boolean runH2Section2ExpectingHalt(Connection connection, String block) throws Exception {
+        try {
+            org.h2.tools.RunScript.execute(connection, new java.io.StringReader(block));
+            return false;
+        } catch (SQLException expected) {
+            connection.rollback();
+            return true;
+        }
+    }
+
+    /** Read a remediation script from the classpath (/db/remediation/&lt;name&gt;). */
+    private static String readRemediationScript(String name) throws Exception {
+        try (InputStream is = TestPopulatedMigration.class.getResourceAsStream("/db/remediation/" + name)) {
+            Assertions.assertNotNull(is, "remediation script must be on the classpath: " + name);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    /** Slice out the Section-2 block from "SET AUTOCOMMIT OFF;" through the first standalone "COMMIT;". */
+    private static String section2Block(String script) {
+        int start = script.indexOf("SET AUTOCOMMIT OFF;");
+        Assertions.assertTrue(start >= 0, "H2 script must contain 'SET AUTOCOMMIT OFF;'");
+        int commit = script.indexOf("\nCOMMIT;", start);
+        Assertions.assertTrue(commit >= 0, "H2 script must contain a standalone 'COMMIT;' after Section 2");
+        return script.substring(start, commit + "\nCOMMIT;".length());
+    }
+
+    /**
+     * Run the PostgreSQL Section-2 rename block against a live connection. psql {@code :'var'}
+     * variables have no JDBC equivalent, so pre-substitute them (single-quoted, matching the psql
+     * {@code :'var'} form) before executing the block as one JDBC statement batch.
+     */
+    private static void runPgSection2(Connection connection, String targetId, String newName, String oldName)
+            throws Exception {
+        String block = section2BlockPg(readRemediationScript("username-collision-postgresql.sql"));
+        String sql = block
+                .replace(":'target_id'", "'" + targetId + "'")
+                .replace(":'new_name'", "'" + newName + "'");
+        try (Statement s = connection.createStatement()) {
+            s.execute(sql);
+        }
+    }
+
+    /** Slice the PostgreSQL Section-2 block from "BEGIN;" through the first standalone "COMMIT;". */
+    private static String section2BlockPg(String script) {
+        int start = script.indexOf("\nBEGIN;");
+        Assertions.assertTrue(start >= 0, "PG script must contain a standalone 'BEGIN;'");
+        int commit = script.indexOf("\nCOMMIT;", start);
+        Assertions.assertTrue(commit >= 0, "PG script must contain a standalone 'COMMIT;' after Section 2");
+        return script.substring(start + 1, commit + "\nCOMMIT;".length());
+    }
+
+    /** Seed the minimal v49 schema plus a 3-way active collision (Foo/FOO/foo) on an H2 connection. */
+    private static void seedThreeWayCollisionAtV49(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 49);
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-1','user','Foo','x','foo1@localhost',NOW(),'pk-f1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-2','user','FOO','x','foo2@localhost',NOW(),'pk-f2')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-3','user','foo','x','foo3@localhost',NOW(),'pk-f3')");
+        }
+        connection.commit();
+    }
+
+    /**
+     * PostgreSQL variant: the 050 unique index rejects a second active case-variant, so build to v49
+     * (before 050), seed the collision, and stay pre-050. autoCommit is true here.
+     */
+    private static void seedThreeWayCollisionAtV49Postgres(Connection connection) throws Exception {
+        boolean prevAuto = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        buildSchemaToVersion(connection, 49);
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-1','user','Foo','x','foo1@localhost',NOW(),'pk-f1')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-2','user','FOO','x','foo2@localhost',NOW(),'pk-f2')");
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C) values ('foo-3','user','foo','x','foo3@localhost',NOW(),'pk-f3')");
+        }
+        connection.commit();
+        connection.setAutoCommit(prevAuto);
+    }
+
+    /** Assert an active user's committed username equals the expected value (case-sensitive). */
+    private static void assertUsernameUnchanged(Connection connection, String userId, String expected) throws Exception {
+        try (Statement s = connection.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "select USE_USERNAME_C from T_USER where USE_ID_C = '" + userId + "'")) {
+            Assertions.assertTrue(rs.next(), "user " + userId + " must exist");
+            Assertions.assertEquals(expected, rs.getString(1),
+                    "user " + userId + " username must be '" + expected + "'");
+        }
     }
 
     /**
