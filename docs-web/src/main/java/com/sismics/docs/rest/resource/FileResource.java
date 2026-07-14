@@ -256,7 +256,7 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
-            FileUtil.startProcessingFile(id);
+            FileUtil.markProcessingWithRollbackCleanup(id, unencryptedFile);
             FileUpdatedAsyncEvent fileUpdatedAsyncEvent = new FileUpdatedAsyncEvent();
             fileUpdatedAsyncEvent.setUserId(principal.getId());
             fileUpdatedAsyncEvent.setLanguage(documentDto.getLanguage());
@@ -471,7 +471,7 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
-            FileUtil.startProcessingFile(id);
+            FileUtil.markProcessingWithRollbackCleanup(id, unencryptedFile);
             FileUpdatedAsyncEvent event = new FileUpdatedAsyncEvent();
             event.setUserId(principal.getId());
             event.setLanguage(documentDto.getLanguage());

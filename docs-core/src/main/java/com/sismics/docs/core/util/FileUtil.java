@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * File entity utilities.
@@ -202,7 +203,7 @@ public class FileUtil {
         userDao.updateQuota(user);
 
         // Raise a new file created event and document updated event if we have a document
-        startProcessingFile(fileId);
+        markProcessingWithRollbackCleanup(fileId, unencryptedFile);
         FileCreatedAsyncEvent fileCreatedAsyncEvent = new FileCreatedAsyncEvent();
         fileCreatedAsyncEvent.setUserId(userId);
         fileCreatedAsyncEvent.setLanguage(language);
@@ -228,6 +229,78 @@ public class FileUtil {
     public static void startProcessingFile(String fileId) {
         processingFileSet.add(fileId);
         log.info("Processing started for file: " + fileId);
+    }
+
+    /**
+     * Mark a file as processing AND register rollback compensation on the current transaction frame,
+     * returning a one-shot local-compensation handle a swallowing producer can run itself.
+     *
+     * <p>Every producer marks a file as processing and queues a {@code FileProcessing} async event
+     * BEFORE its request transaction commits. That event fires only on a durable commit and is discarded
+     * on rollback (issue #63): so on rollback the async listener never runs, and without this
+     * compensation the in-memory processing marker would stay set until the JVM restarts (blocking
+     * rotation / reprocessing of that file) and the decrypted plaintext temp file the event carried would
+     * never be deleted (a leak of decrypted content). The registered callback releases the marker and
+     * deletes that plaintext temp file on rollback. On the commit path the listener owns both; the commit
+     * and rollback paths are mutually exclusive, so the marker is released exactly once.</p>
+     *
+     * <p>The returned {@link Runnable} and the registered rollback callback SHARE one {@link
+     * AtomicBoolean} guard, so the release runs at most once no matter how many times either fires: a
+     * batch producer that swallows a failure after marking (its request may still commit, so no rollback
+     * fires) runs the returned handle to compensate immediately, and if the outer transaction later rolls
+     * back anyway the registered callback is a no-op. This prevents a double release — which, if a
+     * concurrent operation had re-acquired the marker in between, would clear that other operation's live
+     * marker — and a double temp delete.</p>
+     *
+     * <p>The mark is set first and the compensation registered IMMEDIATELY after (neither step throws),
+     * so a producer failure after this call still has its rollback compensated.</p>
+     *
+     * <p>Known pre-existing limitations (predate this compensation, not addressed here): if the async bus
+     * is configured to RETRY a failed subscriber the marker may be released before a redelivery, and two
+     * operations racing on the same file id share this single in-memory marker.</p>
+     *
+     * @param fileId File ID
+     * @param unencryptedFile Decrypted plaintext temp file the queued event owns (may be null)
+     * @return a one-shot local-compensation handle; a producer that SWALLOWS a post-mark failure (so no
+     *         rollback will fire) runs it to release the marker + delete the temp exactly once
+     */
+    public static Runnable markProcessingWithRollbackCleanup(String fileId, Path unencryptedFile) {
+        startProcessingFile(fileId);
+        AtomicBoolean released = new AtomicBoolean(false);
+        Runnable release = () -> {
+            if (released.compareAndSet(false, true)) {
+                endProcessingFile(fileId);
+                deleteTempGuarded(fileId, unencryptedFile);
+            }
+        };
+        ThreadLocalContext.get().getCompletionRegistry().registerAfterRollback(release);
+        return release;
+    }
+
+    /**
+     * Delete a decrypted plaintext temp file, swallowing and logging any failure, and NEVER deleting the
+     * stored-file alias. {@link EncryptionUtil#decryptFile} returns the ORIGINAL stored file path when the
+     * private key is null (its unit-test seam), so a producer's "unencrypted temp" can actually BE the
+     * encrypted stored file at {@code storageDir/<fileId>}; deleting it would destroy real content. This
+     * mirrors the alias guard in {@code FileResource.deleteOrphanTemp}. A delete failure during rollback
+     * compensation must not abort the remaining completion callbacks, so it is swallowed and logged.
+     *
+     * @param fileId File ID (used to recognise the stored-file alias)
+     * @param unencryptedFile Plaintext temp file (may be null)
+     */
+    public static void deleteTempGuarded(String fileId, Path unencryptedFile) {
+        if (unencryptedFile == null) {
+            return;
+        }
+        if (fileId != null && unencryptedFile.equals(DirectoryUtil.getStorageDirectory().resolve(fileId))) {
+            // The stored-file alias (null private key). Never delete the real stored content.
+            return;
+        }
+        try {
+            Files.deleteIfExists(unencryptedFile);
+        } catch (Exception e) {
+            log.warn("Unable to delete temporary file: " + unencryptedFile, e);
+        }
     }
 
     /**
