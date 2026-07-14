@@ -1096,33 +1096,23 @@ public class OidcResource extends BaseResource {
      */
     private <T> T runOnFreshTransaction(java.util.function.Function<jakarta.persistence.EntityManager, T> work) {
         ThreadLocalContext context = ThreadLocalContext.get();
-        jakarta.persistence.EntityManager requestEm = context.getEntityManager();
+        // Peek (do NOT flush/clear) the request EM: capturing it to restore later must not force the
+        // request's pending work to the database.
+        jakarta.persistence.EntityManager requestEm = context.peekEntityManager();
         jakarta.persistence.EntityManager freshEm = com.sismics.util.jpa.EMF.get().createEntityManager();
-        // Everything after creation runs under the finally: a failure in getTransaction()
-        // or begin() must still close the fresh EM and restore the request EM (no leak).
-        jakarta.persistence.EntityTransaction tx = null;
-        try {
-            context.setEntityManager(freshEm);
-            tx = freshEm.getTransaction();
-            tx.begin();
-            T result = work.apply(freshEm);
-            tx.commit();
-            return result;
-        } finally {
-            try {
-                if (tx != null && tx.isActive()) {
-                    tx.rollback();
-                }
-            } catch (Exception e) {
-                log.error("Error rolling back OIDC provisioning transaction", e);
-            }
-            try {
-                freshEm.close();
-            } catch (Exception e) {
-                log.error("Error closing OIDC provisioning entity manager", e);
-            }
-            context.setEntityManager(requestEm);
+        // Fail fast BEFORE pushing anything: a null manager would otherwise leak the nested frame.
+        if (freshEm == null) {
+            throw new IllegalStateException("The entity manager factory returned no entity manager for OIDC provisioning");
         }
+        // Run the work on a NEW frame so its completion callbacks and queued async events are isolated
+        // (this frame's rollback must not discard the request's queued work; its commit must not fire the
+        // request's queued events). The shared boundary GUARANTEES the frame is popped and the request EM
+        // restored even if closing the fresh manager throws — so a close failure can never leak the
+        // nested frame onto the pooled request thread. A post-durable-commit observer failure (a
+        // callback, an event, close) is logged and NOT propagated, so provisioning that already committed
+        // does not surface as a failure through the caller's catch-all-to-null; a pre-commit or IN_DOUBT
+        // failure propagates.
+        return com.sismics.docs.core.util.TransactionBoundary.finalizeOwnedInNewFrame(freshEm, requestEm, work);
     }
 
     /**

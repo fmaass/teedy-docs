@@ -1,6 +1,7 @@
 package com.sismics.docs.core.dao;
 
 import com.sismics.docs.core.model.jpa.Favorite;
+import com.sismics.docs.core.util.TransactionBoundary;
 import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
@@ -152,14 +153,34 @@ public class FavoriteDao {
     /**
      * Drops any queued changes and replaces the poisoned (rollback-only) transaction with a fresh,
      * committable one, so a subsequent read and the end-of-request commit both succeed.
+     *
+     * <p>The poisoned transaction is rolled back here, so its frame is finalized as rolled back: its
+     * after-rollback / after-completion callbacks run and its queued async events are DISCARDED (they
+     * describe the failed insert that never committed). The frame is then rotated to a fresh empty
+     * scope on the SAME entity manager for the replacement transaction, via the shared boundary helper
+     * that also drives the checkpoint rotation.</p>
      */
-    private static void beginFreshTransaction(EntityManager em) {
+    static void beginFreshTransaction(EntityManager em) {
         em.clear();
         EntityTransaction tx = em.getTransaction();
-        if (tx.isActive()) {
-            tx.rollback();
+
+        // Classify the rollback through the three-state boundary rather than a raw tx.rollback(): a
+        // thrown rollback is IN_DOUBT (the rollback is unconfirmed). Mark the frame terminal so the
+        // enclosing request owner does not re-finalize it (running after-rollback compensation on an
+        // unconfirmed state), then propagate so create() aborts.
+        TransactionBoundary.ClassifiedOutcome co = TransactionBoundary.tryRollback(em);
+        if (co.getState() == TransactionBoundary.DurableState.IN_DOUBT) {
+            ThreadLocalContext.get().markCurrentFrameInDoubt();
+            TransactionBoundary.complete(TransactionBoundary.DurableState.IN_DOUBT);
+            TransactionBoundary.propagate(co.getFailure());
         }
-        tx.begin();
+
+        // Clean rollback: finalize the poisoned transaction's frame as rolled back (after-rollback
+        // callbacks run, its queued events are discarded), open a fresh scope on the same manager, and
+        // re-begin. A re-begin failure is fatal to continuation (the rollback is preserved): the orphaned
+        // manager is closed and the failure propagates so create() aborts.
+        TransactionBoundary.rotate(TransactionBoundary.DurableState.ROLLED_BACK);
+        TransactionBoundary.beginContinuation(em, tx);
     }
 
     /**

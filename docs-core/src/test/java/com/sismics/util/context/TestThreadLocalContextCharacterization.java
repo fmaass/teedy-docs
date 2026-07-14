@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.FlushModeType;
 
 import java.util.Date;
 import java.util.UUID;
@@ -91,6 +92,42 @@ public class TestThreadLocalContextCharacterization extends BaseTransactionalTes
         } finally {
             context.setEntityManager(original);
         }
+    }
+
+    /**
+     * (i) Contrasts {@link ThreadLocalContext#peekEntityManager()} with the mutating
+     * {@link ThreadLocalContext#getEntityManager()}: peek must neither flush nor clear. The clear half
+     * is proven by the entity still being managed after peek (the mutating getter would have detached
+     * it); the flush half is proven with a query run under {@link FlushModeType#COMMIT}, which
+     * suppresses Hibernate's auto-flush so the count reflects only rows peek itself flushed — zero.
+     */
+    @Test
+    public void peekEntityManagerNeitherFlushesNorClears() {
+        ThreadLocalContext context = ThreadLocalContext.get();
+        EntityManager em = context.getEntityManager();
+
+        String username = "tlc_peek_" + UUID.randomUUID();
+        com.sismics.docs.core.model.jpa.User user = newRawUser(username);
+        em.persist(user);
+        Assertions.assertTrue(em.contains(user),
+                "precondition: the entity is managed and unflushed before the peek");
+
+        EntityManager peeked = context.peekEntityManager();
+        Assertions.assertSame(em, peeked, "peek returns the same entity manager instance");
+
+        Assertions.assertTrue(em.contains(user),
+                "peek must NOT clear the persistence context (the entity stays managed)");
+
+        // FlushModeType.COMMIT suppresses the pre-query auto-flush, so this count sees only what peek
+        // flushed. peek flushes nothing, so the pending INSERT is not yet visible: count is 0. (The
+        // mutating getEntityManager() would have made this 1.)
+        Number count = (Number) em.createNativeQuery(
+                        "select count(*) from T_USER where USE_USERNAME_C = :username")
+                .setParameter("username", username)
+                .setFlushMode(FlushModeType.COMMIT)
+                .getSingleResult();
+        Assertions.assertEquals(0L, count.longValue(),
+                "peek must NOT flush the pending INSERT to the database");
     }
 
     /**

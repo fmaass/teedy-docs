@@ -61,9 +61,25 @@ public class AppContext {
     static final int DEFAULT_ASYNC_RETRY_BACKOFF_MS = 200;
 
     /**
-     * Singleton instance.
+     * Singleton instance. Volatile so the double-checked-locking read in {@link #getInstance()} and the
+     * clear in {@link #shutDown()} publish safely across threads.
      */
-    private static AppContext instance;
+    private static volatile AppContext instance;
+
+    /**
+     * The instance currently being constructed, held ONLY while the AppContext.class monitor is held (no
+     * volatile needed). {@code startUp()} itself calls {@link #getInstance()} on the SAME thread — the
+     * Lucene recovery path posts a rebuild-index event — and Java monitors are reentrant, so that
+     * re-entrant call must return THIS in-progress context instead of building a second one (which would
+     * leak its services/executors once the outer construction overwrote {@code instance}).
+     */
+    private static AppContext constructing;
+
+    /**
+     * Test-only hook run once during {@link #startUp()} to exercise the same-thread re-entrancy path.
+     * Always null in production.
+     */
+    static Runnable duringStartUp;
 
     /**
      * Generic asynchronous event bus.
@@ -120,6 +136,12 @@ public class AppContext {
      */
     private void startUp() {
         resetEventBus();
+
+        // Test-only seam mirroring the Lucene recovery path, which calls AppContext.getInstance() on this
+        // same thread during startUp (after the event bus exists). Inert in production (hook is null).
+        if (duringStartUp != null) {
+            duringStartUp.run();
+        }
 
         // Start indexing handler
         try {
@@ -217,11 +239,50 @@ public class AppContext {
      * @return Application context
      */
     public static AppContext getInstance() {
-        if (instance == null) {
-            instance = new AppContext();
-            instance.startUp();
+        // Double-checked locking: the hot path (already initialized) is a single volatile read; only the
+        // first initialization takes the lock. Serializing initialization is required because a
+        // concurrent burst of first-requests (e.g. after a transient warm-up failure left instance null)
+        // would otherwise let several threads each construct + startUp() a context and leak all but the
+        // one that wins the publish — leaking their started services / event executors.
+        AppContext result = instance;
+        if (result == null) {
+            synchronized (AppContext.class) {
+                result = instance;
+                if (result == null) {
+                    // Same-thread re-entrancy during construction (startUp() -> Lucene recovery ->
+                    // getInstance()): the monitor is reentrant, so we re-enter here while instance is
+                    // still unpublished. Return the ONE in-construction context rather than building a
+                    // second one that would leak.
+                    if (constructing != null) {
+                        return constructing;
+                    }
+                    constructing = new AppContext();
+                    try {
+                        constructing.startUp();
+                        // Publish the singleton only AFTER a successful startUp(): a half-initialized
+                        // context must never be cached (the field being non-null would stop any retry).
+                        instance = constructing;
+                        result = constructing;
+                    } catch (RuntimeException | Error e) {
+                        // startUp() starts services sequentially; if a later step fails, the already-
+                        // started services / executors of THIS local context must be shut down before it
+                        // is abandoned, so a retry does not accumulate leaked thread pools. Best-effort:
+                        // a shutDown failure must not mask the original startUp failure.
+                        try {
+                            constructing.shutDown();
+                        } catch (Exception shutdownFailure) {
+                            log.error("Failed to shut down a partially-started application context after a startUp failure", shutdownFailure);
+                        }
+                        throw e;
+                    } finally {
+                        // Construction is over (success or failure): the in-progress handle is cleared so
+                        // a later retry after a failure builds afresh.
+                        constructing = null;
+                    }
+                }
+            }
         }
-        return instance;
+        return result;
     }
 
     /**

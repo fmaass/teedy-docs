@@ -2,6 +2,7 @@ package com.sismics.util.filter;
 
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.TransactionBoundary;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -61,8 +62,19 @@ public class RequestContextFilter implements Filter {
         SLF4JBridgeHandler.removeHandlersForRootLogger();
         SLF4JBridgeHandler.install();
         
-        // Initialize the application context
-        TransactionUtil.handle(AppContext::getInstance);
+        // Initialize the application context. This is a best-effort warm-up: a failure here must NOT
+        // abort filter initialization (which would leave the servlet container with a null filter and
+        // fail every subsequent request). AppContext.getInstance() now publishes its singleton only
+        // after a successful startUp(), so a transient warm-up failure leaves no half-initialized
+        // context cached and the first real request cleanly re-attempts creation. The catch is local to
+        // the warm-up and logs at error (a genuinely fatal misconfiguration is not swallowed silently) —
+        // it is required because TransactionUtil.handle now propagates a failed unit of work (so
+        // background file processing can no longer report false success).
+        try {
+            TransactionUtil.handle(AppContext::getInstance);
+        } catch (Exception e) {
+            log.error("Error initializing the application context during filter init", e);
+        }
     }
 
     @Override
@@ -73,72 +85,62 @@ public class RequestContextFilter implements Filter {
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain filterChain) throws IOException, ServletException {
         EntityManager em;
-        
+
         try {
             em = EMF.get().createEntityManager();
         } catch (Exception e) {
             throw new ServletException("Cannot create entity manager", e);
         }
         ThreadLocalContext context = ThreadLocalContext.get();
-        context.setEntityManager(em);
-        EntityTransaction tx = em.getTransaction();
-        tx.begin();
-        
-        try {
-            addCacheHeaders(response);
-            filterChain.doFilter(request, response);
-        } catch (Exception e) {
-            ThreadLocalContext.cleanup();
-            
-            // IOException are thrown if the client closes the connection before completion
-            if (!(e instanceof IOException)) {
-                log.error("An exception occured, rolling back current transaction", e);
 
-                // If an unprocessed error comes up from the application layers (Jersey...), rollback the transaction (should not happen)
-                if (em.isOpen()) {
-                    if (em.getTransaction() != null && em.getTransaction().isActive()) {
-                        em.getTransaction().rollback();
-                    }
-                    
-                    try {
-                        em.close();
-                    } catch (Exception ce) {
-                        log.error("Error closing entity manager", ce);
-                    }
+        // Finalization is exception-safe and deferred: the entity manager is installed and the
+        // transaction begun INSIDE the cleanup-protected region, so even a tx.begin() failure cannot
+        // leak the installed frame / manager onto the pooled thread. The frame's completion (firing the
+        // queued async events on a durable commit, discarding on rollback, neither on IN_DOUBT) runs
+        // while the frame is still installed, and the thread-local context is cleared LAST — guaranteed,
+        // even if closeQuietly threw — so no open manager and no queued event leaks into the NEXT request
+        // handled on this thread (issue #63 must not resurface via the error path).
+        try {
+            context.setEntityManager(em);
+            EntityTransaction tx = em.getTransaction();
+            tx.begin();
+
+            try {
+                addCacheHeaders(response);
+                filterChain.doFilter(request, response);
+            } catch (Exception e) {
+                // IOException are thrown if the client closes the connection before completion: fall
+                // through to the status-based finalization below (unchanged behavior).
+                if (!(e instanceof IOException)) {
+                    log.error("An exception occured, rolling back current transaction", e);
+
+                    // An unprocessed error came up from the application layers (Jersey...): this is a
+                    // pre-commit failure. Roll the transaction back and classify: ROLLED_BACK discards the
+                    // queued events and runs the after-rollback callbacks; if the rollback itself throws
+                    // the outcome is IN_DOUBT (no compensation, events neither fired nor discarded). Then
+                    // rethrow as a ServletException — never commit and never fire on this path.
+                    TransactionBoundary.DurableState state = TransactionBoundary.tryRollback(em).getState();
+                    TransactionBoundary.closeQuietly(em);
+                    TransactionBoundary.complete(state);
+                    throw new ServletException(e);
                 }
-                throw new ServletException(e);
             }
-        }
 
-        // No error processing the request : commit / rollback the current transaction depending on
-        // the HTTP code, then fire the queued async events ONLY if the transaction committed. On
-        // rollback (or a commit failure) the queued events describe modifications that never reached
-        // the database, so they are discarded instead of fired.
-        //
-        // Finalization is exception-safe: whatever commit / rollback / sendError does, the finally
-        // block guarantees that on any non-committed outcome the queued async events are discarded
-        // and the thread-local context is cleared. Otherwise a throw from the error path (e.g.
-        // sendError or rollback failing) would leave the queued events and thread-local state in
-        // place, letting them leak into — and fire during — the NEXT request handled on this thread
-        // (issue #63 resurfacing via the error path).
-        HttpServletResponse r = (HttpServletResponse) response;
-        boolean committed = false;
-        try {
-            committed = commitAndFinalize(em, r.getStatus(), r);
-
-            if (committed) {
-                // Fire all pending async events after request transaction commit.
-                // This way, all modifications done during this request are available in the listeners.
-                context.fireAllAsyncEvents();
-            }
+            // No unhandled application error: commit for 2xx/3xx, otherwise roll back. The completion
+            // dispatcher then fires the queued async events IFF the transaction durably committed, else
+            // discards them — so all modifications done during a committed request are available in the
+            // listeners, and a rolled-back request never fires.
+            HttpServletResponse r = (HttpServletResponse) response;
+            TransactionBoundary.DurableState state = commitAndFinalize(em, r.getStatus(), r);
+            TransactionBoundary.complete(state);
         } finally {
-            if (!committed) {
-                // Any path where the transaction did not successfully commit (rollback, commit
-                // failure, or an exception thrown while finalizing) MUST discard the queued events —
-                // never fire them on the error path.
-                context.discardAsyncEvents();
+            // Guarantee cleanup() runs even if closeQuietly() somehow throws (it is written not to, but
+            // the thread-local MUST be cleared to avoid poisoning the next request on this pooled thread).
+            try {
+                TransactionBoundary.closeQuietly(em);
+            } finally {
+                ThreadLocalContext.cleanup();
             }
-            ThreadLocalContext.cleanup();
         }
     }
 
@@ -147,51 +149,43 @@ public class RequestContextFilter implements Filter {
      * entity manager.
      *
      * <p>The transaction is committed only for 2xx/3xx responses; any other status rolls back. This
-     * method never fires the queued async events itself — it returns whether the transaction
-     * committed so the caller can decide to fire (commit) or discard (rollback / commit failure) the
-     * queued events. This is the invariant that prevents a rolled-back request from physically
-     * deleting file bytes or mutating the Lucene index (issue #63).</p>
+     * method never fires the queued async events itself — it returns the durable state so the caller's
+     * completion dispatcher can fire (COMMITTED), discard (ROLLED_BACK), or neither (IN_DOUBT) the queued
+     * events. This is the invariant that prevents a rolled-back request from physically deleting file
+     * bytes or mutating the Lucene index (issue #63).</p>
      *
-     * <p>The entity manager is always closed (in a finally), even if the commit, rollback, or the
-     * {@code sendError} signalling throws — so a failure on the error path cannot leak an open
-     * entity manager. The originating exception is allowed to propagate; the caller's finally still
-     * discards the queued events and clears the thread-local context.</p>
+     * <p>A commit that itself throws is NOT durable-clean: it is classified {@link
+     * TransactionBoundary.DurableState#IN_DOUBT} (the database may have committed anyway), a 500 is
+     * signalled to honour the wire contract, and the queued events are NEITHER fired NOR discarded (their
+     * durability is unknown; the search-index rebuild / storage sweep are the recovery net). A rollback
+     * that throws is likewise IN_DOUBT so no after-rollback compensation runs.</p>
+     *
+     * <p>The entity manager is always closed here; the caller's finally also closes it (a no-op backstop)
+     * and clears the thread-local context.</p>
      *
      * @param em Entity manager whose transaction is finalized (may be closed or have no active transaction)
      * @param httpStatus HTTP status code of the response
      * @param response Response, used to signal a 500 if the commit itself fails
-     * @return {@code true} if and only if the transaction was committed successfully
+     * @return the classified durable state of the request transaction
      * @throws IOException if signalling the error response fails
      */
-    static boolean commitAndFinalize(EntityManager em, int httpStatus, HttpServletResponse response) throws IOException {
-        boolean committed = false;
-        if (em.isOpen()) {
-            if (em.getTransaction() != null && em.getTransaction().isActive()) {
-                try {
-                    int statusClass = httpStatus / 100;
-                    if (statusClass == 2 || statusClass == 3) {
-                        try {
-                            em.getTransaction().commit();
-                            committed = true;
-                        } catch (Exception e) {
-                            log.error("Error during commit", e);
-                            response.sendError(500);
-                        }
-                    } else {
-                        em.getTransaction().rollback();
-                    }
-                } finally {
-                    // Close the entity manager even if commit / rollback / sendError threw, so the
-                    // error path can never leak an open entity manager.
-                    try {
-                        em.close();
-                    } catch (Exception e) {
-                        log.error("Error closing entity manager", e);
-                    }
+    static TransactionBoundary.DurableState commitAndFinalize(EntityManager em, int httpStatus, HttpServletResponse response) throws IOException {
+        TransactionBoundary.DurableState state = TransactionBoundary.DurableState.ROLLED_BACK;
+        if (em.isOpen() && em.getTransaction() != null && em.getTransaction().isActive()) {
+            int statusClass = httpStatus / 100;
+            if (statusClass == 2 || statusClass == 3) {
+                state = TransactionBoundary.tryCommit(em.getTransaction()).getState();
+                if (state == TransactionBoundary.DurableState.IN_DOUBT) {
+                    // The commit threw (the transaction may have committed anyway). Honour the wire
+                    // contract with a 500; the completion dispatcher fires nothing for IN_DOUBT.
+                    response.sendError(500);
                 }
+            } else {
+                state = TransactionBoundary.tryRollback(em).getState();
             }
+            TransactionBoundary.closeQuietly(em);
         }
-        return committed;
+        return state;
     }
 
     /**
