@@ -101,6 +101,21 @@ abstract class DbOpenHelper {
             ResourceBundle configBundle = ConfigUtil.getConfigBundle();
             Integer currentVersion = Integer.parseInt(configBundle.getString("db.version"));
             log.info(MessageFormat.format("Found database version {0}, new version is {1}, executing database incremental update scripts", oldVersion, currentVersion));
+
+            // Migration 050 adds the ACTIVE, case-insensitive unique-username index. Run a preflight
+            // ONCE, BEFORE any migration script executes, whenever this upgrade will cross version 50
+            // (oldVersion < 50 && newVersion >= 50). Running it here — rather than inside the 050 step
+            // — matters on a multi-version jump (e.g. 46 -> 52): earlier scripts (047/048/049) whose
+            // DDL auto-commits on H2 would otherwise run FIRST and survive the rollback, making the
+            // "no database changes were applied" diagnostic false and leaving a partial schema. A
+            // duplicate-active-username anomaly thus fails closed with a NAMED diagnostic (which
+            // usernames + user IDs collide) before ANY DDL runs. The 050 SQL keeps its own
+            // precondition-abort as defence-in-depth. connection == null is the fail-closed unit-test
+            // path (no real DB) and has no rows to check; oldVersion >= 50 skips it (already migrated).
+            if (oldVersion < 50 && currentVersion >= 50 && connection != null) {
+                UsernameCollisionPreflight.check(connection);
+            }
+
             onUpgrade(oldVersion, currentVersion);
             log.info("Database upgrade complete");
 
