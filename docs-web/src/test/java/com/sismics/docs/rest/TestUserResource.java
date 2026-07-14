@@ -15,6 +15,7 @@ import com.sismics.docs.core.model.jpa.RouteModel;
 import com.sismics.docs.core.model.jpa.RouteStep;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.jpa.EMF;
 import com.sismics.util.totp.GoogleAuthenticator;
@@ -479,7 +480,7 @@ public class TestUserResource extends BaseJerseyTest {
                 System.getenv().getOrDefault("DOCS_LOGIN_MAX_ATTEMPTS", "5"));
 
         // Isolate from the shared loopback-IP limiter state of other tests.
-        com.sismics.docs.rest.util.LoginRateLimiter.getInstance().reset();
+        com.sismics.docs.rest.util.LoginThrottleStore.getInstance().reset();
         try {
             // Login admin, create + enable TOTP for a fresh user
             String adminToken = adminToken();
@@ -539,7 +540,7 @@ public class TestUserResource extends BaseJerseyTest {
             Assertions.assertEquals("RateLimited", lockedJson.getString("type"));
         } finally {
             // Do not leak the lockout to other tests sharing the loopback IP key.
-            com.sismics.docs.rest.util.LoginRateLimiter.getInstance().reset();
+            com.sismics.docs.rest.util.LoginThrottleStore.getInstance().reset();
         }
     }
 
@@ -1102,6 +1103,234 @@ public class TestUserResource extends BaseJerseyTest {
         q.setParameter("type", "ROUTING");
         q.executeUpdate();
         return aclId;
+    }
+
+    /**
+     * @return true if the given session cookie is no longer accepted (the user resolves to anonymous).
+     */
+    private boolean cookieRejected(String token) {
+        JsonObject json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        return json.getBoolean("anonymous");
+    }
+
+    private void configureSmtp(String adminToken) {
+        target().path("/app/config_smtp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("hostname", "localhost")
+                        .param("port", Integer.toString(getSmtpPort()))
+                        .param("from", "contact@sismicsdocs.com")
+                ), JsonObject.class);
+    }
+
+    /**
+     * password_lost never enumerates users: a blank username and a nonexistent username both return the
+     * same generic OK as an existing account, and ONLY the existing account yields a recovery token + email.
+     *
+     * <p>This guards specifically against the pre-fix bug where a blank username validated the wrong argument
+     * and resolved to the first user in the table (typically {@code admin}), minting an extra recovery
+     * token + email for that account. Merely popping the newest email and checking it looks right would still
+     * pass that bug, so the assertions below pin down the TOTAL email count, the recipient, and the recovery
+     * ROW count per account.</p>
+     */
+    @Test
+    public void testPasswordLostNoEnumeration() throws Exception {
+        String adminToken = adminToken();
+        configureSmtp(adminToken);
+        clientUtil.createUser("enum_target");
+
+        // Blank username: generic OK, no user resolved, no key created.
+        JsonObject blank = target().path("/user/password_lost").request()
+                .post(Entity.form(new Form().param("username", "")), JsonObject.class);
+        Assertions.assertEquals("ok", blank.getString("status"));
+
+        // Nonexistent username: identical generic OK.
+        JsonObject ghost = target().path("/user/password_lost").request()
+                .post(Entity.form(new Form().param("username", "no_such_ghost")), JsonObject.class);
+        Assertions.assertEquals("ok", ghost.getString("status"));
+
+        // Existing username: identical generic OK, AND a real recovery email is produced.
+        JsonObject real = target().path("/user/password_lost").request()
+                .post(Entity.form(new Form().param("username", "enum_target")), JsonObject.class);
+        Assertions.assertEquals("ok", real.getString("status"));
+
+        // The one recovery email is addressed to the intended target — not to some other (first-in-table)
+        // account, as the blank-username bug would have produced. The rendered message includes the To
+        // header, so an email misdirected to admin would fail this contains-check.
+        String emailBody = popEmail();
+        Assertions.assertNotNull(emailBody, "the existing account must produce a recovery email");
+        Assertions.assertTrue(emailBody.contains("Please reset your password"));
+        Assertions.assertTrue(emailBody.contains("enum_target@docs.com"),
+                "the recovery email must be addressed to the target account");
+
+        // TOTAL email count == 1: no second email exists. The pre-fix bug sent an extra email during the
+        // blank request (already delivered by now), which this fails on. On the fixed path this is the only
+        // email, so the pop returns null.
+        Assertions.assertNull(popEmail(),
+                "only the existing account may produce a recovery email — total count must be exactly 1");
+
+        // And no recovery ROW leaked to another account. Exactly one active recovery row for the target, and
+        // zero for admin (the account a blank-username lookup erroneously resolved to under the pre-fix bug).
+        long targetRows = inTx(() -> (Long) ThreadLocalContext.get().getEntityManager()
+                .createQuery("select count(r) from PasswordRecovery r where r.username = :u and r.deleteDate is null")
+                .setParameter("u", "enum_target").getSingleResult());
+        long adminRows = inTx(() -> (Long) ThreadLocalContext.get().getEntityManager()
+                .createQuery("select count(r) from PasswordRecovery r where r.username = :u and r.deleteDate is null")
+                .setParameter("u", "admin").getSingleResult());
+        Assertions.assertEquals(1L, targetRows, "exactly one recovery row must exist for the target account");
+        Assertions.assertEquals(0L, adminRows,
+                "a blank username must not create a recovery row for any other account");
+    }
+
+    /**
+     * A self-service password change rotates the session: every prior token is revoked (a stolen/cloned
+     * cookie stops working) and a single fresh token is issued for the current browser.
+     */
+    @Test
+    public void testSelfServicePasswordChangeRotatesSession() {
+        clientUtil.createUser("rotate_me");
+        String tokenA = clientUtil.login("rotate_me");
+        String tokenB = clientUtil.login("rotate_me");
+
+        Response response = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenA)
+                .post(Entity.form(new Form()
+                        .param("current_password", "Test1234")
+                        .param("password", "Rotated9Pass")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
+        String tokenC = clientUtil.getAuthenticationCookie(response);
+        Assertions.assertNotNull(tokenC, "a fresh session cookie is issued on rotation");
+        Assertions.assertNotEquals(tokenA, tokenC);
+
+        // Both old cookies are rejected (including the one that made the change), the new one works.
+        Assertions.assertTrue(cookieRejected(tokenA), "the requesting cookie must be rotated out");
+        Assertions.assertTrue(cookieRejected(tokenB), "the other prior session must be revoked");
+        JsonObject withNew = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenC)
+                .get(JsonObject.class);
+        Assertions.assertFalse(withNew.getBoolean("anonymous"), "the fresh cookie must be valid");
+
+        // Exactly one active session remains.
+        JsonObject sessions = target().path("/user/session").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenC)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, sessions.getJsonArray("sessions").size());
+    }
+
+    /**
+     * A header-authenticated (non-cookie) request carrying a junk auth_token cookie must NOT be handed a
+     * freshly-minted, durable bearer session when it changes its password. Pre-fix, rotation minted a
+     * replacement token whenever ANY non-null cookie string was present, upgrading a junk cookie into a
+     * persistent session.
+     */
+    @Test
+    public void testJunkCookieOnHeaderAuthMintsNoSession() {
+        clientUtil.createUser("hdr_rotate");
+
+        // Header auth resolves the principal from X-Authenticated-User (trusted loopback in the test env);
+        // the presented auth_token cookie is junk and resolves to no session token.
+        Response response = target().path("/user").request()
+                .header(HeaderBasedSecurityFilter.AUTHENTICATED_USER_HEADER, "hdr_rotate")
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, "not-a-real-session-token")
+                .post(Entity.form(new Form()
+                        .param("current_password", "Test1234")
+                        .param("password", "HdrRotate9")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus());
+
+        // No session cookie may be minted for a request whose cookie did not resolve to a valid session.
+        String minted = clientUtil.getAuthenticationCookie(response);
+        Assertions.assertNull(minted,
+                "a junk cookie on a header-authenticated request must not mint a persistent session");
+    }
+
+    /**
+     * A lost-key password reset revokes ALL of the user's sessions (a pre-existing, possibly attacker,
+     * session must not survive the reset).
+     */
+    @Test
+    public void testLostKeyResetRevokesAllSessions() throws Exception {
+        String adminToken = adminToken();
+        configureSmtp(adminToken);
+        clientUtil.createUser("reset_revoke");
+        String tokenA = clientUtil.login("reset_revoke");
+        String tokenB = clientUtil.login("reset_revoke");
+
+        JsonObject lost = target().path("/user/password_lost").request()
+                .post(Entity.form(new Form().param("username", "reset_revoke")), JsonObject.class);
+        Assertions.assertEquals("ok", lost.getString("status"));
+        String emailBody = popEmail();
+        Assertions.assertNotNull(emailBody, "No email to consume");
+        Matcher keyMatcher = Pattern.compile("/passwordreset/(.+?)\"").matcher(emailBody);
+        Assertions.assertTrue(keyMatcher.find(), "Token not found");
+        String key = keyMatcher.group(1).replaceAll("=", "");
+
+        JsonObject reset = target().path("/user/password_reset").request()
+                .post(Entity.form(new Form()
+                        .param("key", key)
+                        .param("password", "Reset9Pass")), JsonObject.class);
+        Assertions.assertEquals("ok", reset.getString("status"));
+
+        // Every pre-reset session cookie is now rejected.
+        Assertions.assertTrue(cookieRejected(tokenA));
+        Assertions.assertTrue(cookieRejected(tokenB));
+    }
+
+    /**
+     * An admin-initiated password reset revokes ALL of the TARGET user's sessions, but leaves the admin's
+     * own session untouched.
+     */
+    @Test
+    public void testAdminPasswordResetRevokesTargetSessions() {
+        clientUtil.createUser("admin_revoke");
+        String targetToken = clientUtil.login("admin_revoke");
+        String adminToken = adminToken();
+
+        JsonObject json = target().path("/user/admin_revoke").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("password", "Adm1nReset9")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+
+        // The target user's session is revoked; the admin's own session is not.
+        Assertions.assertTrue(cookieRejected(targetToken), "the target user's sessions must be revoked");
+        Assertions.assertFalse(cookieRejected(adminToken), "the admin's own session must be untouched");
+    }
+
+    /**
+     * With no trusted proxies configured (the default), a client-supplied X-Forwarded-For header is ignored:
+     * an attacker cannot rotate the header to escape the per-account / per-network login lockout.
+     */
+    @Test
+    public void testXffRotationDoesNotBypassLockout() {
+        com.sismics.docs.rest.util.LoginThrottleStore.getInstance().reset();
+        try {
+            clientUtil.createUser("xff_lock");
+            int maxAttempts = Integer.parseInt(System.getenv().getOrDefault("DOCS_LOGIN_MAX_ATTEMPTS", "5"));
+
+            // Exhaust the threshold with wrong passwords, rotating the spoofed X-Forwarded-For every time.
+            for (int i = 0; i < maxAttempts; i++) {
+                Response wrong = target().path("/user/login").request()
+                        .header("X-Forwarded-For", "203.0.113." + i)
+                        .post(Entity.form(new Form()
+                                .param("username", "xff_lock")
+                                .param("password", "wrongpass")
+                                .param("remember", "false")));
+                Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), wrong.getStatus());
+            }
+
+            // Even the CORRECT password, with yet another fresh spoofed header, is now locked out: the header
+            // never partitioned the attempts.
+            Response locked = target().path("/user/login").request()
+                    .header("X-Forwarded-For", "198.51.100.42")
+                    .post(Entity.form(new Form()
+                            .param("username", "xff_lock")
+                            .param("password", "Test1234")
+                            .param("remember", "false")));
+            Assertions.assertEquals(429, locked.getStatus());
+        } finally {
+            com.sismics.docs.rest.util.LoginThrottleStore.getInstance().reset();
+        }
     }
 
     /**

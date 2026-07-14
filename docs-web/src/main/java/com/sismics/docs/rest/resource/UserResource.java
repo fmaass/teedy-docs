@@ -21,7 +21,9 @@ import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.docs.rest.util.LoginThrottleStore;
 import com.sismics.docs.rest.util.UserUpdateUtil;
+import com.sismics.util.net.ClientAddressResolver;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -168,6 +170,7 @@ public class UserResource extends BaseResource {
         }
         
         // Update the user
+        boolean passwordChanged = StringUtils.isNotBlank(password);
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
         UserUpdateUtil.applyEmailUpdate(user, email);
@@ -179,7 +182,69 @@ public class UserResource extends BaseResource {
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
-        return Response.ok().entity(response.build()).build();
+        Response.ResponseBuilder responseBuilder = Response.ok().entity(response.build());
+
+        // On a self-service password change, ROTATE the session: revoke every existing token (so a cloned or
+        // stolen cookie stops working, including the one that just made this request) and mint a fresh token
+        // for the current browser, returned as a new cookie. Runs in this request transaction.
+        if (passwordChanged) {
+            NewCookie rotatedCookie = rotateSession(user);
+            if (rotatedCookie != null) {
+                responseBuilder.cookie(rotatedCookie);
+            }
+        }
+        return responseBuilder.build();
+    }
+
+    /**
+     * Rotates the current browser's session after a self-service password change: revokes ALL of the user's
+     * authentication tokens (including the current one) and, when the request was made over one of this
+     * user's own valid session cookies, mints a fresh token carrying over its long-lasted flag and returns it
+     * as a replacement cookie.
+     *
+     * @param user the user whose sessions are rotated
+     * @return the replacement session cookie, or null when the request did not present a valid current
+     *         session token for this user (e.g. a header/API-key-authenticated request, or a junk/foreign
+     *         cookie), in which case all of the user's tokens are still revoked but no session is minted
+     */
+    private NewCookie rotateSession(User user) {
+        AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+
+        // Resolve the presented cookie to a session token and confirm it is a VALID CURRENT session for THIS
+        // user. A mere non-null cookie string is not enough: a header- or API-key-authenticated request
+        // carrying a junk (or another user's) auth_token cookie must NOT be handed a freshly-minted, durable
+        // bearer session. Only rotate when the cookie genuinely resolves to one of this user's own sessions.
+        String currentToken = getAuthToken();
+        AuthenticationToken existing = currentToken == null ? null : authenticationTokenDao.get(currentToken);
+        boolean validCurrentSession = existing != null && user.getId().equals(existing.getUserId());
+        boolean longLasted = validCurrentSession && existing.isLongLasted();
+
+        // Revoke ALL sessions, including the current token (a cloned cookie must not survive).
+        authenticationTokenDao.deleteAllByUserId(user.getId());
+
+        if (!validCurrentSession) {
+            // No valid session token of this user's own to rotate — mint nothing.
+            return null;
+        }
+
+        // Mint a fresh token for the current browser.
+        String ip = ClientAddressResolver.getInstance().resolve(request);
+        AuthenticationToken newToken = new AuthenticationToken()
+                .setUserId(user.getId())
+                .setLongLasted(longLasted)
+                .setIp(StringUtils.abbreviate(ip, 45))
+                .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000));
+        String tokenValue = authenticationTokenDao.create(newToken);
+
+        int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
+        return new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+                .value(tokenValue)
+                .path("/")
+                .maxAge(maxAge)
+                .secure(true)
+                .httpOnly(true)
+                .sameSite(NewCookie.SameSite.LAX)
+                .build();
     }
 
     /**
@@ -259,7 +324,14 @@ public class UserResource extends BaseResource {
         user = userDao.update(user, principal.getId());
 
         // Change the password
+        boolean passwordChanged = StringUtils.isNotBlank(password);
         UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
+
+        // An admin-initiated password reset revokes ALL of the target user's sessions (the account may be
+        // compromised). Committed atomically with the password change in this request transaction.
+        if (passwordChanged) {
+            new AuthenticationTokenDao().deleteAllByUserId(user.getId());
+        }
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -302,18 +374,33 @@ public class UserResource extends BaseResource {
         username = StringUtils.strip(username);
         password = StringUtils.strip(password);
 
-        // Rate limiting: check if IP or username is blocked
-        String clientIp = request.getHeader("x-forwarded-for");
-        if (Strings.isNullOrEmpty(clientIp)) {
-            clientIp = request.getRemoteAddr();
-        }
-        com.sismics.docs.rest.util.LoginRateLimiter rateLimiter = com.sismics.docs.rest.util.LoginRateLimiter.getInstance();
-        long retryAfterIp = rateLimiter.getRetryAfterSeconds(clientIp);
-        long retryAfterUser = username != null ? rateLimiter.getRetryAfterSeconds("user:" + username) : 0;
-        long retryAfter = Math.max(retryAfterIp, retryAfterUser);
-        if (retryAfter > 0) {
+        // Resolve the client address from the X-Forwarded-For chain (rightmost-untrusted traversal): a
+        // spoofed leftmost entry cannot let an attacker rotate past the per-account / per-network limit.
+        String clientIp = ClientAddressResolver.getInstance().resolve(request);
+        LoginThrottleStore throttle = LoginThrottleStore.getInstance();
+
+        // Blocked check runs BEFORE authentication, so an existing and a nonexistent account get the identical
+        // 429 contract (no user enumeration). The Retry-After is bounded and identical either way.
+        LoginThrottleStore.ThrottleDecision decision = throttle.checkLoginBlocked(username, clientIp);
+        if (decision.isBlocked()) {
             return Response.status(429)
-                    .header("Retry-After", retryAfter)
+                    .header("Retry-After", decision.getRetryAfterSeconds())
+                    .entity(Json.createObjectBuilder().add("type", "RateLimited")
+                            .add("message", "Too many login attempts. Try again later.").build())
+                    .build();
+        }
+
+        // Global bulkhead: cap the rate of expensive password-hash work admitted past the cheap per-source
+        // checks, so a distributed low-per-source attack cannot saturate CPU. Sheds with a bounded Retry-After
+        // and self-heals; never consulted by already-authenticated requests. This RESERVE happens BEFORE the
+        // expensive bcrypt verify below, which is what backstops the check-then-authenticate race: the blocked
+        // check (checkLoginBlocked) and the per-account failure bump (recordLoginFailure) are separate, so a
+        // burst of concurrent requests at the (threshold - 1) boundary can all pass the check; capping the
+        // rate of admitted expensive work here bounds how much of that burst actually runs bcrypt at once, and
+        // the per-account counter still locks the account after the bounded overshoot.
+        if (!throttle.tryAdmitLoginWork()) {
+            return Response.status(429)
+                    .header("Retry-After", throttle.loginWorkRetryAfterSeconds())
                     .entity(Json.createObjectBuilder().add("type", "RateLimited")
                             .add("message", "Too many login attempts. Try again later.").build())
                     .build();
@@ -332,8 +419,7 @@ public class UserResource extends BaseResource {
             user = AuthenticationUtil.authenticate(username, password);
         }
         if (user == null) {
-            rateLimiter.recordFailure(clientIp);
-            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throttle.recordLoginFailure(username, clientIp);
             throw new ForbiddenClientException();
         }
 
@@ -347,8 +433,7 @@ public class UserResource extends BaseResource {
         // indistinguishable from a bad password (do not leak "exists but disabled"): record
         // the same rate-limiter failure the bad-password path records.
         if (user.isDisabled()) {
-            rateLimiter.recordFailure(clientIp);
-            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throttle.recordLoginFailure(username, clientIp);
             throw new ForbiddenClientException();
         }
 
@@ -370,22 +455,17 @@ public class UserResource extends BaseResource {
                 // A wrong TOTP code is a failed authentication attempt: record it against
                 // the same IP + user keys used for wrong passwords, so repeated wrong
                 // codes trigger lockout.
-                rateLimiter.recordFailure(clientIp);
-                if (username != null) rateLimiter.recordFailure("user:" + username);
+                throttle.recordLoginFailure(username, clientIp);
                 throw new ForbiddenClientException();
             }
         }
 
-        // Clear rate limiter on fully successful auth (password + TOTP, if enabled)
-        rateLimiter.recordSuccess(clientIp);
-        if (username != null) rateLimiter.recordSuccess("user:" + username);
+        // Clear the throttle state on fully successful auth (password + TOTP, if enabled)
+        throttle.recordLoginSuccess(username, clientIp);
 
-        // Get the remote IP
-        String ip = request.getHeader("x-forwarded-for");
-        if (Strings.isNullOrEmpty(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        
+        // The resolved client address is also the recorded session IP (telemetry).
+        String ip = clientIp;
+
         // Create a new session token
         AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
         AuthenticationToken authenticationToken = new AuthenticationToken()
@@ -1007,11 +1087,14 @@ public class UserResource extends BaseResource {
 
         // Get the value of the session token
         String authToken = getAuthToken();
-        
-        // Remove other tokens
-        AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
-        authenticationTokenDao.deleteByUserId(principal.getId(), authToken);
-        
+
+        // Remove all other sessions, keeping the current one. A header-authenticated user has no session
+        // token (nothing to keep) — there is no token-based session to prune, so this is a no-op for them.
+        if (authToken != null) {
+            AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+            authenticationTokenDao.deleteAllExceptToken(principal.getId(), authToken);
+        }
+
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
@@ -1193,18 +1276,41 @@ public class UserResource extends BaseResource {
     public Response passwordLost(@FormParam("username") String username) {
         authenticate();
 
-        // Validate input data
-        ValidationUtil.validateStringNotBlank("username", username);
-
-        // Prepare response
+        // This endpoint ALWAYS returns the same generic OK, whether or not the account exists and whether or
+        // not the recovery path is currently throttled, so it can never be used to enumerate users.
         Response response = Response.ok().entity(Json.createObjectBuilder()
                 .add("status", "ok")
                 .build()).build();
+
+        // A missing/blank username resolves to no user: return the generic OK without touching the database
+        // (the earlier code validated the wrong argument, so a blank username fell through to findByCriteria
+        // and returned the first user in the table).
+        if (StringUtils.isBlank(username)) {
+            return response;
+        }
+
+        // Rate-limit the recovery path per account / network. When limited, silently skip token creation and
+        // mail — never signal the limit through the response body, status, or a Retry-After header.
+        String clientIp = ClientAddressResolver.getInstance().resolve(request);
+        boolean recoveryAllowed = LoginThrottleStore.getInstance().tryRecovery(username, clientIp);
+        if (!recoveryAllowed) {
+            return response;
+        }
 
         // Check for user existence
         UserDao userDao = new UserDao();
         List<UserDto> userDtoList = userDao.findByCriteria(new UserCriteria().setUserName(username), null);
         if (userDtoList.isEmpty()) {
+            // Equalize the dominant work between the existing and nonexistent paths so response timing does
+            // not reveal whether the account exists. Both paths run the same lookup above; only an existing
+            // account additionally persists a recovery-key row (the extra DB write). Spend a comparable
+            // write-path round-trip here — an UPDATE that matches nothing (the username does not exist, so no
+            // row is touched and nothing is persisted or leaked) — to close most of that gap without creating
+            // any state for an attacker-supplied username. The residual timing difference (a soft-delete
+            // UPDATE vs. an INSERT) is small and, critically, bounded: the per-account and global recovery
+            // limiters (tryRecovery, above) cap how many probes an attacker can send against any one account
+            // before suppression, so too few samples are collectable to resolve it.
+            new PasswordRecoveryDao().deleteActiveByLogin(username);
             return response;
         }
         UserDto user = userDtoList.get(0);
@@ -1259,25 +1365,37 @@ public class UserResource extends BaseResource {
         ValidationUtil.validateRequired("key", passwordResetKey);
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
 
-        // Load the password recovery key
+        // Read the key (without consuming it) to validate password strength against the target username
+        // FIRST, so a weak password is rejected without burning the single-use key.
         PasswordRecoveryDao passwordRecoveryDao = new PasswordRecoveryDao();
         PasswordRecovery passwordRecovery = passwordRecoveryDao.getActiveById(passwordResetKey);
         if (passwordRecovery != null && StringUtils.isNotBlank(password)) {
             ValidationUtil.validatePasswordStrength(password, passwordRecovery.getUsername());
         }
-        if (passwordRecovery == null) {
+
+        // Atomically consume the single-use key. The row-count gate inside consume() — not the read above —
+        // is the sole authority: a concurrent reset presenting the same key, or an already-consumed/expired
+        // key, gets null here and a KeyNotFound (the JPA context is never flushed with a managed change, so
+        // nothing leaks past the gate). All the mutations below run in this one request transaction and
+        // commit atomically.
+        String username = passwordRecoveryDao.consume(passwordResetKey);
+        if (username == null) {
             throw new ClientException("KeyNotFound", "Password recovery key not found");
         }
 
         UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(passwordRecovery.getUsername());
+        User user = userDao.getActiveByUsername(username);
 
         // Change the password
         user.setPassword(password);
         user = userDao.updatePassword(user, principal.getId());
 
-        // Deletes password recovery requests
+        // Invalidate every OTHER outstanding recovery key for this user (atomic with the consume above).
         passwordRecoveryDao.deleteActiveByLogin(user.getUsername());
+
+        // Revoke ALL of the user's sessions: a recovery reset must not leave a pre-existing session (which may
+        // belong to an attacker) alive. Committed atomically with the password change in this transaction.
+        new AuthenticationTokenDao().deleteAllByUserId(user.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

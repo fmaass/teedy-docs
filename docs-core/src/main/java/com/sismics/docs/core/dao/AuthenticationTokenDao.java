@@ -129,15 +129,39 @@ public class AuthenticationTokenDao {
     }
     
     /**
-     * Deletes all authentication tokens of an user.
-     * 
-     * @param userId
+     * Deletes ALL authentication tokens of a user (every active session is revoked).
+     *
+     * @param userId User ID
+     * @return the number of tokens deleted
      */
-    public void deleteByUserId(String userId, String id) {
+    public int deleteAllByUserId(String userId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createQuery("delete AuthenticationToken a where a.userId = :userId and a.id != :id");
+        Query q = em.createQuery("delete AuthenticationToken a where a.userId = :userId");
         q.setParameter("userId", userId);
-        q.setParameter("id", id);
-        q.executeUpdate();
+        return q.executeUpdate();
+    }
+
+    /**
+     * Deletes all authentication tokens of a user EXCEPT the one to keep (the current session survives; all
+     * others are revoked).
+     *
+     * <p>The token to keep MUST be non-null: a null {@code keepId} makes the {@code a.id != :keepId}
+     * predicate match no rows (SQL {@code <> NULL} is never true), so nothing would be deleted — the exact
+     * opposite of the intent. Callers that want to revoke everything must use {@link
+     * #deleteAllByUserId(String)} instead.</p>
+     *
+     * @param userId User ID
+     * @param keepId Token ID to preserve (never null)
+     * @return the number of tokens deleted
+     */
+    public int deleteAllExceptToken(String userId, String keepId) {
+        if (keepId == null) {
+            throw new IllegalArgumentException("keepId must not be null; use deleteAllByUserId to revoke every token");
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("delete AuthenticationToken a where a.userId = :userId and a.id != :keepId");
+        q.setParameter("userId", userId);
+        q.setParameter("keepId", keepId);
+        return q.executeUpdate();
     }
 }

@@ -16,6 +16,7 @@ import com.sismics.docs.core.model.jpa.OidcState;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
+import com.sismics.util.net.ClientAddressResolver;
 import jakarta.json.Json;
 import jakarta.json.JsonArray;
 import jakarta.json.JsonObject;
@@ -558,10 +559,9 @@ public class OidcResource extends BaseResource {
                 maybeUpdateEmail(userDao, user, email);
             }
 
-            String ip = request.getHeader("x-forwarded-for");
-            if (StringUtils.isBlank(ip)) {
-                ip = request.getRemoteAddr();
-            }
+            // Recorded session IP only (telemetry, not an auth decision): resolve it through the shared
+            // rightmost-untrusted X-Forwarded-For resolver instead of trusting the raw header.
+            String ip = ClientAddressResolver.getInstance().resolve(request);
 
             AuthenticationTokenDao authTokenDao = new AuthenticationTokenDao();
             AuthenticationToken authToken = new AuthenticationToken()

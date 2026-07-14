@@ -48,13 +48,40 @@ public class UserDao {
     private static final Logger log = LoggerFactory.getLogger(UserDao.class);
 
     /**
+     * A precomputed bcrypt hash of a value no submitted password can equal, used to spend an equivalent
+     * amount of hashing work when the username does not exist. Without it, a missing user returns before any
+     * bcrypt verify runs, and the response-time difference against a wrong-password (which does verify) leaks
+     * whether an account exists. It MUST be generated at the same work factor as real password hashing
+     * ({@link #resolveBcryptWork()}, default {@link Constants#DEFAULT_BCRYPT_WORK}) — a mismatched cost makes
+     * the unknown-account verify faster or slower than a real one and reopens the very timing oracle it
+     * exists to close.
+     */
+    private static final String DUMMY_PASSWORD_HASH =
+            BCrypt.withDefaults().hashToString(resolveBcryptWork(), "docs-nonexistent-account-timing-equalizer".toCharArray());
+
+    /**
+     * A non-empty probe verified against the dummy hash when the submitted password is missing/blank, so that
+     * an omitted password spends the same bcrypt work regardless of whether the account exists.
+     */
+    private static final char[] EMPTY_PASSWORD_PROBE = "docs-omitted-password-timing-equalizer".toCharArray();
+
+    /**
      * Authenticates an user.
-     * 
+     *
      * @param username User login
      * @param password User password
      * @return The authenticated user or null
      */
     public User authenticate(String username, String password) {
+        // A missing or blank password can never authenticate. Handle it uniformly BEFORE the user lookup, so
+        // an existing and a nonexistent account are indistinguishable for an omitted password: both spend one
+        // bcrypt verify against the dummy hash and return null. Previously a real username dereferenced the
+        // null password and 500'd while an unknown username 403'd — an enumeration oracle by response shape.
+        if (Strings.isNullOrEmpty(password)) {
+            BCrypt.verifyer().verify(EMPTY_PASSWORD_PROBE, DUMMY_PASSWORD_HASH);
+            return null;
+        }
+
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         Query q = em.createQuery("select u from User u where u.username = :username and u.deleteDate is null");
         q.setParameter("username", username);
@@ -66,10 +93,13 @@ public class UserDao {
             }
             return user;
         } catch (NoResultException e) {
+            // Spend comparable hashing work for a nonexistent account so timing does not reveal whether the
+            // username exists (constant-time-ish authentication). Password is guaranteed non-blank here.
+            BCrypt.verifyer().verify(password.toCharArray(), DUMMY_PASSWORD_HASH);
             return null;
         }
     }
-    
+
     /**
      * Creates a new user.
      * 
@@ -614,6 +644,18 @@ public class UserDao {
      * @return Hashed password
      */
     private String hashPassword(String password) {
+        return BCrypt.withDefaults().hashToString(resolveBcryptWork(), password.toCharArray());
+    }
+
+    /**
+     * Resolves the bcrypt work factor to use for password hashing: {@link Constants#DEFAULT_BCRYPT_WORK}
+     * unless overridden by the {@link Constants#BCRYPT_WORK_ENV} environment variable (validated to the
+     * bcrypt-legal 4..31 range). Shared by real password hashing and the dummy timing-equalizer hash so both
+     * spend the same amount of work.
+     *
+     * @return the bcrypt work factor
+     */
+    private static int resolveBcryptWork() {
         int bcryptWork = Constants.DEFAULT_BCRYPT_WORK;
         String envBcryptWork = System.getenv(Constants.BCRYPT_WORK_ENV);
         if (!Strings.isNullOrEmpty(envBcryptWork)) {
@@ -628,7 +670,7 @@ public class UserDao {
                 log.warn(Constants.BCRYPT_WORK_ENV + " needs to be a number in range 4...31. Falling back to " + Constants.DEFAULT_BCRYPT_WORK + ".");
             }
         }
-        return BCrypt.withDefaults().hashToString(bcryptWork, password.toCharArray());
+        return bcryptWork;
     }
     
     /**
