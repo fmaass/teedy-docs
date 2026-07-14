@@ -54,6 +54,15 @@ public enum ConfigType {
     INBOX_DELETE_IMPORTED,
 
     /**
+     * Persisted baseline of the inbox source's accepted UIDVALIDITY epoch, stored as
+     * {@code <sourceIdentityDigest>:<uidValidity>}. On each sync the current folder UIDVALIDITY is
+     * compared with this baseline for the SAME source: a change means the mailbox was recreated and
+     * every UID was renumbered, so the source is blocked (no import, no flag change) until an operator
+     * re-saves the inbox configuration, which clears this value and re-establishes the baseline.
+     */
+    INBOX_UIDVALIDITY,
+
+    /**
      * LDAP connection.
      */
     LDAP_ENABLED,
@@ -113,5 +122,13 @@ public enum ConfigType {
      * concurrent runs are serialized (a second run blocks until the first commits), preventing
      * double-count / double-credit of the same file. Seeded by {@code dbupdate-052}.
      */
-    CLEAN_STORAGE_LOCK
+    CLEAN_STORAGE_LOCK,
+
+    /**
+     * Sentinel row used ONLY as a mutual-exclusion lock for the GLOBAL storage-quota check. A global
+     * quota is a cross-user {@code SUM} that no per-user row can serialize, so an upload that must
+     * consult it acquires a {@code PESSIMISTIC_WRITE} row lock on this sentinel first. Its value is
+     * never read; only the row's lock matters. Seeded by {@code dbupdate-053}.
+     */
+    GLOBAL_QUOTA_LOCK
 }

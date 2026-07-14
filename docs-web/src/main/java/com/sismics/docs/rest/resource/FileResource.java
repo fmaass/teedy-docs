@@ -823,27 +823,32 @@ public class FileResource extends BaseResource {
         // A file is always encrypted by the creator of it
         User user = userDao.getById(file.getUserId());
         
-        // Write the decrypted file to the output
-        try {
-            InputStream fileInputStream = Files.newInputStream(storedFile);
-            final InputStream responseInputStream = decrypt ?
-                    EncryptionUtil.decryptInputStream(fileInputStream, user.getPrivateKey()) : fileInputStream;
-                    
-            stream = outputStream -> {
+        // Open the source stream INSIDE the StreamingOutput lambda: opening it eagerly here would leak
+        // the file descriptor whenever the response entity is never consumed (client disconnect, an
+        // error building the response). Nested try-with-resources opens the raw stream first and the
+        // decrypted wrapper second, so Java closes the raw stream if decrypt initialization throws (a
+        // double-close of the raw stream, when decrypt is disabled and both aliases refer to it, is
+        // tolerated).
+        final java.nio.file.Path sourceFile = storedFile;
+        final boolean decryptSource = decrypt;
+        stream = outputStream -> {
+            try (InputStream rawInputStream = Files.newInputStream(sourceFile);
+                 InputStream responseInputStream = decryptSource
+                         ? EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())
+                         : rawInputStream) {
+                ByteStreams.copy(responseInputStream, outputStream);
+            } catch (IOException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new WebApplicationException(Response.status(Status.SERVICE_UNAVAILABLE).build());
+            } finally {
                 try {
-                    ByteStreams.copy(responseInputStream, outputStream);
-                } finally {
-                    try {
-                        responseInputStream.close();
-                        outputStream.close();
-                    } catch (IOException e) {
-                        // Ignore
-                    }
+                    outputStream.close();
+                } catch (IOException e) {
+                    // Ignore
                 }
-            };
-        } catch (Exception e) {
-            return Response.status(Status.SERVICE_UNAVAILABLE).build();
-        }
+            }
+        };
 
         // User-uploaded original content (size == null) carries a user-controlled MIME type and can be an
         // active document (HTML, SVG). Force it to download as an attachment and lock it down with a
@@ -958,12 +963,16 @@ public class FileResource extends BaseResource {
                 int index = 0;
                 for (File file : fileList) {
                     java.nio.file.Path storedfile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
-                    InputStream fileInputStream = Files.newInputStream(storedfile);
 
-                    // Add the decrypted file to the ZIP stream
                     // Files are encrypted by the creator of them
                     User user = userDao.getById(file.getUserId());
-                    try (InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, user.getPrivateKey())) {
+
+                    // Nested try-with-resources: open the raw stream FIRST and the decrypted wrapper
+                    // second, so the raw stream is always closed even if decrypt initialization throws.
+                    // Previously the raw stream was opened outside the try and leaked on a decrypt-setup
+                    // failure (one descriptor per file in the ZIP).
+                    try (InputStream rawInputStream = Files.newInputStream(storedfile);
+                         InputStream decryptedStream = EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())) {
                         ZipEntry zipEntry = new ZipEntry(index + "-" + file.getFullName(Integer.toString(index)));
                         zipOutputStream.putNextEntry(zipEntry);
                         ByteStreams.copy(decryptedStream, zipOutputStream);

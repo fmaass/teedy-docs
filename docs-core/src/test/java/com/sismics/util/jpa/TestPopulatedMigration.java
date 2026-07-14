@@ -32,7 +32,7 @@ import java.util.List;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==52, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==53, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -41,8 +41,8 @@ import java.util.List;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052). */
-    private static final int TARGET_VERSION = 52;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053). */
+    private static final int TARGET_VERSION = 53;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -70,6 +70,85 @@ public class TestPopulatedMigration {
                     postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
                 connection.setAutoCommit(false);
                 runScenario(connection);
+            }
+        }
+    }
+
+    // --- 053 receipt unique index: CONCURRENT claim race on PostgreSQL (H2 is insufficient) --------
+
+    /**
+     * The import's exactly-once guarantee rests on the receipt's unique index serializing concurrent
+     * claims of the SAME (identity digest, UIDVALIDITY, UID). H2's in-memory engine cannot faithfully
+     * reproduce the two-connection race, so this is a PostgreSQL-specific test: two connections race to
+     * insert the same triple with a barrier; exactly ONE commit succeeds and the other fails with a
+     * constraint violation (SQLState class 23). This is the DB-level backstop the InboxService's
+     * claim-first + fresh-transaction-confirm control flow (exercised on H2 in the docs-web
+     * TestInboxSync) depends on.
+     */
+    @Test
+    public void receiptUniqueIndexSerializesConcurrentClaimsPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL concurrent receipt-claim race test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            String url = postgres.getJdbcUrl();
+            String user = postgres.getUsername();
+            String pass = postgres.getPassword();
+
+            // Build the full schema (including T_INBOX_RECEIPT from 053) on a setup connection.
+            try (Connection setup = DriverManager.getConnection(url, user, pass)) {
+                setup.setAutoCommit(false);
+                buildSchemaToVersion(setup, TARGET_VERSION);
+            }
+
+            final java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(2);
+            final java.util.concurrent.atomic.AtomicInteger successes = new java.util.concurrent.atomic.AtomicInteger();
+            final java.util.concurrent.atomic.AtomicInteger constraintFailures = new java.util.concurrent.atomic.AtomicInteger();
+
+            Runnable claimer = () -> {
+                try (Connection connection = DriverManager.getConnection(url, user, pass)) {
+                    connection.setAutoCommit(false);
+                    barrier.await();
+                    try (java.sql.PreparedStatement ps = connection.prepareStatement(
+                            "insert into T_INBOX_RECEIPT (INR_ID_C, INR_IDENTITY_C, INR_UIDVALIDITY_N, INR_UID_N, INR_CREATEDATE_D)"
+                                    + " values (?, 'race-digest', 7, 500, NOW())")) {
+                        ps.setString(1, java.util.UUID.randomUUID().toString());
+                        ps.executeUpdate();
+                        connection.commit();
+                        successes.incrementAndGet();
+                    } catch (SQLException e) {
+                        connection.rollback();
+                        String state = e.getSQLState();
+                        if (state != null && state.startsWith("23")) {
+                            constraintFailures.incrementAndGet();
+                        } else {
+                            throw e;
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            };
+
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                java.util.concurrent.Future<?> f1 = pool.submit(claimer);
+                java.util.concurrent.Future<?> f2 = pool.submit(claimer);
+                f1.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                f2.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            } finally {
+                pool.shutdownNow();
+            }
+
+            Assertions.assertEquals(1, successes.get(),
+                    "exactly one concurrent claim of the same receipt identity must commit");
+            Assertions.assertEquals(1, constraintFailures.get(),
+                    "the losing concurrent claim must fail with a unique-constraint violation");
+
+            try (Connection verify = DriverManager.getConnection(url, user, pass)) {
+                Assertions.assertEquals(1, count(verify, "T_INBOX_RECEIPT",
+                                "INR_IDENTITY_C = 'race-digest' and INR_UIDVALIDITY_N = 7 and INR_UID_N = 500"),
+                        "exactly one receipt row must exist for the raced identity");
             }
         }
     }
@@ -805,7 +884,7 @@ public class TestPopulatedMigration {
 
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
-                "DB_VERSION must be 50 after the full upgrade path");
+                "DB_VERSION must be " + TARGET_VERSION + " after the full upgrade path");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -1051,6 +1130,57 @@ public class TestPopulatedMigration {
         connection.commit();
         Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'u-alice-del'"),
                 "050 constraint must allow a SOFT-DELETED user to reuse an active username (NULLs don't collide)");
+
+        // 5l. Migration 053 created the IMAP import-receipt table (T_INBOX_RECEIPT) with a physical
+        //     UNIQUE(identity digest, UIDVALIDITY, UID) index, and seeded the GLOBAL_QUOTA_LOCK sentinel
+        //     alongside 052's CLEAN_STORAGE_LOCK. Prove on BOTH dialects: (a) the table exists and is
+        //     empty; (b) a receipt referencing a retained document inserts and its FK is resolvable;
+        //     (c) a second receipt with the SAME (digest, UIDVALIDITY, UID) is REJECTED by the unique
+        //     index (the exactly-once backstop) while a different UID is accepted; (d) both sentinel
+        //     rows exist. Savepoint-guarded so PostgreSQL's duplicate-key error is recovered before the
+        //     final commit.
+        connection.commit();
+        Assertions.assertTrue(tableExists(connection, "T_INBOX_RECEIPT"),
+                "053 must create the T_INBOX_RECEIPT table");
+        Assertions.assertEquals(0, count(connection, "T_INBOX_RECEIPT", "1 = 1"),
+                "053 must not seed any receipt rows");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_INBOX_RECEIPT (INR_ID_C, INR_IDENTITY_C, INR_UIDVALIDITY_N, INR_UID_N, INR_ACCOUNT_C, INR_FOLDER_C, INR_IDDOCUMENT_C, INR_CREATEDATE_D) "
+                    + "values ('inr-1','abc123',42,1001,'imap.example.com:993:imap:u@x','INBOX','doc-1',NOW())");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, scalarCount(connection,
+                        "select count(*) from T_INBOX_RECEIPT r join T_DOCUMENT d on r.INR_IDDOCUMENT_C = d.DOC_ID_C where r.INR_ID_C = 'inr-1'"),
+                "receipt -> document FK must be resolvable");
+
+        boolean receiptDuplicateRejected = false;
+        java.sql.Savepoint inrSp = connection.setSavepoint("beforeReceiptDup");
+        try (Statement s = connection.createStatement()) {
+            // Same (identity, UIDVALIDITY, UID), different id and null document — must be rejected.
+            s.executeUpdate("insert into T_INBOX_RECEIPT (INR_ID_C, INR_IDENTITY_C, INR_UIDVALIDITY_N, INR_UID_N, INR_CREATEDATE_D) "
+                    + "values ('inr-dup','abc123',42,1001,NOW())");
+        } catch (java.sql.SQLException e) {
+            receiptDuplicateRejected = true;
+            connection.rollback(inrSp);
+        }
+        Assertions.assertTrue(receiptDuplicateRejected,
+                "053 unique index IDX_INR_IDENTITY must reject a duplicate (digest, UIDVALIDITY, UID) receipt");
+
+        // A different UID under the same digest/UIDVALIDITY is a different message — must be accepted.
+        connection.commit();
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_INBOX_RECEIPT (INR_ID_C, INR_IDENTITY_C, INR_UIDVALIDITY_N, INR_UID_N, INR_CREATEDATE_D) "
+                    + "values ('inr-2','abc123',42,1002,NOW())");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_INBOX_RECEIPT", "INR_ID_C = 'inr-2'"),
+                "a distinct UID must be accepted (only the exact triple collides)");
+
+        // (d) both mutual-exclusion sentinel rows exist.
+        Assertions.assertEquals(1, count(connection, "T_CONFIG", "CFG_ID_C = 'CLEAN_STORAGE_LOCK'"),
+                "052 CLEAN_STORAGE_LOCK sentinel must exist after the full upgrade");
+        Assertions.assertEquals(1, count(connection, "T_CONFIG", "CFG_ID_C = 'GLOBAL_QUOTA_LOCK'"),
+                "053 GLOBAL_QUOTA_LOCK sentinel must exist after the full upgrade");
 
         connection.commit();
     }

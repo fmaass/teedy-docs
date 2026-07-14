@@ -1215,11 +1215,15 @@ public class UserResource extends BaseResource {
         passwordRecovery.setUsername(user.getUsername());
         passwordRecoveryDao.create(passwordRecovery);
 
-        // Fire a password lost event
+        // Fire a password lost event AFTER the request transaction durably commits. Posting it before
+        // commit would email a working recovery link even if the request then rolled back (the
+        // PasswordRecovery row would not exist). The listener consumes only the already-populated
+        // recovery id, so the detached entity is safe.
         PasswordLostEvent passwordLostEvent = new PasswordLostEvent();
         passwordLostEvent.setUser(user);
         passwordLostEvent.setPasswordRecovery(passwordRecovery);
-        AppContext.getInstance().getMailEventBus().post(passwordLostEvent);
+        ThreadLocalContext.get().getCompletionRegistry().registerAfterCommit(
+                () -> AppContext.getInstance().getMailEventBus().post(passwordLostEvent));
 
         // Always return OK
         return response;

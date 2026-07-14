@@ -656,6 +656,16 @@ public class AppResource extends BaseResource {
             configDao.update(ConfigType.INBOX_TAG, tag);
         }
 
+        // Clear the persisted UIDVALIDITY baseline: saving the inbox configuration is the explicit
+        // operator action that accepts the current mailbox and lifts a persistent UIDVALIDITY-reset
+        // block. The next sync re-establishes the baseline from the folder's current UIDVALIDITY and
+        // RESUMES import — which MAY re-import messages still present in the folder. Messages already
+        // imported are not re-imported (they were expunged in delete-mode, or marked \Seen so the
+        // UNSEEN search skips them); only a message that committed but was not yet acked before the
+        // reset could produce a duplicate (never a loss). This is the operator explicitly accepting
+        // re-import on resume — there is no automatic safe reconciliation across a UIDVALIDITY epoch.
+        configDao.update(ConfigType.INBOX_UIDVALIDITY, "");
+
         return Response.ok().build();
     }
 
