@@ -2,6 +2,7 @@ package com.sismics.docs.rest;
 
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Resources;
+import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -544,7 +545,81 @@ public class TestUserResourceReassign extends BaseJerseyTest {
                 "the applied tag link must exist (target can use the moved tag)");
     }
 
+    /**
+     * Global-quota accounting (#99): after a reassign-delete, the departing user's RETAINED live file
+     * (backing a reassigned document) must still count toward the global storage sum, even though its
+     * owner is now a soft-deleted "ghost" whose {@code USE_STORAGECURRENT_N} counter is stale AND excluded
+     * from an active-user sum. A separate DOOMED file the departing user owned (an orphan, physically
+     * deleted by the delete without a quota reclaim) must NOT count. The global sum must therefore grow by
+     * EXACTLY the retained file's bytes — not zero (the pre-#99 counter-only behaviour) and not the
+     * doomed file's bytes.
+     */
+    @Test
+    public void testGlobalStorageCountsGhostRetainedFileNotDoomedFile() throws Exception {
+        String adminToken = adminToken();
+        clientUtil.createUser("reassign_quota_departing");
+        clientUtil.createUser("reassign_quota_target");
+        String departingToken = clientUtil.login("reassign_quota_departing");
+
+        // The pure active-user baseline: measured before the departing user uploads anything, so its
+        // (still zero) counter contributes nothing. Under the pre-#99 counter-only sum, the global value
+        // returns to exactly this after the delete (the ghost is excluded), which is the RED behaviour.
+        long baseline = globalStorageCurrent();
+
+        // A RETAINED file: it backs the departing user's document, which the reassign-delete moves to the
+        // target, so the file stays live with the departing (ghost) user as its key holder.
+        String docId = clientUtil.createDocument(departingToken);
+        String retainedFileId = clientUtil.addFileToDocument(FILE_DOCUMENT_TXT, departingToken, docId);
+        long retainedBytes = Resources.toByteArray(Resources.getResource(FILE_DOCUMENT_TXT)).length;
+
+        // A DOOMED file: an orphan (no document) owned by the departing user. The reassign-delete
+        // soft-deletes it and fires a FileDeletedAsyncEvent that physically removes it WITHOUT a quota
+        // reclaim — the classic stale-ghost-counter path. Its bytes differ from the retained file's so a
+        // sum that wrongly counted it (or the stale counter) would be visibly off.
+        String doomedFileId = clientUtil.addFileToDocument(FILE_PIA_00452_JPG, departingToken, null);
+        Assertions.assertNotEquals(retainedBytes, FILE_PIA_00452_JPG_SIZE,
+                "the retained and doomed files must differ in size for this assertion to be sharp");
+
+        deleteUserReassigning("reassign_quota_departing", "reassign_quota_target", Status.OK);
+
+        // Let the async physical deletion of the doomed file settle before reading the global sum.
+        awaitProcessingQuiescence();
+
+        // The doomed orphan file was physically deleted (soft-deleted row, bytes gone); the retained file
+        // stays live. Confirm that state deterministically before asserting the sum.
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id and FIL_DELETEDATE_D is null", "id", retainedFileId),
+                "the retained file must remain live after the reassign-delete");
+        Assertions.assertEquals(0L, readCount(
+                "select count(*) from T_FILE where FIL_ID_C = :id and FIL_DELETEDATE_D is null", "id", doomedFileId),
+                "the doomed orphan file must be soft-deleted by the reassign-delete");
+
+        Assertions.assertEquals(baseline + retainedBytes, globalStorageCurrent(),
+                "global storage must grow by EXACTLY the ghost-retained live file's bytes (not 0, not the"
+                        + " doomed file's bytes)");
+    }
+
     // ---- helpers ----
+
+    /** Reads {@link UserDao#getGlobalStorageCurrent()} in its own committed transaction. */
+    private long globalStorageCurrent() {
+        EntityManager prev = ThreadLocalContext.get().getEntityManager();
+        EntityManager em = EMF.get().createEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            ThreadLocalContext.get().setEntityManager(em);
+            tx.begin();
+            long value = new UserDao().getGlobalStorageCurrent();
+            tx.commit();
+            return value;
+        } finally {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            em.close();
+            ThreadLocalContext.get().setEntityManager(prev);
+        }
+    }
 
     /**
      * Issues the admin reassign-delete (DELETE /user/{username} with the reassign_to_username form

@@ -66,9 +66,11 @@ quotas and no anonymous access.
 1. **Put Teedy behind OIDC/Authelia.** Configure the OIDC provider so browser
    sessions are authenticated by your IdP; accounts are auto-provisioned on first
    login. See [Authentication → OIDC/SSO](authentication.md).
-2. **Cap storage with a global quota.** Set `DOCS_GLOBAL_QUOTA` to a default
-   per-user byte limit. This default applies to OIDC-provisioned users too, so
-   users created at first SSO login start with a quota. See
+2. **Cap storage with a global quota.** Set `DOCS_GLOBAL_QUOTA` to cap the *total*
+   storage across all users; it also seeds the default per-user quota for
+   OIDC-provisioned users, so accounts created at first SSO login start with a quota.
+   The global total counts physical bytes retained on disk, including files kept live
+   for soft-deleted (ghost) users after a reassign-delete. See
    [Users and quotas](admin-guide.md#users-and-quotas) and
    [configuration → General](configuration.md#general).
 3. **Turn guest login off.** So nothing is browsable without signing in, disable

@@ -25,8 +25,11 @@ per-user storage limit.
 | Delete a user | `DELETE /api/user/{username}` |
 
 - **`storage_quota`** is a per-user byte limit; the user list displays used-vs-quota
-  for each account. A cluster-wide default can be set with the `DOCS_GLOBAL_QUOTA`
-  [environment variable](configuration.md#general).
+  for each account. The `DOCS_GLOBAL_QUOTA`
+  [environment variable](configuration.md#general) both caps the *total* storage across
+  all users and seeds the default per-user quota for auto-provisioned accounts. The
+  global total counts physical bytes retained on disk — including files kept live for
+  soft-deleted (ghost) users after a reassign-delete — not just the active users' counters.
 - **Disable / re-enable** lets you block a user without deleting their documents.
   Disabled accounts are refused at *every* auth path — local login, session cookie,
   API key, OIDC, and LDAP.

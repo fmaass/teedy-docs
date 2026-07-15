@@ -23,9 +23,11 @@ import com.sismics.docs.core.dao.criteria.UserCriteria;
 import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.jpa.QueryParam;
 import com.sismics.docs.core.util.jpa.QueryUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
@@ -735,14 +737,75 @@ public class UserDao {
     }
 
     /**
-     * Returns the global storage used by all users.
+     * Returns the global storage physically occupied across the whole installation, in bytes — the value
+     * the {@code DOCS_GLOBAL_QUOTA} cross-user cap is compared against.
      *
-     * @return Current global storage
+     * <p>This is NOT simply the sum of the active users' {@code USE_STORAGECURRENT_N} counters. A
+     * reassign-delete (#55) retains the departing user's files that back documents reassigned to a
+     * surviving user: those files stay live (with {@code FIL_IDUSER_C} = the departing, now soft-deleted
+     * "ghost" key holder) so the target can still decrypt them. The ghost's counter is deliberately NOT
+     * kept in step by the delete ({@code FileDeletedAsyncListener} never touches quota; the stale counter
+     * is only corrected by a later {@code clean_storage} purge), and the ghost is soft-deleted, so its
+     * counter is both stale AND excluded from an active-user sum — the retained bytes would go uncounted
+     * (#99) and the global cap would silently under-count. So ghost usage is taken from the FILES that
+     * survive, not from the ghost's counter: global storage = the active-user counter sum PLUS the
+     * non-negative {@code FIL_SIZE_N} of every live file owned by a soft-deleted user.</p>
+     *
+     * <p>All the database work is ONE statement, so the counter sum and the ghost-retained file rows come
+     * from a single statement-level snapshot. This is load-bearing: a reassign-delete
+     * ({@code UserResource}) runs OUTSIDE the {@code GLOBAL_QUOTA_LOCK}, so if the counter sum and the
+     * ghost-file scan were separate reads a commit landing between them could exclude the ghost's counter
+     * AND miss its now-retained file — a quota-bypass window. The three UNION-ALL arms carry a discriminator
+     * ({@code rowkind}): arm 0 is the active-user counter sum, arm 1 is the known-size ghost-retained bytes,
+     * and arm 2 emits one row per ghost-retained file whose stored size is {@link File#UNKNOWN_SIZE}
+     * ({@code FIL_SIZE_N = -1}, a legacy value from dbupdate-029) so Java can resolve those — and only
+     * those — from the still-present on-disk encrypted content via the same {@link FileUtil#getFileSize}
+     * pattern the quota-reclaim paths use (an unresolvable file contributes 0, never a negative).</p>
+     *
+     * @return Current global storage in bytes
      */
     public long getGlobalStorageCurrent() {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query query = em.createNativeQuery("select sum(u.USE_STORAGECURRENT_N) from T_USER u where u.USE_DELETEDATE_D is null");
-        return ((Number) query.getSingleResult()).longValue();
+        Query query = em.createNativeQuery(
+                "select 0 as rowkind, cast(coalesce(sum(u.USE_STORAGECURRENT_N), 0) as bigint) as amount,"
+                        + " cast(null as varchar(36)) as file_id, cast(null as varchar(36)) as owner_id"
+                        + " from T_USER u where u.USE_DELETEDATE_D is null"
+                        + " union all"
+                        + " select 1 as rowkind, cast(coalesce(sum(f.FIL_SIZE_N), 0) as bigint) as amount,"
+                        + " cast(null as varchar(36)) as file_id, cast(null as varchar(36)) as owner_id"
+                        + " from T_FILE f join T_USER fu on fu.USE_ID_C = f.FIL_IDUSER_C"
+                        + " where f.FIL_DELETEDATE_D is null and fu.USE_DELETEDATE_D is not null and f.FIL_SIZE_N >= 0"
+                        + " union all"
+                        + " select 2 as rowkind, cast(null as bigint) as amount,"
+                        + " f.FIL_ID_C as file_id, f.FIL_IDUSER_C as owner_id"
+                        + " from T_FILE f join T_USER fu on fu.USE_ID_C = f.FIL_IDUSER_C"
+                        + " where f.FIL_DELETEDATE_D is null and fu.USE_DELETEDATE_D is not null and f.FIL_SIZE_N = -1");
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+
+        long total = 0L;
+        // (fileId, ownerId) of each ghost-retained file whose stored size is unknown and must be sized on disk.
+        List<String[]> unknownSizeFiles = new ArrayList<>();
+        for (Object[] row : rows) {
+            int rowKind = ((Number) row[0]).intValue();
+            if (rowKind == 2) {
+                unknownSizeFiles.add(new String[] { (String) row[2], (String) row[3] });
+            } else if (row[1] != null) {
+                total += ((Number) row[1]).longValue();
+            }
+        }
+
+        // Resolve the unknown-size ghost files from disk (owner private key needed to decrypt-and-count).
+        // Cache owners: several retained files can share one ghost key holder.
+        Map<String, User> ownerCache = new HashMap<>();
+        for (String[] unknown : unknownSizeFiles) {
+            String fileId = unknown[0];
+            String ownerId = unknown[1];
+            User owner = ownerCache.computeIfAbsent(ownerId, this::getById);
+            total += FileUtil.resolveReclaimableSize(fileId, File.UNKNOWN_SIZE, owner);
+        }
+        return total;
     }
 
     /**
