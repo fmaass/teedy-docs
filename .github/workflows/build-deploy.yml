@@ -380,10 +380,13 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Validate and materialize Trivy exceptions
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-fs.ignore
         run: |
           python3 - <<'PY'
           import datetime
           import json
+          import os
           from pathlib import Path
 
           required = {
@@ -410,17 +413,21 @@ jobs:
               if expiry < datetime.date.today():
                   raise SystemExit(f"exception {exception['id']} expired on {expiry}")
               ids.append(exception["id"])
-          Path(".trivyignore.generated").write_text("\n".join(ids) + ("\n" if ids else ""))
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy fs exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
           PY
 
       - name: Scan repository dependencies
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/workspace:ro" \
+            -v "${{ runner.temp }}/trivy-fs.ignore:/scan/trivy-fs.ignore:ro" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
             fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress \
-            --ignorefile /workspace/.trivyignore.generated /workspace
+            --ignorefile /scan/trivy-fs.ignore /workspace
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
   candidate-image:
@@ -483,17 +490,20 @@ jobs:
           path: ${{ runner.temp }}
 
       - name: Validate and materialize Trivy exceptions
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-image.ignore
         run: |
           python3 - <<'PY'
           import datetime
           import json
+          import os
           from pathlib import Path
 
           required = {
               "id", "finding", "reason", "owner", "introduced", "expires",
               "compensating_control", "removal_issue",
           }
-          baseline = json.loads(Path(".github/baselines/trivy-exceptions.json").read_text())
+          baseline = json.loads(Path(".github/baselines/trivy-image-exceptions.json").read_text())
           if set(baseline.get("schema", {}).get("required", [])) != required:
               raise SystemExit("Trivy exception file does not declare the required schema")
           exceptions = baseline.get("exceptions")
@@ -513,7 +523,10 @@ jobs:
               if expiry < datetime.date.today():
                   raise SystemExit(f"exception {exception['id']} expired on {expiry}")
               ids.append(exception["id"])
-          Path(".trivyignore.generated").write_text("\n".join(ids) + ("\n" if ids else ""))
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy image exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
           PY
 
       - name: Extract candidate OCI layout
@@ -527,12 +540,11 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ runner.temp }}:/scan:ro" \
-            -v "${{ github.workspace }}:/workspace:ro" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
             image --input /scan/candidate-image-oci --scanners vuln \
             --severity HIGH,CRITICAL --exit-code 1 --no-progress \
-            --ignorefile /workspace/.trivyignore.generated
+            --ignorefile /scan/trivy-image.ignore
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
   sbom:
@@ -893,6 +905,47 @@ jobs:
             -C "${{ runner.temp }}/arm64-image-oci"
           test -s "${{ runner.temp }}/arm64-image-oci/index.json"
 
+      - name: Validate and materialize arm64 Trivy exceptions
+        if: steps.cfg.outputs.prerelease == 'false'
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-image.ignore
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-image-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy arm64 exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
+          PY
+
       - name: Scan additional arm64 child
         if: steps.cfg.outputs.prerelease == 'false'
         run: |
@@ -901,7 +954,8 @@ jobs:
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
             image --input /scan/arm64-image-oci --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /scan/trivy-image.ignore
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
       - name: Generate additional arm64 CycloneDX SBOM
