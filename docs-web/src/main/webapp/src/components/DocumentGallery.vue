@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getFileUrl } from '../api/file'
 import { type DocumentListItem } from '../api/document'
@@ -15,7 +15,7 @@ const tagFilter = useTagFilterStore()
 // Gallery is browse/open-only (pinned decision): no multi-select, no selection
 // affordance. It renders the SAME paginated result set the table does — the parent
 // (DocumentList) owns the query, pagination, and filters; this is a pure render mode.
-defineProps<{
+const props = defineProps<{
   documents: DocumentListItem[]
   loading?: boolean
 }>()
@@ -26,13 +26,82 @@ const emit = defineEmits<{
   cardContextMenu: [event: Event, doc: DocumentListItem]
 }>()
 
-// Track thumbs that failed to load so the card falls back to a file icon rather
+// Thumbnail load-error handling (#80). A gallery thumbnail is loaded lazily; under load the
+// lazy load can fire a TRANSIENT error while the server raster is still settling (the raster
+// request itself ultimately returns 200). The old handler added the file id to `failedThumbs`
+// whose v-if removed the <img> from the DOM permanently, so a transient hiccup hid the thumbnail
+// until a full page reload. Instead, recover with a bounded retry: on error, re-request the thumb
+// a couple of times (a changed, cache-busted src) before giving up and falling back to the file
+// icon for a genuinely dead thumb.
+const MAX_THUMB_RETRIES = 2
+const THUMB_RETRY_DELAY_MS = 400
+
+// Thumbs that failed to load after exhausting the retries — the card shows a file icon rather
 // than a broken-image glyph (mirrors DocumentTable's @error handling).
 const failedThumbs = ref(new Set<string>())
+// Per-file retry counter: doubles as a cache-busting token in the img src (so the browser truly
+// re-fetches rather than reusing the errored cache entry) and as the retry bound.
+const thumbRetries = ref(new Map<string, number>())
+
+function thumbSrc(fileId: string, rotation?: number): string {
+  const base = getFileUrl(fileId, 'thumb', undefined, rotation)
+  const attempt = thumbRetries.value.get(fileId) ?? 0
+  if (attempt === 0) return base
+  return `${base}${base.includes('?') ? '&' : '?'}_thumbretry=${attempt}`
+}
+
+// Pending retry timers keyed by file id, so they can be cancelled on unmount or when the file's
+// document leaves the list — a fired-after-teardown callback would mutate stale reactive state
+// (leaked-timer hazard). Plain (non-reactive) map: it holds timer handles, not render state.
+const pendingRetryTimers = new Map<string, number>()
+let unmounted = false
+
+function clearRetryTimer(fileId: string) {
+  const id = pendingRetryTimers.get(fileId)
+  if (id !== undefined) {
+    clearTimeout(id)
+    pendingRetryTimers.delete(fileId)
+  }
+}
 
 function onThumbError(fileId: string) {
-  failedThumbs.value = new Set(failedThumbs.value).add(fileId)
+  const attempt = thumbRetries.value.get(fileId) ?? 0
+  if (attempt < MAX_THUMB_RETRIES) {
+    clearRetryTimer(fileId) // never stack two pending timers for the same thumb
+    const id = window.setTimeout(() => {
+      pendingRetryTimers.delete(fileId)
+      // Guard: no-op if the component has been torn down (defensive — onUnmounted also clears the
+      // timer, so this normally cannot fire post-teardown, but never mutate stale reactive state).
+      if (unmounted) return
+      // Bumping the attempt changes thumbSrc(), which re-fetches the <img>.
+      thumbRetries.value = new Map(thumbRetries.value).set(fileId, attempt + 1)
+    }, THUMB_RETRY_DELAY_MS)
+    pendingRetryTimers.set(fileId, id)
+  } else {
+    // Retries exhausted — treat the thumb as genuinely dead and fall back to the icon.
+    failedThumbs.value = new Set(failedThumbs.value).add(fileId)
+  }
 }
+
+// When the document set changes, cancel any pending retry whose document is no longer rendered —
+// its <img> is gone, so a late retry would only mutate reactive state for nothing.
+watch(
+  () => props.documents,
+  (docs) => {
+    const liveFileIds = new Set(
+      docs.map((d) => d.file_id).filter((id): id is string => !!id),
+    )
+    for (const fileId of [...pendingRetryTimers.keys()]) {
+      if (!liveFileIds.has(fileId)) clearRetryTimer(fileId)
+    }
+  },
+)
+
+onUnmounted(() => {
+  unmounted = true
+  for (const id of pendingRetryTimers.values()) clearTimeout(id)
+  pendingRetryTimers.clear()
+})
 
 // The open region is a real link to the document view (valid link semantics, a
 // genuine href, keyboard-focusable, accessible name = title). We render it via
@@ -79,7 +148,7 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
           <span class="card-thumb">
             <img
               v-if="doc.file_id && !failedThumbs.has(doc.file_id)"
-              :src="getFileUrl(doc.file_id, 'thumb', undefined, doc.file_rotation)"
+              :src="thumbSrc(doc.file_id, doc.file_rotation)"
               alt=""
               loading="lazy"
               @error="onThumbError(doc.file_id!)"
