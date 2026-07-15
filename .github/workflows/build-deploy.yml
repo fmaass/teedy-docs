@@ -32,8 +32,12 @@ jobs:
       - name: Check db.version covers latest migration
         run: bash scripts/check-db-version.sh
 
+      # Exclude the observation-timing-fragile tests (JUnit tag "flaky-h2-observation") from the fast
+      # shared-JVM H2 suite, where they flake non-deterministically. They remain gated on the
+      # test-web-postgres job (which runs them against a real PostgreSQL, where they pass reliably), so
+      # coverage is preserved. A deterministic rewrite is tracked in #101.
       - name: Run tests
-        run: ./mvnw --batch-mode test
+        run: ./mvnw --batch-mode test -DexcludedGroups=flaky-h2-observation
 
   test-postgres:
     # Run the docs-core suite (DbOpenHelper migration bootstrap + DAO/native-query tests)

@@ -15,6 +15,7 @@ import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
@@ -132,6 +133,11 @@ public class TestUserResourceReassign extends BaseJerseyTest {
      * the bytes and a DocumentDeletedAsyncEvent would drop the doc from Lucene. Observing the bytes
      * still present AND the document still findable by search proves neither event fired.
      */
+    // Quarantined from the H2 `test` job for observation-timing flakiness on the fast shared-JVM H2
+    // suite (it asserts a document indexed earlier in the test is still searchable, but an unrelated
+    // AppContext startup on that JVM can install a fresh empty RAM Lucene index mid-test); still gated
+    // on the Postgres job, where it passes reliably. Deterministic rewrite tracked in #101.
+    @Tag("flaky-h2-observation")
     @Test
     public void testNoDeletionEventsForReassignedFilesAndDocs() throws Exception {
         String adminToken = adminToken();
