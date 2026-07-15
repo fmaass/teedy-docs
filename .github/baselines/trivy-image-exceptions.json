@@ -14,83 +14,13 @@
   "recorded": "2026-07-15",
   "exceptions": [
     {
-      "id": "CVE-2026-47065",
-      "finding": "org.apache.mina:mina-core",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2026-54512",
-      "finding": "jackson-databind",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2026-1605",
-      "finding": "jetty-server",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2026-2332",
-      "finding": "jetty-http",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2025-5115",
-      "finding": "jetty-http2-common",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2026-5795",
-      "finding": "jetty-ee10-jaspi",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
-      "id": "CVE-2026-54513",
-      "finding": "WAR Java dependency",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
-      "removal_issue": "#105"
-    },
-    {
       "id": "CVE-2017-9096",
       "finding": "com.lowagie:itext",
-      "reason": "Pre-existing dependency CVE surfaced at image-scan adoption (rc.2 Phase F); fix tracked in #105",
+      "reason": "XXE in iText's XML parsers, reachable only when iText parses untrusted XML/XFA/PDF. Reachability assessment (docs/security/itext-cve-2017-9096-assessment.md) confirms both usage surfaces — PdfUtil font registration and TextPlainFormatHandler text/CSV-to-PDF — only WRITE PDFs and never parse user-supplied XML, so the flaw is not reachable. No fixed release exists in the com.lowagie:itext 2.x lineage (transitive via the opensagres XDocReport PDF converters).",
       "owner": "fmaass",
       "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "#105",
+      "expires": "2027-01-15",
+      "compensating_control": "Not reachable from user input (write-only PDF generation, no XML parsing); see docs/security/itext-cve-2017-9096-assessment.md",
       "removal_issue": "#105"
     }
   ]

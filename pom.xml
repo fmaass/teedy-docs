@@ -55,7 +55,7 @@
     <org.glassfish.jersey.version>3.1.10</org.glassfish.jersey.version>
     <parsson.version>1.1.9</parsson.version>
     <jakarta.servlet.jakarta.servlet-api.version>6.0.0</jakarta.servlet.jakarta.servlet-api.version>
-    <org.eclipse.jetty.version>12.0.21</org.eclipse.jetty.version>
+    <org.eclipse.jetty.version>12.0.34</org.eclipse.jetty.version>
 
     <!-- Plugins version -->
     <org.apache.maven.plugins.maven-antrun-plugin.version>3.1.0</org.apache.maven.plugins.maven-antrun-plugin.version>
@@ -134,6 +134,17 @@
 
   <dependencyManagement>
     <dependencies>
+      <!-- Align the whole Jackson family (core, databind, annotations) on one patch
+           line: java-jwt pulls jackson-core/databind directly, and a databind-only
+           pin would leave core/databind on mismatched patch levels. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>2.21.4</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
       <dependency>
         <groupId>com.sismics.docs</groupId>
         <artifactId>docs-core</artifactId>
@@ -488,6 +499,13 @@
         <groupId>org.apache.directory.api</groupId>
         <artifactId>api-ldap-codec-standalone</artifactId>
         <version>${org.apache.directory.api.version}</version>
+      </dependency>
+
+      <!-- api-ldap-client-api pulls mina-core transitively; pin the patched line. -->
+      <dependency>
+        <groupId>org.apache.mina</groupId>
+        <artifactId>mina-core</artifactId>
+        <version>2.2.8</version>
       </dependency>
 
       <dependency>
