@@ -1468,27 +1468,51 @@ public class AppResource extends BaseResource {
         Config enabled = configDao.getById(ConfigType.LDAP_ENABLED);
 
         JsonObjectBuilder response = Json.createObjectBuilder();
-        if (enabled != null && Boolean.parseBoolean(enabled.getValue())) {
-            // LDAP enabled
-            Config adminPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
-            boolean adminPasswordSet = adminPassword != null && !Strings.isNullOrEmpty(adminPassword.getValue());
-            response.add("enabled", true)
-                    .add("host", ConfigUtil.getConfigStringValue(ConfigType.LDAP_HOST))
-                    .add("port", ConfigUtil.getConfigIntegerValue(ConfigType.LDAP_PORT))
-                    .add("usessl", ConfigUtil.getConfigBooleanValue(ConfigType.LDAP_USESSL))
-                    .add("admin_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_ADMIN_DN))
-                    // The admin bind password is write-only: it is NEVER echoed back (BL-028).
-                    // Only a boolean "is a password stored?" flag is exposed, so the UI shows a
-                    // "leave blank to keep" affordance instead of the secret. The POST keeps the
-                    // stored value when admin_password is absent/empty.
-                    .add("admin_password_set", adminPasswordSet)
-                    .add("base_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_BASE_DN))
-                    .add("filter", ConfigUtil.getConfigStringValue(ConfigType.LDAP_FILTER))
-                    .add("default_email", ConfigUtil.getConfigStringValue(ConfigType.LDAP_DEFAULT_EMAIL))
-                    .add("default_storage", ConfigUtil.getConfigLongValue(ConfigType.LDAP_DEFAULT_STORAGE));
-        } else {
-            // LDAP disabled
-            response.add("enabled", false);
+        response.add("enabled", enabled != null && Boolean.parseBoolean(enabled.getValue()));
+
+        // #83: every NON-secret field is returned whenever its config row EXISTS, regardless of
+        // whether LDAP is currently enabled. Disabling LDAP only flips LDAP_ENABLED to false —
+        // the connection settings persist in T_CONFIG — so the admin UI must repopulate them on a
+        // disable/re-enable cycle. Each field is read directly from its row (not via ConfigUtil,
+        // which throws on a missing row) and emitted only when present, so the never-configured
+        // state (no rows) simply omits them instead of failing.
+        Config host = configDao.getById(ConfigType.LDAP_HOST);
+        if (host != null) {
+            response.add("host", host.getValue());
+        }
+        Config port = configDao.getById(ConfigType.LDAP_PORT);
+        if (port != null) {
+            response.add("port", Integer.parseInt(port.getValue()));
+        }
+        Config usessl = configDao.getById(ConfigType.LDAP_USESSL);
+        if (usessl != null) {
+            response.add("usessl", Boolean.parseBoolean(usessl.getValue()));
+        }
+        Config adminDn = configDao.getById(ConfigType.LDAP_ADMIN_DN);
+        if (adminDn != null) {
+            response.add("admin_dn", adminDn.getValue());
+        }
+        // The admin bind password is write-only: it is NEVER echoed back (BL-028). Only a boolean
+        // "is a password stored?" flag is exposed, so the UI shows a "leave blank to keep"
+        // affordance instead of the secret. The POST keeps the stored value when admin_password is
+        // absent/empty. This flag is always present (false when unset).
+        Config adminPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
+        response.add("admin_password_set", adminPassword != null && !Strings.isNullOrEmpty(adminPassword.getValue()));
+        Config baseDn = configDao.getById(ConfigType.LDAP_BASE_DN);
+        if (baseDn != null) {
+            response.add("base_dn", baseDn.getValue());
+        }
+        Config filter = configDao.getById(ConfigType.LDAP_FILTER);
+        if (filter != null) {
+            response.add("filter", filter.getValue());
+        }
+        Config defaultEmail = configDao.getById(ConfigType.LDAP_DEFAULT_EMAIL);
+        if (defaultEmail != null) {
+            response.add("default_email", defaultEmail.getValue());
+        }
+        Config defaultStorage = configDao.getById(ConfigType.LDAP_DEFAULT_STORAGE);
+        if (defaultStorage != null) {
+            response.add("default_storage", Long.parseLong(defaultStorage.getValue()));
         }
 
         return Response.ok().entity(response.build()).build();

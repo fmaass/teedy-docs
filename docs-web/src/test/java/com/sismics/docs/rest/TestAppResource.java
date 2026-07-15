@@ -1978,6 +1978,132 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
+     * #83: the LDAP config GET must return every NON-secret field whenever it exists in T_CONFIG,
+     * regardless of whether LDAP is currently enabled — disabling only flips LDAP_ENABLED, the
+     * connection settings persist, and the admin UI must repopulate them on a disable/re-enable
+     * cycle. Pure config CRUD (no live LDAP server): exercises the state matrix
+     * never-configured / enabled+configured / disabled-but-retained (the fix) / re-enabled, plus
+     * the write-only secret invariants (never echoed; admin_password_set flag correct; a blank
+     * admin_password on re-enable keeps the stored value, never wipes it).
+     */
+    @Test
+    public void testLdapConfigRetainedWhenDisabled() {
+        String adminToken = adminToken();
+
+        // The H2 in-memory DB is shared across the suite, so remove any LDAP_* rows a peer test
+        // (e.g. testLdapAuthentication) may have left, to deterministically reach the fresh-install
+        // "never configured" state for the first leg.
+        deleteLdapConfigRows();
+
+        // Never configured: GET must not throw; enabled=false, no non-secret fields, secret unset.
+        JsonObject json = getLdapConfig(adminToken);
+        Assertions.assertFalse(json.getBoolean("enabled"), "never-configured: LDAP disabled");
+        Assertions.assertFalse(json.containsKey("host"), "never-configured: no host field");
+        Assertions.assertFalse(json.containsKey("port"), "never-configured: no port field");
+        Assertions.assertFalse(json.getBoolean("admin_password_set"), "never-configured: no stored secret");
+
+        // Enable + fully configure.
+        Response enableResponse = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("enabled", "true")
+                        .param("host", "ldap.example.com")
+                        .param("port", "389")
+                        .param("usessl", "false")
+                        .param("admin_dn", "cn=admin,dc=example,dc=com")
+                        .param("admin_password", "secret-bind")
+                        .param("base_dn", "dc=example,dc=com")
+                        .param("filter", "(uid=USERNAME)")
+                        .param("default_email", "default@example.com")
+                        .param("default_storage", "100000000")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), enableResponse.getStatus());
+
+        // Enabled + configured: every non-secret field returned, secret never echoed but flagged.
+        json = getLdapConfig(adminToken);
+        assertLdapNonSecretFields(json);
+        Assertions.assertTrue(json.getBoolean("enabled"), "enabled+configured: enabled true");
+        Assertions.assertFalse(json.containsKey("admin_password"), "secret must never be echoed");
+        Assertions.assertTrue(json.getBoolean("admin_password_set"), "stored secret is flagged");
+
+        // Disable: only 'enabled' is sent false. THE #83 FIX — the connection settings remain in
+        // T_CONFIG and MUST still be returned so the admin UI repopulates. RED before the fix
+        // (the old GET returned {enabled:false} and nothing else).
+        Response disableResponse = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("enabled", "false")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), disableResponse.getStatus());
+
+        json = getLdapConfig(adminToken);
+        Assertions.assertFalse(json.getBoolean("enabled"), "disabled: enabled false");
+        assertLdapNonSecretFields(json); // #83: retained non-secret fields still returned when disabled
+        Assertions.assertFalse(json.containsKey("admin_password"), "secret still never echoed when disabled");
+        Assertions.assertTrue(json.getBoolean("admin_password_set"), "#83: stored bind password retained when disabled");
+
+        // Re-enable with a BLANK admin_password: the stored secret is KEPT (unchanged), never wiped,
+        // and the config is accepted (no 'admin_password must be set' error).
+        Response reEnableResponse = target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()
+                        .param("enabled", "true")
+                        .param("host", "ldap.example.com")
+                        .param("port", "389")
+                        .param("usessl", "false")
+                        .param("admin_dn", "cn=admin,dc=example,dc=com")
+                        .param("admin_password", "")
+                        .param("base_dn", "dc=example,dc=com")
+                        .param("filter", "(uid=USERNAME)")
+                        .param("default_email", "default@example.com")
+                        .param("default_storage", "100000000")));
+        Assertions.assertEquals(Status.OK.getStatusCode(), reEnableResponse.getStatus(),
+                "blank admin_password on re-enable is 'keep stored', not a validation error");
+
+        json = getLdapConfig(adminToken);
+        Assertions.assertTrue(json.getBoolean("enabled"), "re-enabled: enabled true");
+        assertLdapNonSecretFields(json);
+        Assertions.assertTrue(json.getBoolean("admin_password_set"),
+                "blank secret means unchanged: the previously-stored password is still set");
+
+        // Leave the shared DB in the fresh-install state so later suite tests are order-independent.
+        deleteLdapConfigRows();
+    }
+
+    /**
+     * Reads the LDAP config as admin.
+     */
+    private JsonObject getLdapConfig(String adminToken) {
+        return target().path("/app/config_ldap").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+    }
+
+    /**
+     * Asserts every non-secret LDAP field is present with the values written by
+     * {@link #testLdapConfigRetainedWhenDisabled()}.
+     */
+    private void assertLdapNonSecretFields(JsonObject json) {
+        Assertions.assertEquals("ldap.example.com", json.getString("host"));
+        Assertions.assertEquals(389, json.getJsonNumber("port").intValue());
+        Assertions.assertFalse(json.getBoolean("usessl"));
+        Assertions.assertEquals("cn=admin,dc=example,dc=com", json.getString("admin_dn"));
+        Assertions.assertEquals("dc=example,dc=com", json.getString("base_dn"));
+        Assertions.assertEquals("(uid=USERNAME)", json.getString("filter"));
+        Assertions.assertEquals("default@example.com", json.getString("default_email"));
+        Assertions.assertEquals(100000000L, json.getJsonNumber("default_storage").longValue());
+    }
+
+    /**
+     * Deletes every LDAP_* row from the shared T_CONFIG so a test can reach (or restore) the
+     * fresh-install "never configured" state deterministically. Runs in its own committed
+     * transaction on a fresh EntityManager, restoring the ambient EM afterward.
+     */
+    private void deleteLdapConfigRows() {
+        java.util.List<Throwable> errors = new java.util.ArrayList<>();
+        withOwnTransaction(() -> ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("delete from T_CONFIG where CFG_ID_C like 'LDAP_%'").executeUpdate(), errors);
+        Assertions.assertTrue(errors.isEmpty(), "LDAP config cleanup failed: " + errors);
+    }
+
+    /**
      * The admin stats dashboard endpoint: response shape, seeded totals, per-user storage
      * ordering, the documents-created series bucketing, and the activity series.
      *
