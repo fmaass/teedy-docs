@@ -31,6 +31,7 @@ import com.sismics.rest.util.ValidationUtil;
 import com.sismics.security.UserPrincipal;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.csrf.CsrfTokenUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.totp.GoogleAuthenticator;
 import com.sismics.util.totp.GoogleAuthenticatorKey;
@@ -209,9 +210,9 @@ public class UserResource extends BaseResource {
         // stolen cookie stops working, including the one that just made this request) and mint a fresh token
         // for the current browser, returned as a new cookie. Runs in this request transaction.
         if (passwordChanged) {
-            NewCookie rotatedCookie = rotateSession(user);
-            if (rotatedCookie != null) {
-                responseBuilder.cookie(rotatedCookie);
+            NewCookie[] rotatedCookies = rotateSession(user);
+            if (rotatedCookies != null) {
+                responseBuilder.cookie(rotatedCookies);
             }
         }
         return responseBuilder.build();
@@ -224,11 +225,12 @@ public class UserResource extends BaseResource {
      * as a replacement cookie.
      *
      * @param user the user whose sessions are rotated
-     * @return the replacement session cookie, or null when the request did not present a valid current
-     *         session token for this user (e.g. a header/API-key-authenticated request, or a junk/foreign
-     *         cookie), in which case all of the user's tokens are still revoked but no session is minted
+     * @return the replacement session cookie and its additive CSRF companion cookie (as a two-element
+     *         array), or null when the request did not present a valid current session token for this
+     *         user (e.g. a header/API-key-authenticated request, or a junk/foreign cookie), in which case
+     *         all of the user's tokens are still revoked but no session is minted
      */
-    private NewCookie rotateSession(User user) {
+    private NewCookie[] rotateSession(User user) {
         AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
 
         // Resolve the presented cookie to a session token and confirm it is a VALID CURRENT session for THIS
@@ -258,7 +260,7 @@ public class UserResource extends BaseResource {
         String tokenValue = authenticationTokenDao.create(newToken);
 
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
-        return new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+        NewCookie authCookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
                 .value(tokenValue)
                 .path("/")
                 .maxAge(maxAge)
@@ -266,6 +268,7 @@ public class UserResource extends BaseResource {
                 .httpOnly(true)
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
+        return new NewCookie[] { authCookie, CsrfTokenUtil.buildSessionCookie(tokenValue) };
     }
 
     /**
@@ -512,7 +515,10 @@ public class UserResource extends BaseResource {
                 .httpOnly(true)
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        // Additive CSRF companion cookie (non-HttpOnly, JS-readable) derived from this session's token id.
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildSessionCookie(token))
+                .build();
     }
 
     /**
@@ -582,7 +588,9 @@ public class UserResource extends BaseResource {
             response.add("logout_url", logoutUrl);
         }
 
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildClearedSessionCookie())
+                .build();
     }
 
     /**
@@ -851,9 +859,11 @@ public class UserResource extends BaseResource {
                 response.add("is_default_password", Constants.DEFAULT_ADMIN_PASSWORD.equals(adminUser.getPassword()));
             }
         } else {
-            // Update the last connection date (null when authenticated via header/proxy)
+            // Update the last connection date (null when authenticated via header/proxy). Skip the write on
+            // a HEAD: Jersey dispatches HEAD through this @GET method, and this write IS the short-session
+            // expiry clock — a cross-site HEAD must not keep a session alive.
             String authToken = getAuthToken();
-            if (authToken != null) {
+            if (authToken != null && "GET".equals(request.getMethod())) {
                 AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
                 authenticationTokenDao.updateLastConnectionDate(authToken);
             }

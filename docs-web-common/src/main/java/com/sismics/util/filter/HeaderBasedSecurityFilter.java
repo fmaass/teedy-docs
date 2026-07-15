@@ -71,17 +71,30 @@ public class HeaderBasedSecurityFilter extends SecurityFilter {
     }
 
     @Override
-    protected User authenticate(HttpServletRequest request) {
+    protected String getMechanism() {
+        return MECHANISM_TRUSTED_HEADER;
+    }
+
+    @Override
+    protected AuthAttempt attempt(HttpServletRequest request) {
         if (!enabled) {
-            return null;
+            return AuthAttempt.absent();
         }
 
         List<String> headerValues = Collections.list(request.getHeaders(AUTHENTICATED_USER_HEADER));
+        if (headerValues.isEmpty()) {
+            return AuthAttempt.absent();
+        }
         String username = resolveAuthenticatedUsername(request.getRemoteAddr(), headerValues);
         if (username == null) {
-            return null;
+            // Header present but not trusted / not usable: fall through to anonymous (denied downstream).
+            return AuthAttempt.ignore();
         }
-        return new UserDao().getActiveByUsername(username);
+        User user = new UserDao().getActiveByUsername(username);
+        if (!isEligible(user)) {
+            return AuthAttempt.ignore();
+        }
+        return AuthAttempt.authenticated(user, null);
     }
 
     /**
