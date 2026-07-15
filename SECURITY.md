@@ -35,3 +35,9 @@ database — for example with full-disk / filesystem encryption and restricted a
 is the operator's responsibility. Secrets that Teedy manages (password hashes, API-key
 hashes, OIDC client secret, the CSRF proxy key) are stored hashed or as opaque values,
 but the underlying store itself is not encrypted by the application.
+
+## Cross-Site Request Forgery (CSRF)
+
+CSRF protection infrastructure is present but runs in **report-only mode** (off by
+default) as of v3.6.5-rc.2. See **`docs/csrf.md`** for the mechanism, the credential
+precedence model, and how enforcement is enabled in a future release.
