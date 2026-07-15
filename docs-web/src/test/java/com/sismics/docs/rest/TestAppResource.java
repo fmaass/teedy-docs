@@ -934,6 +934,15 @@ public class TestAppResource extends BaseJerseyTest {
                 .put(Entity.form(new Form().param("title", "Concurrent accounting doc").param("language", "eng")), JsonObject.class)
                 .getString("id");
         String fileId = clientUtil.addFileToDocument("file/PIA00452.jpg", adminToken, docId);
+
+        // The upload's content extraction + raster (_web/_thumb) generation runs on the async event bus
+        // AFTER the PUT returns. Drain ALL of it — queued and active — BEFORE removing the physical bytes
+        // below, so a straggler cannot re-create a raster after the delete and make clean_storage count a
+        // file this run already accounted as gone. A strict barrier (fails on timeout) is used rather than
+        // the best-effort teardown drain, so a stuck processor surfaces loudly instead of racing this
+        // accounting assertion into an order-dependent flake.
+        awaitAsyncQuiescence("upload processing must drain before the already-removed-bytes accounting run");
+
         executeSql("update T_DOCUMENT set DOC_IDFILE_C = null where DOC_ID_C = :did", java.util.Map.of("did", docId));
         executeSql("update T_FILE set FIL_DELETEDATE_D = :now where FIL_ID_C = :fid",
                 java.util.Map.of("now", new java.util.Date(), "fid", fileId));

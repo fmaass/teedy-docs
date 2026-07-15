@@ -340,6 +340,47 @@ public abstract class BaseJerseyTest extends JerseyTest {
         }
     }
 
+    /**
+     * Strict async-work barrier: block until ALL post-response asynchronous work driven by the
+     * {@link AppContext} has drained, then return — or FAIL the test if it has not drained within
+     * {@link #QUIESCENCE_TIMEOUT_MS}. This is the deterministic seam a test uses when a later assertion
+     * depends on async side effects being complete; unlike {@link #awaitProcessingQuiescence()} (a
+     * best-effort drain used in teardown, which silently returns on timeout), a timeout here is a
+     * FAILURE, so a genuinely stuck or never-delivered async task surfaces loudly instead of racing the
+     * assertion into an order-dependent flake.
+     *
+     * <p>It covers BOTH independent kinds of async work, because the two are tracked separately and
+     * neither alone is sufficient:</p>
+     * <ul>
+     *   <li>{@link FileUtil#getProcessingFileCount()} — files still marked in-flight for content
+     *       extraction / raster generation ({@code FileProcessingAsyncListener}).</li>
+     *   <li>{@link AppContext#getQueuedTaskCount()} — tasks QUEUED or ACTIVELY EXECUTING on the async
+     *       event-bus executors ({@code taskCount − completedTaskCount}). This is what catches the
+     *       independent subscribers that do NOT touch the file-processing marker — notably
+     *       {@code FileDeletedAsyncListener}, whose physical byte removal + index delete the
+     *       file-processing barrier never observes. In unit-test mode the event bus is synchronous
+     *       (no executor), so this term is 0 and the inline subscriber has already run by the time the
+     *       triggering request returns; under an async-bus configuration it blocks until the executor
+     *       is idle.</li>
+     * </ul>
+     *
+     * @param message Failure message if async work has not drained within the deadline
+     */
+    protected static void awaitAsyncQuiescence(String message) throws InterruptedException {
+        long deadline = System.nanoTime() + QUIESCENCE_TIMEOUT_MS * 1_000_000L;
+        while (true) {
+            if (FileUtil.getProcessingFileCount() == 0
+                    && AppContext.getInstance().getQueuedTaskCount() == 0) {
+                return;
+            }
+            if (System.nanoTime() >= deadline) {
+                Assertions.fail(message + " (async work did not drain within " + QUIESCENCE_TIMEOUT_MS + "ms)");
+                return;
+            }
+            Thread.sleep(50);
+        }
+    }
+
     @Override
     @AfterEach
     public void tearDown() throws Exception {

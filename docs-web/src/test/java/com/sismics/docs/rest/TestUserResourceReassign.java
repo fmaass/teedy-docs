@@ -3,6 +3,7 @@ package com.sismics.docs.rest;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Resources;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -129,9 +130,15 @@ public class TestUserResourceReassign extends BaseJerseyTest {
 
     /**
      * Path 4: no FileDeletedAsyncEvent / DocumentDeletedAsyncEvent fires for reassigned files/docs.
-     * The unit-test event bus is synchronous, so a fired FileDeletedAsyncEvent would physically delete
-     * the bytes and a DocumentDeletedAsyncEvent would drop the doc from Lucene. Observing the bytes
-     * still present AND the document still findable by search proves neither event fired.
+     *
+     * <p>The sharp check observes the PUBLICATIONS directly: a scoped counter is registered on the
+     * AppContext async event bus BEFORE the reassign-delete and counts only a
+     * {@link FileDeletedAsyncEvent} carrying the reassigned file's id or a
+     * {@link DocumentDeletedAsyncEvent} carrying the reassigned document's id. Counting the published
+     * events (not their listener side effects) is what makes the test un-fakeable: a broken or disabled
+     * {@code FileDeletedAsyncListener} would leave the bytes on disk and thus PASS a side-effect-only
+     * check even though a deletion event was wrongly published. After draining the async executor the
+     * counts must be exactly zero. The surviving DB row + on-disk bytes are kept only as corroboration.</p>
      */
     @Test
     public void testNoDeletionEventsForReassignedFilesAndDocs() throws Exception {
@@ -140,7 +147,7 @@ public class TestUserResourceReassign extends BaseJerseyTest {
         clientUtil.createUser("reassign_noevent_target");
         String departingToken = clientUtil.login("reassign_noevent_departing");
 
-        // A uniquely-titled document so the Lucene search assertion is unambiguous.
+        // A uniquely-titled document so the corroborating search assertion is unambiguous.
         String uniqueTitle = "ReassignNoEventUniqueTitle";
         String docId = target().path("/document").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, departingToken)
@@ -151,20 +158,33 @@ public class TestUserResourceReassign extends BaseJerseyTest {
         Path storedFile = DirectoryUtil.getStorageDirectory().resolve(fileId);
         Assertions.assertTrue(Files.exists(storedFile));
 
-        deleteUserReassigning("reassign_noevent_departing", "reassign_noevent_target", Status.OK);
+        // Register the scoped publication counter BEFORE the reassign-delete, on the same process-wide
+        // AppContext async bus the server thread publishes to.
+        ScopedDeletionEventCounter counter = new ScopedDeletionEventCounter(fileId, docId);
+        AppContext.getInstance().getAsyncEventBus().register(counter);
+        try {
+            deleteUserReassigning("reassign_noevent_departing", "reassign_noevent_target", Status.OK);
+            // Drain queued AND active async event work before reading the counters, and fail loudly if
+            // it never drains (rather than racing the assertion).
+            awaitAsyncQuiescence("reassign-delete async work must drain before counting deletion events");
+        } finally {
+            AppContext.getInstance().getAsyncEventBus().unregister(counter);
+        }
 
-        // Let any post-response file processing settle before observing the deletion side effects, so a
-        // straggler cannot race the assertions on the shared filesystem / index.
-        awaitProcessingQuiescence();
+        // PRIMARY: neither deletion event was published for the reassigned file / document.
+        Assertions.assertEquals(0, counter.fileDeletedCount.get(),
+                "no FileDeletedAsyncEvent must be published for the reassigned file");
+        Assertions.assertEquals(0, counter.documentDeletedCount.get(),
+                "no DocumentDeletedAsyncEvent must be published for the reassigned document");
 
-        // The physical bytes are still present: no FileDeletedAsyncEvent fired for the reassigned file.
+        // Corroboration: the physical bytes survive and the reassigned document row is still ACTIVE.
         Assertions.assertTrue(Files.exists(storedFile),
-                "no FileDeletedAsyncEvent must fire for a reassigned file (bytes must remain on disk)");
+                "corroboration: the reassigned file's bytes must remain on disk");
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_DELETEDATE_D is null", "id", docId),
+                "corroboration: the reassigned document must remain active (not soft-deleted)");
 
-        // The document is still in the Lucene index (the target can find it by title): no
-        // DocumentDeletedAsyncEvent fired for the reassigned document. Indexing runs through the async
-        // event bus, so poll briefly for the index to reflect the reassigned (still-live) document
-        // rather than asserting on a single possibly-not-yet-caught-up read.
+        // Corroboration: the target can still find the reassigned document by title (still indexed).
         String targetToken = clientUtil.login("reassign_noevent_target");
         boolean found = false;
         for (int attempt = 0; attempt < 20 && !found; attempt++) {
@@ -185,14 +205,41 @@ public class TestUserResourceReassign extends BaseJerseyTest {
             }
         }
         Assertions.assertTrue(found,
-                "no DocumentDeletedAsyncEvent must fire for a reassigned document (must stay searchable)");
+                "corroboration: the reassigned document must stay searchable for the target");
+    }
 
-        // Deterministic corroboration independent of index timing: the reassigned document row is still
-        // ACTIVE (not soft-deleted). A fired DocumentDeletedAsyncEvent accompanies the document being
-        // deleted; the row staying live confirms the reassigned document was excluded from deletion.
-        Assertions.assertEquals(1L, readCount(
-                "select count(*) from T_DOCUMENT where DOC_ID_C = :id and DOC_DELETEDATE_D is null", "id", docId),
-                "the reassigned document must remain active (not soft-deleted)");
+    /**
+     * Guava event-bus subscriber that counts, scoped to one specific file id and document id, the
+     * deletion events PUBLISHED on the async bus. Scoping by id makes a wrongly-published event for the
+     * reassigned artifact observable even amid unrelated events, and counting publications (not listener
+     * effects) means a broken listener cannot mask a mis-publication.
+     */
+    public static class ScopedDeletionEventCounter {
+        private final String fileId;
+        private final String documentId;
+        final java.util.concurrent.atomic.AtomicInteger fileDeletedCount = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger documentDeletedCount = new java.util.concurrent.atomic.AtomicInteger();
+
+        ScopedDeletionEventCounter(String fileId, String documentId) {
+            this.fileId = fileId;
+            this.documentId = documentId;
+        }
+
+        @com.google.common.eventbus.Subscribe
+        @com.google.common.eventbus.AllowConcurrentEvents
+        public void onFileDeleted(com.sismics.docs.core.event.FileDeletedAsyncEvent event) {
+            if (fileId.equals(event.getFileId())) {
+                fileDeletedCount.incrementAndGet();
+            }
+        }
+
+        @com.google.common.eventbus.Subscribe
+        @com.google.common.eventbus.AllowConcurrentEvents
+        public void onDocumentDeleted(com.sismics.docs.core.event.DocumentDeletedAsyncEvent event) {
+            if (documentId.equals(event.getDocumentId())) {
+                documentDeletedCount.incrementAndGet();
+            }
+        }
     }
 
     /**
