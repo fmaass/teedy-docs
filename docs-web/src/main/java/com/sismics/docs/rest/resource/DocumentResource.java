@@ -638,6 +638,15 @@ public class DocumentResource extends BaseResource {
     @Path("export")
     @Produces({MediaType.APPLICATION_OCTET_STREAM, MediaType.TEXT_PLAIN})
     public Response export() {
+        // Jersey serves a HEAD for this @GET method by invoking it with the entity suppressed. Short-circuit
+        // a HEAD BEFORE any side effect (export-permit acquisition, audit-row write): the StreamingOutput
+        // that releases the permit never runs on a HEAD, so proceeding would leak a permit on every HEAD
+        // (an export-capacity DoS). BaseResource sees the real servlet method via @Context, not Jersey's
+        // implicit-HEAD dispatch.
+        if (!"GET".equals(request.getMethod())) {
+            return Response.ok().build();
+        }
+
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }

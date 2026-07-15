@@ -15,6 +15,7 @@ import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.OidcState;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.csrf.CsrfTokenUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.net.ClientAddressResolver;
 import jakarta.json.Json;
@@ -590,7 +591,7 @@ public class OidcResource extends BaseResource {
             }
 
             return Response.temporaryRedirect(URI.create(redirectTarget))
-                    .cookie(cookie)
+                    .cookie(cookie, CsrfTokenUtil.buildSessionCookie(tokenValue))
                     .build();
         } catch (Exception e) {
             log.error("Error processing OIDC callback", e);

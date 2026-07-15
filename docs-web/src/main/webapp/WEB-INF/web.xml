@@ -51,6 +51,12 @@
   </filter>
 
   <filter>
+    <filter-name>csrfFilter</filter-name>
+    <filter-class>com.sismics.util.csrf.CsrfFilter</filter-class>
+    <async-supported>true</async-supported>
+  </filter>
+
+  <filter>
     <filter-name>headerBasedSecurityFilter</filter-name>
     <filter-class>com.sismics.util.filter.HeaderBasedSecurityFilter</filter-class>
     <async-supported>true</async-supported>
@@ -75,18 +81,29 @@
     -->
   </filter>
   
-  <filter-mapping>
-    <filter-name>tokenBasedSecurityFilter</filter-name>
-    <url-pattern>/api/*</url-pattern>
-  </filter-mapping>
-
+  <!--
+    Filter execution order for /api/* is the order of these filter-mappings. Credential precedence is
+    explicit-scheme-first: the API-key filter runs BEFORE the token-cookie filter (an invalid tdapi_*
+    Authorization header is a controlled 401, and a valid one wins over a cookie), then the trusted-header
+    filter. The CSRF filter runs LAST so the authenticated principal + proven mechanism are installed.
+  -->
   <filter-mapping>
     <filter-name>apiKeyBasedSecurityFilter</filter-name>
     <url-pattern>/api/*</url-pattern>
   </filter-mapping>
 
   <filter-mapping>
+    <filter-name>tokenBasedSecurityFilter</filter-name>
+    <url-pattern>/api/*</url-pattern>
+  </filter-mapping>
+
+  <filter-mapping>
     <filter-name>headerBasedSecurityFilter</filter-name>
+    <url-pattern>/api/*</url-pattern>
+  </filter-mapping>
+
+  <filter-mapping>
+    <filter-name>csrfFilter</filter-name>
     <url-pattern>/api/*</url-pattern>
   </filter-mapping>
 
