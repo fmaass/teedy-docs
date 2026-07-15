@@ -20,9 +20,13 @@ Check scripts: `scripts/check-version-consistency.sh vX.Y.Z` (tag vs poms vs pac
 
 Authoritative workflow: **`.github/workflows/build-deploy.yml`** ("Build and Publish").
 Required jobs, each present and successful for the exact release SHA:
-`test`, `test-postgres`, `test-web-postgres`, `docs-importer`, `build`, `e2e`, `docker`.
-The `build` job runs the i18n parity gate (`npm run i18n:check`); `e2e` runs Playwright against the
-real production image; `docker` (image publish) hard-gates on `e2e`.
+`test`, `test-postgres`, `test-web-postgres`, `docs-importer`, `build`, `codeql`, `trivy-fs`,
+`candidate-image`, `trivy-image`, `sbom`, `e2e`, `e2e-visual`, `smoke`, and — on a publishing ref —
+`publish`. The `build` job runs the i18n parity gate (`npm run i18n:check`); `e2e`/`e2e-visual` run
+Playwright against the single candidate image; `smoke` boots that image; `codeql`/`trivy-fs`/
+`trivy-image`/`sbom` are the security gates. The `publish` job (tag/main only) needs
+`smoke` + every security gate and promotes the exact signed+verified candidate digest to the release
+tag. `e2e-harness` runs but is **non-gating** (#76). Full pipeline runbook: **`docs/ci-pipeline.md`**.
 
 ## Migration mechanism
 
