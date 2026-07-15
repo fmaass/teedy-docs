@@ -9,11 +9,14 @@ import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -86,8 +89,28 @@ public class FileDao {
     }
     
     /**
+     * Returns the subset of the given file IDs whose row still PHYSICALLY exists in T_FILE, regardless
+     * of soft-delete state (no {@code deleteDate} filter). Only a committed hard-delete removes the row.
+     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimQuotaForDeletedDocumentFiles} to re-read,
+     * under the global quota lock, which of a purge's snapshotted files a concurrent purge has not already
+     * hard-deleted — so their quota is reclaimed exactly once.
+     *
+     * @param ids File IDs to test
+     * @return the subset of {@code ids} that still have a row
+     */
+    public Set<String> getExistingIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptySet();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<String> q = em.createQuery("select f.id from File f where f.id in :ids", String.class);
+        q.setParameter("ids", ids);
+        return new HashSet<>(q.getResultList());
+    }
+
+    /**
      * Returns an active file or null.
-     * 
+     *
      * @param id File ID
      * @return File
      */

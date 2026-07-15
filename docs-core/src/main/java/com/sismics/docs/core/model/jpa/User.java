@@ -1,6 +1,7 @@
 package com.sismics.docs.core.model.jpa;
 
 import com.google.common.base.MoreObjects;
+import org.hibernate.annotations.DynamicUpdate;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -10,11 +11,20 @@ import java.util.Date;
 
 /**
  * User entity.
- * 
+ *
+ * <p>{@code @DynamicUpdate} makes Hibernate emit an UPDATE listing ONLY the columns whose values
+ * actually changed, instead of a full-row UPDATE that re-binds every column. This protects the
+ * storage-quota accounting: {@code USE_STORAGECURRENT_N} is mutated only by the locked reserve/reclaim
+ * paths, so a generic profile update (email/TOTP/OIDC binding/quota) that loaded the row earlier must
+ * NOT rewrite storageCurrent with its stale in-memory value and clobber a concurrent reservation. With
+ * a full-row UPDATE, removing the {@code setStorageCurrent} call in {@code UserDao.update} alone is not
+ * enough — the stale column value would still be bound; the dynamic update is what leaves it untouched.
+ *
  * @author jtremeaux
  */
 @Entity
 @Table(name = "T_USER")
+@DynamicUpdate
 public class User implements Loggable {
     /**
      * User ID.

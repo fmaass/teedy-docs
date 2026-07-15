@@ -44,6 +44,53 @@ public class TestExportUtil extends BaseTransactionalTest {
         Assertions.assertEquals("file", ExportUtil.sanitizeFileName(".."));
     }
 
+    /**
+     * Zip-slip guard for the file-download archive: {@code FileResource.sendZippedFiles} names each
+     * entry {@code index + "-" + ExportUtil.sanitizeFileName(fullName)}. This builds a real ZIP whose
+     * source names are a {@code ../}-traversal attack and a second name that sanitizes to the SAME
+     * basename, then extracts it and asserts every entry stays under the target directory and the two
+     * colliding basenames do not overwrite each other (the unique index prefix de-collides them).
+     */
+    @Test
+    public void zipEntryNamesAreTraversalSafeAndDeCollide() throws Exception {
+        String[] sourceNames = {"../../../../etc/passwd", "passwd"};
+
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(buffer)) {
+            int index = 0;
+            for (String sourceName : sourceNames) {
+                // Exactly the entry-name expression used by FileResource.sendZippedFiles.
+                ZipEntry entry = new ZipEntry(index + "-" + ExportUtil.sanitizeFileName(sourceName));
+                zos.putNextEntry(entry);
+                zos.write(("content-" + index).getBytes());
+                zos.closeEntry();
+                index++;
+            }
+        }
+
+        java.nio.file.Path target = java.nio.file.Files.createTempDirectory("zipslip-target-").toRealPath();
+        try {
+            java.util.List<String> extracted = new java.util.ArrayList<>();
+            try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(buffer.toByteArray()))) {
+                ZipEntry entry;
+                while ((entry = zis.getNextEntry()) != null) {
+                    java.nio.file.Path resolved = target.resolve(entry.getName()).normalize();
+                    Assertions.assertTrue(resolved.startsWith(target),
+                            "extracted entry must stay under the target dir: " + entry.getName());
+                    Assertions.assertFalse(entry.getName().contains("/"),
+                            "entry name must carry no path separator: " + entry.getName());
+                    extracted.add(entry.getName());
+                    zis.closeEntry();
+                }
+            }
+            Assertions.assertEquals(2, extracted.size(), "both entries present");
+            Assertions.assertEquals(2, new java.util.HashSet<>(extracted).size(),
+                    "the two same-basename files must not collide (unique index prefix)");
+        } finally {
+            java.nio.file.Files.deleteIfExists(target);
+        }
+    }
+
     @Test
     public void testWriteExportZip() throws Exception {
         // Owner with one document carrying one encrypted file.

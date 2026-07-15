@@ -185,10 +185,13 @@ public class UserDao {
         q.setParameter("id", user.getId());
         User userDb = (User) q.getSingleResult();
 
-        // Update the user (except password)
+        // Update the user (except password). storageCurrent is DELIBERATELY not written here: it is
+        // running quota accounting owned solely by the locked reserve/reclaim paths
+        // (FileUtil.reserveStorage / reclaimUserQuota). Binding a stale caller-supplied storageCurrent
+        // from a generic profile/admin/TOTP/OIDC update would clobber a concurrent upload's reservation
+        // (combined with @DynamicUpdate on User, which keeps the untouched column out of the UPDATE).
         userDb.setEmail(user.getEmail());
         userDb.setStorageQuota(user.getStorageQuota());
-        userDb.setStorageCurrent(user.getStorageCurrent());
         userDb.setTotpKey(user.getTotpKey());
         userDb.setDisableDate(user.getDisableDate());
 
@@ -199,44 +202,30 @@ public class UserDao {
     }
     
     /**
-     * Updates a user's quota.
-     * 
-     * @param user User to update
-     */
-    public void updateQuota(User user) {
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
-
-        // Get the user
-        Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
-        q.setParameter("id", user.getId());
-        User userDb = (User) q.getSingleResult();
-
-        // Update the user
-        userDb.setStorageCurrent(user.getStorageCurrent());
-    }
-
-    /**
-     * Sets a user's current storage usage by ID, REGARDLESS of the user's active state, and is a no-op
-     * if the user row does not exist. Unlike {@link #updateQuota(User)} — which filters on
-     * {@code deleteDate is null} and throws {@code NoResultException} for a soft-deleted user — this is
-     * safe to call for a RETAINED soft-deleted uploader (the #55 ghost key-holder, kept because a
-     * document was reassigned away from it). A storage-quota reclaim on such a uploader must never throw
-     * after destructive work; it credits the (still-present) row or skips cleanly if the row is gone.
-     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimUserQuota} so BOTH clean_storage and the
-     * retention purge are safe against a ghost uploader.
+     * Locks a user's row FOR UPDATE regardless of its delete state (dialect-portable
+     * {@code PESSIMISTIC_WRITE}), returning the freshly re-read managed instance so a caller can mutate
+     * running storage accounting on a value that reflects every committed reservation/reclaim — never a
+     * stale pre-lock copy. Unlike {@link #getActiveByIdForUpdate(String)} this does NOT filter on
+     * {@code deleteDate is null}, so it also locks a RETAINED soft-deleted uploader (the #55 ghost
+     * key-holder, kept because a document was reassigned away from it). Returns {@code null} if the row
+     * does not exist, so a reclaim after destructive work never throws — it credits the still-present
+     * row or skips cleanly. The canonical quota lock order is GLOBAL sentinel first, then this row.
      *
-     * @param userId User ID (any delete state)
-     * @param storageCurrent New storage_current value
+     * @param id User ID (any delete state)
+     * @return the locked, freshly re-read user, or {@code null} if the row is absent
      */
-    public void updateQuotaById(String userId, long storageCurrent) {
+    public User getByIdForUpdate(String id) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        User userDb = em.find(User.class, userId);
-        if (userDb == null) {
-            return;
+        Query q = em.createQuery("select u from User u where u.id = :id");
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
         }
-        userDb.setStorageCurrent(storageCurrent);
     }
-    
+
     /**
      * Update the user password.
      * 

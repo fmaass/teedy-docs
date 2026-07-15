@@ -56,13 +56,17 @@ public class TestFileProcessingMarker extends BaseTest {
     }
 
     private User createUser(String userName) throws Exception {
+        return createUser(userName, 1_000_000L);
+    }
+
+    private User createUser(String userName, long quota) throws Exception {
         UserDao userDao = new UserDao();
         User user = new User();
         user.setUsername(userName);
         user.setPassword("12345678");
         user.setEmail(userName + "@docs.com");
         user.setRoleId("admin");
-        user.setStorageQuota(1_000_000L);
+        user.setStorageQuota(quota);
         userDao.create(user, userName);
         return user;
     }
@@ -193,6 +197,75 @@ public class TestFileProcessingMarker extends BaseTest {
                 "createFile's marker must be released when the request rolls back");
         Assertions.assertFalse(Files.exists(temp),
                 "createFile's plaintext temp must be deleted when the request rolls back");
+    }
+
+    // The REAL createFile producer: a work failure after the encrypted blob was written rolls back, and
+    // the after-rollback compensation must DELETE that orphaned blob (a DB rollback undoes the row and
+    // the quota reservation but not the bytes on disk).
+    @Test
+    public void createFileRollbackDeletesEncryptedBlob() throws Exception {
+        String userName = shortId("blb-");
+        Path temp = writePlaintextTemp();
+        long fileSize = Files.size(temp);
+        String[] createdFileId = {null};
+
+        Assertions.assertThrows(IllegalStateException.class, () ->
+                TransactionUtil.handle(() -> {
+                    try {
+                        User user = createUser(userName);
+                        String fileId = FileUtil.createFile("apollo.jpg", null, temp, fileSize, null,
+                                user.getId(), null);
+                        createdFileId[0] = fileId;
+                        Assertions.assertTrue(Files.exists(DirectoryUtil.getStorageDirectory().resolve(fileId)),
+                                "the encrypted blob was written by createFile");
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                    throw new IllegalStateException("request failed after the upload");
+                }));
+
+        Assertions.assertNotNull(createdFileId[0], "createFile ran and wrote a blob");
+        Assertions.assertFalse(Files.exists(DirectoryUtil.getStorageDirectory().resolve(createdFileId[0])),
+                "the encrypted blob must be deleted when the upload's transaction rolls back");
+    }
+
+    // The multi-attachment path (the inbox / multi-file upload class): two files are created in ONE
+    // transaction; the second loses quota and rolls the WHOLE transaction back. The first attachment's
+    // blob must NOT be left orphaned on disk.
+    @Test
+    public void multiAttachmentRollbackLeavesNoOrphanBlob() throws Exception {
+        String userName = shortId("mab-");
+        Path temp1 = writePlaintextTemp();
+        Path temp2 = writePlaintextTemp();
+        String[] firstFileId = {null};
+
+        try {
+            Assertions.assertThrows(IllegalStateException.class, () ->
+                    TransactionUtil.handle(() -> {
+                        try {
+                            // Quota fits the first 9_000-byte reservation but not a second.
+                            User user = createUser(userName, 10_000L);
+                            String f1 = FileUtil.createFile("a.jpg", null, temp1, 9_000L, null,
+                                    user.getId(), null);
+                            firstFileId[0] = f1;
+                            Assertions.assertTrue(
+                                    Files.exists(DirectoryUtil.getStorageDirectory().resolve(f1)),
+                                    "the first attachment's blob was written");
+                            // Second attachment overshoots the quota — reserveStorage throws before any
+                            // second blob is written, and the whole transaction rolls back.
+                            FileUtil.createFile("b.jpg", null, temp2, 9_000L, null, user.getId(), null);
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                    }));
+
+            Assertions.assertNotNull(firstFileId[0], "the first attachment was created");
+            Assertions.assertFalse(Files.exists(DirectoryUtil.getStorageDirectory().resolve(firstFileId[0])),
+                    "the first attachment's blob must not orphan when a later attachment rolls the tx back");
+        } finally {
+            Files.deleteIfExists(temp1);
+            Files.deleteIfExists(temp2);
+        }
     }
 
     // Stands in for the FileResource attach + manual-reprocess producers, whose temp is produced by

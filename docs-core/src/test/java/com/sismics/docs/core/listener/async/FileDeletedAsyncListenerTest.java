@@ -26,9 +26,8 @@ public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
         User user = createUser("listenerNeutralSizeKnown");
         File file = createFile(user, FILE_JPG_SIZE);
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         FileDeletedAsyncListener fileDeletedAsyncListener = new FileDeletedAsyncListener();
         TransactionUtil.commit();
@@ -51,9 +50,8 @@ public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
         User user = createUser("listenerNeutralSizeUnknown");
         File file = createFile(user, File.UNKNOWN_SIZE);
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         FileDeletedAsyncListener fileDeletedAsyncListener = new FileDeletedAsyncListener();
         TransactionUtil.commit();
@@ -76,9 +74,8 @@ public class FileDeletedAsyncListenerTest extends BaseTransactionalTest {
         User user = createUser("listenerRedeliveryNeutral");
         File file = createFile(user, FILE_JPG_SIZE);
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         FileDeletedAsyncListener fileDeletedAsyncListener = new FileDeletedAsyncListener();
         TransactionUtil.commit();

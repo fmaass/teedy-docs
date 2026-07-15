@@ -1022,6 +1022,16 @@ public class AppResource extends BaseResource {
                     "The clean_storage single-run lock is unavailable (missing CLEAN_STORAGE_LOCK row — is the database migrated?)");
         }
 
+        // Acquire the GLOBAL storage-quota lock next — the canonical quota lock order is GLOBAL sentinel
+        // first, then a user row. This run reclaims quota (per-owner, locking user rows) during its DB
+        // mutation phase below; taking the global lock HERE, before any application-row mutation,
+        // guarantees that order is respected against concurrent uploads/deletes and cannot deadlock.
+        // FAIL CLOSED like the CLEAN lock: a missing sentinel means an un-migrated database, so refuse.
+        if (!new ConfigDao().lockForUpdate(ConfigType.GLOBAL_QUOTA_LOCK)) {
+            throw new ServerException("CleanStorageError",
+                    "The global storage-quota lock is unavailable (missing GLOBAL_QUOTA_LOCK row — is the database migrated?)");
+        }
+
         // Capture the eligibility SNAPSHOT before mutating anything — the same side-effect-free
         // computation the dry-run preview uses (so the dry-run estimate matches this state). The file
         // ids here are the CANDIDATES this run intends to hard-delete; the physical sweep below narrows

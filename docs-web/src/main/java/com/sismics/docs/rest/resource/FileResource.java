@@ -39,6 +39,7 @@ import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.RestUtil;
+import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.HttpUtil;
@@ -311,6 +312,9 @@ public class FileResource extends BaseResource {
 
         // Validate input data
         name = ValidationUtil.validateLength(name, "name", 1, 200, false);
+        // Reject path separators / control chars in the new name (shared validator) so a rename can
+        // never store a name that would later escape a ZIP/export extraction directory.
+        ValidationUtil.validateFileName(name, "name");
 
         // Update the file
         FileDao fileDao = new FileDao();
@@ -717,18 +721,20 @@ public class FileResource extends BaseResource {
         // Get the file
         File file = findFile(id, null, PermType.WRITE);
 
+        // Reclaim the owner's storage quota synchronously, atomically with the delete, and EXACTLY once
+        // even under two concurrent deletes of the same file. reclaimSingleFileOnDelete takes the GLOBAL
+        // sentinel lock, re-reads the file ACTIVE under it, and reclaims only if THIS delete is still the
+        // one seeing it active (a concurrent delete that already soft-deleted it reclaims nothing). It runs
+        // BEFORE the fileDao.delete so the quota locks (GLOBAL then the owner's row) are taken before the
+        // T_FILE row is dirtied — the canonical lock order, no deadlock inversion — and while the file
+        // still exists on disk (needed to size a legacy UNKNOWN_SIZE row). Doing it in the delete
+        // transaction, not the async FileDeletedAsyncEvent listener, also stops a retried event from
+        // double-subtracting.
+        FileUtil.reclaimSingleFileOnDelete(file.getId());
+
         // Delete the file
         FileDao fileDao = new FileDao();
         fileDao.delete(file.getId(), principal.getId());
-
-        // Reclaim the owner's storage quota synchronously, atomically with the delete: the file row
-        // and its size are known here and the file still exists on disk (needed to size legacy
-        // UNKNOWN_SIZE rows). Doing it in the delete transaction — instead of in the async
-        // FileDeletedAsyncEvent listener — means it commits or rolls back with the delete and a
-        // retried async event can never double-subtract.
-        User fileOwner = new UserDao().getById(file.getUserId());
-        long reclaimed = FileUtil.resolveReclaimableSize(file.getId(), file.getSize(), fileOwner);
-        FileUtil.reclaimUserQuota(file.getUserId(), reclaimed);
 
         // Raise a new file deleted event (index + storage cleanup only; quota already reclaimed above)
         FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
@@ -973,7 +979,12 @@ public class FileResource extends BaseResource {
                     // failure (one descriptor per file in the ZIP).
                     try (InputStream rawInputStream = Files.newInputStream(storedfile);
                          InputStream decryptedStream = EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())) {
-                        ZipEntry zipEntry = new ZipEntry(index + "-" + file.getFullName(Integer.toString(index)));
+                        // Sanitize the stored file name to a single safe path segment (a persisted or
+                        // imported name may contain '/', '\' or traversal), preventing a zip-slip entry
+                        // that escapes the extraction directory. The unique index prefix de-collides two
+                        // names that sanitize to the same basename.
+                        ZipEntry zipEntry = new ZipEntry(index + "-"
+                                + ExportUtil.sanitizeFileName(file.getFullName(Integer.toString(index))));
                         zipOutputStream.putNextEntry(zipEntry);
                         ByteStreams.copy(decryptedStream, zipOutputStream);
                         zipOutputStream.closeEntry();

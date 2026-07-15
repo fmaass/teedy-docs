@@ -98,6 +98,7 @@ public class UserResource extends BaseResource {
         ValidationUtil.validatePasswordStrength(password, username);
         email = ValidationUtil.validateLength(email, "email", 1, 100);
         Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
+        ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
         ValidationUtil.validateEmail(email, "email");
         
         // Create the user
@@ -303,6 +304,7 @@ public class UserResource extends BaseResource {
         UserUpdateUtil.applyEmailUpdate(user, email);
         if (StringUtils.isNotBlank(storageQuotaStr)) {
             Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
+            ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
             user.setStorageQuota(storageQuota);
         }
         if (disabled != null) {

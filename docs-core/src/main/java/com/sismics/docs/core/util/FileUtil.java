@@ -3,7 +3,9 @@ package com.sismics.docs.core.util;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.io.CharStreams;
+import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
+import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
@@ -132,22 +134,15 @@ public class FileUtil {
             throw new IOException("ErrorGuessMime", e);
         }
 
-        // Validate user quota
+        // Reserve the storage BEFORE any T_FILE mutation or blob I/O. This atomically validates the
+        // per-user AND global quota and increments the reservation under the canonical lock order
+        // (GLOBAL sentinel first, then the user's own row). Acquiring the locks here — before the
+        // fileDao writes below — keeps the lock ordering consistent (a pending T_FILE change flushed by
+        // a later pessimistic query would otherwise invert the T_FILE/GLOBAL order and could deadlock).
+        // A losing reservation throws here, so no row is created and no blob byte is ever written.
         UserDao userDao = new UserDao();
         User user = userDao.getById(userId);
-        if (user.getStorageCurrent() + fileSize > user.getStorageQuota()) {
-            throw new IOException("QuotaReached");
-        }
-
-        // Validate global quota
-        String globalStorageQuotaStr = System.getenv(Constants.GLOBAL_QUOTA_ENV);
-        if (!Strings.isNullOrEmpty(globalStorageQuotaStr)) {
-            long globalStorageQuota = Long.parseLong(globalStorageQuotaStr);
-            long globalStorageCurrent = userDao.getGlobalStorageCurrent();
-            if (globalStorageCurrent + fileSize > globalStorageQuota) {
-                throw new IOException("QuotaReached");
-            }
-        }
+        reserveStorage(userId, fileSize);
 
         // Prepare the file
         File file = new File();
@@ -191,16 +186,31 @@ public class FileUtil {
         // Create the file
         String fileId = fileDao.create(file, userId);
 
+        // Register an after-ROLLBACK deletion of the encrypted blob as soon as its path is known,
+        // BEFORE the copy runs so a partial Files.copy is covered too. A DB rollback undoes the T_FILE
+        // row and the storageCurrent reservation but NOT the bytes written to disk, which would then
+        // orphan. This is critical for a multi-attachment transaction (e.g. an inbox import creating
+        // several files in one tx): if a later attachment loses quota and the whole tx rolls back, the
+        // earlier attachments' blobs must not be left behind. Not registered on IN_DOUBT (the row may
+        // have committed) — the clean_storage age-thresholded sweep is the net for that ambiguous case.
+        Path path = DirectoryUtil.getStorageDirectory().resolve(file.getId());
+        ThreadLocalContext.get().getCompletionRegistry().registerAfterRollback(() -> {
+            try {
+                Files.deleteIfExists(path);
+            } catch (IOException e) {
+                log.warn("Unable to delete the encrypted blob of a rolled-back upload: " + path, e);
+            }
+        });
+
         // Save the file
         Cipher cipher = EncryptionUtil.getEncryptionCipher(user.getPrivateKey());
-        Path path = DirectoryUtil.getStorageDirectory().resolve(file.getId());
         try (InputStream inputStream = Files.newInputStream(unencryptedFile)) {
             Files.copy(new CipherInputStream(inputStream, cipher), path);
         }
 
-        // Update the user quota
-        user.setStorageCurrent(user.getStorageCurrent() + fileSize);
-        userDao.updateQuota(user);
+        // The storage reservation was already applied atomically by reserveStorage above (before this
+        // blob write). Do NOT decrement storageCurrent on rollback here: the DB rollback already undoes
+        // the in-tx reservation increment, so a manual decrement would double-count.
 
         // Raise a new file created event and document updated event if we have a document
         markProcessingWithRollbackCleanup(fileId, unencryptedFile);
@@ -377,9 +387,158 @@ public class FileUtil {
     }
 
     /**
-     * Decrement a user's current storage by the given number of bytes, within the current
-     * transaction. Clamps at zero so accounting cannot go negative. A no-op for a zero/negative
-     * amount or an unknown user.
+     * Acquire the GLOBAL storage-quota lock — the first hop of the canonical quota lock order (GLOBAL
+     * sentinel row, then the user's own row). A global quota is a cross-user {@code SUM} that no
+     * per-user row can serialize, so every quota-mutating path takes a {@code PESSIMISTIC_WRITE} row
+     * lock on this single sentinel first; that both serializes the SUM read and gives one consistent
+     * lock order everywhere, so no two quota paths can deadlock on the user rows. Fails CLOSED like
+     * {@code CLEAN_STORAGE_LOCK}: if the sentinel row is absent (a database that never ran migration
+     * 053) the lock cannot be evaluated, so the whole quota mutation is refused and its transaction
+     * rolls back rather than proceeding unlocked. The row is always seeded by migration 053.
+     */
+    private static void lockGlobalQuotaOrThrow() {
+        if (!new ConfigDao().lockForUpdate(ConfigType.GLOBAL_QUOTA_LOCK)) {
+            throw new IllegalStateException(
+                    "The global storage-quota lock row (GLOBAL_QUOTA_LOCK) is missing — is the database migrated?");
+        }
+    }
+
+    /**
+     * Atomically reserve storage for a new upload under the canonical quota lock order, or throw
+     * {@code IOException("QuotaReached")} without touching anything if the reservation would exceed the
+     * per-user OR the global quota. On success it has incremented the user's {@code storageCurrent}
+     * exactly once on the freshly-locked row; the caller then writes the blob. A DB rollback later
+     * undoes this increment, so there is never a manual decrement.
+     *
+     * <p>Lock order: GLOBAL sentinel first, then the user's own row (both {@code PESSIMISTIC_WRITE}).
+     * The global {@code SUM} is read BEFORE the user row is locked on purpose: the SUM query flushes and
+     * clears the persistence context, which would detach a user instance fetched earlier and silence its
+     * reservation write. Reading the SUM first, then locking + re-reading the user row last, keeps that
+     * managed instance live for the increment. It is consistent because the global lock is already held,
+     * so no other path can change any {@code storageCurrent} between the SUM read and this commit.</p>
+     *
+     * <p>Comparisons are overflow-safe ({@code fileSize > quota - current}, never
+     * {@code current + fileSize > quota}): {@code quota - current} may be negative (already over quota →
+     * reject) but cannot overflow, whereas {@code current + fileSize} can.</p>
+     *
+     * @param userId Uploading user ID (must be active)
+     * @param fileSize Bytes to reserve
+     * @throws IOException {@code "QuotaReached"} if the per-user or global quota would be exceeded, or if
+     *         the user row is not active
+     */
+    public static void reserveStorage(String userId, long fileSize) throws IOException {
+        reserveStorage(userId, fileSize, readGlobalQuota());
+    }
+
+    /**
+     * Reads the configured global storage quota from the environment.
+     *
+     * @return the global quota in bytes, or {@code null} when the env var is unset/empty (no global limit)
+     * @throws IOException if {@code DOCS_GLOBAL_QUOTA} is set but non-numeric or negative (fail closed)
+     */
+    private static Long readGlobalQuota() throws IOException {
+        return parseGlobalQuota(System.getenv(Constants.GLOBAL_QUOTA_ENV));
+    }
+
+    /**
+     * Parses and validates a raw {@code DOCS_GLOBAL_QUOTA} value, distinguishing UNSET from
+     * SET-BUT-INVALID (package-private so tests can drive the parse without mutating the environment):
+     * <ul>
+     *   <li>{@code null}/empty — legitimately UNSET → {@code null} (no global limit);</li>
+     *   <li>a valid non-negative long — that limit;</li>
+     *   <li>anything else (non-numeric, or negative) — a MISCONFIGURATION → {@code IOException} (fail
+     *       CLOSED). It must NEVER be silently treated as "no limit": a typo or a negative value would
+     *       otherwise disable the global cap entirely (fail open). This mirrors the pre-existing
+     *       {@code createFile} behaviour, where {@code Long.parseLong} threw on a non-numeric value and a
+     *       negative quota made the check always reject.</li>
+     * </ul>
+     *
+     * @param raw the raw environment value (may be {@code null})
+     * @return the parsed non-negative quota, or {@code null} when unset/empty
+     * @throws IOException {@code "ErrorGlobalQuotaConfig"} when set but non-numeric or negative
+     */
+    static Long parseGlobalQuota(String raw) throws IOException {
+        if (Strings.isNullOrEmpty(raw)) {
+            return null;
+        }
+        long globalQuota;
+        try {
+            globalQuota = Long.parseLong(raw);
+        } catch (NumberFormatException e) {
+            log.error("{} is set but not a valid number ('{}'); refusing uploads until it is corrected or unset",
+                    Constants.GLOBAL_QUOTA_ENV, raw);
+            throw new IOException("ErrorGlobalQuotaConfig");
+        }
+        if (globalQuota < 0L) {
+            log.error("{} is set to a negative value ({}); refusing uploads until it is corrected or unset",
+                    Constants.GLOBAL_QUOTA_ENV, globalQuota);
+            throw new IOException("ErrorGlobalQuotaConfig");
+        }
+        return globalQuota;
+    }
+
+    /**
+     * Reserve implementation with the global quota supplied explicitly. The public {@link
+     * #reserveStorage(String, long)} reads it from the environment; this overload lets tests drive the
+     * global-limit path deterministically without mutating process environment. See that method's
+     * contract for the locking and overflow-safety guarantees.
+     *
+     * @param userId Uploading user ID (must be active)
+     * @param fileSize Bytes to reserve
+     * @param globalQuota Global quota in bytes, or {@code null} for no global limit
+     * @throws IOException {@code "QuotaReached"} if a per-user or global limit would be exceeded, or the
+     *         user row is not active
+     */
+    static void reserveStorage(String userId, long fileSize, Long globalQuota) throws IOException {
+        // GLOBAL sentinel lock first (canonical order, fail closed).
+        lockGlobalQuotaOrThrow();
+
+        UserDao userDao = new UserDao();
+
+        // Read the global SUM (if a global quota is configured) BEFORE locking the user row, so the
+        // clear it triggers cannot detach the user instance we mutate below. Safe under the held global
+        // lock: no other path can change any storageCurrent until we commit.
+        long globalStorageCurrent = 0L;
+        if (globalQuota != null) {
+            globalStorageCurrent = userDao.getGlobalStorageCurrent();
+        }
+
+        // Lock + re-read the user's OWN row fresh (never a stale pre-lock value), and mutate THAT
+        // managed instance. No getEntityManager() call may follow before the increment, or the clear
+        // would detach it and drop the reservation.
+        User user = userDao.getActiveByIdForUpdate(userId);
+        if (user == null) {
+            throw new IOException("QuotaReached");
+        }
+        long current = user.getStorageCurrent() == null ? 0L : user.getStorageCurrent();
+        long quota = user.getStorageQuota() == null ? 0L : user.getStorageQuota();
+
+        // Fail closed on any non-sensical operand before the subtraction: a NEGATIVE quota (a stored
+        // quota < 0 is invalid — the input boundary rejects it, but a legacy/extreme value must still be
+        // safe here), or a negative current / fileSize. Rejecting these first keeps {@code quota -
+        // current} between two non-negative longs, so it cannot underflow into a large positive value that
+        // would wrongly accept the upload (the overflow-safe form only holds for non-negative operands).
+        if (quota < 0L || current < 0L || fileSize < 0L || fileSize > quota - current) {
+            throw new IOException("QuotaReached");
+        }
+        if (globalQuota != null
+                && (globalQuota < 0L || globalStorageCurrent < 0L || fileSize > globalQuota - globalStorageCurrent)) {
+            throw new IOException("QuotaReached");
+        }
+
+        user.setStorageCurrent(current + fileSize);
+    }
+
+    /**
+     * Decrement a user's current storage by the given number of bytes, within the current transaction,
+     * under the canonical quota lock order (GLOBAL sentinel first, then the user's own row). Clamps at
+     * zero so accounting cannot go negative. A no-op for a zero/negative amount or an unknown user.
+     *
+     * <p>The user row is locked and re-read via {@link UserDao#getByIdForUpdate(String)}, which — unlike
+     * the active-only variant — finds a RETAINED soft-deleted uploader (the #55 ghost key-holder) and
+     * returns {@code null} rather than throwing when the row is absent. This keeps BOTH clean_storage AND
+     * the retention purge safe: a quota reclaim can never throw AFTER destructive work has removed the
+     * bytes. A reclaim performs NO quota-limit or global-SUM validation — a delete never checks limits.</p>
      *
      * @param userId Owning user ID
      * @param bytes Bytes to reclaim (from {@link #resolveReclaimableSize})
@@ -388,18 +547,55 @@ public class FileUtil {
         if (bytes <= 0L || userId == null) {
             return;
         }
-        UserDao userDao = new UserDao();
-        // getById finds by primary key regardless of delete state, so a RETAINED soft-deleted uploader
-        // (the #55 ghost key-holder) is found here. The write goes through updateQuotaById, which — unlike
-        // updateQuota — does NOT filter on deleteDate and so never throws NoResultException for such a
-        // uploader. This makes BOTH clean_storage AND the retention purge (which also routes through here)
-        // safe: a quota reclaim can never throw AFTER destructive work has removed the bytes.
-        User user = userDao.getById(userId);
+        lockGlobalQuotaOrThrow();
+        reclaimLocked(userId, bytes);
+    }
+
+    /**
+     * Reclaim a single file's storage on a soft-delete, EXACTLY once even under two concurrent
+     * {@code DELETE /file/{id}} for the same file. Both requests pass their initial active-file check
+     * before either commits, so a naive "reclaim the size" would double-subtract. This takes the GLOBAL
+     * sentinel lock FIRST (canonical order, before the caller dirties the {@code T_FILE} row) and then
+     * RE-READS the file ACTIVE under the lock: only the delete that still sees it active — the winner —
+     * reclaims; a delete that lost the race sees it already soft-deleted (or gone) and reclaims nothing.
+     * The winner reclaims against the file's OWN uploader ({@code FIL_IDUSER_C}), which owns the bytes
+     * (a collaborator's upload counts against the collaborator). Must be called BEFORE the caller's
+     * {@code fileDao.delete}, within the same transaction, while the file still exists on disk (needed to
+     * size a legacy {@link File#UNKNOWN_SIZE} row).
+     *
+     * @param fileId File ID being deleted
+     */
+    public static void reclaimSingleFileOnDelete(String fileId) {
+        if (fileId == null) {
+            return;
+        }
+        lockGlobalQuotaOrThrow();
+        // Fresh, active-only read under the lock: null when a concurrent delete already soft-deleted or
+        // hard-deleted it (this call is the loser and reclaims nothing).
+        File active = new FileDao().getFile(fileId);
+        if (active == null) {
+            return;
+        }
+        User owner = new UserDao().getById(active.getUserId());
+        long bytes = resolveReclaimableSize(active.getId(), active.getSize(), owner);
+        reclaimLocked(active.getUserId(), bytes);
+    }
+
+    /**
+     * Subtract {@code bytes} (zero-clamped) from a user's {@code storageCurrent} on its freshly-locked
+     * row. The GLOBAL sentinel lock MUST already be held by the caller (canonical lock order). A no-op
+     * if the row is absent (the ghost-holder path).
+     *
+     * @param userId Owning user ID
+     * @param bytes Bytes to reclaim (already known positive)
+     */
+    private static void reclaimLocked(String userId, long bytes) {
+        User user = new UserDao().getByIdForUpdate(userId);
         if (user == null) {
             return;
         }
         long current = user.getStorageCurrent() == null ? 0L : user.getStorageCurrent();
-        userDao.updateQuotaById(userId, Math.max(0L, current - bytes));
+        user.setStorageCurrent(Math.max(0L, current - bytes));
     }
 
     /**
@@ -440,11 +636,38 @@ public class FileUtil {
         if (files == null || files.isEmpty()) {
             return;
         }
+
+        // Acquire the GLOBAL sentinel lock FIRST — before deciding WHAT to reclaim. The callers snapshot
+        // the document's files BEFORE this call (DocumentResourceHelper / TrashPurgeService), so two
+        // concurrent purges of the same document hold the SAME stale snapshot. Locking first, then
+        // re-reading which of those files STILL EXIST under the lock, makes the reclaim set fresh: a file
+        // a concurrent purge already hard-deleted (and reclaimed) is gone from the re-read here and is not
+        // subtracted a second time. Without this the second purge blocks on the lock, then applies its
+        // stale snapshot after the first committed its deletes — a double-decrement (the zero clamp masks
+        // it only when the document held all of the user's usage).
+        lockGlobalQuotaOrThrow();
+
+        // Re-read, UNDER the lock, which of the snapshotted files still physically exist as rows (no
+        // deleteDate filter — a soft-deleted trashed file is still present; only a committed hard-delete
+        // removes the row). Only those are reclaimed.
+        List<String> fileIds = new ArrayList<>();
+        for (File file : files) {
+            if (file.getId() != null) {
+                fileIds.add(file.getId());
+            }
+        }
+        Set<String> stillPresent = new FileDao().getExistingIds(fileIds);
+
         UserDao userDao = new UserDao();
         Map<String, User> ownerCache = new HashMap<>();
         Map<String, Long> reclaimByOwner = new LinkedHashMap<>();
 
         for (File file : files) {
+            // Skip a file whose row a concurrent purge already hard-deleted (and reclaimed) — the fresh,
+            // lock-serialized existence set is the guard against a double reclaim.
+            if (!stillPresent.contains(file.getId())) {
+                continue;
+            }
             // Reclaim the files this document delete is responsible for: those cascade-trashed with the
             // document (same deleteDate) AND any file left stranded with a null deleteDate. A stranded
             // file arises when a WRITE collaborator uploaded into another user's document and that owner
@@ -471,8 +694,17 @@ public class FileUtil {
             }
         }
 
-        for (Map.Entry<String, Long> entry : reclaimByOwner.entrySet()) {
-            reclaimUserQuota(entry.getKey(), entry.getValue());
+        if (reclaimByOwner.isEmpty()) {
+            return;
+        }
+
+        // Reclaim each owner's row in a deterministic (owner-id-sorted) order. The GLOBAL lock is already
+        // held (above), so only one quota path runs at a time — the per-user lock order can never form a
+        // cross-path cycle — but sorting keeps this method's own multi-owner acquisition deterministic.
+        List<String> owners = new ArrayList<>(reclaimByOwner.keySet());
+        Collections.sort(owners);
+        for (String ownerId : owners) {
+            reclaimLocked(ownerId, reclaimByOwner.get(ownerId));
         }
     }
 }
