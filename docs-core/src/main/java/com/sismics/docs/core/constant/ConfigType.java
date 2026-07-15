@@ -130,5 +130,15 @@ public enum ConfigType {
      * consult it acquires a {@code PESSIMISTIC_WRITE} row lock on this sentinel first. Its value is
      * never read; only the row's lock matters. Seeded by {@code dbupdate-053}.
      */
-    GLOBAL_QUOTA_LOCK
+    GLOBAL_QUOTA_LOCK,
+
+    /**
+     * Server secret ({@code K_csrf_proxy}) used to MAC the structured CSRF proof token issued to
+     * trusted-header ("proxy") authenticated sessions, which — unlike token-cookie sessions — carry no
+     * per-session auth-token id to key a stateless token from. Runtime-seeded once at first use (a fresh
+     * random value stored here; NO schema change) and NEVER echoed by any config endpoint; the single
+     * container makes this row the shared secret store. A value-format version prefix leaves room for
+     * future key rotation.
+     */
+    CSRF_PROXY_KEY
 }

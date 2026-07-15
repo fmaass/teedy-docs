@@ -6,6 +6,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.rest.util.ClientUtil;
+import com.sismics.util.csrf.CsrfFilter;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.RequestContextFilter;
@@ -171,13 +172,17 @@ public abstract class BaseJerseyTest extends JerseyTest {
         WebappContext context = new WebappContext("GrizzlyContext", "/docs");
         webappContext = context;
         context.addListener("com.sismics.util.listener.IIOProviderContextListener");
+        // Mirror the production filter order (web.xml): request context, then the security filters in
+        // explicit-scheme-first precedence (api-key, token-cookie, trusted-header), then the CSRF filter.
         context.addFilter("requestContextFilter", RequestContextFilter.class)
-                .addMappingForUrlPatterns(null, "/*");
-        context.addFilter("tokenBasedSecurityFilter", TokenBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         context.addFilter("apiKeyBasedSecurityFilter", ApiKeyBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
+        context.addFilter("tokenBasedSecurityFilter", TokenBasedSecurityFilter.class)
+                .addMappingForUrlPatterns(null, "/*");
         context.addFilter("headerBasedSecurityFilter", HeaderBasedSecurityFilter.class)
+                .addMappingForUrlPatterns(null, "/*");
+        context.addFilter("csrfFilter", CsrfFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         ServletRegistration reg = context.addServlet("jerseyServlet", ServletContainer.class);
         reg.setInitParameter("jersey.config.server.provider.packages", "com.sismics.docs.rest.resource");

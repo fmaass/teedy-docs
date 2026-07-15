@@ -2,19 +2,36 @@
 
 ## Supported Versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.5.x   | Yes                |
-| 2.4.x   | Security fixes only|
-| < 2.4   | No                 |
+This fork tracks the 3.x line. Security fixes land on the latest minor; the immediately
+preceding minor receives security fixes only.
+
+| Version | Supported           |
+| ------- | ------------------- |
+| 3.6.x   | Yes                 |
+| 3.5.x   | Security fixes only |
+| < 3.5   | No                  |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please report it responsibly:
+Please report vulnerabilities privately — **do not open a public GitHub issue.**
 
-1. **Do not** open a public GitHub issue.
-2. Email the maintainer at the address listed on the [GitHub profile](https://github.com/fmaass).
-3. Include a description of the vulnerability, steps to reproduce, and any potential impact.
-4. You will receive a response within 7 days acknowledging the report.
+1. Preferred: use GitHub's **private vulnerability reporting** for this repository
+   (repository **Security** tab → **Report a vulnerability**). This opens a private
+   advisory visible only to the maintainers.
+2. Alternatively, email the maintainer at the address listed on the
+   [GitHub profile](https://github.com/fmaass).
+3. Include a description of the vulnerability, steps to reproduce, affected version,
+   and any potential impact.
+4. You will receive an acknowledgement within 7 days.
 
-We will work with you to understand the issue and coordinate a fix before any public disclosure.
+We will work with you to understand the issue and coordinate a fix and disclosure.
+
+## Data-at-Rest
+
+Teedy does **not** encrypt document files or database contents at rest (see ADR-0012).
+Uploaded files are stored on the configured storage volume and database rows in
+PostgreSQL (or embedded H2) as-is. Protecting the host, the storage volume, and the
+database — for example with full-disk / filesystem encryption and restricted access —
+is the operator's responsibility. Secrets that Teedy manages (password hashes, API-key
+hashes, OIDC client secret, the CSRF proxy key) are stored hashed or as opaque values,
+but the underlying store itself is not encrypted by the application.

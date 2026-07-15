@@ -1334,6 +1334,64 @@ public class TestUserResource extends BaseJerseyTest {
     }
 
     /**
+     * #82 server-side per-user UI language: POST /user accepts an optional 'locale' that round-trips
+     * on GET /user, an unknown locale is rejected (400), and an absent locale leaves the stored value
+     * unchanged (and is omitted from GET until set).
+     */
+    @Test
+    public void testUserLocale() {
+        clientUtil.createUser("locale_user");
+        String token = clientUtil.login("locale_user");
+
+        // No locale set yet: GET omits the field.
+        JsonObject json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertFalse(json.containsKey("locale"), "locale omitted from GET until set");
+
+        // Set a valid locale — round-trips on GET.
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("locale", "de")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("de", json.getString("locale"));
+
+        // A follow-up update that omits locale must NOT clear the stored value.
+        target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("email", "locale_user2@docs.com")), JsonObject.class);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("de", json.getString("locale"), "absent locale leaves stored value unchanged");
+        Assertions.assertEquals("locale_user2@docs.com", json.getString("email"));
+
+        // A multi-part SPA locale code is accepted (validated against the supported set).
+        target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("locale", "zh_CN")), JsonObject.class);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("zh_CN", json.getString("locale"));
+
+        // An unknown locale is rejected with a validation error (400), stored value unchanged.
+        Response bad = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("locale", "xx_ZZ")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(bad.getStatus()));
+        json = bad.readEntity(JsonObject.class);
+        Assertions.assertEquals("ValidationError", json.getString("type"));
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("zh_CN", json.getString("locale"), "rejected locale must not overwrite stored value");
+    }
+
+    /**
      * True if a JSON string array contains the given value.
      */
     static boolean containsString(JsonArray array, String value) {

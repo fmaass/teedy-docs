@@ -34,26 +34,26 @@ const { data: ldapConfig, isLoading } = useQuery({
   queryFn: () => getLdapConfig(),
 })
 
-// Seed the form once from the server. `enabled: false` responses carry no other
-// fields, so keep the sensible template defaults for a first-time setup.
+// Seed the form once from the server. #83: the backend returns every non-secret field
+// whenever it exists in T_CONFIG, INDEPENDENT of `enabled` (a disabled-but-previously-configured
+// setup keeps its values), so seed each field whenever it is present rather than gating on
+// `enabled`. A never-configured install omits the fields, so the template defaults stand.
 let seeded = false
 watch(ldapConfig, (config) => {
   if (!config || seeded) return
   form.enabled = config.enabled === true
-  if (config.enabled) {
-    form.host = config.host ?? ''
-    form.port = config.port ?? 389
-    form.usessl = config.usessl ?? false
-    form.admin_dn = config.admin_dn ?? ''
-    // The admin bind password is write-only: the GET never returns it. Never populate the
-    // field from the server; keep it blank and let admin_password_set drive the affordance.
-    form.admin_password = ''
-    form.admin_password_set = config.admin_password_set ?? false
-    form.base_dn = config.base_dn ?? ''
-    form.filter = config.filter ?? form.filter
-    form.default_email = config.default_email ?? ''
-    form.default_storage = config.default_storage ?? form.default_storage
-  }
+  if (config.host !== undefined) form.host = config.host ?? ''
+  if (config.port !== undefined) form.port = config.port ?? 389
+  if (config.usessl !== undefined) form.usessl = config.usessl ?? false
+  if (config.admin_dn !== undefined) form.admin_dn = config.admin_dn ?? ''
+  // The admin bind password is write-only: the GET never returns it. Never populate the
+  // field from the server; keep it blank and let admin_password_set drive the affordance.
+  form.admin_password = ''
+  form.admin_password_set = config.admin_password_set ?? false
+  if (config.base_dn !== undefined) form.base_dn = config.base_dn ?? ''
+  if (config.filter !== undefined) form.filter = config.filter ?? form.filter
+  if (config.default_email !== undefined) form.default_email = config.default_email ?? ''
+  if (config.default_storage !== undefined) form.default_storage = config.default_storage ?? form.default_storage
   seeded = true
 }, { immediate: true })
 

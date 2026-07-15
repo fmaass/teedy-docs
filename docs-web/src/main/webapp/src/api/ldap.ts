@@ -1,11 +1,12 @@
 import api from './client'
 
-// GET /api/app/config_ldap returns { enabled: false } when LDAP is off, or the
-// config (WITHOUT the admin password) when on. The admin bind password is write-only:
-// the GET never returns it, only a boolean `admin_password_set` flag so the UI can show
-// a "leave blank to keep" affordance. POST writes the config back as form params; an
-// absent/empty admin_password keeps the stored value. When enabled=false the backend
-// ignores every field but `enabled`.
+// GET /api/app/config_ldap returns `enabled` plus every non-secret field that exists in
+// T_CONFIG — INDEPENDENT of `enabled` (#83): a disabled-but-previously-configured setup still
+// returns its host/port/etc so the admin UI repopulates. The admin bind password is write-only:
+// the GET never returns it, only a boolean `admin_password_set` flag so the UI can show a
+// "leave blank to keep" affordance. POST writes the config back as form params; an absent/empty
+// admin_password keeps the stored value. When enabled=false the POST persists only `enabled`,
+// leaving the previously-stored connection settings intact.
 export interface LdapConfig {
   enabled: boolean
   host?: string

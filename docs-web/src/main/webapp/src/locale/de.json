@@ -350,6 +350,7 @@
       "password_updated": "Passwort aktualisiert",
       "failed_update_password": "Passwort konnte nicht aktualisiert werden",
       "language_updated": "Sprache aktualisiert",
+      "language_sync_failed": "Sprache auf diesem Gerät geändert, konnte aber nicht in Ihrem Konto gespeichert werden",
       "theme_switched": "Design geändert zu {name}",
       "sessions": {
         "title": "Aktive Sitzungen",

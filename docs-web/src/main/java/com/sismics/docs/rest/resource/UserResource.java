@@ -31,6 +31,7 @@ import com.sismics.rest.util.ValidationUtil;
 import com.sismics.security.UserPrincipal;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.csrf.CsrfTokenUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.totp.GoogleAuthenticator;
 import com.sismics.util.totp.GoogleAuthenticatorKey;
@@ -56,6 +57,14 @@ import java.util.stream.Collectors;
  */
 @Path("/user")
 public class UserResource extends BaseResource {
+    /**
+     * Supported UI locale codes, mirrored from the SPA's set (the bundled English plus every lazy-loaded
+     * locale in docs-web/src/main/webapp/src/i18n.ts). A per-user locale (#82) is validated against this
+     * set on write so an unknown code is rejected rather than persisted. Keep in sync with the SPA.
+     */
+    private static final Set<String> SUPPORTED_LOCALES = Set.of(
+            "en", "de", "es", "fr", "it", "pt", "pl", "el", "ru", "zh_CN", "zh_TW", "sq_AL");
+
     /**
      * Creates a new user.
      *
@@ -136,6 +145,7 @@ public class UserResource extends BaseResource {
      * @apiGroup User
      * @apiParam {String{8..50}} password Password
      * @apiParam {String{1..100}} email E-mail
+     * @apiParam {String} locale Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or connected as guest
      * @apiError (client) ValidationError Validation error
@@ -144,20 +154,28 @@ public class UserResource extends BaseResource {
      *
      * @param password Password
      * @param email E-Mail
+     * @param locale Preferred UI locale code
      * @return Response
      */
     @POST
     public Response update(
         @FormParam("password") String password,
         @FormParam("current_password") String currentPassword,
-        @FormParam("email") String email) {
+        @FormParam("email") String email,
+        @FormParam("locale") String locale) {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
-        
+
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
         email = ValidationUtil.validateLength(email, "email", 1, 100, true);
+        // #82: optional preferred UI locale. Absent/blank leaves the stored value unchanged; a
+        // provided value must be one of the SPA-supported locale codes or the request is rejected.
+        locale = ValidationUtil.validateLength(locale, "locale", 1, 10, true);
+        if (locale != null && !SUPPORTED_LOCALES.contains(locale)) {
+            throw new ClientException("ValidationError", "'locale' is not a supported locale");
+        }
 
         // If changing password, verify the current password first
         if (StringUtils.isNotBlank(password)) {
@@ -175,6 +193,9 @@ public class UserResource extends BaseResource {
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
         UserUpdateUtil.applyEmailUpdate(user, email);
+        if (locale != null) {
+            user.setLocale(locale);
+        }
         user = userDao.update(user, principal.getId());
 
         // Change the password
@@ -189,9 +210,9 @@ public class UserResource extends BaseResource {
         // stolen cookie stops working, including the one that just made this request) and mint a fresh token
         // for the current browser, returned as a new cookie. Runs in this request transaction.
         if (passwordChanged) {
-            NewCookie rotatedCookie = rotateSession(user);
-            if (rotatedCookie != null) {
-                responseBuilder.cookie(rotatedCookie);
+            NewCookie[] rotatedCookies = rotateSession(user);
+            if (rotatedCookies != null) {
+                responseBuilder.cookie(rotatedCookies);
             }
         }
         return responseBuilder.build();
@@ -204,11 +225,12 @@ public class UserResource extends BaseResource {
      * as a replacement cookie.
      *
      * @param user the user whose sessions are rotated
-     * @return the replacement session cookie, or null when the request did not present a valid current
-     *         session token for this user (e.g. a header/API-key-authenticated request, or a junk/foreign
-     *         cookie), in which case all of the user's tokens are still revoked but no session is minted
+     * @return the replacement session cookie and its additive CSRF companion cookie (as a two-element
+     *         array), or null when the request did not present a valid current session token for this
+     *         user (e.g. a header/API-key-authenticated request, or a junk/foreign cookie), in which case
+     *         all of the user's tokens are still revoked but no session is minted
      */
-    private NewCookie rotateSession(User user) {
+    private NewCookie[] rotateSession(User user) {
         AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
 
         // Resolve the presented cookie to a session token and confirm it is a VALID CURRENT session for THIS
@@ -238,7 +260,7 @@ public class UserResource extends BaseResource {
         String tokenValue = authenticationTokenDao.create(newToken);
 
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
-        return new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+        NewCookie authCookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
                 .value(tokenValue)
                 .path("/")
                 .maxAge(maxAge)
@@ -246,6 +268,7 @@ public class UserResource extends BaseResource {
                 .httpOnly(true)
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
+        return new NewCookie[] { authCookie, CsrfTokenUtil.buildSessionCookie(tokenValue) };
     }
 
     /**
@@ -492,7 +515,10 @@ public class UserResource extends BaseResource {
                 .httpOnly(true)
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        // Additive CSRF companion cookie (non-HttpOnly, JS-readable) derived from this session's token id.
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildSessionCookie(token))
+                .build();
     }
 
     /**
@@ -562,7 +588,9 @@ public class UserResource extends BaseResource {
             response.add("logout_url", logoutUrl);
         }
 
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildClearedSessionCookie())
+                .build();
     }
 
     /**
@@ -831,9 +859,11 @@ public class UserResource extends BaseResource {
                 response.add("is_default_password", Constants.DEFAULT_ADMIN_PASSWORD.equals(adminUser.getPassword()));
             }
         } else {
-            // Update the last connection date (null when authenticated via header/proxy)
+            // Update the last connection date (null when authenticated via header/proxy). Skip the write on
+            // a HEAD: Jersey dispatches HEAD through this @GET method, and this write IS the short-session
+            // expiry clock — a cross-site HEAD must not keep a session alive.
             String authToken = getAuthToken();
-            if (authToken != null) {
+            if (authToken != null && "GET".equals(request.getMethod())) {
                 AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
                 authenticationTokenDao.updateLastConnectionDate(authToken);
             }
@@ -853,6 +883,12 @@ public class UserResource extends BaseResource {
                     .add("storage_current", user.getStorageCurrent())
                     .add("totp_enabled", user.getTotpKey() != null)
                     .add("onboarding", user.isOnboarding());
+
+            // #82 preferred UI locale — emitted only when the user has set one (never pass null to
+            // the string overload). The SPA seeds a fresh device's locale from this on login.
+            if (user.getLocale() != null) {
+                response.add("locale", user.getLocale());
+            }
 
             // Base functions
             JsonArrayBuilder baseFunctions = Json.createArrayBuilder();
