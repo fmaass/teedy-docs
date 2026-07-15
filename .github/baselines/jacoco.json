@@ -1,0 +1,7 @@
+{
+  "recorded": "2026-07-15",
+  "phase": "3.6.5-rc.2",
+  "report": "docs-web/target/site/jacoco-aggregate/jacoco.xml",
+  "minimums": null,
+  "policy": "report-only; thresholds are intentionally deferred until after rc.2"
+}

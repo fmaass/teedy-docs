@@ -179,6 +179,22 @@
           </execution>
         </executions>
       </plugin>
+
+      <!-- docs-web is reactor-last and depends on docs-core + docs-web-common, so
+           aggregation runs only after all three modules have executed tests. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>aggregate-report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report-aggregate</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 

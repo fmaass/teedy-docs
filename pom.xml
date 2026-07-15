@@ -62,6 +62,7 @@
     <org.apache.maven.plugins.maven-jar-plugin.version>3.3.0</org.apache.maven.plugins.maven-jar-plugin.version>
     <org.apache.maven.plugins.maven-war-plugin.version>3.3.2</org.apache.maven.plugins.maven-war-plugin.version>
     <org.apache.maven.plugins.maven-surefire-plugin.version>3.5.6</org.apache.maven.plugins.maven-surefire-plugin.version>
+    <org.jacoco.jacoco-maven-plugin.version>0.8.14</org.jacoco.jacoco-maven-plugin.version>
   </properties>
 
   <scm>
@@ -99,6 +100,22 @@
           <forkCount>1</forkCount>
           <reuseForks>false</reuseForks>
         </configuration>
+      </plugin>
+
+      <!-- Instrument every reactor module. The aggregate report is deliberately
+           emitted by docs-web, the last module, after upstream module tests ran. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${org.jacoco.jacoco-maven-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
 
       <plugin>
