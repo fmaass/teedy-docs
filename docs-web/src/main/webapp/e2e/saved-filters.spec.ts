@@ -45,7 +45,7 @@ async function createPlainDoc(page: Page, title: string) {
   await expect(page).toHaveURL(/#\/document\/view\//)
 }
 
-test('@flaky save a tag+text filter, clear, re-apply from the dropdown, delete (#42, quarantined #81)', async ({ page }) => {
+test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42, #81 de-flaked)', async ({ page }) => {
   const tag = unique('sf-tag')
   const term = unique('sfterm')
   const matchTitle = `${term}-match`
@@ -90,7 +90,16 @@ test('@flaky save a tag+text filter, clear, re-apply from the dropdown, delete (
   await page.getByRole('button', { name: 'Saved filters' }).click()
   // exact: the delete control's accessible name now also contains the filter name
   // (Delete saved filter "<name>"), so match the apply button by its exact name.
-  await page.getByRole('button', { name: filterName, exact: true }).click()
+  // Same popover instability as the delete button below (#81): the dropdown Popover
+  // keeps micro-repositioning after open (PrimeVue recomputes its position via
+  // observers), so the apply button "is not stable" and Playwright's actionability
+  // wait times out / the element detaches mid-retry. Assert it is present + visible
+  // (its exact per-filter accessible name is unambiguous), then dispatch the click
+  // directly. The apply effect is fully verified below (URL carries the stored filter
+  // + the POST-refresh filtered result set).
+  const applyButton = page.getByRole('button', { name: filterName, exact: true })
+  await expect(applyButton).toBeVisible()
+  await applyButton.click({ force: true })
 
   // The URL carries the stored filter again.
   await expect(page).toHaveURL(/[?&]tags=/)

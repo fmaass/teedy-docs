@@ -33,11 +33,13 @@
 # unique RUN token, so reruns against a long-lived instance never collide. Created
 # documents are trashed at the end (best-effort cleanup).
 #
-# Version gate: check 1 asserts current_version == E2E_EXPECT_VERSION (default
-# 3.6.0). A mismatch FAILS the harness so it can never certify a stale image.
+# Version gate: check 1 asserts current_version == E2E_EXPECT_VERSION. That env var
+# is REQUIRED (no hardcoded default) — CI derives it from the checked-out pom.xml and
+# a local caller must export it. An unset value fails the harness fast. A mismatch
+# FAILS the harness so it can never certify a stale image.
 #
 # Checks performed (each FAIL exits nonzero at the end):
-#   1. /api/app answers and current_version == expected (default 3.6.0)      [api]
+#   1. /api/app answers and current_version == E2E_EXPECT_VERSION (required)  [api]
 #   2. native form login admin/admin lands in the app shell (logged-in UI)   [browser]
 #   8. Admin settings › account sessions — the self-service sessions table
 #      renders the current-session row (the computed "current" marker)         [browser]
@@ -59,7 +61,14 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
-expect_version="${E2E_EXPECT_VERSION:-3.6.0}"
+# E2E_EXPECT_VERSION is REQUIRED — there is deliberately no hardcoded version default
+# anywhere, so the harness can never silently certify against a stale expectation. CI
+# derives it from the checked-out pom.xml; a local caller must export it.
+if [ -z "${E2E_EXPECT_VERSION:-}" ]; then
+  echo "FATAL: E2E_EXPECT_VERSION is not set — refusing to run the version gate without an explicit expected version (derive it from pom.xml, as CI does). See scripts/check-version-consistency.sh." >&2
+  exit 2
+fi
+expect_version="${E2E_EXPECT_VERSION}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"

@@ -31,7 +31,9 @@
 #   E2E_PORT      host port to expose 8080 on (default 8080)
 #   E2E_TIMEOUT   seconds to wait for /api/app readiness (default 180)
 #   CHROME_BIN    path to the Chrome/Chromium binary (default: autodetect)
-#   E2E_EXPECT_VERSION   passed through to the harness version gate (default 3.6.0 there)
+#   E2E_EXPECT_VERSION   REQUIRED — passed through to the harness version gate, which
+#                        has no default and fails fast if it is unset (CI derives it
+#                        from the checked-out pom.xml; a local caller must export it)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
