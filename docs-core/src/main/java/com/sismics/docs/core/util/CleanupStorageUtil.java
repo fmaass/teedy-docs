@@ -459,23 +459,37 @@ public class CleanupStorageUtil {
     }
 
     /**
-     * Enumerates the storage directory for age-eligible filesystem orphans (#72): on-disk base ids with
-     * no {@code T_FILE} row (any state) whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}.
-     * Read-only. Groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb} under the base id.
+     * DB-snapshot half of the orphan sweep: reads every {@code T_FILE.FIL_ID_C} (any delete state) into a
+     * set. Kept separate from the pure-filesystem enumeration below so the apply (#103) can capture this
+     * snapshot in a SHORT owned transaction that is fully committed and closed BEFORE the potentially long
+     * filesystem sweep — the sweep then holds no open request transaction across the filesystem I/O.
      *
      * @param em entity manager (to read all file ids)
+     * @return the set of all known file ids
+     */
+    public static Set<String> snapshotAllFileIds(EntityManager em) {
+        @SuppressWarnings("unchecked")
+        List<String> allIds = em.createNativeQuery("select f.FIL_ID_C from T_FILE f").getResultList();
+        return new HashSet<>(allIds);
+    }
+
+    /**
+     * Pure-filesystem half of the orphan sweep: enumerates the storage directory for age-eligible
+     * filesystem orphans (#72) against an ALREADY-CAPTURED id snapshot, with NO database access. On-disk
+     * base ids not in {@code knownFileIds} whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}
+     * are returned. Read-only on the filesystem; groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb}
+     * under the base id. This is the half the apply runs during the sweep, off-database (#103).
+     *
      * @param storageDir storage directory (may be null/non-existent → empty)
+     * @param knownFileIds set of all {@code T_FILE.FIL_ID_C} (any delete state), captured beforehand
      * @param nowMs current epoch millis (for the age comparison)
      * @return the age-eligible orphan candidates
      */
-    public static List<OrphanCandidate> findAgeEligibleOrphans(EntityManager em, Path storageDir, long nowMs) {
+    public static List<OrphanCandidate> enumerateFilesystemOrphans(Path storageDir, Set<String> knownFileIds, long nowMs) {
         List<OrphanCandidate> result = new ArrayList<>();
         if (storageDir == null || !Files.isDirectory(storageDir)) {
             return result;
         }
-        @SuppressWarnings("unchecked")
-        List<String> allIds = em.createNativeQuery("select f.FIL_ID_C from T_FILE f").getResultList();
-        Set<String> knownFileIds = new HashSet<>(allIds);
 
         // Collect the distinct base ids present on disk (derivative suffixes stripped). File ids are
         // UUIDs (no underscores), so the base id is the segment before the first underscore.
@@ -498,5 +512,26 @@ public class CleanupStorageUtil {
             }
         }
         return result;
+    }
+
+    /**
+     * Enumerates the storage directory for age-eligible filesystem orphans (#72): on-disk base ids with
+     * no {@code T_FILE} row (any state) whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}.
+     * Read-only. Groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb} under the base id. Composes the
+     * DB snapshot ({@link #snapshotAllFileIds}) and the filesystem enumeration
+     * ({@link #enumerateFilesystemOrphans}); used by the dry-run manifest, where both halves run in the
+     * one read-only transaction.
+     *
+     * @param em entity manager (to read all file ids)
+     * @param storageDir storage directory (may be null/non-existent → empty)
+     * @param nowMs current epoch millis (for the age comparison)
+     * @return the age-eligible orphan candidates
+     */
+    public static List<OrphanCandidate> findAgeEligibleOrphans(EntityManager em, Path storageDir, long nowMs) {
+        // Skip the DB read entirely when there is no storage directory to enumerate (unchanged behavior).
+        if (storageDir == null || !Files.isDirectory(storageDir)) {
+            return new ArrayList<>();
+        }
+        return enumerateFilesystemOrphans(storageDir, snapshotAllFileIds(em), nowMs);
     }
 }

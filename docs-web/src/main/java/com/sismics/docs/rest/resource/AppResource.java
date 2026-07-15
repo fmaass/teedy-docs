@@ -22,6 +22,7 @@ import com.sismics.docs.core.util.CleanupStorageUtil;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.TransactionBoundary;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.StatsBucketUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -34,6 +35,7 @@ import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.jpa.EMF;
 import com.sismics.util.log4j.LogCriteria;
 import com.sismics.util.log4j.LogEntry;
 import com.sismics.util.log4j.MemoryAppender;
@@ -1392,6 +1394,24 @@ public class AppResource extends BaseResource {
             }
         }
 
+        // #103: END the read-only continuation transaction BEFORE the (potentially long) filesystem
+        // sweep. The confirmation read above was the LAST database access of the base request frame; the
+        // sweep below runs entirely off-database. Leaving this transaction open across the sweep is the
+        // bug: under a PostgreSQL idle_in_transaction_session_timeout the idle session is aborted mid-
+        // sweep, and the T_CLEANUP_RUN insert then 500s AFTER the bytes are already gone (a long sweep
+        // makes an internal failure out of a completed reclaim). The continuation only ever RAN reads
+        // (the checkpoint commit fired and reset the frame's events/callbacks), so there is nothing to
+        // commit — roll it back. We deliberately do NOT complete/rotate/close the base frame: it stays
+        // installed with an inactive transaction, which RequestContextFilter.commitAndFinalize tolerates
+        // (it initializes ROLLED_BACK, skips the active-transaction block, and completes the frame at
+        // end-of-request). If the rollback ITSELF is IN_DOUBT, mark the frame terminal and propagate.
+        EntityManager requestEm = ThreadLocalContext.get().peekEntityManager();
+        TransactionBoundary.ClassifiedOutcome ended = TransactionBoundary.tryRollback(requestEm);
+        if (ended.getState() == TransactionBoundary.DurableState.IN_DOUBT) {
+            ThreadLocalContext.get().markCurrentFrameInDoubt();
+            TransactionBoundary.propagate(ended.getFailure());
+        }
+
         java.nio.file.Path storageDir = DirectoryUtil.getStorageDirectory();
         java.util.function.Consumer<String> duringReclaimHook =
                 EnvironmentUtil.isUnitTest() ? cleanStorageDuringReclaimHook : null;
@@ -1435,12 +1455,19 @@ public class AppResource extends BaseResource {
             // #72 AGE-THRESHOLDED FILESYSTEM-ORPHAN RECLAIM: also unlink genuine orphans — on-disk base ids
             // with NO T_FILE row (any state) whose variants are all OLDER than the age threshold. Enumerated
             // HERE, under the sweep lock, against the CURRENT filesystem + committed post-transaction DB
-            // state (a fresh EM read after commit) with a fresh clock — so a serialized second run sees the
-            // orphans a first run already reclaimed as gone, and a base id that gained a row concurrently, or
-            // a file still fresh (a possible in-flight upload whose row has not committed), is skipped.
-            EntityManager sweepEm = ThreadLocalContext.get().getEntityManager();
+            // state with a fresh clock — so a serialized second run sees the orphans a first run already
+            // reclaimed as gone, and a base id that gained a row concurrently, or a file still fresh (a
+            // possible in-flight upload whose row has not committed), is skipped.
+            //
+            // #103: the DB half (the all-file-ids snapshot) runs in its OWN short owned transaction —
+            // fully committed and closed here — while the actual filesystem enumeration + unlink runs
+            // off-database. The base request transaction was already ended above, so nothing holds an open
+            // request transaction across the sweep. The snapshot's brief owned frame reads the committed
+            // post-transaction DB state, exactly as the old inline read did.
+            Set<String> knownFileIds = TransactionBoundary.finalizeOwnedInNewFrame(
+                    EMF.get().createEntityManager(), requestEm, CleanupStorageUtil::snapshotAllFileIds);
             long nowMs = System.currentTimeMillis();
-            for (CleanupStorageUtil.OrphanCandidate orphan : CleanupStorageUtil.findAgeEligibleOrphans(sweepEm, storageDir, nowMs)) {
+            for (CleanupStorageUtil.OrphanCandidate orphan : CleanupStorageUtil.enumerateFilesystemOrphans(storageDir, knownFileIds, nowMs)) {
                 CleanupStorageUtil.ReclaimResult reclaim =
                         CleanupStorageUtil.deleteAndMeasure(storageDir, orphan.baseId, duringReclaimHook);
                 if (reclaim.isReclaimed()) {
@@ -1464,13 +1491,22 @@ public class AppResource extends BaseResource {
         // pre-sweep estimate. This table is NEVER swept by clean_storage (unlike an audit-log entry,
         // whose orphan-audit-log delete would purge it), so the next cleanup preserves it. The acting
         // admin is stored as a plain value snapshot, not an FK, so the record survives that admin's
-        // later deletion. It commits with the request's end-of-request transaction.
-        new CleanupRunDao().create(new CleanupRun()
-                .setFileCount(actualCount)
-                .setBytes(actualBytes)
-                .setUserId(principal.getId())
-                .setUsername(principal.getName())
-                .setCreateDate(new Date()));
+        // later deletion.
+        //
+        // #103: the base request transaction was ended before the sweep, so this row is written in its
+        // OWN short owned transaction (a fresh entity manager, committed and closed) rather than riding
+        // the end-of-request commit — which no longer exists on a durable transaction here.
+        final long recordedCount = actualCount;
+        final long recordedBytes = actualBytes;
+        TransactionBoundary.finalizeOwnedInNewFrame(EMF.get().createEntityManager(), requestEm, frameEm -> {
+            new CleanupRunDao().create(new CleanupRun()
+                    .setFileCount(recordedCount)
+                    .setBytes(recordedBytes)
+                    .setUserId(principal.getId())
+                    .setUsername(principal.getName())
+                    .setCreateDate(new Date()));
+            return null;
+        });
         log.info("Recorded clean_storage protocol: {} files, {} bytes reclaimed", actualCount, actualBytes);
 
         // Always return OK
