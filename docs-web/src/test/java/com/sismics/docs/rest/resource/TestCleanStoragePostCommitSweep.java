@@ -14,7 +14,17 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Storage-mutation safety of {@code clean_storage}'s filesystem deletion.
@@ -36,6 +46,7 @@ public class TestCleanStoragePostCommitSweep extends BaseJerseyTest {
     public void clearHook() {
         AppResource.cleanStorageBeforeCommitHook = null;
         AppResource.cleanStorageBeforeSweepHook = null;
+        AppResource.cleanStorageDuringReclaimHook = null;
     }
 
     /**
@@ -199,6 +210,126 @@ public class TestCleanStoragePostCommitSweep extends BaseJerseyTest {
         // Cleanup: remove the revived file row + its bytes.
         executeInIsolatedTx("delete from T_FILE where FIL_ID_C = :id", java.util.Map.of("id", restoredFileId));
         Files.deleteIfExists(restoredPhysical);
+    }
+
+    /**
+     * #79 CONCURRENT-RUN SERIALIZATION + COUNT CORRECTNESS: two overlapping {@code clean_storage}
+     * executions must count each physically-removed logical file EXACTLY once. The whole post-commit
+     * filesystem sweep is serialized by an IN-PROCESS lock ({@code AppResource.STORAGE_SWEEP_LOCK}), so a
+     * second run's sweep does not begin deleting until the first run's sweep completes; the second run then
+     * recomputes its orphan set against the current filesystem and reclaims only what still remains.
+     *
+     * <p>This test proves SERIALIZATION deterministically: run A enters the sweep, deletes the orphan's
+     * base variant, and pauses in the seam WHILE STILL HOLDING the sweep lock (INDEFINITELY, released only
+     * by the test — no wall-clock decides). Run B's sweep then provably BLOCKS on the lock — asserted via
+     * {@code AppResource.sweepLockHasQueuedThreads()} — and the seam is proven to fire exactly once (B has
+     * not entered its own sweep). Releasing A lets it finish and release the lock; B then runs, finds the
+     * orphan already gone, and counts 0. Across both runs the orphan is counted exactly once, for its full
+     * footprint.</p>
+     */
+    @Test
+    public void twoConcurrentRunsSerializeAndCountEachRemovedFileExactlyOnce() throws Exception {
+        String adminToken = adminToken();
+        Path storageDir = DirectoryUtil.getStorageDirectory();
+
+        // Quiesce any pre-existing age-eligible orphan left by earlier tests, so the planted orphan below
+        // is the ONLY reclaimable logical file and the two runs' counts are exactly attributable to it.
+        target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()), JsonObject.class);
+
+        // A genuine OLD filesystem orphan (base + _web + _thumb, no DB row, mtime 2 days ago): known
+        // footprint, reclaimable by the age-thresholded orphan sweep of BOTH runs.
+        String orphanId = UUID.randomUUID().toString();
+        long twoDaysAgo = System.currentTimeMillis() - 2L * 24L * 60L * 60L * 1000L;
+        long footprint = 0L;
+        for (String suffix : new String[]{"", "_web", "_thumb"}) {
+            Path p = storageDir.resolve(orphanId + suffix);
+            Files.write(p, new byte[]{1, 2, 3, 4});
+            Files.setLastModifiedTime(p, FileTime.fromMillis(twoDaysAgo));
+            footprint += 4;
+        }
+
+        // The seam fires only for the run that is INSIDE the sweep (holding the lock), after it deletes the
+        // orphan's base. It counts invocations (to prove the OTHER run never enters its own sweep while the
+        // lock is held) and holds the first run INDEFINITELY until the test releases it.
+        AtomicInteger seamInvocations = new AtomicInteger(0);
+        CountDownLatch aInsideLock = new CountDownLatch(1);
+        CountDownLatch releaseA = new CountDownLatch(1);
+        AppResource.cleanStorageDuringReclaimHook = (fileId) -> {
+            if (orphanId.equals(fileId)) {
+                seamInvocations.incrementAndGet();
+                aInsideLock.countDown();
+                try {
+                    releaseA.await(); // indefinite: released only by the test, never by a timeout
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        // Each run publishes its response when it COMPLETES. Run A is blocked in the seam holding the sweep
+        // lock and cannot publish until released, so the FIRST item taken is deterministically run B.
+        BlockingQueue<JsonObject> results = new LinkedBlockingQueue<>();
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        Callable<Void> run = () -> {
+            barrier.await();
+            results.add(target().path("/app/batch/clean_storage").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .post(Entity.form(new Form()), JsonObject.class));
+            return null;
+        };
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            pool.submit(run);
+            pool.submit(run);
+
+            // Run A enters the sweep, deletes the orphan's base, and pauses holding the sweep lock.
+            Assertions.assertTrue(aInsideLock.await(60, TimeUnit.SECONDS),
+                    "one run must enter the sweep and pause holding the lock");
+            Assertions.assertTrue(Files.exists(storageDir.resolve(orphanId + "_web")),
+                    "precondition: run A deleted only the base; the _web variant is still on disk");
+
+            // SERIALIZATION PROOF: run B's sweep must BLOCK on the sweep lock (it cannot start deleting).
+            // Wait until B is queued on the lock — deterministic (B will reach the lock), no timeout decides.
+            long deadline = System.currentTimeMillis() + 60_000L;
+            while (!AppResource.sweepLockHasQueuedThreads()) {
+                if (System.currentTimeMillis() > deadline) {
+                    Assertions.fail("run B never blocked on the sweep lock — sweeps are not serialized");
+                }
+                Thread.sleep(20);
+            }
+            // B is blocked on the lock, so it has NOT entered its own sweep: the seam fired exactly once.
+            Assertions.assertEquals(1, seamInvocations.get(),
+                    "only the lock-holding run is inside the sweep; the blocked run has not started deleting");
+
+            // Release A to finish its sweep and release the lock; take B's result (it runs after A).
+            releaseA.countDown();
+            JsonObject first = results.take();
+            JsonObject second = results.take();
+
+            // Exactly-once across both runs: one run counted the orphan (full footprint), the other 0.
+            long totalCount = first.getJsonNumber("file_count").longValue()
+                    + second.getJsonNumber("file_count").longValue();
+            long totalBytes = first.getJsonNumber("bytes").longValue()
+                    + second.getJsonNumber("bytes").longValue();
+            Assertions.assertEquals(1L, totalCount, "the orphan is counted EXACTLY once across both runs");
+            Assertions.assertEquals(footprint, totalBytes,
+                    "the summed bytes equal the orphan's on-disk footprint, counted once");
+            // Physically reclaimed exactly once: every variant gone.
+            for (String suffix : new String[]{"", "_web", "_thumb"}) {
+                Assertions.assertFalse(Files.exists(storageDir.resolve(orphanId + suffix)),
+                        "the orphan variant " + suffix + " is physically reclaimed");
+            }
+        } finally {
+            releaseA.countDown();
+            pool.shutdownNow();
+            pool.awaitTermination(10, TimeUnit.SECONDS);
+            for (String suffix : new String[]{"", "_web", "_thumb"}) {
+                Files.deleteIfExists(storageDir.resolve(orphanId + suffix));
+            }
+        }
     }
 
     /**
