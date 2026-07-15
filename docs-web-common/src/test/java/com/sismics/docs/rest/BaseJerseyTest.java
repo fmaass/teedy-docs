@@ -2,6 +2,7 @@ package com.sismics.docs.rest;
 
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.rest.util.ClientUtil;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
@@ -284,9 +285,43 @@ public abstract class BaseJerseyTest extends JerseyTest {
         }
     }
 
+    /**
+     * Upper bound for {@link #awaitProcessingQuiescence()}. Generous so heavy content extraction
+     * (OCR, PDF/office rasterization) on a slow CI host finishes, yet the poll returns the instant the
+     * processing set drains, so a healthy run pays only milliseconds.
+     */
+    private static final long QUIESCENCE_TIMEOUT_MS = 30_000;
+
+    /**
+     * Block until asynchronous file processing has drained — no file remains marked in-flight in
+     * {@link FileUtil}'s process-wide processing set.
+     *
+     * <p>File content extraction and thumbnail/raster generation run <em>after</em> the triggering
+     * request has already returned to the client (the request commits, then the queued file-processing
+     * event is dispatched on a worker). That post-response work writes {@code sismics_docs} temp files
+     * into the shared system tmpdir and mutates the Lucene index — global resources that other tests
+     * observe. A test that snapshots those resources, and this base class's per-test teardown, must
+     * first let any in-flight processing finish, otherwise a straggler from this (or an immediately
+     * preceding) test races the observation and produces a spurious, order-dependent failure. Returns
+     * as soon as the set is empty; on a genuinely stuck processor it stops waiting after
+     * {@link #QUIESCENCE_TIMEOUT_MS} and lets the caller proceed (best-effort — never fails a test).</p>
+     */
+    protected static void awaitProcessingQuiescence() throws InterruptedException {
+        long deadline = System.nanoTime() + QUIESCENCE_TIMEOUT_MS * 1_000_000L;
+        while (FileUtil.getProcessingFileCount() != 0) {
+            if (System.nanoTime() >= deadline) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+    }
+
     @Override
     @AfterEach
     public void tearDown() throws Exception {
+        // Drain any in-flight post-response file processing BEFORE tearing the server down, so a
+        // straggler cannot cross into the next test and pollute its view of the shared tmpdir / index.
+        awaitProcessingQuiescence();
         super.tearDown();
         System.clearProperty("docs.header_authentication");
         System.clearProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY);

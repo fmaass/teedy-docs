@@ -604,14 +604,18 @@ public class TestDocumentResource extends BaseJerseyTest {
         // Add a PDF file
         String file1Id = clientUtil.addFileToDocument(FILE_WIKIPEDIA_PDF, documentPdfToken, document1Id);
 
-        // Search documents by query in full content
-        JsonObject json = target().path("/document/list")
-                .queryParam("search", "full:vrandecic")
-                .request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
-                .get(JsonObject.class);
-        Assertions.assertEquals(1, json.getJsonArray("documents").size());
-        
+        // Content extraction and indexing run on a worker after the upload response returns, so wait
+        // for processing to drain and poll the search until the extracted content is indexed rather
+        // than asserting once and racing the async work.
+        awaitProcessingQuiescence();
+        awaitCondition("PDF full-content search did not return the document (full:vrandecic)", () ->
+                target().path("/document/list")
+                        .queryParam("search", "full:vrandecic")
+                        .request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
+                        .get(JsonObject.class)
+                        .getJsonArray("documents").size() == 1);
+
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
                 .queryParam("size", "thumb")
@@ -867,6 +871,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_leak", 100000);
         String token = clientUtil.login("document_eml_leak");
 
+        // Quiesce any in-flight file processing before the baseline so no straggler's temp lands
+        // between the snapshots (this test does no successful upload, so nothing new starts after).
+        awaitProcessingQuiescence();
         java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
@@ -904,6 +911,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_temp", 100000);
         String token = clientUtil.login("document_eml_temp");
 
+        // Quiesce any in-flight file processing before the baseline so no straggler's temp lands
+        // between the snapshots (this test does no successful upload, so nothing new starts after).
+        awaitProcessingQuiescence();
         java.util.Set<Path> before = snapshotSismicsTempFiles();
 
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
@@ -927,15 +937,14 @@ public class TestDocumentResource extends BaseJerseyTest {
     /**
      * Snapshots the {@code sismics_docs*} temp files currently present in the shared system
      * tmpdir. The leak assertions work on the DELTA between two snapshots ({@link
-     * #leakedSismicsTempFiles(java.util.Set)}), never on a raw count: a raw count races with
-     * concurrent JVMs (parallel worktree suites) and with straggler async file-processing
-     * from earlier tests in this class (e.g. testEmlImport's attachment OCR), whose temps
-     * inflate the number mid-window. Every file that pre-exists this test appears in BOTH
-     * snapshots and cancels out. The guarantee is asymmetric: a FALSE PASS is impossible (a
-     * file this test leaks always lands in the delta), but a concurrent writer CAN still
-     * inject a matching file between the snapshots, producing a spurious FAILURE — a loud,
-     * investigable outcome, never a silently missed leak. (Same mechanism as
-     * TestFileResource.)
+     * #leakedSismicsTempFiles(java.util.Set)}), never on a raw count: every file that pre-exists
+     * this test appears in BOTH snapshots and cancels out, so only a temp created between them
+     * counts. Callers take the baseline only after {@link #awaitProcessingQuiescence()} — with no
+     * async file processing in flight and no successful upload in these failure-path tests, nothing
+     * writes a {@code sismics_docs} temp during the window except this test's own (correctly
+     * cleaned) failed import, so the delta reflects only this import. The guarantee is asymmetric:
+     * a FALSE PASS is impossible (a file this test leaks always lands in the delta). (Same
+     * mechanism as TestFileResource.)
      */
     private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
         Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));

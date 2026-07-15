@@ -152,6 +152,10 @@ public class TestUserResourceReassign extends BaseJerseyTest {
 
         deleteUserReassigning("reassign_noevent_departing", "reassign_noevent_target", Status.OK);
 
+        // Let any post-response file processing settle before observing the deletion side effects, so a
+        // straggler cannot race the assertions on the shared filesystem / index.
+        awaitProcessingQuiescence();
+
         // The physical bytes are still present: no FileDeletedAsyncEvent fired for the reassigned file.
         Assertions.assertTrue(Files.exists(storedFile),
                 "no FileDeletedAsyncEvent must fire for a reassigned file (bytes must remain on disk)");

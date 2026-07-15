@@ -334,6 +334,16 @@ public class FileUtil {
     }
 
     /**
+     * Return the number of files currently marked in-flight for processing. Lets a caller observe when
+     * asynchronous, post-response file processing (content extraction, raster generation) has drained.
+     *
+     * @return Count of files currently processing
+     */
+    public static int getProcessingFileCount() {
+        return processingFileSet.size();
+    }
+
+    /**
      * Get the size of a file on disk.
      *
      * @param fileId the file id
