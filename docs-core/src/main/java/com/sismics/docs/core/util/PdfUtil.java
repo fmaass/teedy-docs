@@ -137,18 +137,37 @@ public class PdfUtil {
     }
 
     /**
+     * The bundled mono font extracted to disk, cached across AppContext starts. FontFactory stores the
+     * PATH and loads the font lazily on first use, so the extracted file must stay readable; it is
+     * extracted at most once per JVM (never per AppContext start) and never deleted by us — but a tmp
+     * reaper (tmpwatch/systemd-tmpfiles) may remove it mid-life, so registerFonts re-extracts when the
+     * cached file no longer exists rather than trusting the cache blindly.
+     */
+    private static Path monoFontFile;
+
+    /**
      * Register fonts.
      */
-    public static void registerFonts() {
-        URL url = Resources.getResource("fonts/LiberationMono-Regular.ttf");
-        try (InputStream is = url.openStream()) {
-            Path file = Files.createTempFile("sismics_docs_font_mono", ".ttf");
-            try (OutputStream os = Files.newOutputStream(file)) {
-                ByteStreams.copy(is, os);
+    public static synchronized void registerFonts() {
+        try {
+            if (monoFontFile == null || !Files.exists(monoFontFile)) {
+                // Extract into a process-private temp directory (never a predictable fixed /tmp name),
+                // because registerFonts runs on every AppContext start and FontFactory reads the
+                // registered path lazily — a fresh extraction per start would leak one temp per start,
+                // while a stale cache pointing at a reaped file would break font loads until restart.
+                Path fontDir = Files.createTempDirectory("sismics_docs_font_mono");
+                Path file = fontDir.resolve("LiberationMono-Regular.ttf");
+                URL url = Resources.getResource("fonts/LiberationMono-Regular.ttf");
+                try (InputStream is = url.openStream(); OutputStream os = Files.newOutputStream(file)) {
+                    ByteStreams.copy(is, os);
+                }
+                monoFontFile = file;
             }
-            FontFactory.register(file.toAbsolutePath().toString(), "LiberationMono-Regular");
+            FontFactory.register(monoFontFile.toAbsolutePath().toString(), "LiberationMono-Regular");
             FontFactory.registerDirectories();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // FontFactory wraps I/O problems in its unchecked ExceptionConverter; font registration is
+            // non-fatal, so never let it abort an AppContext start.
             log.error("Error loading font", e);
         }
     }

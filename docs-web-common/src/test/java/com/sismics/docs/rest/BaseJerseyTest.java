@@ -200,9 +200,10 @@ public abstract class BaseJerseyTest extends JerseyTest {
         super.setUp();
         clientUtil = new ClientUtil(target());
 
-        // Force the AppContext to start up NOW, on the setUp thread, so its one-time startup side effects
-        // (the sismics_docs_font_mono*.ttf temp registerFonts leaks, the fresh RAM Lucene index) are
-        // established BEFORE the test body's baseline snapshots — never lazily by the body's first request.
+        // Force the AppContext to start up NOW, on the setUp thread, so its one-time startup side effect
+        // (the fresh RAM Lucene index) is established BEFORE the test body's baseline snapshots — never
+        // lazily by the body's first request. (registerFonts extracts its mono font once per JVM, so a
+        // start no longer leaks a temp, but a mid-body index swap still corrupts a test's observations.)
         // Paired with the synchronous undeploy in tearDown, this pins one deterministic AppContext per test.
         // Wrapped like the filter's own warm-up: AppContext.startUp() touches the DB, so it needs an
         // entity manager / transaction on this thread.
@@ -355,10 +356,9 @@ public abstract class BaseJerseyTest extends JerseyTest {
         // .destroy() -> AppContext.shutDown()) on THIS thread, before the next test begins. httpServer
         // .shutdownNow() alone destroys the filters asynchronously, so the AppContext singleton could be
         // nulled LATE — after the next test's warm-up had already re-created it — making that test's first
-        // request lazily re-run AppContext.startUp() mid-body. That late startup leaks a
-        // sismics_docs_font_mono*.ttf temp (registerFonts never deletes it) into a later test's temp-leak
-        // delta AND swaps in a fresh empty RAM Lucene index that drops a document indexed earlier in the
-        // same test — the shared root cause of the order-dependent observation flakes.
+        // request lazily re-run AppContext.startUp() mid-body. That late startup swaps in a fresh empty
+        // RAM Lucene index that drops a document indexed earlier in the same test — the shared root cause
+        // of the order-dependent observation flakes.
         if (webappContext != null) {
             try {
                 webappContext.undeploy();

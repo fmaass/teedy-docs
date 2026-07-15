@@ -78,6 +78,16 @@ public class EncryptionUtil {
         Path tmpFile = AppContext.getInstance().getFileService().createTemporaryFile();
         try (InputStream is = Files.newInputStream(file)) {
             Files.copy(new CipherInputStream(is, getCipher(privateKey, Cipher.DECRYPT_MODE)), tmpFile, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Throwable t) {
+            // The plaintext temp was already created; ANY failure (Errors included) must not strand it
+            // on disk. Delete it and rethrow the ORIGINAL failure with its exact type — a cleanup
+            // failure of any kind is suppressed, never masks it.
+            try {
+                Files.deleteIfExists(tmpFile);
+            } catch (Throwable cleanupFailure) {
+                t.addSuppressed(cleanupFailure);
+            }
+            throw t;
         }
         return tmpFile;
     }
