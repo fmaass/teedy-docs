@@ -4,6 +4,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.EventBus;
+import com.google.common.util.concurrent.Service;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.listener.async.*;
@@ -169,10 +170,27 @@ public class AppContext {
         inboxService.startAsync();
         inboxService.awaitRunning();
 
-        // Start file size service
+        // Start file size service. Unlike the other services it SELF-COMPLETES: it schedules its first
+        // iteration with zero initial delay and calls stopAsync() as soon as there is nothing left to size
+        // (an empty or already-sized corpus). On a small dataset it can therefore leave the RUNNING state
+        // before awaitRunning() observes it, which makes awaitRunning() throw IllegalStateException.
+        //
+        // Tolerating this is safe because TERMINATED is reachable ONLY by that legitimate self-completion:
+        // FileSizeService.startUp()/shutDown() only log (never throw) and runOneIteration() catches every
+        // Throwable, so the service can never enter FAILED on its own — its lone stopAsync() call fires
+        // when the work is exhausted. So only the benign self-stop sequence RUNNING -> STOPPING ->
+        // TERMINATED is accepted; a genuine startup failure would surface as FAILED (or any other state)
+        // and still propagates, never masked (#102).
         fileSizeService = new FileSizeService();
         fileSizeService.startAsync();
-        fileSizeService.awaitRunning();
+        try {
+            fileSizeService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = fileSizeService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
 
         // Start trash purge service
         trashPurgeService = new TrashPurgeService();

@@ -2,7 +2,9 @@ package com.sismics.docs.rest;
 
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
+import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.rest.util.ClientUtil;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
@@ -60,7 +62,14 @@ public abstract class BaseJerseyTest extends JerseyTest {
      * Test HTTP server.
      */
     private HttpServer httpServer;
-    
+
+    /**
+     * The deployed servlet context. Held so teardown can {@link WebappContext#undeploy()} it
+     * SYNCHRONOUSLY, which destroys the filters (and thus shuts the AppContext singleton down) before
+     * the next test starts — see {@link #tearDown()}.
+     */
+    private WebappContext webappContext;
+
     /**
      * Utility class for the REST client.
      */
@@ -160,6 +169,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
         NetworkListener listener = new NetworkListener("grizzly", "localhost", 0);
         httpServer.addListener(listener);
         WebappContext context = new WebappContext("GrizzlyContext", "/docs");
+        webappContext = context;
         context.addListener("com.sismics.util.listener.IIOProviderContextListener");
         context.addFilter("requestContextFilter", RequestContextFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
@@ -184,6 +194,14 @@ public abstract class BaseJerseyTest extends JerseyTest {
 
         super.setUp();
         clientUtil = new ClientUtil(target());
+
+        // Force the AppContext to start up NOW, on the setUp thread, so its one-time startup side effects
+        // (the sismics_docs_font_mono*.ttf temp registerFonts leaks, the fresh RAM Lucene index) are
+        // established BEFORE the test body's baseline snapshots — never lazily by the body's first request.
+        // Paired with the synchronous undeploy in tearDown, this pins one deterministic AppContext per test.
+        // Wrapped like the filter's own warm-up: AppContext.startUp() touches the DB, so it needs an
+        // entity manager / transaction on this thread.
+        TransactionUtil.handle(AppContext::getInstance);
 
         consumedEmailIndices.clear();
         greenMail = new GreenMail(ServerSetup.SMTP.dynamicPort());
@@ -327,6 +345,21 @@ public abstract class BaseJerseyTest extends JerseyTest {
         System.clearProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY);
         if (greenMail != null) {
             greenMail.stop();
+        }
+        // Undeploy the servlet context SYNCHRONOUSLY first: this destroys the filters (RequestContextFilter
+        // .destroy() -> AppContext.shutDown()) on THIS thread, before the next test begins. httpServer
+        // .shutdownNow() alone destroys the filters asynchronously, so the AppContext singleton could be
+        // nulled LATE — after the next test's warm-up had already re-created it — making that test's first
+        // request lazily re-run AppContext.startUp() mid-body. That late startup leaks a
+        // sismics_docs_font_mono*.ttf temp (registerFonts never deletes it) into a later test's temp-leak
+        // delta AND swaps in a fresh empty RAM Lucene index that drops a document indexed earlier in the
+        // same test — the shared root cause of the order-dependent observation flakes.
+        if (webappContext != null) {
+            try {
+                webappContext.undeploy();
+            } catch (RuntimeException e) {
+                // Best-effort: an undeploy failure must not mask the test outcome.
+            }
         }
         if (httpServer != null) {
             httpServer.shutdownNow();

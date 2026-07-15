@@ -32,17 +32,11 @@ jobs:
       - name: Check db.version covers latest migration
         run: bash scripts/check-db-version.sh
 
-      # The fast shared-JVM H2 suite has observation-timing-fragile tests (they assert on globally
-      # shared, asynchronously produced state — temp files, the RAM Lucene index, deletion events —
-      # that a late AppContext teardown/recreation can perturb). Root cause and a deterministic rewrite
-      # are tracked in #101; the same tests pass reliably on the real-PostgreSQL jobs below (slower I/O
-      # spaces the async work out), so coverage is preserved there. Two guards keep this job stable
-      # without hiding real product failures: the worst offenders carry the "flaky-h2-observation" tag
-      # (excluded here, still run on test-web-postgres), and any remaining flake is retried
-      # (rerunFailingTestsCount) — a genuine, reproducible failure still fails every rerun and reds the
-      # job, while the PostgreSQL jobs run with no retry at all.
+      # Determinism of the previously observation-timing-fragile tests is restored by the AppContext
+      # per-test lifecycle fix (one deterministic AppContext per test, no late teardown/recreation) —
+      # see #101/#102. No quarantine tag or retry is needed; the full suite gates cleanly on H2.
       - name: Run tests
-        run: ./mvnw --batch-mode test -DexcludedGroups=flaky-h2-observation -Dsurefire.rerunFailingTestsCount=2
+        run: ./mvnw --batch-mode test
 
   test-postgres:
     # Run the docs-core suite (DbOpenHelper migration bootstrap + DAO/native-query tests)
