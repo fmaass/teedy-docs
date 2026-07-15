@@ -1,0 +1,247 @@
+{
+  "schema": {
+    "required": [
+      "id",
+      "finding",
+      "reason",
+      "owner",
+      "introduced",
+      "expires",
+      "compensating_control",
+      "removal_issue"
+    ]
+  },
+  "recorded": "2026-07-15",
+  "findings": [
+    {
+      "id": "java/command-line-injection:2b1a06f3fbabdda8c4a4",
+      "finding": "Pre-existing CodeQL java/command-line-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/implicit-cast-in-compound-assignment:227afa728d9a75edc035",
+      "finding": "Pre-existing CodeQL java/implicit-cast-in-compound-assignment finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/polynomial-redos:f6e6d8268220e5a64441",
+      "finding": "Pre-existing CodeQL java/polynomial-redos finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/regex-injection:6ae3a017d5e5a0b2a4b1",
+      "finding": "Pre-existing CodeQL java/regex-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/regex-injection:cc54b4ae32196642eb09",
+      "finding": "Pre-existing CodeQL java/regex-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:1d4901c720ecdb38a312",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:2864fb28b2f31874b543",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:46b9b94091a3b7fdf9b6",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:499fa857806ce2f71a67",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:4ea39218e3024ff9e430",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:64882241e1ee247831c5",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:6669b89a75e6bd931c3c",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:6e204ba14db881cbbc36",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:7210aa4327be8c241934",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:7d46cac6cf237e340476",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:8f0f8d58407b7f77e743",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:98c38a6d4c9061d0530e",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:bf3eb475802642aad56b",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:bf3faa465d8507e61569",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:bf6c24aff37022798827",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:c74810728ad5cea696b8",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:c938d87cb30a8773a8b2",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection:f446534623817945163c",
+      "finding": "Pre-existing CodeQL java/path-injection finding",
+      "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+      "owner": "fmaass",
+      "introduced": "2026-07-15",
+      "expires": "2026-10-15",
+      "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+      "removal_issue": "#104"
+    }
+  ]
+}

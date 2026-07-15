@@ -99,12 +99,297 @@ jobs:
           name: docs-web.war
           path: docs-web/target/docs*.war
 
+  codeql:
+    runs-on: ubuntu-latest
+    needs: [resolve-ref]
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          java-version: "25"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+        with:
+          languages: java, javascript-typescript
+
+      - name: Compile Java for CodeQL
+        run: ./mvnw --batch-mode -DskipTests compile
+
+      - name: Analyze and upload SARIF
+        uses: github/codeql-action/analyze@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+        with:
+          output: ${{ runner.temp }}/codeql-sarif
+          upload: true
+          wait-for-processing: true
+
+      - name: Gate new high-severity CodeQL findings
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/codeql-known.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("CodeQL baseline does not declare the required schema")
+          findings = baseline.get("findings")
+          if not isinstance(findings, list):
+              raise SystemExit("CodeQL baseline findings must be an array")
+          known = set()
+          for index, finding in enumerate(findings):
+              missing = required - set(finding)
+              if missing:
+                  raise SystemExit(f"baseline finding {index} lacks fields: {sorted(missing)}")
+              if not finding["owner"] or not finding["expires"]:
+                  raise SystemExit(f"baseline finding {finding['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(finding["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"baseline finding {finding['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"baseline finding {finding['id']} expired on {expiry}")
+              known.add(finding["id"])
+
+          sarif_files = sorted(Path("${{ runner.temp }}/codeql-sarif").rglob("*.sarif"))
+          if not sarif_files:
+              raise SystemExit("CodeQL produced no SARIF files")
+          new_high = []
+          for sarif_file in sarif_files:
+              try:
+                  raw_sarif = sarif_file.read_text()
+              except OSError as error:
+                  raise SystemExit(f"Cannot read CodeQL SARIF {sarif_file}: {error}")
+              if not raw_sarif.strip():
+                  raise SystemExit(f"CodeQL SARIF is empty: {sarif_file}")
+              try:
+                  sarif = json.loads(raw_sarif)
+              except json.JSONDecodeError as error:
+                  raise SystemExit(f"CodeQL SARIF is not valid JSON ({sarif_file}): {error}")
+              if not isinstance(sarif, dict) or sarif.get("version") != "2.1.0":
+                  raise SystemExit(f"CodeQL output is not SARIF 2.1.0: {sarif_file}")
+              runs = sarif.get("runs")
+              if not isinstance(runs, list) or not runs:
+                  raise SystemExit(f"CodeQL SARIF has no analysis runs: {sarif_file}")
+              for run_index, run in enumerate(runs):
+                  if not isinstance(run, dict):
+                      raise SystemExit(f"CodeQL SARIF run {run_index} is malformed: {sarif_file}")
+                  driver = run.get("tool", {}).get("driver")
+                  if not isinstance(driver, dict) or not driver.get("name"):
+                      raise SystemExit(f"CodeQL SARIF run {run_index} lacks a tool driver: {sarif_file}")
+                  results = run.get("results")
+                  if not isinstance(results, list):
+                      raise SystemExit(f"CodeQL SARIF run {run_index} lacks a results array: {sarif_file}")
+                  rules = {}
+                  components = [driver]
+                  components.extend(run.get("tool", {}).get("extensions", []))
+                  for component in components:
+                      for rule in component.get("rules", []):
+                          rules[rule.get("id")] = rule
+                  for result_index, result in enumerate(results):
+                      if not isinstance(result, dict):
+                          raise SystemExit(f"CodeQL SARIF result {result_index} is malformed: {sarif_file}")
+                      rule_id = result.get("ruleId", "unknown-rule")
+                      severity = rules.get(rule_id, {}).get("properties", {}).get("security-severity")
+                      try:
+                          score = float(severity)
+                      except (TypeError, ValueError):
+                          continue
+                      if score < 7.0:
+                          continue
+                      fingerprints = result.get("partialFingerprints", {})
+                      identity = json.dumps(fingerprints, sort_keys=True)
+                      if not fingerprints:
+                          location = (result.get("locations") or [{}])[0].get("physicalLocation", {})
+                          identity = json.dumps(location, sort_keys=True)
+                      digest = hashlib.sha256(identity.encode()).hexdigest()[:20]
+                      finding_id = f"{rule_id}:{digest}"
+                      if finding_id not in known:
+                          message = result.get("message", {}).get("text", "CodeQL finding")
+                          new_high.append((finding_id, score, message))
+          if new_high:
+              for finding_id, score, message in new_high:
+                  print(f"NEW HIGH CODEQL FINDING {finding_id} ({score}): {message}")
+              raise SystemExit(1)
+          print("No new high-severity CodeQL findings")
+          PY
+
+  trivy-fs:
+    runs-on: ubuntu-latest
+    needs: [resolve-ref]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Validate and materialize Trivy exceptions
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          Path(".trivyignore.generated").write_text("\n".join(ids) + ("\n" if ids else ""))
+          PY
+
+      - name: Scan repository dependencies
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /workspace/.trivyignore.generated /workspace
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+  candidate-image:
+    runs-on: ubuntu-latest
+    needs: [resolve-ref, build]
+    outputs:
+      digest: ${{ steps.candidate.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build candidate once (amd64 OCI archive)
+        id: candidate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          outputs: type=oci,dest=${{ runner.temp }}/candidate-image.oci.tar
+          tags: teedy-candidate:local
+
+      - name: Record candidate digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          test -n "${CANDIDATE_DIGEST}"
+          echo "${CANDIDATE_DIGEST}" > "${{ runner.temp }}/candidate-image.digest"
+          echo "Regression candidate: ${CANDIDATE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate OCI archive
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: candidate-image-oci
+          path: |
+            ${{ runner.temp }}/candidate-image.oci.tar
+            ${{ runner.temp }}/candidate-image.digest
+          if-no-files-found: error
+
+  trivy-image:
+    runs-on: ubuntu-latest
+    needs: [candidate-image]
+
+    steps:
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Scan candidate image
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan:ro" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/candidate-image.oci.tar --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+  sbom:
+    runs-on: ubuntu-latest
+    needs: [candidate-image]
+
+    steps:
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Generate candidate CycloneDX SBOM
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/candidate-image.oci.tar --format cyclonedx \
+            --output /scan/candidate-image.cdx.json --exit-code 0 --no-progress
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+      - name: Validate candidate CycloneDX SBOM
+        run: |
+          test -s "${{ runner.temp }}/candidate-image.cdx.json"
+          jq -e '.bomFormat == "CycloneDX"' "${{ runner.temp }}/candidate-image.cdx.json" > /dev/null
+
+      - name: Upload candidate SBOM
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: candidate-image-sbom
+          path: ${{ runner.temp }}/candidate-image.cdx.json
+          if-no-files-found: error
+
   e2e:
     # Playwright FUNCTIONAL suite (desktop + mobile projects) against the real prod
     # image (embedded H2, admin/admin), booted + torn down by scripts/e2e-run.sh —
     # exactly build-deploy.yml's `e2e` job.
     runs-on: ubuntu-latest
-    needs: [resolve-ref, build]
+    needs: [resolve-ref, candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -116,20 +401,18 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install e2e dependencies
         run: cd docs-web/src/main/webapp && npm ci
@@ -159,7 +442,7 @@ jobs:
     # environment the committed *-linux.png baselines match) — build-deploy.yml's
     # `e2e-visual` job.
     runs-on: ubuntu-latest
-    needs: [resolve-ref, build]
+    needs: [resolve-ref, candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -171,20 +454,18 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install e2e dependencies
         run: cd docs-web/src/main/webapp && npm ci
@@ -211,7 +492,7 @@ jobs:
     # build-deploy.yml's `e2e-harness` job. Non-gating there; here it is simply one
     # more regression signal that feeds the failure ticket.
     runs-on: ubuntu-latest
-    needs: [resolve-ref, build]
+    needs: [resolve-ref, candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -238,20 +519,18 @@ jobs:
       - name: Install browser-harness
         run: python -m pip install --upgrade "browser-harness==0.1.4"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Google Chrome
         uses: browser-actions/setup-chrome@b94431e051d1c52dcbe9a7092a4f10f827795416 # v2.1.0
@@ -281,7 +560,7 @@ jobs:
     # `if: failure()` fires when at least one job in `needs` failed OR was cancelled;
     # on an all-green run this job is skipped and no issue is touched.
     runs-on: ubuntu-latest
-    needs: [resolve-ref, build, e2e, e2e-visual, e2e-harness]
+    needs: [resolve-ref, build, codeql, trivy-fs, candidate-image, trivy-image, sbom, e2e, e2e-visual, e2e-harness]
     if: failure()
     permissions:
       contents: read
@@ -296,6 +575,11 @@ jobs:
           REF_UNDER_TEST: ${{ needs.resolve-ref.outputs.ref }}
           # Per-job results so the ticket names WHICH suite regressed.
           R_BUILD: ${{ needs.build.result }}
+          R_CODEQL: ${{ needs.codeql.result }}
+          R_TRIVY_FS: ${{ needs.trivy-fs.result }}
+          R_CANDIDATE: ${{ needs.candidate-image.result }}
+          R_TRIVY_IMAGE: ${{ needs.trivy-image.result }}
+          R_SBOM: ${{ needs.sbom.result }}
           R_E2E: ${{ needs.e2e.result }}
           R_VISUAL: ${{ needs.e2e-visual.result }}
           R_HARNESS: ${{ needs.e2e-harness.result }}
@@ -314,7 +598,16 @@ jobs:
           # Summarize which jobs failed (a job is "failed" unless it succeeded or was
           # skipped — cancelled/timed_out count as failures worth a ticket).
           failed=""
-          for entry in "build=${R_BUILD}" "e2e=${R_E2E}" "e2e-visual=${R_VISUAL}" "e2e-harness=${R_HARNESS}"; do
+          for entry in \
+            "build=${R_BUILD}" \
+            "codeql=${R_CODEQL}" \
+            "trivy-fs=${R_TRIVY_FS}" \
+            "candidate-image=${R_CANDIDATE}" \
+            "trivy-image=${R_TRIVY_IMAGE}" \
+            "sbom=${R_SBOM}" \
+            "e2e=${R_E2E}" \
+            "e2e-visual=${R_VISUAL}" \
+            "e2e-harness=${R_HARNESS}"; do
             name="${entry%%=*}"
             result="${entry#*=}"
             if [ "${result}" != "success" ] && [ "${result}" != "skipped" ]; then

@@ -1,0 +1,16 @@
+{
+  "schema": {
+    "required": [
+      "id",
+      "finding",
+      "reason",
+      "owner",
+      "introduced",
+      "expires",
+      "compensating_control",
+      "removal_issue"
+    ]
+  },
+  "recorded": "2026-07-15",
+  "exceptions": []
+}
