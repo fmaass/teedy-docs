@@ -11,9 +11,16 @@ import { unique } from './helpers'
 //      only credential) call /api/user and assert it returns the OWNER's identity
 //      (anonymous:false, username "admin"), and /api/document/list returns 200 — a
 //      genuinely auth-gated endpoint (it 403s for anonymous callers).
-//   3. Negative: a garbage token is rejected (403 on the gated endpoint).
-//   4. Negative: after the key is DELETED via the UI, the same token no longer
-//      authenticates (403) — revocation is honoured server-side.
+//   3. Negative: a garbage `tdapi_*` token is an INVALID credential — ApiKeyBasedSecurityFilter
+//      REJECTS it with 401 (AuthenticationFailed) and terminates the chain, on EVERY /api route
+//      (the gated endpoint AND /api/user). It is NOT downgraded to anonymous.
+//   4. Negative: after the key is DELETED via the UI, the same token resolves to no key — the SAME
+//      invalid-credential path — so it is rejected with 401. Revocation is honoured server-side.
+//
+// 401-vs-403 contract (credential-precedence work, this release; verified against the filters):
+//   * A `Bearer tdapi_*`-shaped header resolving to no key (garbage OR revoked) => 401 (bad credential).
+//   * NO credential at all on a gated endpoint => 403 (the resource denies the anonymous caller — an
+//     authorization denial, not an authentication rejection). That distinction is asserted below.
 //
 // If bearer auth were removed the positive read-back (username "admin") and the 200 on
 // the gated endpoint would both fail, so this is a real assertion of the server filter,
@@ -63,21 +70,24 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
     })
     expect(listRes.status(), 'gated endpoint with valid token').toBe(200)
 
-    // --- Negative: no credential at all is forbidden on the gated endpoint ---
+    // --- Negative: NO credential at all is an authorization denial on the gated endpoint (403) ---
+    // An absent credential is NOT a rejected credential: the api-key filter falls through to anonymous
+    // and the RESOURCE denies the anonymous caller — a genuine 403 authorization denial, which must
+    // stay 403 (distinct from the 401 bad-credential rejections below).
     const anonList = await anon.get(GATED_ENDPOINT)
     expect(anonList.status(), 'gated endpoint anonymous').toBe(403)
 
-    // --- Negative: a garbage token is rejected ---
+    // --- Negative: a garbage tdapi_ token is an INVALID credential — rejected with 401 ---
     const garbageRes = await anon.get(GATED_ENDPOINT, {
       headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
     })
-    expect(garbageRes.status(), 'gated endpoint with garbage token').toBe(403)
-    // /api/user never 403s (it answers anonymous:true) — assert the garbage token is
-    // treated as unauthenticated there too, so the positive read-back above is meaningful.
+    expect(garbageRes.status(), 'gated endpoint with garbage token').toBe(401)
+    // The rejection terminates the chain on EVERY /api route, so /api/user rejects it too (401) —
+    // it answers anonymous:true only when NO credential is presented, never for an invalid one.
     const garbageMe = await anon.get('/api/user', {
       headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
     })
-    expect((await garbageMe.json()).anonymous, 'garbage token is anonymous').toBe(true)
+    expect(garbageMe.status(), 'garbage token rejected on /api/user').toBe(401)
 
     // --- Revoke the key via the UI, then reuse the SAME token: it must be rejected ---
     const row = page.getByRole('row', { name: new RegExp(keyName) })
@@ -88,14 +98,16 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
     await confirm.getByRole('button', { name: 'Yes' }).click()
     await expect(page.getByRole('row', { name: new RegExp(keyName) })).toHaveCount(0)
 
+    // A deleted key resolves to no key — the SAME invalid-credential path as a garbage token — so a
+    // revoked token is rejected with 401 on every /api route, not silently downgraded to anonymous.
     const revokedList = await anon.get(GATED_ENDPOINT, {
       headers: { Authorization: `Bearer ${token}` },
     })
-    expect(revokedList.status(), 'gated endpoint with revoked token').toBe(403)
+    expect(revokedList.status(), 'gated endpoint with revoked token').toBe(401)
     const revokedMe = await anon.get('/api/user', {
       headers: { Authorization: `Bearer ${token}` },
     })
-    expect((await revokedMe.json()).anonymous, 'revoked token is anonymous').toBe(true)
+    expect(revokedMe.status(), 'revoked token rejected on /api/user').toBe(401)
   } finally {
     await anon.dispose()
     // Best-effort cleanup if the revoke step above did not run (early failure).

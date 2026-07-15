@@ -30,17 +30,25 @@ test.describe('LDAP settings persistence (#83)', () => {
     await page.locator('#ldap-filter').fill(FILTER)
     await page.locator('#ldap-default-email').fill(EMAIL)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByText('LDAP configuration saved')).toBeVisible()
+    // The two saves emit the SAME success toast (life 2000ms). On slower CI the first toast can still
+    // be showing when the second appears, so scope to .first() — two identical toasts would otherwise
+    // trip Playwright's strict-mode "resolved to 2 elements" and flake the assertion.
+    await expect(page.getByText('LDAP configuration saved').first()).toBeVisible()
 
     // 2. Disable LDAP (only 'enabled' is persisted false; the connection settings remain stored).
     await page.locator('#ldap-enabled').click()
     await expect(page.locator('#ldap-host')).toHaveCount(0)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByText('LDAP configuration saved')).toBeVisible()
+    await expect(page.getByText('LDAP configuration saved').first()).toBeVisible()
 
     try {
-      // 3. Full reload → fresh GET /app/config_ldap (this is where the #83 bug lived).
-      await page.goto('/#/settings/ldap')
+      // 3. FULL page reload → brand-new SPA (fresh QueryClient + a fresh SettingsLdap mount that
+      //    re-seeds its form from a fresh GET /app/config_ldap). This is load-bearing: the component
+      //    seeds its form ONCE (a `seeded` guard) and disable only flips `enabled` in the in-memory
+      //    reactive form, so a same-route hash nav would NOT refetch and the test would pass on stale
+      //    in-memory values even if the #83 GET bug were present. Only a real reload exercises the GET
+      //    path where #83 lived.
+      await page.reload()
       await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
 
       // 4. Re-enable and assert the retained settings repopulated the form.
