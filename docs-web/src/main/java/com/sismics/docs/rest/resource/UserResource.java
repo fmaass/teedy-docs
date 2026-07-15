@@ -57,6 +57,14 @@ import java.util.stream.Collectors;
 @Path("/user")
 public class UserResource extends BaseResource {
     /**
+     * Supported UI locale codes, mirrored from the SPA's set (the bundled English plus every lazy-loaded
+     * locale in docs-web/src/main/webapp/src/i18n.ts). A per-user locale (#82) is validated against this
+     * set on write so an unknown code is rejected rather than persisted. Keep in sync with the SPA.
+     */
+    private static final Set<String> SUPPORTED_LOCALES = Set.of(
+            "en", "de", "es", "fr", "it", "pt", "pl", "el", "ru", "zh_CN", "zh_TW", "sq_AL");
+
+    /**
      * Creates a new user.
      *
      * @api {put} /user Register a new user
@@ -136,6 +144,7 @@ public class UserResource extends BaseResource {
      * @apiGroup User
      * @apiParam {String{8..50}} password Password
      * @apiParam {String{1..100}} email E-mail
+     * @apiParam {String} locale Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or connected as guest
      * @apiError (client) ValidationError Validation error
@@ -144,20 +153,28 @@ public class UserResource extends BaseResource {
      *
      * @param password Password
      * @param email E-Mail
+     * @param locale Preferred UI locale code
      * @return Response
      */
     @POST
     public Response update(
         @FormParam("password") String password,
         @FormParam("current_password") String currentPassword,
-        @FormParam("email") String email) {
+        @FormParam("email") String email,
+        @FormParam("locale") String locale) {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
-        
+
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
         email = ValidationUtil.validateLength(email, "email", 1, 100, true);
+        // #82: optional preferred UI locale. Absent/blank leaves the stored value unchanged; a
+        // provided value must be one of the SPA-supported locale codes or the request is rejected.
+        locale = ValidationUtil.validateLength(locale, "locale", 1, 10, true);
+        if (locale != null && !SUPPORTED_LOCALES.contains(locale)) {
+            throw new ClientException("ValidationError", "'locale' is not a supported locale");
+        }
 
         // If changing password, verify the current password first
         if (StringUtils.isNotBlank(password)) {
@@ -175,6 +192,9 @@ public class UserResource extends BaseResource {
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
         UserUpdateUtil.applyEmailUpdate(user, email);
+        if (locale != null) {
+            user.setLocale(locale);
+        }
         user = userDao.update(user, principal.getId());
 
         // Change the password
@@ -853,6 +873,12 @@ public class UserResource extends BaseResource {
                     .add("storage_current", user.getStorageCurrent())
                     .add("totp_enabled", user.getTotpKey() != null)
                     .add("onboarding", user.isOnboarding());
+
+            // #82 preferred UI locale — emitted only when the user has set one (never pass null to
+            // the string overload). The SPA seeds a fresh device's locale from this on login.
+            if (user.getLocale() != null) {
+                response.add("locale", user.getLocale());
+            }
 
             // Base functions
             JsonArrayBuilder baseFunctions = Json.createArrayBuilder();

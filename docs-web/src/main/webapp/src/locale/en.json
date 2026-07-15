@@ -350,6 +350,7 @@
       "password_updated": "Password updated",
       "failed_update_password": "Failed to update password",
       "language_updated": "Language updated",
+      "language_sync_failed": "Language changed on this device, but could not be saved to your account",
       "theme_switched": "Theme switched to {name}",
       "sessions": {
         "title": "Active sessions",

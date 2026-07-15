@@ -118,6 +118,13 @@ public class User implements Loggable {
     private String oidcSubject;
 
     /**
+     * Preferred UI locale as an SPA locale code (e.g. "de", "zh_CN"). Nullable: null means "no
+     * server-side preference", so the SPA falls back to its on-device / default locale (#82).
+     */
+    @Column(name = "USE_LOCALE_C", length = 10)
+    private String locale;
+
+    /**
      * True if this account was provisioned by LDAP authentication. Used so the LDAP
      * handler never adopts a pre-existing INTERNAL account that happens to share a
      * username with an LDAP directory entry (account-hijack guard).
@@ -271,6 +278,15 @@ public class User implements Loggable {
 
     public User setOidcSubject(String oidcSubject) {
         this.oidcSubject = oidcSubject;
+        return this;
+    }
+
+    public String getLocale() {
+        return locale;
+    }
+
+    public User setLocale(String locale) {
+        this.locale = locale;
         return this;
     }
 

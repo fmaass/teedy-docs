@@ -8,12 +8,21 @@ vi.mock('../api/user', () => ({
   logout: vi.fn(),
 }))
 
+// Mock the i18n module: the store calls setLocale to seed the UI language from the server-side
+// preference. setLocale is a dependency, not the unit under test, so we assert the store's seeding
+// RULE (when it calls setLocale) without exercising vue-i18n's lazy locale loading.
+vi.mock('../i18n', () => ({
+  setLocale: vi.fn(),
+}))
+
 import { getCurrentUser, login as apiLogin, logout as apiLogout } from '../api/user'
+import { setLocale } from '../i18n'
 import { useAuthStore } from './auth'
 
 const mockGetCurrentUser = vi.mocked(getCurrentUser)
 const mockApiLogin = vi.mocked(apiLogin)
 const mockApiLogout = vi.mocked(apiLogout)
+const mockSetLocale = vi.mocked(setLocale)
 
 // Wrap a mock body in the minimal axios-response shape each API returns. We only care
 // about `.data`; the rest of the AxiosResponse envelope is irrelevant to the store, so
@@ -47,6 +56,7 @@ describe('auth store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    localStorage.clear()
   })
 
   describe('initial state and getters', () => {
@@ -81,6 +91,54 @@ describe('auth store', () => {
       expect(store.user).toBeNull()
       expect(store.initialized).toBe(true)
       expect(store.isAnonymous).toBe(true)
+    })
+  })
+
+  // #82: the store seeds the UI locale from the server-side preference, but ONLY when there is no
+  // explicit on-device choice. An explicit local choice (localStorage 'teedy-locale') always wins.
+  describe('fetchCurrentUser locale seeding', () => {
+    it('applies the server locale when no local choice exists', async () => {
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ locale: 'de' })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockSetLocale).toHaveBeenCalledWith('de')
+    })
+
+    it('does NOT overwrite an explicit local choice', async () => {
+      localStorage.setItem('teedy-locale', 'fr')
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ locale: 'de' })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockSetLocale).not.toHaveBeenCalled()
+    })
+
+    it('does nothing when the server carries no locale preference', async () => {
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo()))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockSetLocale).not.toHaveBeenCalled()
+    })
+
+    // BLOCKING-1 regression: a failing locale lazy-load (setLocale rejects) must NOT clear the
+    // already-authenticated user or flip the session to anonymous — an i18n failure is not an auth
+    // failure. The user stays loaded and initialized stays true.
+    it('keeps the authenticated user intact when setLocale rejects', async () => {
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'erin', locale: 'de' })))
+      mockSetLocale.mockRejectedValue(new Error('chunk load failed'))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockSetLocale).toHaveBeenCalledWith('de')
+      expect(store.user?.username).toBe('erin') // still authenticated — NOT cleared
+      expect(store.isAnonymous).toBe(false)
+      expect(store.initialized).toBe(true)
     })
   })
 

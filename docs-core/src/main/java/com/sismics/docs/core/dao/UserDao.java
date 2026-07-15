@@ -194,6 +194,12 @@ public class UserDao {
         userDb.setStorageQuota(user.getStorageQuota());
         userDb.setTotpKey(user.getTotpKey());
         userDb.setDisableDate(user.getDisableDate());
+        // #82 preferred UI locale. Every caller loads the User from the DB before mutating it, so a
+        // caller that does not touch the locale passes through the stored value unchanged; only the
+        // self-service POST /user sets a new one. Included in this explicit copy list because
+        // @DynamicUpdate keeps an unmodified column out of the UPDATE otherwise (same reason the
+        // other fields are copied here rather than relying on the managed entity).
+        userDb.setLocale(user.getLocale());
 
         // Create audit log
         AuditLogUtil.create(userDb, AuditLogType.UPDATE, userId);

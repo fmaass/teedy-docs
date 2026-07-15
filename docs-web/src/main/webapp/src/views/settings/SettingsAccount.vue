@@ -16,7 +16,10 @@ import api from '../../api/client'
 import { listSessions, deleteOtherSessions, type UserSession } from '../../api/user'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
-const { t } = useI18n()
+// `useI18n()` with no options binds to the GLOBAL scope, so `locale` is the effective active UI
+// locale (including a value server-seeded at login via the auth store) — the source of truth for
+// what is actually rendered, unlike localStorage which is only the explicit on-device choice.
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const { switchTheme } = useThemeSwitch()
@@ -44,7 +47,9 @@ const languages = [
 
 const themeOptions = themeNames.map((n) => ({ label: n, value: n }))
 
-const selectedLocale = ref(localStorage.getItem('teedy-locale') || 'en')
+// Seed the selector from the ACTIVE locale (may have been server-seeded), so the shown selection
+// matches what is rendered — not from localStorage, which is empty on a freshly-seeded device.
+const selectedLocale = ref(locale.value as string)
 const selectedTheme = ref(getStoredTheme())
 
 interface SelectChangeEvent {
@@ -98,7 +103,7 @@ function formatSessionDate(ts?: number): string {
 }
 
 onMounted(() => {
-  selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
+  selectedLocale.value = locale.value as string
   loadSessions()
 })
 
@@ -134,9 +139,22 @@ async function handleSave() {
 }
 
 async function handleLocaleChange(locale: string) {
+  // Apply on-device immediately and record the explicit choice (this localStorage write is what
+  // makes the local choice win over the server-seeded value on later logins — see stores/auth.ts).
   await setLocale(locale)
   localStorage.setItem('teedy-locale', locale)
   toast.add({ severity: 'success', summary: t('ui.account.language_updated'), life: 2000 })
+
+  // #82: persist the preference server-side so a fresh device / new login seeds this language.
+  // A server failure never blocks the local switch — the choice already applied and persisted
+  // on-device; we only warn that cross-device sync did not happen.
+  try {
+    const params = new URLSearchParams()
+    params.set('locale', locale)
+    await api.post('/user', params)
+  } catch {
+    toast.add({ severity: 'warn', summary: t('ui.account.language_sync_failed'), life: 3000 })
+  }
 }
 
 async function handleThemeChange(name: string) {

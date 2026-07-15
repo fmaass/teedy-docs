@@ -10,6 +10,9 @@ export interface UserInfo {
   is_default_password: boolean
   base_functions: string[]
   onboarding: boolean
+  // #82 server-side preferred UI locale. Present only when the user has set one; the SPA seeds a
+  // fresh device's locale from this at login/boot when no explicit on-device choice exists.
+  locale?: string
 }
 
 export interface UserListItem {
