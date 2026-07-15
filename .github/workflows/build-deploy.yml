@@ -482,14 +482,57 @@ jobs:
           name: candidate-image-oci
           path: ${{ runner.temp }}
 
+      - name: Validate and materialize Trivy exceptions
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          Path(".trivyignore.generated").write_text("\n".join(ids) + ("\n" if ids else ""))
+          PY
+
+      - name: Extract candidate OCI layout
+        run: |
+          mkdir "${{ runner.temp }}/candidate-image-oci"
+          tar -xf "${{ runner.temp }}/candidate-image.oci.tar" \
+            -C "${{ runner.temp }}/candidate-image-oci"
+          test -s "${{ runner.temp }}/candidate-image-oci/index.json"
+
       - name: Scan candidate image
         run: |
           docker run --rm \
             -v "${{ runner.temp }}:/scan:ro" \
+            -v "${{ github.workspace }}:/workspace:ro" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
-            image --input /scan/candidate-image.oci.tar --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+            image --input /scan/candidate-image-oci --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /workspace/.trivyignore.generated
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
   sbom:
@@ -505,13 +548,20 @@ jobs:
           name: candidate-image-oci
           path: ${{ runner.temp }}
 
+      - name: Extract candidate OCI layout
+        run: |
+          mkdir "${{ runner.temp }}/candidate-image-oci"
+          tar -xf "${{ runner.temp }}/candidate-image.oci.tar" \
+            -C "${{ runner.temp }}/candidate-image-oci"
+          test -s "${{ runner.temp }}/candidate-image-oci/index.json"
+
       - name: Generate candidate CycloneDX SBOM
         run: |
           docker run --rm \
             -v "${{ runner.temp }}:/scan" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
-            image --input /scan/candidate-image.oci.tar --format cyclonedx \
+            image --input /scan/candidate-image-oci --format cyclonedx \
             --output /scan/candidate-image.cdx.json --exit-code 0 --no-progress
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
@@ -835,6 +885,14 @@ jobs:
           outputs: type=oci,dest=${{ runner.temp }}/arm64-image.oci.tar
           tags: teedy-arm64:local
 
+      - name: Extract additional arm64 OCI layout
+        if: steps.cfg.outputs.prerelease == 'false'
+        run: |
+          mkdir "${{ runner.temp }}/arm64-image-oci"
+          tar -xf "${{ runner.temp }}/arm64-image.oci.tar" \
+            -C "${{ runner.temp }}/arm64-image-oci"
+          test -s "${{ runner.temp }}/arm64-image-oci/index.json"
+
       - name: Scan additional arm64 child
         if: steps.cfg.outputs.prerelease == 'false'
         run: |
@@ -842,7 +900,7 @@ jobs:
             -v "${{ runner.temp }}:/scan:ro" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
-            image --input /scan/arm64-image.oci.tar --scanners vuln \
+            image --input /scan/arm64-image-oci --scanners vuln \
             --severity HIGH,CRITICAL --exit-code 1 --no-progress
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
@@ -853,7 +911,7 @@ jobs:
             -v "${{ runner.temp }}:/scan" \
             -v "trivy-cache:/root/.cache/trivy" \
             aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
-            image --input /scan/arm64-image.oci.tar --format cyclonedx \
+            image --input /scan/arm64-image-oci --format cyclonedx \
             --output /scan/arm64-image.cdx.json --exit-code 0 --no-progress
           # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
 
