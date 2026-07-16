@@ -32,10 +32,13 @@ import { dirname, join, resolve } from 'node:path';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
-const resourceDir = join(
-  repoRoot,
-  'docs-web/src/main/java/com/sismics/docs/rest/resource'
-);
+// The packages Jersey scans for resources (web.xml jersey.config.server.provider.packages,
+// mirrored by BaseJerseyTest and TestCsrfGetInventory — keep all four in sync): the legacy
+// resource package plus the Phase G document-slice edge.
+const resourceDirs = [
+  join(repoRoot, 'docs-web/src/main/java/com/sismics/docs/rest/resource'),
+  join(repoRoot, 'docs-web/src/main/java/com/sismics/docs/rest/document'),
+];
 const specPath = join(
   repoRoot,
   'docs-web/src/main/webapp/public/apidoc/openapi.json'
@@ -57,7 +60,10 @@ function normalizePath(raw) {
 }
 
 function joinPaths(base, sub) {
-  const a = base.replace(/\/+$/, '');
+  // JAX-RS treats @Path("document") and @Path("/document") identically; normalize to the
+  // leading-slash form the OpenAPI spec uses.
+  let a = base.replace(/\/+$/, '');
+  if (a && !a.startsWith('/')) a = `/${a}`;
   const b = (sub || '').replace(/^\/+/, '');
   if (!b) return a || '/';
   return `${a}/${b}`;
@@ -206,25 +212,26 @@ function extractMethodBody(lines, bodyStart) {
 }
 
 function loadSurface() {
-  // Discover JAX-RS resources by CONTENT, not filename: any .java in the resource
-  // package that carries a class-level @Path is a root resource, regardless of its
-  // name (a future Health.java without the *Resource suffix must still be caught).
-  // Jersey scans the single package com.sismics.docs.rest.resource
-  // (web.xml: jersey.config.server.provider.packages), so that directory is the
-  // authoritative source set. BaseResource (abstract, no class-level @Path) is
-  // excluded intrinsically by the @Path filter — no name-based exclusion needed.
-  const files = readdirSync(resourceDir)
-    .filter((f) => f.endsWith('.java'))
-    .sort();
-
+  // Discover JAX-RS resources by CONTENT, not filename: any .java in a scanned package
+  // that carries a class-level @Path is a root resource, regardless of its name (a future
+  // Health.java without the *Resource suffix must still be caught). The directory set
+  // mirrors Jersey's provider.packages scan config (see resourceDirs above), so both the
+  // legacy resource package and the document-slice edge are authoritative sources.
+  // BaseResource (abstract, no class-level @Path) is excluded intrinsically by the @Path
+  // filter — no name-based exclusion needed.
   const all = [];
   const classPaths = new Map();
-  for (const f of files) {
-    const source = readFileSync(join(resourceDir, f), 'utf8');
-    if (extractClassPath(source) === null) continue; // not a root JAX-RS resource
-    const parsed = parseResource(source, f);
-    classPaths.set(f, parsed.classPath);
-    for (const ep of parsed.endpoints) all.push(ep);
+  for (const dir of resourceDirs) {
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.java'))
+      .sort();
+    for (const f of files) {
+      const source = readFileSync(join(dir, f), 'utf8');
+      if (extractClassPath(source) === null) continue; // not a root JAX-RS resource
+      const parsed = parseResource(source, f);
+      classPaths.set(f, parsed.classPath);
+      for (const ep of parsed.endpoints) all.push(ep);
+    }
   }
   return { endpoints: all, classPaths };
 }
