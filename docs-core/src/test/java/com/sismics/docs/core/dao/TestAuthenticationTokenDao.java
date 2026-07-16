@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 public class TestAuthenticationTokenDao extends BaseTransactionalTest {
 
     private String createToken(AuthenticationTokenDao dao, String userId) {
-        return dao.create(new AuthenticationToken().setUserId(userId).setLongLasted(false));
+        // The credential-epoch stamp column is NOT NULL (migration 055); a directly-minted test token must
+        // carry a stamp. This suite exercises the revocation primitives, not the epoch, so 0 is incidental.
+        return dao.create(new AuthenticationToken().setUserId(userId).setLongLasted(false).setCredentialEpoch(0L));
     }
 
     @Test

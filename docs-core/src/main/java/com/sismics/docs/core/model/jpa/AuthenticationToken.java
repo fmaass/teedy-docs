@@ -66,6 +66,16 @@ public class AuthenticationToken {
     @Column(name = "AUT_OIDC_IDTOKEN_C", length = 4000)
     private String oidcIdToken;
 
+    /**
+     * Credential epoch stamped at mint: the authorizing user's credential epoch at the moment this token
+     * was issued (the proof-time epoch), never a later re-read. The token authenticates only while this
+     * stamp still equals the user's current epoch, so a credential-epoch bump revokes it. Nullable in the
+     * object model solely so a malformed/legacy row carrying no stamp is representable and fails closed at
+     * validation; every production mint stamps it and the column is NOT NULL.
+     */
+    @Column(name = "AUT_CREDENTIALEPOCH_N", nullable = false, updatable = false)
+    private Long credentialEpoch;
+
     public String getId() {
         return id;
     }
@@ -135,6 +145,15 @@ public class AuthenticationToken {
 
     public AuthenticationToken setOidcIdToken(String oidcIdToken) {
         this.oidcIdToken = oidcIdToken;
+        return this;
+    }
+
+    public Long getCredentialEpoch() {
+        return credentialEpoch;
+    }
+
+    public AuthenticationToken setCredentialEpoch(Long credentialEpoch) {
+        this.credentialEpoch = credentialEpoch;
         return this;
     }
 

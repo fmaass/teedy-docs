@@ -52,6 +52,13 @@ public class ApiKeyBasedSecurityFilter extends SecurityFilter {
             return AuthAttempt.ignore();
         }
 
+        // Credential-epoch check: a key stamped at an epoch the user has since advanced past is dead.
+        // Checked BEFORE the last-used bookkeeping so a revoked key never touches the row; falls through
+        // to anonymous (denied downstream) rather than a hard 401, matching the disabled-account handling.
+        if (!epochMatches(apiKey.getCredentialEpoch(), user.getCredentialEpoch())) {
+            return AuthAttempt.ignore();
+        }
+
         apiKeyDao.updateLastUsedDate(apiKey.getId());
         return AuthAttempt.authenticated(user, null);
     }

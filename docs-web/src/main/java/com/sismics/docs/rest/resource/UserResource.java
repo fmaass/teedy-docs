@@ -256,7 +256,11 @@ public class UserResource extends BaseResource {
                 .setUserId(user.getId())
                 .setLongLasted(longLasted)
                 .setIp(StringUtils.abbreviate(ip, 45))
-                .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000));
+                .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
+                // Stamp the current in-transaction user entity's epoch. In Phase 2 the self password-change
+                // bumps the epoch in this same transaction before the rotation, so the replacement session
+                // naturally stamps the just-bumped epoch with no change here.
+                .setCredentialEpoch(user.getCredentialEpoch());
         String tokenValue = authenticationTokenDao.create(newToken);
 
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
@@ -497,7 +501,10 @@ public class UserResource extends BaseResource {
             .setUserId(user.getId())
             .setLongLasted(longLasted)
             .setIp(StringUtils.abbreviate(ip, 45))
-            .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000));
+            .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
+            // Proof-time stamp: the epoch of the user the authenticating transaction just validated (also
+            // covers the guest branch, which resolved the guest via getActiveByUsername into this same user).
+            .setCredentialEpoch(user.getCredentialEpoch());
         String token = authenticationTokenDao.create(authenticationToken);
         
         // Cleanup old session tokens

@@ -418,6 +418,28 @@ public class UserDao {
     }
 
     /**
+     * Atomically advances a user's credential epoch by one, in a single in-place SQL statement
+     * ({@code set USE_CREDENTIALEPOCH_N = USE_CREDENTIALEPOCH_N + 1}) — never a read-modify-write. This is
+     * the SOLE writer of the epoch after insert: doing the increment in the database means two concurrent
+     * bumps compose to +2 (the row lock the UPDATE takes serializes them) and an unrelated
+     * {@link #update(User, String)} — which does not carry the epoch in its copy list — cannot overwrite or
+     * lower a just-bumped value. Scoped to an active (non-deleted) user; a deleted user already dead-ends
+     * every credential via the eligibility predicate, so bumping it would be a no-op with no rows matched.
+     * Portable across H2 and PostgreSQL (a plain arithmetic UPDATE).
+     *
+     * @param userId User ID
+     * @return the number of rows updated (1 for an active user, 0 if absent or soft-deleted)
+     */
+    public int bumpCredentialEpoch(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "update T_USER set USE_CREDENTIALEPOCH_N = USE_CREDENTIALEPOCH_N + 1"
+                        + " where USE_ID_C = :userId and USE_DELETEDATE_D is null");
+        q.setParameter("userId", userId);
+        return q.executeUpdate();
+    }
+
+    /**
      * Stores the OIDC issuer and subject on a user for stable identity binding.
      *
      * @param userId User ID

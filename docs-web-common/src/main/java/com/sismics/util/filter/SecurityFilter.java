@@ -65,6 +65,17 @@ public abstract class SecurityFilter implements Filter {
      */
     public static final String AUTH_TOKEN_ID_ATTRIBUTE = "auth_token_id";
 
+    /**
+     * Name of the request attribute carrying the {@code authorizedEpoch}: the credential epoch of the user
+     * that the winning credential proved, read from the fresh user-load that validated the request. A
+     * resource minting a new credential on this request (an API key) stamps THIS value onto it — the
+     * proof-time epoch — rather than re-reading a possibly-newer "current" epoch, which is what makes a
+     * concurrent reset invalidate the freshly-minted credential. Set on the SAME winning-principal
+     * installation path as {@link #AUTH_MECHANISM_ATTRIBUTE}, so it is present for a key minted under ANY
+     * mechanism (token cookie, api key, or trusted header), not only the two credential filters.
+     */
+    public static final String AUTHORIZED_EPOCH_ATTRIBUTE = "authorized_epoch";
+
     public static final String MECHANISM_TOKEN_COOKIE = "token-cookie";
     public static final String MECHANISM_API_KEY = "api-key";
     public static final String MECHANISM_TRUSTED_HEADER = "trusted-header";
@@ -131,6 +142,21 @@ public abstract class SecurityFilter implements Filter {
      */
     protected boolean isEligible(User user) {
         return user != null && user.getDeleteDate() == null && user.getDisableDate() == null;
+    }
+
+    /**
+     * Exact-equality credential-epoch check. A presented credential is honored ONLY while the epoch it was
+     * stamped with at mint still equals the user's current epoch. A stamp BELOW the user's epoch is a
+     * revoked (stale) credential; a stamp ABOVE it is a corrupt/future value — both are rejected (the
+     * caller resolves the mismatch to {@code ignore()} → anonymous, matching the disabled/deleted
+     * handling, not a hard 401). A null stamp (a malformed/legacy row) is rejected: it fails closed.
+     *
+     * @param stampedEpoch the epoch stamped on the credential at mint (nullable)
+     * @param userEpoch the user's current credential epoch
+     * @return true only when the stamp is present and exactly equals the user's epoch
+     */
+    protected boolean epochMatches(Long stampedEpoch, long userEpoch) {
+        return stampedEpoch != null && stampedEpoch == userEpoch;
     }
 
     /**
@@ -205,6 +231,10 @@ public abstract class SecurityFilter implements Filter {
                 if (!hasIdentifiedUser(request)) {
                     injectAuthenticatedUser(request, attempt.user);
                     request.setAttribute(AUTH_MECHANISM_ATTRIBUTE, getMechanism());
+                    // Carry the proof-time epoch on the SAME winning-principal path as the mechanism, so a
+                    // resource minting a new credential (an API key) stamps the epoch this request's
+                    // authorization observed regardless of which mechanism won (cookie, api key, header).
+                    request.setAttribute(AUTHORIZED_EPOCH_ATTRIBUTE, attempt.user.getCredentialEpoch());
                     if (attempt.authTokenId != null) {
                         request.setAttribute(AUTH_TOKEN_ID_ATTRIBUTE, attempt.authTokenId);
                     }
