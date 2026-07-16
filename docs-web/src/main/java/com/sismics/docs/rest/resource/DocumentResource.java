@@ -1,40 +1,30 @@
 package com.sismics.docs.rest.resource;
 
 import com.google.common.collect.Lists;
-import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.AuditLogDao;
-import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FavoriteDao;
 import com.sismics.docs.core.dao.FileDao;
-import com.sismics.docs.core.dao.RelationDao;
-import com.sismics.docs.core.dao.RouteStepDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.DocumentCriteria;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
-import com.sismics.docs.core.dao.dto.AclDto;
-import com.sismics.docs.core.dao.dto.ContributorDto;
 import com.sismics.docs.core.dao.dto.DocumentDto;
-import com.sismics.docs.core.dao.dto.RelationDto;
-import com.sismics.docs.core.dao.dto.RouteStepDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.event.DocumentRestoredAsyncEvent;
 import com.sismics.docs.core.event.DocumentTrashedAsyncEvent;
-import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.AuditLog;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.ConfigUtil;
-import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.ExportGuard;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
@@ -49,7 +39,6 @@ import com.sismics.docs.rest.util.DocumentSearchCriteriaUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
-import com.sismics.rest.util.AclUtil;
 import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EmailUtil;
@@ -72,7 +61,6 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
 import org.apache.commons.collections4.CollectionUtils;
@@ -91,17 +79,14 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.text.MessageFormat;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Document REST resources.
@@ -114,232 +99,6 @@ public class DocumentResource extends BaseResource {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(DocumentResource.class);
-
-    /**
-     * Upper bound on the RAW (pre-sanitization) description a client may submit. A hostile
-     * or malformed payload is rejected here before the sanitizer runs, so sanitization can
-     * never be handed an unbounded string.
-     */
-    private static final int DESCRIPTION_RAW_MAX = 100000;
-
-    /**
-     * Upper bound on the STORED (post-sanitization) description. Matches the widened
-     * DOC_DESCRIPTION_C column (dbupdate-048).
-     */
-    private static final int DESCRIPTION_STORED_MAX = 50000;
-
-    /**
-     * Enforce the description contract at a REST ingress: reject an oversized raw payload,
-     * sanitize to the allowlist, then validate the stored length. Returns null for a null
-     * (unsubmitted) description so a partial update can distinguish "not sent" from "empty".
-     *
-     * @param description Raw description form value (may be null)
-     * @return Sanitized description within the stored bound, or null
-     * @throws ClientException on a too-large raw payload or too-large sanitized result
-     */
-    private static String sanitizeDescription(String description) {
-        // Bound the raw input first so the sanitizer never processes an unbounded string.
-        description = ValidationUtil.validateLength(description, "description", 0, DESCRIPTION_RAW_MAX, true);
-        String sanitized = DescriptionSanitizer.sanitize(description);
-        // The stored contract: sanitized HTML must fit the widened column.
-        return ValidationUtil.validateLength(sanitized, "description", 0, DESCRIPTION_STORED_MAX, true);
-    }
-
-    /**
-     * Returns a document.
-     *
-     * @api {get} /document/:id Get a document
-     * @apiName GetDocument
-     * @apiGroup Document
-     * @apiParam {String} id Document ID
-     * @apiParam {String} [share] Share ID
-     * @apiParam {Boolean} [files] If true includes files information
-     * @apiSuccess {String} id ID
-     * @apiSuccess {String} title Title
-     * @apiSuccess {String} description Description
-     * @apiSuccess {Number} create_date Create date (timestamp)
-     * @apiSuccess {Number} update_date Update date (timestamp)
-     * @apiSuccess {String} language Language
-     * @apiSuccess {Boolean} shared True if the document is shared
-     * @apiSuccess {Number} file_count Number of files in this document
-     * @apiSuccess {Object[]} tags List of tags
-     * @apiSuccess {String} tags.id ID
-     * @apiSuccess {String} tags.name Name
-     * @apiSuccess {String} tags.color Color
-     * @apiSuccess {String} subject Subject
-     * @apiSuccess {String} identifier Identifier
-     * @apiSuccess {String} publisher Publisher
-     * @apiSuccess {String} format Format
-     * @apiSuccess {String} source Source
-     * @apiSuccess {String} type Type
-     * @apiSuccess {String} coverage Coverage
-     * @apiSuccess {String} rights Rights
-     * @apiSuccess {String} creator Username of the creator
-     * @apiSuccess {String} file_id Main file ID
-     * @apiSuccess {Boolean} favorite True if the current user has favorited this document
-     * @apiSuccess {Boolean} writable True if the document is writable by the current user
-     * @apiSuccess {Object[]} acls List of ACL
-     * @apiSuccess {String} acls.id ID
-     * @apiSuccess {String="READ","WRITE"} acls.perm Permission
-     * @apiSuccess {String} acls.name Target name
-     * @apiSuccess {String="USER","GROUP","SHARE"} acls.type Target type
-     * @apiSuccess {Object[]} inherited_acls List of ACL not directly applied to this document
-     * @apiSuccess {String="READ","WRITE"} inherited_acls.perm Permission
-     * @apiSuccess {String} inherited_acls.source_id Source ID
-     * @apiSuccess {String} inherited_acls.source_name Source name
-     * @apiSuccess {String} inherited_acls.source_color The color of the Source
-     * @apiSuccess {String} inherited_acls.id ID
-     * @apiSuccess {String} inherited_acls.name Target name
-     * @apiSuccess {String="USER","GROUP","SHARE"} inherited_acls.type Target type
-     * @apiSuccess {Object[]} contributors List of users having contributed to this document
-     * @apiSuccess {String} contributors.username Username
-     * @apiSuccess {String} contributors.email E-mail
-     * @apiSuccess {Object[]} relations List of document related to this one
-     * @apiSuccess {String} relations.id ID
-     * @apiSuccess {String} relations.title Title
-     * @apiSuccess {String} relations.source True if this document is the source of the relation
-     * @apiSuccess {Object} route_step The current active route step
-     * @apiSuccess {String} route_step.name Route step name
-     * @apiSuccess {String="APPROVE", "VALIDATE"} route_step.type Route step type
-     * @apiSuccess {Boolean} route_step.transitionable True if the route step is actionable by the current user
-     * @apiSuccess {Object[]} files List of files
-     * @apiSuccess {String} files.id ID
-     * @apiSuccess {String} files.name File name
-     * @apiSuccess {String} files.version Zero-based version number
-     * @apiSuccess {String} files.mimetype MIME type
-     * @apiSuccess {String} files.create_date Create date (timestamp)
-     * @apiSuccess {Object[]} metadata List of metadata
-     * @apiSuccess {String} metadata.id ID
-     * @apiSuccess {String} metadata.name Name
-     * @apiSuccess {String="STRING","INTEGER","FLOAT","DATE","BOOLEAN"} metadata.type Type
-     * @apiSuccess {Object} metadata.value Value
-     * @apiError (client) NotFound Document not found
-     * @apiPermission none
-     * @apiVersion 1.5.0
-     *
-     * @param documentId Document ID
-     * @param shareId Share ID
-     * @return Response
-     */
-    @GET
-    @Path("{id: [a-z0-9\\-]+}")
-    public Response get(
-            @PathParam("id") String documentId,
-            @QueryParam("share") String shareId,
-            @QueryParam("files") Boolean files) {
-        authenticate();
-
-        DocumentDao documentDao = new DocumentDao();
-        DocumentDto documentDto = documentDao.getDocument(documentId, PermType.READ, getTargetIdList(shareId));
-        if (documentDto == null) {
-            throw new NotFoundException();
-        }
-
-        JsonObjectBuilder document = DocumentResourceHelper.createDocumentObjectBuilder(documentDto)
-                .add("creator", documentDto.getCreator())
-                .add("coverage", JsonUtil.nullable(documentDto.getCoverage()))
-                .add("file_count", documentDto.getFileCount())
-                .add("format", JsonUtil.nullable(documentDto.getFormat()))
-                .add("identifier", JsonUtil.nullable(documentDto.getIdentifier()))
-                .add("publisher", JsonUtil.nullable(documentDto.getPublisher()))
-                .add("rights", JsonUtil.nullable(documentDto.getRights()))
-                .add("source", JsonUtil.nullable(documentDto.getSource()))
-                .add("subject", JsonUtil.nullable(documentDto.getSubject()))
-                .add("type", JsonUtil.nullable(documentDto.getType()));
-
-        List<TagDto> tagDtoList = null;
-        if (principal.isAnonymous()) {
-            // No tags in anonymous mode (sharing)
-            document.add("tags", Json.createArrayBuilder());
-        } else {
-            // Add tags visible by the current user on this document
-            TagDao tagDao = new TagDao();
-            tagDtoList = tagDao.findByCriteria(
-                    new TagCriteria()
-                            .setTargetIdList(getTargetIdList(null)) // No tags for shares
-                            .setDocumentId(documentId),
-                    new SortCriteria(1, true));
-            document.add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
-        }
-
-        // Add ACL
-        AclUtil.addAcls(document, documentId, getTargetIdList(shareId));
-
-        // Add computed ACL
-        if (tagDtoList != null) {
-            JsonArrayBuilder aclList = Json.createArrayBuilder();
-            for (TagDto tagDto : tagDtoList) {
-                AclDao aclDao = new AclDao();
-                List<AclDto> aclDtoList = aclDao.getBySourceId(tagDto.getId(), AclType.USER);
-                for (AclDto aclDto : aclDtoList) {
-                    aclList.add(Json.createObjectBuilder()
-                            .add("perm", aclDto.getPerm().name())
-                            .add("source_id", tagDto.getId())
-                            .add("source_name", tagDto.getName())
-                            .add("source_color", tagDto.getColor())
-                            .add("id", aclDto.getTargetId())
-                            .add("name", JsonUtil.nullable(aclDto.getTargetName()))
-                            .add("type", aclDto.getTargetType()));
-                }
-            }
-            document.add("inherited_acls", aclList);
-        }
-
-        // Add contributors
-        ContributorDao contributorDao = new ContributorDao();
-        List<ContributorDto> contributorDtoList = contributorDao.getByDocumentId(documentId);
-        JsonArrayBuilder contributorList = Json.createArrayBuilder();
-        for (ContributorDto contributorDto : contributorDtoList) {
-            contributorList.add(Json.createObjectBuilder()
-                    .add("username", contributorDto.getUsername())
-                    .add("email", contributorDto.getEmail()));
-        }
-        document.add("contributors", contributorList);
-
-        // Add relations
-        RelationDao relationDao = new RelationDao();
-        List<RelationDto> relationDtoList = relationDao.getByDocumentId(documentId);
-        JsonArrayBuilder relationList = Json.createArrayBuilder();
-        for (RelationDto relationDto : relationDtoList) {
-            relationList.add(Json.createObjectBuilder()
-                    .add("id", relationDto.getId())
-                    .add("title", relationDto.getTitle())
-                    .add("source", relationDto.isSource()));
-        }
-        document.add("relations", relationList);
-
-        // Add current route step
-        RouteStepDto routeStepDto = new RouteStepDao().getCurrentStep(documentId);
-        if (routeStepDto != null && !principal.isAnonymous()) {
-            JsonObjectBuilder step = routeStepDto.toJson();
-            step.add("transitionable", getTargetIdList(null).contains(routeStepDto.getTargetId()));
-            document.add("route_step", step);
-        }
-
-        // Add custom metadata
-        MetadataUtil.addMetadata(document, documentId);
-
-        // Add the current user's favorite flag (private per-user state; always false for the
-        // anonymous share principal, which has no favorites).
-        boolean favorite = !principal.isAnonymous()
-                && new FavoriteDao().getByUserAndDocument(principal.getId(), documentId) != null;
-        document.add("favorite", favorite);
-
-        // Add files
-        if (Boolean.TRUE == files) {
-            FileDao fileDao = new FileDao();
-            List<File> fileList = fileDao.getByDocumentsIds(Collections.singleton(documentId));
-
-            JsonArrayBuilder filesArrayBuilder = Json.createArrayBuilder();
-            for (File fileDb : fileList) {
-                filesArrayBuilder.add(RestUtil.fileToJsonObjectBuilder(fileDb));
-            }
-
-            document.add("files", filesArrayBuilder);
-        }
-
-        return Response.ok().entity(document.build()).build();
-    }
 
     /**
      * Export a document to PDF.
@@ -872,7 +631,7 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         title = ValidationUtil.validateLength(title, "title", 1, 100, false);
         language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = sanitizeDescription(description);
+        description = DocumentResourceHelper.sanitizeDescription(description);
         subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
         identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
         publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
@@ -930,178 +689,6 @@ public class DocumentResource extends BaseResource {
 
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("id", document.getId());
-        return Response.ok().entity(response.build()).build();
-    }
-
-    /**
-     * Partial-updates the document. Only fields present in the submitted form are modified;
-     * omitted fields are left unchanged. Title and language are always required.
-     *
-     * @api {post} /document/:id Update a document
-     * @apiName PostDocument
-     * @apiGroup Document
-     * @apiParam {String} id ID
-     * @apiParam {String} title Title
-     * @apiParam {String} [description] Description (omit to preserve)
-     * @apiParam {String} [subject] Subject (omit to preserve)
-     * @apiParam {String} [identifier] Identifier (omit to preserve)
-     * @apiParam {String} [publisher] Publisher (omit to preserve)
-     * @apiParam {String} [format] Format (omit to preserve)
-     * @apiParam {String} [source] Source (omit to preserve)
-     * @apiParam {String} [type] Type (omit to preserve)
-     * @apiParam {String} [coverage] Coverage (omit to preserve)
-     * @apiParam {String} [rights] Rights (omit to preserve)
-     * @apiParam {String[]} [tags] List of tags ID (omit to preserve)
-     * @apiParam {String[]} [relations] List of related documents ID (omit to preserve)
-     * @apiParam {Boolean} [relations_reset] Clear all outgoing relations when true and no relations supplied
-     * @apiParam {String[]} [metadata_id] List of metadata ID (omit to preserve)
-     * @apiParam {String[]} [metadata_value] List of metadata values
-     * @apiParam {String} [language] Language
-     * @apiParam {Number} [create_date] Create date (timestamp, omit to preserve)
-     * @apiSuccess {String} id Document ID
-     * @apiError (client) ForbiddenError Access denied or document not writable
-     * @apiError (client) ValidationError Validation error
-     * @apiError (client) NotFound Document not found
-     * @apiPermission user
-     * @apiVersion 1.5.0
-     *
-     * @param id Document ID
-     * @param form Form parameters
-     * @return Response
-     */
-    @POST
-    @Path("{id: [a-z0-9\\-]+}")
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    public Response update(
-            @PathParam("id") String id,
-            MultivaluedMap<String, String> form) {
-        String title = form.getFirst("title");
-        String description = form.getFirst("description");
-        String subject = form.getFirst("subject");
-        String identifier = form.getFirst("identifier");
-        String publisher = form.getFirst("publisher");
-        String format = form.getFirst("format");
-        String source = form.getFirst("source");
-        String type = form.getFirst("type");
-        String coverage = form.getFirst("coverage");
-        String rights = form.getFirst("rights");
-        List<String> tagList = form.get("tags");
-        List<String> relationList = form.get("relations");
-        List<String> metadataIdList = form.get("metadata_id");
-        List<String> metadataValueList = form.get("metadata_value");
-        String language = form.getFirst("language");
-        String createDateStr = form.getFirst("create_date");
-        if (!authenticate()) {
-            throw new ForbiddenClientException();
-        }
-
-        // Validate input data
-        title = ValidationUtil.validateLength(title, "title", 1, 100, false);
-        language = ValidationUtil.validateLength(language, "language", 3, 7, false);
-        description = sanitizeDescription(description);
-        subject = ValidationUtil.validateLength(subject, "subject", 0, 500, true);
-        identifier = ValidationUtil.validateLength(identifier, "identifier", 0, 500, true);
-        publisher = ValidationUtil.validateLength(publisher, "publisher", 0, 500, true);
-        format = ValidationUtil.validateLength(format, "format", 0, 500, true);
-        source = ValidationUtil.validateLength(source, "source", 0, 500, true);
-        type = ValidationUtil.validateLength(type, "type", 0, 100, true);
-        coverage = ValidationUtil.validateLength(coverage, "coverage", 0, 100, true);
-        rights = ValidationUtil.validateLength(rights, "rights", 0, 100, true);
-        Date createDate = ValidationUtil.validateDate(createDateStr, "create_date", true);
-        if (language != null && !Constants.SUPPORTED_LANGUAGES.contains(language)) {
-            throw new ClientException("ValidationError", MessageFormat.format("{0} is not a supported language", language));
-        }
-
-        // Check write permission
-        AclDao aclDao = new AclDao();
-        if (!aclDao.checkPermission(id, PermType.WRITE, getTargetIdList(null))) {
-            throw new ForbiddenClientException();
-        }
-
-        // Get the document
-        DocumentDao documentDao = new DocumentDao();
-        Document document = documentDao.getById(id);
-        if (document == null) {
-            throw new NotFoundException();
-        }
-
-        // Partial update: only modify fields whose form params were submitted.
-        // title and language are always required; all others are optional.
-        document.setTitle(title);
-        document.setLanguage(language);
-        if (description != null) {
-            document.setDescription(description);
-        }
-        if (subject != null) {
-            document.setSubject(subject);
-        }
-        if (identifier != null) {
-            document.setIdentifier(identifier);
-        }
-        if (publisher != null) {
-            document.setPublisher(publisher);
-        }
-        if (format != null) {
-            document.setFormat(format);
-        }
-        if (source != null) {
-            document.setSource(source);
-        }
-        if (type != null) {
-            document.setType(type);
-        }
-        if (coverage != null) {
-            document.setCoverage(coverage);
-        }
-        if (rights != null) {
-            document.setRights(rights);
-        }
-        if (createDateStr != null) {
-            document.setCreateDate(createDate != null ? createDate : new Date());
-        }
-
-        documentDao.update(document, principal.getId());
-
-        // Update tags, relations, metadata only when their params are present in the form.
-        // Partial-update contract: omitting a param preserves the existing value. But when a
-        // client empties a previously-set collection, it sends ZERO of that param, which is
-        // indistinguishable from "omitted". A client that intends an explicit clear sends the
-        // matching *_reset=true sentinel; old clients that never send it keep the old
-        // preserve-on-omit semantics.
-        boolean tagsReset = Boolean.parseBoolean(form.getFirst("tags_reset"));
-        boolean relationsReset = Boolean.parseBoolean(form.getFirst("relations_reset"));
-        boolean metadataReset = Boolean.parseBoolean(form.getFirst("metadata_reset"));
-        if (form.containsKey("tags") || tagsReset) {
-            // updateTagList treats a null list as "no change"; a reset with no tags supplied
-            // must clear, so pass an empty (non-null) list.
-            List<String> effectiveTags = tagList != null ? tagList : new ArrayList<>();
-            DocumentResourceHelper.updateTagList(id, effectiveTags, getTargetIdList(null));
-        }
-        if (form.containsKey("relations") || relationsReset) {
-            // updateRelationList treats a null list as "no change"; a reset with no relations
-            // supplied must clear every outgoing relation, so pass an empty (non-null) list.
-            List<String> effectiveRelations = relationList != null ? relationList : new ArrayList<>();
-            DocumentResourceHelper.updateRelationList(id, effectiveRelations);
-        }
-        if (form.containsKey("metadata_id")) {
-            try {
-                MetadataUtil.updateMetadata(document.getId(), metadataIdList, metadataValueList);
-            } catch (Exception e) {
-                throw new ClientException("ValidationError", e.getMessage());
-            }
-        } else if (metadataReset) {
-            // Explicit clear of the last remaining metadata value (zero metadata_id params).
-            MetadataUtil.clearMetadata(document.getId());
-        }
-
-        // Raise a document updated event
-        DocumentUpdatedAsyncEvent documentUpdatedAsyncEvent = new DocumentUpdatedAsyncEvent();
-        documentUpdatedAsyncEvent.setUserId(principal.getId());
-        documentUpdatedAsyncEvent.setDocumentId(id);
-        ThreadLocalContext.get().addAsyncEvent(documentUpdatedAsyncEvent);
-
-        JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("id", id);
         return Response.ok().entity(response.build()).build();
     }
 
@@ -1172,7 +759,7 @@ public class DocumentResource extends BaseResource {
             } else {
                 document.setTitle(StringUtils.abbreviate(mailContent.getSubject(), 100));
             }
-            document.setDescription(sanitizeDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000)));
+            document.setDescription(DocumentResourceHelper.sanitizeDescription(StringUtils.abbreviate(mailContent.getMessage(), 4000)));
             document.setSubject(StringUtils.abbreviate(mailContent.getSubject(), 500));
             document.setFormat("EML");
             document.setSource("Email");

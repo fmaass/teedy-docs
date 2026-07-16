@@ -43,6 +43,7 @@
     <org.slf4j.jcl-over-slf4j.version>2.0.17</org.slf4j.jcl-over-slf4j.version>
     <org.slf4j.jul-to-slf4j.version>2.0.17</org.slf4j.jul-to-slf4j.version>
     <org.junit.junit-jupiter.version>5.12.2</org.junit.junit-jupiter.version>
+    <com.tngtech.archunit.archunit-junit5.version>1.3.0</com.tngtech.archunit.archunit-junit5.version>
     <org.testcontainers.version>1.21.4</org.testcontainers.version>
     <com.h2database.h2.version>2.3.232</com.h2database.h2.version>
     <jakarta.json.jakarta.json-api.version>2.1.3</jakarta.json.jakarta.json-api.version>
@@ -369,6 +370,12 @@
         <groupId>org.junit.jupiter</groupId>
         <artifactId>junit-jupiter</artifactId>
         <version>${org.junit.junit-jupiter.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${com.tngtech.archunit.archunit-junit5.version}</version>
       </dependency>
 
       <dependency>

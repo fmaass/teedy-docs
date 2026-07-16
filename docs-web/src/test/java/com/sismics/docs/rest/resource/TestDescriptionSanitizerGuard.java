@@ -43,8 +43,9 @@ public class TestDescriptionSanitizerGuard {
      * setDescription argument must contain one of these.
      */
     private static final List<String> SANITIZED_ARGUMENT_TOKENS = List.of(
-            "DescriptionSanitizer.sanitize",   // docs-core ingress + DAO boundary
-            "sanitizeDescription");            // DocumentResource REST helper (wraps the sanitizer)
+            "DescriptionSanitizer.sanitize",                // docs-core ingress + DAO boundary
+            "DocumentResourceHelper.sanitizeDescription",   // hoisted REST helper (wraps the sanitizer)
+            "sanitizeDescription");                         // unqualified helper call
 
     /**
      * Receiver prefixes whose setDescription target is the read-projection DTO, not the

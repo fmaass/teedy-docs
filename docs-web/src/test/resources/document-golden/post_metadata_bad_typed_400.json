@@ -1,0 +1,23 @@
+STATUS 400
+Content-Type: application/json
+Cache-Control: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+BODY {"message":"Integer value not parsable","type":"ValidationError"}
+--READBACK--
+STATUS 200
+Content-Type: application/json
+Cache-Control: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+BODY {"acls":[{"id":"<ID:user.owner>","name":"gc_pmeta_owner","perm":"READ","type":"USER"},{"id":"<ID:user.owner>","name":"gc_pmeta_owner","perm":"WRITE","type":"USER"}],"contributors":[{"email":"gc_pmeta_owner@docs.com","username":"gc_pmeta_owner"}],"coverage":null,"create_date":1500000000000,"creator":"gc_pmeta_owner","description":null,"favorite":false,"file_count":0,"file_id":null,"file_rotation":0,"format":null,"id":"<ID:doc>","identifier":null,"inherited_acls":[],"language":"eng","metadata":[{"id":"<ID:meta.str>","name":"gcPMeta0str","type":"STRING"},{"id":"<ID:meta.int>","name":"gcPMeta1int","type":"INTEGER","value":2}],"publisher":null,"relations":[],"rights":null,"shared":false,"source":null,"subject":null,"tags":[],"title":"GC pmeta replace","type":null,"update_date":"<TS:doc.update>","writable":true}
+LABEL MAP
+<ID:doc> at s1:$.id
+<ID:meta.int> at s1:$.metadata[1].id
+<ID:meta.str> at s1:$.metadata[0].id
+<ID:user.owner> at s1:$.acls[0].id, s1:$.acls[1].id
+<TS:doc.update> at s1:$.update_date

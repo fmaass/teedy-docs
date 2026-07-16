@@ -1,0 +1,9 @@
+STATUS 403
+Content-Type: application/json
+Cache-Control: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+BODY {"message":"You don't have access to this resource","type":"ForbiddenError"}
+LABEL MAP

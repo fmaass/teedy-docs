@@ -1,0 +1,7 @@
+# Append-only, strictly-DECREASING per-class line-count ceilings for migrated "giant" resources.
+# Raising a ceiling requires deleting history, which is diff-visible in review. Each row:
+#   <source-path-relative-to-module>\t<oldest> <...> <newest-cap>
+# DocumentResource's pre-extraction 1463 is replaced by its measured post-extraction count, so the
+# two migrated endpoints' headroom cannot silently regrow. New rest.document classes are separately
+# capped at 300 lines by ResourceSizeGateTest#newResourcesUnderCap.
+src/main/java/com/sismics/docs/rest/resource/DocumentResource.java	1463 1050

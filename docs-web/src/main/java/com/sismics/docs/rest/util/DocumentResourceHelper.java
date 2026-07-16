@@ -11,8 +11,10 @@ import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.rest.exception.ClientException;
+import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.Json;
@@ -30,8 +32,39 @@ import java.util.Set;
  * JSON builders for a document representation and its tag array. Keeps the endpoint methods thin.
  */
 public final class DocumentResourceHelper {
+    /**
+     * Upper bound on the RAW (pre-sanitization) description a client may submit. The sanitizer strips
+     * markup, so the stored bound is smaller; this bound only exists so a malformed payload is rejected
+     * here before the sanitizer runs, so sanitization can never be handed an unbounded string.
+     */
+    private static final int DESCRIPTION_RAW_MAX = 100000;
+
+    /**
+     * Upper bound on the STORED (post-sanitization) description. Matches the widened
+     * DOC_DESCRIPTION_C column (dbupdate-048).
+     */
+    private static final int DESCRIPTION_STORED_MAX = 50000;
+
     private DocumentResourceHelper() {
         // Utility class
+    }
+
+    /**
+     * Enforce the description contract at a REST ingress: reject an oversized raw payload, sanitize to
+     * the allowlist, then validate the stored length. Returns null for a null (unsubmitted) description
+     * so a partial update can distinguish "not sent" from "empty". Single source of truth for this
+     * wire-load-bearing rule, shared by the document create and update endpoints.
+     *
+     * @param description Raw description form value (may be null)
+     * @return Sanitized description within the stored bound, or null
+     * @throws ClientException on a too-large raw payload or too-large sanitized result
+     */
+    public static String sanitizeDescription(String description) {
+        // Bound the raw input first so the sanitizer never processes an unbounded string.
+        description = ValidationUtil.validateLength(description, "description", 0, DESCRIPTION_RAW_MAX, true);
+        String sanitized = DescriptionSanitizer.sanitize(description);
+        // The stored contract: sanitized HTML must fit the widened column.
+        return ValidationUtil.validateLength(sanitized, "description", 0, DESCRIPTION_STORED_MAX, true);
     }
 
     /**

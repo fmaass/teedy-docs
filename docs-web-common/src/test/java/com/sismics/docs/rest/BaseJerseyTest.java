@@ -185,7 +185,7 @@ public abstract class BaseJerseyTest extends JerseyTest {
         context.addFilter("csrfFilter", CsrfFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         ServletRegistration reg = context.addServlet("jerseyServlet", ServletContainer.class);
-        reg.setInitParameter("jersey.config.server.provider.packages", "com.sismics.docs.rest.resource");
+        reg.setInitParameter("jersey.config.server.provider.packages", "com.sismics.docs.rest.resource,com.sismics.docs.rest.document");
         reg.setInitParameter("jersey.config.server.provider.classnames", "org.glassfish.jersey.media.multipart.MultiPartFeature");
         reg.setInitParameter("jersey.config.server.response.setStatusOverSendError", "true");
         reg.setLoadOnStartup(1);

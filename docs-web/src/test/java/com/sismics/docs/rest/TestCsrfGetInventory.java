@@ -21,7 +21,14 @@ import java.util.TreeSet;
  */
 public class TestCsrfGetInventory {
 
-    private static final String RESOURCE_PACKAGE = "com.sismics.docs.rest.resource";
+    /**
+     * The packages Jersey scans for resources (web.xml + BaseJerseyTest, kept in sync): the legacy
+     * resource package plus the Phase G document-slice edge.
+     */
+    private static final String[] RESOURCE_PACKAGES = {
+            "com.sismics.docs.rest.resource",
+            "com.sismics.docs.rest.document"
+    };
 
     /**
      * Every {@code @GET} route that is READ-ONLY (no server side effect) and therefore intentionally NOT
@@ -98,21 +105,26 @@ public class TestCsrfGetInventory {
     private static Set<String> discoverGetRoutes() throws Exception {
         Set<String> routes = new TreeSet<>();
         ClassPath classPath = ClassPath.from(Thread.currentThread().getContextClassLoader());
-        for (ClassPath.ClassInfo classInfo : classPath.getTopLevelClasses(RESOURCE_PACKAGE)) {
-            Class<?> clazz = classInfo.load();
-            Path classPathAnn = clazz.getAnnotation(Path.class);
-            String base = classPathAnn == null ? "" : classPathAnn.value();
-            for (Method method : clazz.getDeclaredMethods()) {
-                if (!method.isAnnotationPresent(GET.class)) {
-                    continue;
+        for (String resourcePackage : RESOURCE_PACKAGES) {
+            for (ClassPath.ClassInfo classInfo : classPath.getTopLevelClasses(resourcePackage)) {
+                Class<?> clazz = classInfo.load();
+                Path classPathAnn = clazz.getAnnotation(Path.class);
+                String base = classPathAnn == null ? "" : classPathAnn.value();
+                if (!base.isEmpty() && !base.startsWith("/")) {
+                    base = "/" + base;
                 }
-                String route = base;
-                Path methodPathAnn = method.getAnnotation(Path.class);
-                if (methodPathAnn != null) {
-                    String mv = methodPathAnn.value();
-                    route = base + (mv.startsWith("/") ? mv : "/" + mv);
+                for (Method method : clazz.getDeclaredMethods()) {
+                    if (!method.isAnnotationPresent(GET.class)) {
+                        continue;
+                    }
+                    String route = base;
+                    Path methodPathAnn = method.getAnnotation(Path.class);
+                    if (methodPathAnn != null) {
+                        String mv = methodPathAnn.value();
+                        route = base + (mv.startsWith("/") ? mv : "/" + mv);
+                    }
+                    routes.add(normalize(route));
                 }
-                routes.add(normalize(route));
             }
         }
         return routes;
