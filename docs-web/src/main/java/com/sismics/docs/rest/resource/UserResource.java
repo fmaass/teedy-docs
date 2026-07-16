@@ -352,6 +352,8 @@ public class UserResource extends BaseResource {
             ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
             user.setStorageQuota(storageQuota);
         }
+        user = userDao.update(user, principal.getId());
+
         boolean disableTransition = false;
         if (disabled != null) {
             // Cannot disable the admin user or the guest user
@@ -361,16 +363,28 @@ public class UserResource extends BaseResource {
                 disabled = false;
             }
 
-            if (disabled && user.getDisableDate() == null) {
+            // Decide and apply the disable/enable transition under a FOR UPDATE lock on the target row, held
+            // for the rest of this request transaction. The transition MUST be computed from the row's CURRENT
+            // disableDate read under the lock, never the pre-lock value loaded above: a concurrent admin (or the
+            // target's own self-update) may have changed the state in between. Locking closes two races the
+            // pre-lock decision left open — (a) a racing self-update re-enabling a just-disabled account, and
+            // (b) a stale duplicate request flipping the state without the credential bump. disableDate is not
+            // in userDao.update's copy list, so this locked read-modify-write is its sole writer.
+            User lockedUser = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            if (lockedUser == null) {
+                // The target was soft-deleted concurrently: fail with the endpoint's existing not-found semantics.
+                throw new ClientException("UserNotFound", "The user does not exist");
+            }
+            boolean currentlyDisabled = lockedUser.getDisableDate() != null;
+            if (disabled && !currentlyDisabled) {
                 // Recording the disabled date
                 disableTransition = true;
-                user.setDisableDate(new Date());
-            } else if (!disabled && user.getDisableDate() != null) {
-                // Emptying the disabled date
-                user.setDisableDate(null);
+                lockedUser.setDisableDate(new Date());
+            } else if (!disabled && currentlyDisabled) {
+                // Emptying the disabled date (a re-enable does NOT bump, per #110)
+                lockedUser.setDisableDate(null);
             }
         }
-        user = userDao.update(user, principal.getId());
 
         // Change the password
         boolean passwordChanged = StringUtils.isNotBlank(password);

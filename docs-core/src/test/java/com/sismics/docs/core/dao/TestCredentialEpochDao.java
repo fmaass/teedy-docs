@@ -6,11 +6,14 @@ import com.sismics.docs.core.model.jpa.AuthenticationToken;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Date;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Tests for the credential-epoch single-writer bump, its concurrency/rollback semantics, and the
@@ -44,6 +47,65 @@ public class TestCredentialEpochDao extends BaseTest {
             }
         });
         return id[0];
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            Assertions.assertTrue(latch.await(30, TimeUnit.SECONDS), "the coordinating thread must signal in time");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void joinAll(Thread... threads) throws InterruptedException {
+        for (Thread t : threads) {
+            t.join(30_000);
+        }
+        for (Thread t : threads) {
+            Assertions.assertFalse(t.isAlive(), "every worker thread must finish");
+        }
+    }
+
+    /**
+     * True when SOME database session is currently blocked waiting on a lock, read from the engine's own
+     * lock/waiting introspection (never a sleep): {@code pg_locks.granted = false} on PostgreSQL, a non-null
+     * {@code INFORMATION_SCHEMA.SESSIONS.BLOCKER_ID} on H2. Runs on its own connection.
+     */
+    private boolean someSessionIsBlocked() {
+        boolean[] blocked = new boolean[1];
+        TransactionUtil.handle(() -> {
+            EntityManager em = ThreadLocalContext.get().getEntityManager();
+            String product = em.unwrap(org.hibernate.Session.class)
+                    .doReturningWork(conn -> conn.getMetaData().getDatabaseProductName());
+            String sql = product.toLowerCase().contains("postgres")
+                    ? "select count(*) from pg_locks where not granted"
+                    : "select count(*) from information_schema.sessions where blocker_id is not null";
+            Number n = (Number) em.createNativeQuery(sql).getSingleResult();
+            blocked[0] = n.longValue() > 0;
+        });
+        return blocked[0];
+    }
+
+    /**
+     * Bounded poll of {@link #someSessionIsBlocked()} until the competitor has genuinely blocked on the row
+     * lock. Returns only on a real observed block; times out (fails) otherwise. The 15ms interval is a poll
+     * cadence, not a race sleep: progress is gated on the observed lock state, never on elapsed time.
+     */
+    private void awaitBlockedSession() {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (someSessionIsBlocked()) {
+                return;
+            }
+            try {
+                Thread.sleep(15);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
+        throw new AssertionError("no database session blocked on a row lock within 20s — the forced overlap did not occur");
     }
 
     /** Reads the persisted epoch directly from the row (bypasses any managed-entity cache). */
@@ -84,40 +146,67 @@ public class TestCredentialEpochDao extends BaseTest {
     }
 
     @Test
-    public void concurrentBumpsComposeToPlusTwo() throws Exception {
+    public void concurrentBumpsComposeToPlusTwoUnderForcedOverlap() throws Exception {
         String userId = createUser();
 
-        Runnable bump = () -> TransactionUtil.handle(() -> new UserDao().bumpCredentialEpoch(userId));
-        Thread t1 = new Thread(bump);
-        Thread t2 = new Thread(bump);
-        t1.start();
-        t2.start();
-        t1.join(30_000);
-        t2.join(30_000);
-        Assertions.assertFalse(t1.isAlive() || t2.isAlive(), "both bump threads must finish");
+        CountDownLatch firstBumped = new CountDownLatch(1);
+        CountDownLatch firstMayCommit = new CountDownLatch(1);
 
-        // The atomic in-place UPDATE takes a row lock, so the two commits serialize: no lost update
-        // (a read-modify-write would have left this at +1).
-        Assertions.assertEquals(2L, readEpoch(userId));
+        // Worker A executes its bump (the in-place UPDATE takes and HOLDS the row lock), then keeps the
+        // transaction open — lock held, uncommitted — until released, so worker B is forced to contend for the
+        // SAME row concurrently rather than running after A has finished (which a plain join would allow).
+        Thread a = new Thread(() -> TransactionUtil.handle(() -> {
+            new UserDao().bumpCredentialEpoch(userId);
+            firstBumped.countDown();
+            await(firstMayCommit);
+        }));
+        // Worker B starts its bump only once A's bump is in-flight, so the two are provably concurrent; its
+        // UPDATE then blocks on A's row lock until A commits.
+        Thread b = new Thread(() -> {
+            await(firstBumped);
+            TransactionUtil.handle(() -> new UserDao().bumpCredentialEpoch(userId));
+        });
+
+        a.start();
+        b.start();
+        await(firstBumped);       // A's bump UPDATE has executed and holds the row lock (uncommitted)
+        awaitBlockedSession();    // prove B is genuinely blocked contending for the same row (real overlap, not a sleep)
+        firstMayCommit.countDown();
+        joinAll(a, b);
+
+        // A read-modify-write bump would have B compute its target from the pre-A value and write an absolute
+        // E+1, losing A's increment (final +1). The atomic in-place UPDATE re-evaluates against the latest
+        // committed row when it unblocks, so the two forced-overlap increments compose to +2.
+        Assertions.assertEquals(2L, readEpoch(userId), "two forced-overlap bumps compose to +2 (no lost update)");
     }
 
     @Test
-    public void unrelatedUpdateDoesNotLowerTheEpoch() {
+    public void staleProfileUpdateCannotLowerTheEpoch() {
         String userId = createUser();
-        TransactionUtil.handle(() -> new UserDao().bumpCredentialEpoch(userId));
-        TransactionUtil.handle(() -> new UserDao().bumpCredentialEpoch(userId));
-        Assertions.assertEquals(2L, readEpoch(userId));
 
-        // A generic profile update loads the row (epoch 2 in the DB) and writes back email/quota/etc. The
-        // epoch is absent from UserDao.update's copy list and @DynamicUpdate keeps the untouched column out
-        // of the UPDATE, so a stale-epoch write cannot overwrite the bumped value.
+        // Load the profile object while the epoch is still 0 — BEFORE any bump. This is the stale carrier a
+        // real request holds when it reads the row, then a credential-invalidating bump lands before it writes
+        // back. Loading AFTER the bump (caller and DB both at the bumped value) would let a regressed copy list
+        // write the same value over itself and pass — so the pre-bump load is what makes this discriminating.
+        User[] holder = new User[1];
+        TransactionUtil.handle(() -> holder[0] = new UserDao().getById(userId));
+        User staleUser = holder[0];
+        Assertions.assertEquals(0L, staleUser.getCredentialEpoch(), "the stale carrier holds the pre-bump epoch 0");
+
+        // A credential-invalidating event bumps the epoch to 1 in its own committed transaction.
+        TransactionUtil.handle(() -> new UserDao().bumpCredentialEpoch(userId));
+        Assertions.assertEquals(1L, readEpoch(userId));
+
+        // Replay the stale (epoch-0) object through a generic profile update. The epoch is absent from
+        // UserDao.update's copy list, so the stale 0 is never written over the bumped 1. A regression that
+        // ADDED the epoch to the copy list would write 0 here, lowering the persisted epoch — this assertion
+        // catches it.
         TransactionUtil.handle(() -> {
             UserDao userDao = new UserDao();
-            User user = userDao.getById(userId);
-            user.setEmail("changed@docs.com");
-            userDao.update(user, userId);
+            staleUser.setEmail("changed@docs.com");
+            userDao.update(staleUser, userId);
         });
-        Assertions.assertEquals(2L, readEpoch(userId), "a generic update must not lower the epoch");
+        Assertions.assertEquals(1L, readEpoch(userId), "a stale-object update must not lower the bumped epoch");
     }
 
     @Test

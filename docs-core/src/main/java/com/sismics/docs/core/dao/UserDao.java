@@ -195,7 +195,13 @@ public class UserDao {
         userDb.setEmail(user.getEmail());
         userDb.setStorageQuota(user.getStorageQuota());
         userDb.setTotpKey(user.getTotpKey());
-        userDb.setDisableDate(user.getDisableDate());
+        // disableDate is DELIBERATELY not written here (same exclusion rationale as password/storageCurrent
+        // above): the account's enabled/disabled state is owned solely by the admin disable/enable transition,
+        // which decides and applies it under a FOR UPDATE row lock on the target
+        // (UserResource.update -> CredentialLifecycleUtil.lockActiveUser). A generic profile/self/TOTP/OIDC
+        // update carries a pre-read, possibly stale disableDate; writing it back here would let a racing
+        // self-update re-enable an account an admin just disabled, so this copy is removed and disableDate is
+        // never touched off the locked transition.
         // #82 preferred UI locale. Every caller loads the User from the DB before mutating it, so a
         // caller that does not touch the locale passes through the stored value unchanged; only the
         // self-service POST /user sets a new one. Included in this explicit copy list because

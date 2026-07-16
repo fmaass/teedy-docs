@@ -1,6 +1,8 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.dao.PasswordRecoveryDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.PasswordRecovery;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.PasswordRecoveryUtil;
 import com.sismics.docs.core.util.TransactionUtil;
@@ -51,6 +53,15 @@ public class TestRecoveryOriginAgnostic extends BaseJerseyTest {
                 .post(Entity.form(new Form().param("username", username)), JsonObject.class);
     }
 
+    /** Seeds one active recovery key for an arbitrary username directly (no user account required). */
+    private void seedRecoveryKey(String username) {
+        TransactionUtil.handle(() -> {
+            PasswordRecovery recovery = new PasswordRecovery();
+            recovery.setUsername(username);
+            new PasswordRecoveryDao().create(recovery);
+        });
+    }
+
     @Test
     public void existingExternalAndInternalTakeSameObservablePath() {
         clientUtil.createUser("recovery_internal_user");
@@ -80,6 +91,34 @@ public class TestRecoveryOriginAgnostic extends BaseJerseyTest {
                 "a nonexistent account returns the same generic OK");
         Assertions.assertEquals(0L, activeRecoveryRows(ghost),
                 "the nonexistent-account dummy must be side-effect-free: no recovery row created or altered");
+    }
+
+    /**
+     * Pins the ENDPOINT WIRING of the nonexistent-account lane: drive the REAL {@code POST /user/password_lost}
+     * with a username that has NO user account but DOES have an active recovery key (recovery rows are keyed by
+     * username string, with no FK to a user), so the request resolves to no user and takes the nonexistent lane
+     * at the endpoint. Assert that recovery key — and the whole active row count — is untouched. The former
+     * equalizer was a username-scoped soft-delete ({@code deleteActiveByLogin}); wiring any such mutating,
+     * username-taking helper into this lane would drop this key. Only the read-only no-arg equalizer the endpoint
+     * actually calls leaves it in place. Unlike {@link #equalizerIsReadOnlyAndLeavesExistingKeysUntouched} (which
+     * calls the helper directly and so cannot catch a re-wire), this fails if the endpoint's nonexistent branch
+     * performs ANY write.
+     */
+    @Test
+    public void endpointNonexistentLaneDoesNotMutateRecoveryRows() {
+        String orphanUsername = "recovery_orphan_no_user";
+        seedRecoveryKey(orphanUsername);
+        Assertions.assertEquals(1L, activeRecoveryRows(orphanUsername),
+                "precondition: one active recovery key exists under a username with no user account");
+        long totalActiveBefore = totalActiveRecoveryRows();
+
+        JsonObject resp = passwordLost(orphanUsername);
+        Assertions.assertEquals("ok", resp.getString("status"), "the nonexistent lane returns the generic OK");
+
+        Assertions.assertEquals(1L, activeRecoveryRows(orphanUsername),
+                "the endpoint's nonexistent lane must not soft-delete or alter the requested username's recovery key");
+        Assertions.assertEquals(totalActiveBefore, totalActiveRecoveryRows(),
+                "the endpoint's nonexistent lane must not write any recovery row");
     }
 
     /**
