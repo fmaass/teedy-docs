@@ -570,7 +570,9 @@ public class OidcResource extends BaseResource {
                     .setLongLasted(true)
                     .setIp(StringUtils.abbreviate(ip, 45))
                     .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
-                    .setOidcIdToken(idTokenStr);
+                    .setOidcIdToken(idTokenStr)
+                    // Proof-time stamp: the epoch of the OIDC user loaded/provisioned in this transaction.
+                    .setCredentialEpoch(user.getCredentialEpoch());
             String tokenValue = authTokenDao.create(authToken);
             authTokenDao.deleteOldSessionToken(user.getId());
 

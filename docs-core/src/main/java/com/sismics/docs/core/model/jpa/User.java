@@ -132,6 +132,24 @@ public class User implements Loggable {
     @Column(name = "USE_LDAP_B", nullable = false)
     private boolean ldap;
 
+    /**
+     * Credential epoch: a monotonic counter that is incremented whenever this account's credentials are
+     * globally invalidated (the increment itself is wired to credential-lifecycle events in a later phase;
+     * this phase ships only the mechanism). Every session token and API key is stamped at mint with the
+     * epoch that authorized it, and a credential is honored only while its stamp still equals this value —
+     * so one increment revokes every previously-issued credential at once.
+     *
+     * <p>Declared as a primitive {@code long} so a freshly-constructed {@code User} binds a concrete 0
+     * rather than a null: {@code @DynamicUpdate} aside, Hibernate would otherwise bind an explicit null
+     * for a wrapper and the NOT NULL column would reject it — the SQL default only applies when the column
+     * is omitted from the INSERT, which is not the case here. The sole writer of this column after insert
+     * is {@link com.sismics.docs.core.dao.UserDao#bumpCredentialEpoch(String)} (an atomic in-place +1); it
+     * is deliberately absent from {@code UserDao.update}'s field-copy list so a stale profile/OIDC update
+     * cannot lower it.</p>
+     */
+    @Column(name = "USE_CREDENTIALEPOCH_N", nullable = false)
+    private long credentialEpoch;
+
     public String getId() {
         return id;
     }
@@ -296,6 +314,15 @@ public class User implements Loggable {
 
     public User setLdap(boolean ldap) {
         this.ldap = ldap;
+        return this;
+    }
+
+    public long getCredentialEpoch() {
+        return credentialEpoch;
+    }
+
+    public User setCredentialEpoch(long credentialEpoch) {
+        this.credentialEpoch = credentialEpoch;
         return this;
     }
 

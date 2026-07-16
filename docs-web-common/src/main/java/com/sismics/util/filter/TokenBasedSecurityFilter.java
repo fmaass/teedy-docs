@@ -162,6 +162,13 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
             return AuthAttempt.ignore();
         }
 
+        // Credential-epoch check: a token stamped at an epoch the user has since advanced past (a reset,
+        // admin change, disable, or self password-change) is dead. Checked BEFORE the rotation below so a
+        // revoked token never extends its own lifetime; falls through to anonymous like a stale cookie.
+        if (!epochMatches(authToken.getCredentialEpoch(), user.getCredentialEpoch())) {
+            return AuthAttempt.ignore();
+        }
+
         // Token rotation: if < 30 days remaining on a long-lived token, extend by 90 days
         if (authToken.isLongLasted()) {
             long now = System.currentTimeMillis();
