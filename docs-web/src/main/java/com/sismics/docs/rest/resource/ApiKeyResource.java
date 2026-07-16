@@ -2,6 +2,7 @@ package com.sismics.docs.rest.resource;
 
 import com.sismics.docs.core.dao.ApiKeyDao;
 import com.sismics.docs.core.model.jpa.ApiKey;
+import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
@@ -67,6 +68,15 @@ public class ApiKeyResource extends BaseResource {
         // A guest must not mint a durable bearer credential (mirrors the self-update guard at
         // UserResource.update): the guest is a shared anonymous-login identity, not an account owner.
         if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        // An external-origin account (OIDC/LDAP provisioned) must not mint a durable LOCAL bearer
+        // credential: it would be a standing key that authenticates outside the identity provider,
+        // bypassing the provider's disable/revocation control. Refuse BEFORE any secret is generated,
+        // hashed, or persisted, so a refused request leaves no key row or other side effect. The 403
+        // is non-disclosive (identical to the guest refusal above).
+        if (AuthenticationUtil.isExternalOrigin(principal.getId())) {
             throw new ForbiddenClientException();
         }
 

@@ -501,22 +501,6 @@ public class UserDao {
     }
 
     /**
-     * Stores the OIDC issuer and subject on a user for stable identity binding.
-     *
-     * @param userId User ID
-     * @param issuer OIDC issuer URL
-     * @param subject OIDC subject identifier
-     */
-    public void updateOidcBinding(String userId, String issuer, String subject) {
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery("update T_USER set USE_OIDC_ISSUER_C = :issuer, USE_OIDC_SUBJECT_C = :subject where USE_ID_C = :userId");
-        q.setParameter("issuer", issuer);
-        q.setParameter("subject", subject);
-        q.setParameter("userId", userId);
-        q.executeUpdate();
-    }
-
-    /**
      * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves the
      * departing user's tags that are linked to those documents to the target so no tag link is lost.
      *

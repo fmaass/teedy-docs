@@ -121,6 +121,22 @@ public class PasswordRecoveryDao {
     }
 
     /**
+     * Performs the side-effect-free work equivalent of the {@link #create(PasswordRecovery)} round-trip, for
+     * the nonexistent-account lane of password recovery. It draws one recovery token (the same bounded
+     * {@link SecureRandom} work {@code create} does) and issues ONE read-only lookup that matches nothing.
+     *
+     * <p>This spends a comparable, BOUNDED database round-trip for a username that does not exist WITHOUT
+     * persisting a recovery row or soft-deleting anything. It replaces the former state-mutating dummy (a
+     * soft-delete UPDATE by username): that dummy amplified writes on an unauthenticated endpoint and could
+     * interleave a dummy delete with a concurrent real recovery-key creation. The work is constant per call
+     * (one token draw + one indexed lookup), so it cannot be driven into unbounded CPU by attacker input, and
+     * the caller's response is observably unchanged.</p>
+     */
+    public void equalizeNonexistentRecovery() {
+        getActiveById(generateToken());
+    }
+
+    /**
      * Deletes active password recovery by username.
      *
      * @param username Username

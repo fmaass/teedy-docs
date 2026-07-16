@@ -19,6 +19,7 @@ import com.sismics.docs.core.model.jpa.*;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
+import com.sismics.docs.core.util.PasswordRecoveryUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
@@ -1334,9 +1335,11 @@ public class UserResource extends BaseResource {
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 1, 100, false);
 
-        // Check the password and get the user
+        // Check the password and get the user through the origin-aware handler chain (NOT the raw
+        // origin-blind UserDao.authenticate): the chain refuses an external-origin account, so a
+        // password planted on an OIDC/LDAP account through recovery cannot be used to disable TOTP.
         UserDao userDao = new UserDao();
-        User user = userDao.authenticate(principal.getName(), password);
+        User user = AuthenticationUtil.authenticate(principal.getName(), password);
         if (user == null) {
             throw new ForbiddenClientException();
         }
@@ -1399,14 +1402,15 @@ public class UserResource extends BaseResource {
         if (userDtoList.isEmpty()) {
             // Equalize the dominant work between the existing and nonexistent paths so response timing does
             // not reveal whether the account exists. Both paths run the same lookup above; only an existing
-            // account additionally persists a recovery-key row (the extra DB write). Spend a comparable
-            // write-path round-trip here — an UPDATE that matches nothing (the username does not exist, so no
-            // row is touched and nothing is persisted or leaked) — to close most of that gap without creating
-            // any state for an attacker-supplied username. The residual timing difference (a soft-delete
-            // UPDATE vs. an INSERT) is small and, critically, bounded: the per-account and global recovery
-            // limiters (tryRecovery, above) cap how many probes an attacker can send against any one account
-            // before suppression, so too few samples are collectable to resolve it.
-            new PasswordRecoveryDao().deleteActiveByLogin(username);
+            // account additionally persists a recovery-key row (the extra DB round-trip). Spend a comparable,
+            // side-effect-FREE and bounded round-trip here (a token draw plus one read-only lookup that
+            // matches nothing) instead of a state-mutating UPDATE, so this unauthenticated endpoint neither
+            // amplifies writes nor lets a dummy delete interleave with a concurrent real key creation for the
+            // same username. The residual timing difference (a read vs. an INSERT) is small and, critically,
+            // bounded: the per-account and global recovery limiters (tryRecovery, above) cap how many probes
+            // an attacker can send against any one account before suppression, so too few samples are
+            // collectable to resolve it.
+            PasswordRecoveryUtil.equalizeNonexistentRecovery();
             return response;
         }
         UserDto user = userDtoList.get(0);

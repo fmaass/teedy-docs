@@ -15,14 +15,15 @@ public class InternalAuthenticationHandler implements AuthenticationHandler {
     public User authenticate(String username, String password) {
         UserDao userDao = new UserDao();
         User user = userDao.authenticate(username, password);
-        // Refuse LDAP-provisioned accounts: an LDAP-origin user must ALWAYS authenticate
-        // through the LDAP handler (so LDAP disable/revocation/password rules are enforced),
-        // never via a local password. This completes the origin partition — internal handles
-        // only non-LDAP users, LDAP handles only LDAP users — and mirrors how OIDC-origin
-        // accounts are kept off the local-password path. Trade-off: if LDAP is globally
-        // disabled, LDAP-origin users cannot log in at all, which is correct for an
-        // LDAP-authoritative model (same as OIDC users when OIDC is off).
-        if (user != null && user.isLdap()) {
+        // Origin partition: this handler returns ONLY genuine internal accounts. An account
+        // provisioned by an external identity provider must ALWAYS authenticate through THAT
+        // provider (so its disable/revocation/password rules are enforced), never via a local
+        // password — including a password planted through the password-recovery flow. So refuse
+        // any account whose origin is external: LDAP-provisioned (isLdap) OR OIDC-provisioned
+        // (oidcIssuer/oidcSubject set). This is symmetric with the LDAP handler, which refuses
+        // non-LDAP accounts. Trade-off: if the external provider is globally disabled, its users
+        // cannot log in at all, which is correct for a provider-authoritative model.
+        if (user != null && (user.isLdap() || user.getOidcIssuer() != null || user.getOidcSubject() != null)) {
             return null;
         }
         return user;
