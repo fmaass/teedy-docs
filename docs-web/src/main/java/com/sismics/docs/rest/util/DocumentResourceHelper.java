@@ -11,6 +11,7 @@ import com.sismics.docs.core.event.DocumentDeletedAsyncEvent;
 import com.sismics.docs.core.event.FileDeletedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.rest.exception.ClientException;
@@ -20,6 +21,7 @@ import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
+import jakarta.ws.rs.NotFoundException;
 import java.text.MessageFormat;
 import java.util.Date;
 import java.util.HashSet;
@@ -126,6 +128,32 @@ public final class DocumentResourceHelper {
         documentDeletedAsyncEvent.setUserId(userId);
         documentDeletedAsyncEvent.setDocumentId(documentId);
         ThreadLocalContext.get().addAsyncEvent(documentDeletedAsyncEvent);
+    }
+
+    /**
+     * Restores one of the acting user's own trashed documents, serialized under the #111 owner-row lock.
+     *
+     * <p>The document is fetched owner-scoped (another user's trashed document resolves to null, so a
+     * cross-user restore is a non-disclosive 404). The restore then takes the owner's (self) user row FOR
+     * UPDATE, held to commit so it spans the un-delete: self-delete guards on the SAME owner-row lock, so the
+     * two serialize. A self-delete that commits first soft-deletes the owner, {@link
+     * CredentialLifecycleUtil#lockActiveUser(String)} returns null here, and this aborts rather than
+     * resurrecting a document left ACTIVE and directly shared under a deleted owner; a restore that commits
+     * first leaves the waiting self-delete's guard to see the now-active shared document and refuse.</p>
+     *
+     * @param userId Acting (owner) user ID
+     * @param documentId Trashed document ID
+     */
+    public static void restoreOwnedDocument(String userId, String documentId) {
+        DocumentDao documentDao = new DocumentDao();
+        Document document = documentDao.getDeletedById(documentId, userId);
+        if (document == null) {
+            throw new NotFoundException();
+        }
+        if (CredentialLifecycleUtil.lockActiveUser(userId) == null) {
+            throw new NotFoundException();
+        }
+        documentDao.restore(documentId, userId);
     }
 
     /**

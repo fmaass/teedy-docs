@@ -2,6 +2,7 @@ package com.sismics.docs.rest;
 
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.PasswordRecoveryUtil;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.JsonObject;
@@ -26,6 +27,14 @@ public class TestRecoveryOriginAgnostic extends BaseJerseyTest {
         TransactionUtil.handle(() -> count[0] = (Long) ThreadLocalContext.get().getEntityManager()
                 .createQuery("select count(r) from PasswordRecovery r where r.username = :u and r.deleteDate is null")
                 .setParameter("u", username).getSingleResult());
+        return count[0];
+    }
+
+    private long totalActiveRecoveryRows() {
+        long[] count = new long[1];
+        TransactionUtil.handle(() -> count[0] = (Long) ThreadLocalContext.get().getEntityManager()
+                .createQuery("select count(r) from PasswordRecovery r where r.deleteDate is null")
+                .getSingleResult());
         return count[0];
     }
 
@@ -71,5 +80,33 @@ public class TestRecoveryOriginAgnostic extends BaseJerseyTest {
                 "a nonexistent account returns the same generic OK");
         Assertions.assertEquals(0L, activeRecoveryRows(ghost),
                 "the nonexistent-account dummy must be side-effect-free: no recovery row created or altered");
+    }
+
+    /**
+     * Discriminating guard on the equalizer's READ-ONLY contract: seed one ACTIVE recovery key for a real
+     * account, invoke {@link PasswordRecoveryUtil#equalizeNonexistentRecovery()} directly, and assert the
+     * key — and every recovery row — is untouched. The former nonexistent-account dummy soft-deleted active
+     * keys (a state MUTATION), so against that behavior this assertion fails; only a genuinely read-only
+     * equalizer leaves the active row count unchanged. This pins the property the endpoint's OK-with-zero-rows
+     * response cannot distinguish (a zero-row UPDATE also returns OK with zero rows).
+     */
+    @Test
+    public void equalizerIsReadOnlyAndLeavesExistingKeysUntouched() {
+        clientUtil.createUser("recovery_readonly_user");
+        // Seed exactly one active recovery key for this real account via the real recovery path.
+        passwordLost("recovery_readonly_user");
+        Assertions.assertEquals(1L, activeRecoveryRows("recovery_readonly_user"),
+                "precondition: the real account has one active recovery key");
+        long totalActiveBefore = totalActiveRecoveryRows();
+
+        // Invoke the nonexistent-account equalizer directly, in its own committed transaction.
+        TransactionUtil.handle(PasswordRecoveryUtil::equalizeNonexistentRecovery);
+
+        // A state-mutating equalizer (the former soft-delete-active-keys dummy) would drop the seeded key
+        // and shrink the active row count; a read-only equalizer changes neither.
+        Assertions.assertEquals(1L, activeRecoveryRows("recovery_readonly_user"),
+                "the equalizer must not delete or alter an existing account's active recovery key");
+        Assertions.assertEquals(totalActiveBefore, totalActiveRecoveryRows(),
+                "the equalizer must not change the active recovery row count (no write of any kind)");
     }
 }

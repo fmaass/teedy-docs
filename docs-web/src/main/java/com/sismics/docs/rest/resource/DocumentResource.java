@@ -949,15 +949,7 @@ public class DocumentResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        DocumentDao documentDao = new DocumentDao();
-        // Owner-scoped fetch: a document owned by another user resolves to null (404),
-        // never disclosing its existence or allowing a cross-user restore.
-        Document document = documentDao.getDeletedById(id, principal.getId());
-        if (document == null) {
-            throw new NotFoundException();
-        }
-
-        documentDao.restore(id, principal.getId());
+        DocumentResourceHelper.restoreOwnedDocument(principal.getId(), id);
 
         DocumentRestoredAsyncEvent restoredEvent = new DocumentRestoredAsyncEvent();
         restoredEvent.setUserId(principal.getId());
