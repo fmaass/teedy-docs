@@ -369,9 +369,24 @@ public class AppContext {
      *
      * @return Number of queued tasks
      */
-    public int getQueuedTaskCount() {
-        int queueSize = 0;
-        for (ThreadPoolExecutor executor : asyncExecutorList) {
+    public long getQueuedTaskCount() {
+        return computeQueuedTaskCount(asyncExecutorList);
+    }
+
+    /**
+     * Sum the queued (submitted but not yet completed) tasks across the given executors.
+     *
+     * <p>Package-private and static so the accumulation arithmetic can be exercised directly by a
+     * unit test with executor task counts beyond the {@code int} range —
+     * {@link ThreadPoolExecutor#getTaskCount()} returns {@code long}, and a long-lived instance can
+     * legitimately pass 2^31 processed tasks.
+     *
+     * @param executors Executors to sum over
+     * @return Number of queued tasks
+     */
+    static long computeQueuedTaskCount(List<ThreadPoolExecutor> executors) {
+        long queueSize = 0;
+        for (ThreadPoolExecutor executor : executors) {
             queueSize += executor.getTaskCount() - executor.getCompletedTaskCount();
         }
         return queueSize;

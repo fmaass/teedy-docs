@@ -4,6 +4,7 @@ import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.TagMatchRuleDao;
 import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.model.jpa.TagMatchRule;
+import com.sismics.docs.core.util.RegexRulePolicy;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
@@ -16,8 +17,6 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * Tag match rule REST resources.
@@ -181,17 +180,21 @@ public class TagMatchRuleResource extends BaseResource {
         text = ValidationUtil.validateLength(text, "text", 1, 10000, false);
         validateRegex(pattern);
 
-        boolean matches = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(text).find();
+        boolean matches;
+        try {
+            matches = RegexRulePolicy.find(pattern, text);
+        } catch (RegexRulePolicy.EvaluationAbortedException e) {
+            throw new ClientException("ValidationError", "Pattern evaluation aborted: " + e.getMessage());
+        }
 
         return Response.ok().entity(Json.createObjectBuilder()
                 .add("matches", matches).build()).build();
     }
 
     private void validateRegex(String pattern) {
-        try {
-            Pattern.compile(pattern);
-        } catch (PatternSyntaxException e) {
-            throw new ClientException("ValidationError", "Invalid regex pattern: " + e.getDescription());
+        String rejection = RegexRulePolicy.validate(pattern);
+        if (rejection != null) {
+            throw new ClientException("ValidationError", "Invalid regex pattern: " + rejection);
         }
     }
 }

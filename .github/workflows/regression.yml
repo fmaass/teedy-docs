@@ -137,7 +137,6 @@ jobs:
         run: |
           python3 - <<'PY'
           import datetime
-          import hashlib
           import json
           from pathlib import Path
 
@@ -212,13 +211,17 @@ jobs:
                           continue
                       if score < 7.0:
                           continue
-                      fingerprints = result.get("partialFingerprints", {})
-                      identity = json.dumps(fingerprints, sort_keys=True)
-                      if not fingerprints:
-                          location = (result.get("locations") or [{}])[0].get("physicalLocation", {})
-                          identity = json.dumps(location, sort_keys=True)
-                      digest = hashlib.sha256(identity.encode()).hexdigest()[:20]
-                      finding_id = f"{rule_id}:{digest}"
+                      # One result = one identity: rule id + physical location. The previous
+                      # scheme hashed CodeQL partialFingerprints (line-content hash + column
+                      # fingerprint), which collapses alerts on byte-identical lines in different
+                      # files into ONE identity (not multiplicity-safe) and cannot be recomputed
+                      # from the code-scanning API. Location identities are injective per result,
+                      # auditable against the GitHub code-scanning UI, and locally computable; the
+                      # cost is that shifting a flagged line requires a conscious baseline update.
+                      location = (result.get("locations") or [{}])[0].get("physicalLocation", {})
+                      uri = location.get("artifactLocation", {}).get("uri", "unknown-file")
+                      region = location.get("region", {})
+                      finding_id = f"{rule_id}@{uri}:{region.get('startLine', 0)}:{region.get('startColumn', 1)}"
                       if finding_id not in known:
                           message = result.get("message", {}).get("text", "CodeQL finding")
                           new_high.append((finding_id, score, message))

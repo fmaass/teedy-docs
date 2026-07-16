@@ -17,6 +17,7 @@ import com.sismics.docs.core.model.jpa.TagMatchRule;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.RasterGenerationUtil;
+import com.sismics.docs.core.util.RegexRulePolicy;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.format.FormatHandlerUtil;
@@ -24,12 +25,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.text.MessageFormat;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 
 /**
  * Listener on file processing.
@@ -285,12 +288,8 @@ public class FileProcessingAsyncListener {
                 if (target == null) {
                     continue;
                 }
-                try {
-                    if (Pattern.compile(rule.getPattern(), Pattern.CASE_INSENSITIVE).matcher(target).find()) {
-                        newTagIds.add(rule.getTagId());
-                    }
-                } catch (Exception e) {
-                    log.warn("Invalid regex in tag match rule {}: {}", rule.getId(), rule.getPattern());
+                if (ruleMatches(rule, target)) {
+                    newTagIds.add(rule.getTagId());
                 }
             }
 
@@ -319,5 +318,69 @@ public class FileProcessingAsyncListener {
                 }
             }
         });
+    }
+
+    /**
+     * Evaluate one persisted rule against a target text under {@link RegexRulePolicy}.
+     *
+     * <p>FAIL SAFE by construction: an invalid persisted pattern (a legacy or directly-inserted
+     * DB row that never went through REST validation) or an evaluation that exceeds the policy's
+     * wall-clock deadline skips the rule with a bounded warning — a pathological rule cannot
+     * stall file processing, and sibling rules are unaffected.
+     *
+     * <p>Package-private and static so rule evaluation can be exercised directly against
+     * DAO-level rule objects in unit tests.
+     *
+     * @param rule Persisted tag match rule
+     * @param target Target text
+     * @return True when the rule pattern occurs in the target
+     */
+    static boolean ruleMatches(TagMatchRule rule, String target) {
+        if (quarantinedRules.get(quarantineKey(rule.getId(), rule.getPattern())) != null) {
+            return false;
+        }
+        try {
+            return RegexRulePolicy.find(rule.getPattern(), target);
+        } catch (Exception e) {
+            if (shouldWarnSkip(rule.getId(), rule.getPattern())) {
+                log.warn("Tag match rule {} skipped (pattern invalid or evaluation aborted): {}",
+                        rule.getId(), rule.getPattern());
+            }
+            return false;
+        }
+    }
+
+    /**
+     * QUARANTINE for rule id + pattern combinations whose evaluation failed (invalid pattern,
+     * deadline timeout, matcher stack exhaustion). Rule evaluation runs once per rule per
+     * PROCESSED FILE, so without the quarantine every upload re-pays the full evaluation cost of
+     * a bad rule (up to the 2 s deadline each) and re-logs the warning — any uploader can amplify
+     * one bad persisted rule into unbounded work and log growth. Entries key on id + pattern, so
+     * editing the rule's pattern releases it. Bounded LRU so a rotating pattern population cannot
+     * grow it without limit; access-ordered so live entries survive.
+     */
+    private static final int QUARANTINE_CACHE_CAPACITY = 1024;
+    private static final Map<String, Boolean> quarantinedRules =
+            Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                    return size() > QUARANTINE_CACHE_CAPACITY;
+                }
+            });
+
+    private static String quarantineKey(String ruleId, String pattern) {
+        return ruleId + ' ' + pattern;
+    }
+
+    /**
+     * Quarantine a failed rule and decide whether its skip warning should be emitted: once per
+     * rule id + pattern, re-warning (and re-evaluating) only when the rule's pattern changes.
+     *
+     * @param ruleId Rule id
+     * @param pattern Rule pattern
+     * @return True when the warning should be logged
+     */
+    static boolean shouldWarnSkip(String ruleId, String pattern) {
+        return quarantinedRules.put(quarantineKey(ruleId, pattern), Boolean.TRUE) == null;
     }
 }

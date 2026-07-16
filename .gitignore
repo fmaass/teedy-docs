@@ -4,6 +4,7 @@
 /*/bin
 /*/gen
 /*/target
+/target
 /*/build
 /out
 /.idea
@@ -48,3 +49,6 @@ docs/data/
 docs/exports/
 docs/FRONTEND_UI_REVIEW_HANDOVER_2026-06-11.md
 docs/v2.8.0-release-notes.md
+
+# Per-worktree isolated Maven repository (parallel builds; never committed)
+.repo.local/

@@ -159,8 +159,12 @@ All security gates are **fail-closed**: a missing/malformed input is an error, n
   wrong; any baseline finding lacks `owner`/`expires` or has an expired `expires`; no SARIF was
   produced; a SARIF file is empty, not JSON, not SARIF `2.1.0`, or has no runs/driver/results. A
   result counts as **high** when its rule `security-severity >= 7.0`. Each high finding's identity is
-  `"<ruleId>:<sha256(partialFingerprints||location)[:20]>"`; any high finding whose id is **not** in
-  the baseline fails the build (exit 1).
+  `"<ruleId>@<artifact uri>:<startLine>:<startColumn>"` of the result's primary location — one
+  identity per result, one-to-one with the GitHub code-scanning alert list (the earlier
+  fingerprint-hash scheme collapsed alerts on byte-identical lines in different files into one
+  identity and could not be recomputed outside CI). Any high finding whose id is **not** in the
+  baseline fails the build (exit 1). The identical gate runs in `build-deploy.yml` and
+  `regression.yml` — change both together.
 - **Trivy fs** (`trivy-fs` job): scans the repo working tree for dependency vulns. Runs the pinned
   **aquasec/trivy Docker image by digest** (`aquasec/trivy@sha256:bcc376de…258d1c`, v0.69.3) — **not**
   the trivy GitHub Action — with `fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1`. A
@@ -216,35 +220,42 @@ CodeQL baseline finding (`.github/baselines/codeql-known.json`):
 
 ```json
 {
-  "id": "java/path-injection:1d4901c720ecdb38a312",
-  "finding": "Pre-existing CodeQL java/path-injection finding",
-  "reason": "Pre-existing at CodeQL gate adoption (rc.2 Phase F); triage tracked in #104",
+  "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/ThemeResource.java:211:37",
+  "finding": "CodeQL path-injection: theme image write flagged as path injection",
+  "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
   "owner": "fmaass",
   "introduced": "2026-07-15",
   "expires": "2026-10-15",
-  "compensating_control": "Freeze-and-ratchet CI gate rejects every unlisted high-severity finding ID.",
+  "compensating_control": "The type path segment is constrained by the JAX-RS route regex to exactly logo|background|favicon and the endpoint requires the ADMIN base function; no traversal value can bind.",
   "removal_issue": "#104"
 }
 ```
 
-**(c) Currently baselined findings and their remediation.** These are pre-existing findings adopted
-when the gates went in (rc.2 Phase F), frozen for remediation, **not** ignored forever. All three
-baselines expire **2026-10-15**, which forces re-triage:
+**(c) Currently baselined findings and their remediation.** Every baseline entry carries a
+near-term `expires` that forces re-triage (CodeQL entries: **2026-10-15**; the Trivy itext
+exception: **2027-01-15**):
 
-- **SAST (CodeQL):** 23 findings in `codeql-known.json`, tracked in **GitHub #104** (mostly
-  `java/path-injection`, plus command-line-injection, regex-injection, polynomial-redos,
-  implicit-cast).
-- **Dependency CVEs (Trivy image):** 8 exceptions in `trivy-image-exceptions.json`, tracked in
-  **GitHub #105** (mina-core, jackson-databind, several jetty modules, itext).
+- **SAST (CodeQL):** 23 entries in `codeql-known.json`, one per finding dispositioned
+  **ALREADY-MITIGATED** in the committed triage record `docs/security/sast-triage-2026-07.md`
+  (GitHub #104) with the neutralizing invariant stated per entry (mostly `java/path-injection`,
+  plus command-line-injection, polynomial-redos and the two bounded regex-injection sinks,
+  anchored at their relocated `RegexRulePolicy` coordinates — fail-closed: superseded anchors are
+  never retained). The one finding the triage dispositioned **FIXED** (implicit-cast) was
+  remediated in code and is not baselined.
+- **Dependency CVEs (Trivy image):** `trivy-image-exceptions.json` was pruned to the single
+  unfixable itext exception (see `docs/security/itext-cve-2017-9096-assessment.md`), tracked in
+  **GitHub #105**.
 - **Trivy fs:** `trivy-exceptions.json` currently has **zero** exceptions.
 
-**(d) Adding a new CodeQL baseline id.** The gate computes the id as
-`"<ruleId>:<fingerprint>"`, where `<fingerprint>` is the first 20 hex chars of the SHA-256 of the
-result's `partialFingerprints` (JSON, `sort_keys=True`), or of the first location's
-`physicalLocation` when no `partialFingerprints` exist. Read the exact id from the failing gate log
-line (`NEW HIGH CODEQL FINDING <id> (<score>): <message>`) and add a full entry (all eight fields,
-real owner, near `expires`, `removal_issue`) to `codeql-known.json`. Adding an id is accepting a
-finding — prefer fixing it.
+**(d) Adding or re-anchoring a CodeQL baseline id.** The gate computes the id as
+`"<ruleId>@<artifact uri>:<startLine>:<startColumn>"` from the result's primary location, so it can
+be reproduced locally from the code-scanning API or read directly from the failing gate log line
+(`NEW HIGH CODEQL FINDING <id> (<score>): <message>`). Because the id embeds line/column, an edit
+that shifts a flagged line turns the gate red with the finding's NEW coordinates — update the
+existing entry's id to the new coordinates (that is a deliberate re-acknowledgement, not a new
+acceptance). For a genuinely new finding, add a full entry (all eight fields, real owner, near
+`expires`, `removal_issue`) to `codeql-known.json`. Adding an id is accepting a finding — prefer
+fixing it.
 
 **(e) Fix, don't baseline, when you can.** Example: **CVE-2025-66021** in
 `owasp-java-html-sanitizer` was **fixed by bumping the dependency** (to `20260101.1`, commit
