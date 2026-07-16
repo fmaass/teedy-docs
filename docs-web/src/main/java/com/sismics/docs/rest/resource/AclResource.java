@@ -14,6 +14,7 @@ import com.sismics.docs.core.event.AclDeletedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.Tag;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.rest.exception.ClientException;
@@ -88,7 +89,17 @@ public class AclResource extends BaseResource {
         if (!aclDao.checkPermission(sourceId, PermType.WRITE, getTargetIdList(null))) {
             throw new ForbiddenClientException();
         }
-        
+
+        // #111: when the ACL source is a DOCUMENT (not a tag or route model), lock the document owner's row
+        // FOR UPDATE — the same lock a self-delete of the owner takes — and confirm the document is still
+        // active under it, so a grant cannot attach to a document being concurrently trashed by the owner's
+        // deletion (nor ride a stale owner past a reassignment). Tag/route sources do not participate. A
+        // null result means the document was deleted / its owner could not be locked active — abort.
+        if (CredentialLifecycleUtil.documentExists(sourceId)
+                && CredentialLifecycleUtil.lockDocumentOwnerForGrant(sourceId) == null) {
+            throw new NotFoundException();
+        }
+
         // Create the ACL
         Acl acl = new Acl();
         acl.setSourceId(sourceId);

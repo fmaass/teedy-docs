@@ -9,6 +9,7 @@ import com.sismics.docs.core.dao.ShareDao;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Share;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
@@ -68,7 +69,15 @@ public class ShareResource extends BaseResource {
         if (!aclDao.checkPermission(documentId, PermType.WRITE, getTargetIdList(null))) {
             throw new NotFoundException();
         }
-        
+
+        // #111: lock the document owner's row FOR UPDATE (the same lock a self-delete of the owner takes)
+        // and confirm the document is still active under it, so this share cannot attach to a document being
+        // concurrently trashed by the owner's deletion. A null result means the document was deleted (or its
+        // owner could not be locked active) while we waited — abort, fail closed.
+        if (CredentialLifecycleUtil.lockDocumentOwnerForGrant(documentId) == null) {
+            throw new NotFoundException();
+        }
+
         // Create the share
         ShareDao shareDao = new ShareDao();
         Share share = new Share();

@@ -17,6 +17,7 @@ import com.sismics.docs.core.event.PasswordLostEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.*;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
@@ -177,17 +178,21 @@ public class UserResource extends BaseResource {
             throw new ClientException("ValidationError", "'locale' is not a supported locale");
         }
 
-        // If changing password, verify the current password first
+        // If changing password, verify the current password first and capture the credential epoch the
+        // verification observed. That epoch gates the conditional update below so a self-change that
+        // verified the old password then paused cannot overwrite a recovery reset that landed in between.
+        User verifiedUser = null;
         if (StringUtils.isNotBlank(password)) {
             if (StringUtils.isBlank(currentPassword)) {
                 throw new ClientException("CurrentPasswordRequired", "Current password is required to change password");
             }
-            if (AuthenticationUtil.authenticate(principal.getName(), currentPassword) == null) {
+            verifiedUser = AuthenticationUtil.authenticate(principal.getName(), currentPassword);
+            if (verifiedUser == null) {
                 throw new ForbiddenClientException();
             }
             ValidationUtil.validatePasswordStrength(password, principal.getName());
         }
-        
+
         // Update the user
         boolean passwordChanged = StringUtils.isNotBlank(password);
         UserDao userDao = new UserDao();
@@ -198,8 +203,19 @@ public class UserResource extends BaseResource {
         }
         user = userDao.update(user, principal.getId());
 
-        // Change the password
-        UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
+        // Change the password conditionally on the verification-time epoch, advancing the credential epoch
+        // (which kills EVERY existing session AND API key of this user). The returned authoritative
+        // post-bump epoch stamps the rotated replacement session. A concurrent recovery reset that already
+        // bumped the epoch wins: the conditional update abandons the self-change and returns a negative
+        // value, so the reset's password stands.
+        if (passwordChanged) {
+            long rotatedEpoch = CredentialLifecycleUtil.changeOwnPassword(
+                    user.getId(), password, verifiedUser.getCredentialEpoch(), principal.getId());
+            if (rotatedEpoch < 0) {
+                throw new ClientException("ConcurrentCredentialChange",
+                        "The password was changed by another operation; please retry");
+            }
+        }
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -257,10 +273,11 @@ public class UserResource extends BaseResource {
                 .setLongLasted(longLasted)
                 .setIp(StringUtils.abbreviate(ip, 45))
                 .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
-                // Stamp the current in-transaction user entity's epoch. In Phase 2 the self password-change
-                // bumps the epoch in this same transaction before the rotation, so the replacement session
-                // naturally stamps the just-bumped epoch with no change here.
-                .setCredentialEpoch(user.getCredentialEpoch());
+                // Stamp the AUTHORITATIVE post-bump epoch, read fresh from the row (scalar) in this same
+                // transaction. The self password-change bumped the epoch just before this rotation; the
+                // native bump does not refresh the in-memory user entity, so stamping its cached (pre-bump)
+                // epoch would leave the replacement session dead on arrival.
+                .setCredentialEpoch(CredentialLifecycleUtil.currentEpoch(user.getId()));
         String tokenValue = authenticationTokenDao.create(newToken);
 
         int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
@@ -334,6 +351,7 @@ public class UserResource extends BaseResource {
             ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
             user.setStorageQuota(storageQuota);
         }
+        boolean disableTransition = false;
         if (disabled != null) {
             // Cannot disable the admin user or the guest user
             RoleBaseFunctionDao userBaseFuction = new RoleBaseFunctionDao();
@@ -344,6 +362,7 @@ public class UserResource extends BaseResource {
 
             if (disabled && user.getDisableDate() == null) {
                 // Recording the disabled date
+                disableTransition = true;
                 user.setDisableDate(new Date());
             } else if (!disabled && user.getDisableDate() != null) {
                 // Emptying the disabled date
@@ -360,6 +379,13 @@ public class UserResource extends BaseResource {
         // compromised). Committed atomically with the password change in this request transaction.
         if (passwordChanged) {
             new AuthenticationTokenDao().deleteAllByUserId(user.getId());
+        }
+
+        // Uniform rule: an admin password change OR a transition to disabled advances the credential epoch,
+        // invalidating EVERY existing session and API key of the target (closes #108, and #110 so a
+        // re-enable — which does NOT bump — cannot resurrect credentials stamped before the disable).
+        if (passwordChanged || disableTransition) {
+            CredentialLifecycleUtil.bumpEpoch(user.getId());
         }
 
         // Always return OK
@@ -625,6 +651,21 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "This user cannot be deleted");
         }
 
+        // #111: lock the owner (self) row FOR UPDATE and guard under the lock, held to commit so it spans
+        // the owner-scoped trash below. A concurrent direct share/ACL grant on one of this account's
+        // documents takes the SAME owner-row lock, so the two serialize: a grant that commits first is seen
+        // by the guard (this delete is refused); a delete that commits first leaves the waiting grant to
+        // re-read the now-deleted owner/document and abort. BLOCK the delete when the account still owns
+        // documents directly shared with other principals — fail closed, non-disclosive.
+        User lockedSelf = CredentialLifecycleUtil.lockActiveUser(principal.getId());
+        if (lockedSelf == null) {
+            throw new ClientException("ForbiddenError", "This user cannot be deleted");
+        }
+        if (CredentialLifecycleUtil.hasSharedDocuments(principal.getId())) {
+            throw new ClientException("SharedDocumentsError",
+                    "This account owns documents shared with other users and cannot be deleted");
+        }
+
         // Gracefully handle workflow references (never blocks): collect affected route models and
         // cancel active routes with an open step targeting this user.
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(principal.getId());
@@ -633,11 +674,11 @@ public class UserResource extends BaseResource {
         // Find linked data
         DocumentDao documentDao = new DocumentDao();
         List<Document> documentList = documentDao.findByUserId(principal.getId());
+        UserDao userDao = new UserDao();
         FileDao fileDao = new FileDao();
         List<File> fileList = fileDao.findByUserId(principal.getId());
 
         // Delete the user
-        UserDao userDao = new UserDao();
         userDao.delete(principal.getName(), principal.getId());
 
         sendDeletionEvents(documentList, fileList);
@@ -716,13 +757,23 @@ public class UserResource extends BaseResource {
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
         PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
-        // Re-validate the target under a row lock held to commit, closing the TOCTOU between the
-        // active-check above and the reassignment below: a concurrent deletion of the target must not
-        // leave documents owned by a now-soft-deleted user (which clean_storage would later purge). If
-        // the target was concurrently deleted, this returns null and the delete fails cleanly with no
-        // reassignment performed.
-        User lockedTarget = userDao.getActiveByIdForUpdate(reassignTarget.getId());
-        if (lockedTarget == null) {
+        // Lock BOTH the departing and the target owner rows FOR UPDATE, in a deterministic id order so
+        // every multi-owner locker uses the same order (deadlock-safe). Each lock is eligibility-scoped, so
+        // a concurrently-deleted participant yields null and the delete fails cleanly with no reassignment
+        // (closes the TOCTOU between the active-check above and the reassignment below — documents must not
+        // land on a now-soft-deleted owner). Held to commit, these locks serialize the reassignment against
+        // any concurrent direct share/ACL grant on either owner's documents (which take the same owner-row
+        // lock), so a grant can never ride a stale owner past the transfer into the new owner's lifecycle.
+        User lockedDeparting;
+        User lockedTarget;
+        if (user.getId().compareTo(reassignTarget.getId()) <= 0) {
+            lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+        } else {
+            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+            lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+        }
+        if (lockedDeparting == null || lockedTarget == null) {
             throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
         }
 
@@ -1434,6 +1485,11 @@ public class UserResource extends BaseResource {
         // Change the password
         user.setPassword(password);
         user = userDao.updatePassword(user, principal.getId());
+
+        // Advance the credential epoch so the reset invalidates EVERY existing session AND API key (closes
+        // the #96 race and #97): a credential minted at the old epoch is rejected on its next request. This
+        // is the authoritative writer even for a session the token-delete below might miss.
+        CredentialLifecycleUtil.bumpEpoch(user.getId());
 
         // Invalidate every OTHER outstanding recovery key for this user (atomic with the consume above).
         passwordRecoveryDao.deleteActiveByLogin(user.getUsername());

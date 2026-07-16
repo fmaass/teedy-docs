@@ -259,6 +259,60 @@ public class UserDao {
     }
 
     /**
+     * Changes a user's OWN password under a pessimistic row lock, conditional on the credential epoch
+     * observed when the current password was verified. The password hash and the epoch are read from the
+     * SAME {@code SELECT ... FOR UPDATE} row version, so verification and update cannot straddle a
+     * concurrent bump: if the locked epoch no longer equals {@code verifiedEpoch} a credential-invalidating
+     * event (e.g. a completed recovery reset) landed in between and MUST win — the change is abandoned and
+     * this returns {@code -1} without touching the password. On success it hashes and stores the new
+     * password, advances the epoch (the single atomic in-place increment, which kills every existing
+     * session AND API key of this user), and returns the authoritative post-bump epoch read back from the
+     * row with a SCALAR NATIVE query — never the managed entity, whose cached epoch the native bump does
+     * not refresh — so the caller can stamp the rotated replacement session with the just-bumped value.
+     *
+     * @param userId User ID
+     * @param clearPassword New clear-text password to hash and store
+     * @param verifiedEpoch The credential epoch observed when the current password was verified
+     * @param actingUserId Acting user ID (for the update audit log)
+     * @return the new (post-bump) credential epoch on success, or {@code -1} when a concurrent credential
+     *         change moved the epoch off the verified value (the update is abandoned, the other change wins)
+     */
+    public long changeOwnPassword(String userId, String clearPassword, long verifiedEpoch, String actingUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
+        q.setParameter("id", userId);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        User userDb;
+        try {
+            userDb = (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return -1L;
+        }
+        // Fail closed on exact inequality: a locked epoch below OR above the verified value both mean the
+        // verification-time snapshot is stale, so the change is abandoned rather than allowed to overwrite
+        // the newer credential state.
+        if (userDb.getCredentialEpoch() != verifiedEpoch) {
+            return -1L;
+        }
+        userDb.setPassword(hashPassword(clearPassword));
+        // Flush the password change before the native bump/re-read so the row already carries it and the
+        // scalar re-read below reflects the whole in-transaction state.
+        em.flush();
+        int updated = bumpCredentialEpoch(userId);
+        if (updated != 1) {
+            return -1L;
+        }
+        Query reread = em.createNativeQuery(
+                "select USE_CREDENTIALEPOCH_N from T_USER where USE_ID_C = :id and USE_DELETEDATE_D is null");
+        reread.setParameter("id", userId);
+        long newEpoch = ((Number) reread.getSingleResult()).longValue();
+
+        AuditLogUtil.create(userDb, AuditLogType.UPDATE, actingUserId);
+
+        return newEpoch;
+    }
+
+    /**
      * Update the hashed password silently.
      *
      * @param user User to update
@@ -274,6 +328,13 @@ public class UserDao {
 
         // Update the user
         userDb.setPassword(user.getPassword());
+
+        // The startup admin-password-init path mutates an EXISTING account's credential, so it bumps the
+        // epoch under the uniform rule: any session or API key stamped at the pre-init epoch is invalidated
+        // once the configured password takes effect. Flush the password first so it and the native bump
+        // both land before commit.
+        em.flush();
+        bumpCredentialEpoch(userDb.getId());
 
         return user;
     }

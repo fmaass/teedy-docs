@@ -1,9 +1,11 @@
 package com.sismics.docs.core.dao;
 
+import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
@@ -47,6 +49,112 @@ public class DocumentDao {
         return document.getId();
     }
     
+    /**
+     * True when the given user still OWNS at least one ACTIVE document carrying an ACTIVE DIRECT grant to
+     * a principal OTHER than themselves — the #111 self-delete guard. "Direct" means an ACL whose source is
+     * the document itself; a tag-inherited grant (source = a tag) is NOT joined here and dies with the
+     * documents, as today. ROUTING grants are excluded (a route is deliberately canceled on deletion and
+     * must not block it), and the owner's own base grants (target == owner) are excluded. Any remaining
+     * grant — to another user, a group, or a share link — means the account is sharing documents and must
+     * not be silently deleted. The count is done in one native statement so it composes with the owner-row
+     * lock the caller holds.
+     *
+     * @param ownerId Owner user ID
+     * @return true if the owner has an active document directly shared to another principal
+     */
+    public boolean hasActiveDocumentsSharedToOthers(String ownerId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select count(a.ACL_ID_C) from T_ACL a"
+                + " join T_DOCUMENT d on d.DOC_ID_C = a.ACL_SOURCEID_C"
+                + " where d.DOC_IDUSER_C = :ownerId and d.DOC_DELETEDATE_D is null"
+                + " and a.ACL_DELETEDATE_D is null and a.ACL_TYPE_C = :type"
+                + " and a.ACL_TARGETID_C <> :ownerId");
+        q.setParameter("ownerId", ownerId);
+        q.setParameter("type", AclType.USER.name());
+        return ((Number) q.getSingleResult()).longValue() > 0;
+    }
+
+    /**
+     * The CURRENT owner id of an ACTIVE document, read fresh from the row with a scalar native query so it
+     * reflects committed cross-transaction changes (an entity read could return an identity-map-cached
+     * instance whose fields predate a concurrent reassignment). Returns null when the document is absent or
+     * trashed.
+     *
+     * @param id Document ID
+     * @return the active document's owner id, or null if absent/trashed
+     */
+    public String getOwnerIfActive(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select d.DOC_IDUSER_C from T_DOCUMENT d where d.DOC_ID_C = :id and d.DOC_DELETEDATE_D is null");
+        q.setParameter("id", id);
+        try {
+            return (String) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * True when a document row exists for the id in ANY state (active or trashed). Lets the ACL-grant path
+     * tell a document source (which participates in the #111 owner-row lock protocol) from a tag or
+     * route-model source (which does not).
+     *
+     * @param id Source ID
+     * @return true if a T_DOCUMENT row exists for the id
+     */
+    public boolean existsById(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select count(d.DOC_ID_C) from T_DOCUMENT d where d.DOC_ID_C = :id");
+        q.setParameter("id", id);
+        return ((Number) q.getSingleResult()).longValue() > 0;
+    }
+
+    /**
+     * #111 grant-path serialization: acquires a {@code SELECT ... FOR UPDATE} lock (eligibility-scoped) on
+     * the CURRENT owner's user row for an active document and returns that owner id — the same owner-row
+     * lock a self-delete of that owner takes, so a direct share/ACL grant and a self-delete on the owner's
+     * documents serialize. The lock is held to the caller's transaction commit.
+     *
+     * <p>Returns null (the grant must ABORT, fail closed) when the document is absent/trashed, or when the
+     * owner's user row cannot be locked active within the bounded retry budget. The retry loop handles a
+     * concurrent ownership reassignment: if the locked owner turns out no longer to own the document (an
+     * admin reassign-delete moved it while this waited), it re-reads the current owner and re-locks it,
+     * WITHOUT releasing the previously-acquired lock (it persists to transaction end — harmless extra
+     * contention), so a grant can never ride a stale owner lock past a transfer into a new owner's
+     * self-delete.</p>
+     *
+     * @param documentId Document ID whose owner is to be locked
+     * @return the current active owner id with its user row locked FOR UPDATE, or null to abort
+     */
+    public String lockOwnerForGrant(String documentId) {
+        UserDao userDao = new UserDao();
+        final int maxAttempts = 5;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            String ownerId = getOwnerIfActive(documentId);
+            if (ownerId == null) {
+                return null;
+            }
+            User lockedOwner = userDao.getActiveByIdForUpdate(ownerId);
+            if (lockedOwner == null) {
+                // The owner was soft-deleted while we waited: the document was either trashed (the next
+                // re-read returns null and aborts) or reassigned to a new active owner (the next re-read
+                // returns that owner). Retry against the freshly-read owner.
+                continue;
+            }
+            String ownerAfterLock = getOwnerIfActive(documentId);
+            if (ownerAfterLock == null) {
+                return null;
+            }
+            if (ownerId.equals(ownerAfterLock)) {
+                return ownerId;
+            }
+            // Ownership changed under us (reassignment). Loop to lock the current owner; the prior lock is
+            // intentionally kept.
+        }
+        return null;
+    }
+
     /**
      * Returns the list of all active documents.
      *
