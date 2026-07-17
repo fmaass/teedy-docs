@@ -27,6 +27,16 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class TestInboxSync extends BaseJerseyTest {
 
+    private void createUser(String adminToken, String username, String email) {
+        target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("username", username)
+                        .param("email", email)
+                        .param("password", "Test1234")
+                        .param("storage_quota", "1000000")), JsonObject.class);
+    }
+
     private int configureInbox(String adminToken, int imapPort, String tagId, boolean deleteImported) {
         target().path("/app/config_inbox").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
@@ -70,6 +80,47 @@ public class TestInboxSync extends BaseJerseyTest {
 
     private void sync() {
         AppContext.getInstance().getInboxService().syncInbox();
+    }
+
+    @Test
+    public void ambiguousSenderEmailImportsAsAdmin() throws Exception {
+        GreenMail greenMail = new GreenMail(new ServerSetup[] {
+                ServerSetup.SMTP.dynamicPort(), ServerSetup.IMAP.dynamicPort() });
+        greenMail.setUser("test@sismics.com", "Test1234");
+        greenMail.start();
+        InboxService inbox = AppContext.getInstance().getInboxService();
+        try {
+            String adminToken = adminToken();
+            String suffix = Long.toUnsignedString(System.nanoTime());
+            String senderEmail = "shared-" + suffix + "@example.com";
+            createUser(adminToken, "inbox_shared_a_" + suffix, senderEmail);
+            createUser(adminToken, "inbox_shared_b_" + suffix, senderEmail);
+            String tagName = "InboxShared" + suffix;
+            String tagId = createInboxTag(adminToken, tagName);
+            configureInbox(adminToken, greenMail.getImap().getPort(), tagId, false);
+            ServerSetup smtp = new ServerSetup(greenMail.getSmtp().getPort(), null, ServerSetup.PROTOCOL_SMTP);
+
+            GreenMailUtil.sendTextEmail("test@sismics.com", senderEmail, "Ambiguous sender", "body", smtp);
+            sync();
+
+            Assertions.assertNull(inbox.getLastSyncError(), "an ambiguous sender must not fail the sync");
+            JsonObject list = target().path("/document/list")
+                    .queryParam("search", "tag:" + tagName)
+                    .request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get(JsonObject.class);
+            Assertions.assertEquals(1, list.getJsonArray("documents").size(),
+                    "the message must be imported exactly once");
+            String documentId = list.getJsonArray("documents").getJsonObject(0).getString("id");
+            JsonObject document = target().path("/document/" + documentId).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get(JsonObject.class);
+            Assertions.assertEquals("admin", document.getString("creator"),
+                    "an ambiguous sender email must fall back to admin ownership");
+            Assertions.assertEquals(0, unseenCount(adminToken), "the imported message must be acknowledged");
+        } finally {
+            greenMail.stop();
+        }
     }
 
     /**

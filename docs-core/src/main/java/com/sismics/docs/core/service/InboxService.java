@@ -616,7 +616,11 @@ public class InboxService extends AbstractScheduledService {
             subject = subject.trim().replaceAll(" +", " ");
         }
         UserDao userDao = new UserDao();
-        com.sismics.docs.core.model.jpa.User user = userDao.getByEmail(sender.getAddress());
+        String senderEmail = sender.getAddress();
+        com.sismics.docs.core.model.jpa.User user = userDao.getByEmail(senderEmail);
+        if (user == null && senderEmail != null && userDao.hasMultipleActiveUsersByEmail(senderEmail)) {
+            log.warn("Multiple active users match inbox sender email {}; attributing document to admin", senderEmail);
+        }
         String userId = user != null ? user.getId() : "admin";
         if (user != null) {
             document.setUserId(user.getId());

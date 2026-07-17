@@ -452,17 +452,28 @@ public class UserDao {
      * Gets an active user by its email.
      *
      * @param email User's email
-     * @return User
+     * @return The user when exactly one active user matches; null when no active user matches or the email is ambiguous
      */
     public User getByEmail(String email) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        try {
-            Query q = em.createQuery("select u from User u where u.email = :email and u.deleteDate is null");
-            q.setParameter("email", email);
-            return (User) q.getSingleResult();
-        } catch (NoResultException e) {
-            return null;
-        }
+        Query q = em.createQuery("select u from User u where u.email = :email and u.deleteDate is null");
+        q.setParameter("email", email);
+        @SuppressWarnings("unchecked")
+        List<User> users = q.getResultList();
+        return users.size() == 1 ? users.get(0) : null;
+    }
+
+    /**
+     * Returns whether an email belongs to multiple active users.
+     *
+     * @param email User's email
+     * @return True if multiple active users match
+     */
+    public boolean hasMultipleActiveUsersByEmail(String email) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select count(u) from User u where u.email = :email and u.deleteDate is null");
+        q.setParameter("email", email);
+        return (Long) q.getSingleResult() > 1;
     }
 
     /**
