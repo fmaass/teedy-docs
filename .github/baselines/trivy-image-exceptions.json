@@ -12,16 +12,5 @@
     ]
   },
   "recorded": "2026-07-15",
-  "exceptions": [
-    {
-      "id": "CVE-2017-9096",
-      "finding": "com.lowagie:itext",
-      "reason": "XXE in iText's XML parsers, reachable only when iText parses untrusted XML/XFA/PDF. Reachability assessment (docs/security/itext-cve-2017-9096-assessment.md) confirms both usage surfaces — PdfUtil font registration and TextPlainFormatHandler text/CSV-to-PDF — only WRITE PDFs and never parse user-supplied XML, so the flaw is not reachable. No fixed release exists in the com.lowagie:itext 2.x lineage (transitive via the opensagres XDocReport PDF converters).",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2027-01-15",
-      "compensating_control": "Not reachable from user input (write-only PDF generation, no XML parsing); see docs/security/itext-cve-2017-9096-assessment.md",
-      "removal_issue": "#105"
-    }
-  ]
+  "exceptions": []
 }

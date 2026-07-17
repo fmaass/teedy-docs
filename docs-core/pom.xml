@@ -149,13 +149,18 @@
     </dependency>
 
     <dependency>
-      <groupId>fr.opensagres.xdocreport</groupId>
-      <artifactId>fr.opensagres.odfdom.converter.pdf</artifactId>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
     </dependency>
 
     <dependency>
       <groupId>fr.opensagres.xdocreport</groupId>
-      <artifactId>fr.opensagres.poi.xwpf.converter.pdf</artifactId>
+      <artifactId>fr.opensagres.odfdom.converter.pdf.openpdf</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>fr.opensagres.xdocreport</groupId>
+      <artifactId>fr.opensagres.poi.xwpf.converter.pdf.openpdf</artifactId>
     </dependency>
 
     <dependency>
