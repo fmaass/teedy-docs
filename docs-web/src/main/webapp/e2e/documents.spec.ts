@@ -63,7 +63,7 @@ test('double-clicking a document row navigates to the full document view (D #11)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 })
 
-test('@flaky a document with more than 3 tags shows a focusable +N control whose popover reveals the rest (D #24, quarantined #118)', async ({ page, baseURL, request }) => {
+test('a document with more than 3 tags shows a focusable +N control whose popover reveals the rest (D #24)', async ({ page, baseURL, request }) => {
   // Seed 5 uniquely-named tags + a document carrying all of them via REST so the
   // list row deterministically overflows (>3 tags). The tags are named so their
   // creation order is stable; the first 3 render inline, the last 2 collapse.
@@ -107,8 +107,21 @@ test('@flaky a document with more than 3 tags shows a focusable +N control whose
 
     // Activating it opens the popover (teleported to <body>) with the 2 hidden tags,
     // and does NOT navigate the row (still on the list).
-    await overflow.click()
-    await expect(overflow).toHaveAttribute('aria-expanded', 'true')
+    //
+    // On the touch viewport the tap is occasionally swallowed under full-suite load: a
+    // list re-render (the document query keeps previous data and refetches) replaces the
+    // trigger between actionability and dispatch, so the toggle handler never runs and
+    // aria-expanded stays false (#118). The reveal is idempotent and
+    // the handler flips `open` synchronously, so aria-expanded is an EXACT post-tap signal:
+    // retry the tap until it flips, re-tapping ONLY while still collapsed (a tap on an
+    // already-open trigger would toggle it shut). Same dropped-click remedy as the
+    // Empty-trash gesture in trash.spec.ts. No arbitrary sleeps — the DOM signal gates it.
+    await expect(async () => {
+      if ((await overflow.getAttribute('aria-expanded')) !== 'true') {
+        await overflow.click()
+      }
+      await expect(overflow).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 })
+    }).toPass({ timeout: 15000 })
     await expect(page).toHaveURL(/#\/document$/)
     const panel = page.locator('.tag-overflow-panel')
     await expect(panel).toBeVisible()
