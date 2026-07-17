@@ -15,6 +15,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Date;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
@@ -23,16 +24,33 @@ import java.util.function.BooleanSupplier;
  * ({@code hasActiveDocumentsSharedToOthers}) scans only ACTIVE documents, so a trashed-but-shared document
  * is invisible to a concurrent self-delete; without a shared serialization point, restore could resurrect
  * such a document — leaving it ACTIVE and directly shared under a now-deleted owner (the orphaned shared
- * document #111 forbids). Restore and self-delete therefore both take the owner's (self) user row FOR UPDATE
- * held to commit, so they serialize on the REAL lock; removing the restore endpoint's owner-row lock makes
- * both race tests fail (the restore request no longer parks on the gate, so the block barrier times out).
+ * document #111 forbids). Restore therefore takes the owner's (self) user row FOR UPDATE held to commit, so
+ * it serializes on the REAL lock against the self-delete, which takes the same row.
+ *
+ * <p>Both orderings are exercised, but WITHOUT racing two waiters over a released lock (DB lock acquisition
+ * among waiters is not FIFO on either engine, so a "who wins the released lock" assertion is inherently
+ * non-deterministic). Instead each test parks EXACTLY ONE operation — the restore — on the owner row and
+ * then makes the other operation's outcome deterministic:
+ * <ul>
+ *   <li>Ordering (i), self-delete wins: the restore parks on the owner-row lock (already past its own
+ *       authentication and trashed-document fetch); the gate then commits the owner's soft-deletion under
+ *       the held lock and releases, so the sole waiting restore resumes, re-reads the now soft-deleted owner,
+ *       and aborts (404) instead of resurrecting the shared document.</li>
+ *   <li>Ordering (ii), restore wins: the restore parks on the owner-row lock; the gate releases WITHOUT
+ *       deleting the owner, so the sole waiting restore acquires the lock, resurrects the document, and
+ *       commits (200). Only AFTER that commit is the self-delete issued, and it now sees the newly-active
+ *       shared document under the #111 guard and is refused (400).</li>
+ * </ul>
+ * There is never more than one waiter on the owner-row lock, so there is no lock-acquisition race to resolve
+ * and each outcome is deterministic.
  *
  * <p>Coordination mirrors {@link TestRouteModelIntegrityRestConcurrency}: the TEST thread holds a pessimistic
- * lock (the "gate") on the owner user row in its own transaction while the requests are fired, and observes
- * the requests actually parking on locks via the database's lock-wait view (H2:
+ * lock (the "gate") on the owner user row in its own transaction while the restore is fired, and observes the
+ * restore actually parking on the lock via the database's lock-wait view (H2:
  * {@code INFORMATION_SCHEMA.SESSIONS.BLOCKER_ID}; PostgreSQL: {@code pg_blocking_pids} rooted at the gate's
- * own backend PID) — a deterministic signal, not a timing heuristic. Releasing the gate lets the engine
- * serialize the requests on the REAL owner-row lock. Runs on H2 and on real PostgreSQL.</p>
+ * own backend PID) — a deterministic signal, not a timing heuristic. Removing the restore endpoint's
+ * owner-row lock makes both tests fail: the restore no longer parks on the gate, so the block barrier times
+ * out — the base-red signal that the serialization is gone. Runs on H2 and on real PostgreSQL.</p>
  */
 public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
 
@@ -88,6 +106,21 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
             }
         }
 
+        /**
+         * Commit the gate transaction — persisting any mutation staged on the locked owner row (e.g. its
+         * soft-deletion) — and release the row lock, so a parked waiter resumes and observes the committed
+         * state. Idempotent with {@link #release()}.
+         */
+        void commitAndRelease() {
+            if (tx.isActive()) {
+                tx.commit();
+            }
+            if (em.isOpen()) {
+                em.close();
+            }
+            ThreadLocalContext.cleanup();
+        }
+
         void release() {
             if (tx.isActive()) {
                 tx.rollback();
@@ -140,9 +173,12 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
     }
 
     /**
-     * Ordering (i) — self-delete acquires the owner-row lock first. Once it commits (owner soft-deleted),
-     * the waiting restore's {@code lockActiveUser} returns null and the restore aborts (404) instead of
-     * resurrecting the shared document under a deleted owner.
+     * Ordering (i) — the self-delete acquires the owner-row lock first. The restore authenticates while the
+     * owner is still active and fetches its trashed document, then parks on the owner-row lock. The gate
+     * commits the owner's soft-deletion under the held lock (the self-delete that won the race, made
+     * deterministic by staging it under the lock rather than racing a second request for it) and releases;
+     * the sole waiting restore resumes, finds {@code lockActiveUser} returns null for the now soft-deleted
+     * owner, and aborts (404) instead of resurrecting the shared document under a deleted owner.
      */
     @Test
     public void selfDeleteFirstAbortsTheWaitingRestore() throws Exception {
@@ -155,20 +191,9 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
         trash(docId, ownerToken); // D + its ACL soft-deleted -> invisible to the self-delete guard
         String ownerId = userIdOf("restore_race_df_owner");
 
-        AtomicReference<Integer> deleteStatus = new AtomicReference<>();
         AtomicReference<Integer> restoreStatus = new AtomicReference<>();
-        AtomicReference<Throwable> deleteError = new AtomicReference<>();
         AtomicReference<Throwable> restoreError = new AtomicReference<>();
 
-        Thread deleteThread = new Thread(() -> {
-            try {
-                Response r = target().path("/user").request()
-                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken).delete();
-                deleteStatus.set(r.getStatus());
-            } catch (Throwable t) {
-                deleteError.set(t);
-            }
-        });
         Thread restoreThread = new Thread(() -> {
             try {
                 Response r = target().path("/document/" + docId + "/restore").request()
@@ -184,25 +209,23 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
         User gateLocked = new UserDao().getActiveByIdForUpdate(ownerId);
         Assertions.assertNotNull(gateLocked, "Gate must lock the owner user row");
         try {
-            deleteThread.start();
-            gate.awaitCondition(() -> gate.blockedSessions() >= 1, "self-delete parked on the owner-row lock");
             restoreThread.start();
-            // With the lock the restore parks on the owner-row lock too (2 parked). Without it the restore
-            // never takes the lock, so this barrier times out — the failure signal when serialization is absent.
-            gate.awaitCondition(() -> gate.blockedSessions() >= 2, "restore parked on the owner-row lock");
+            // With the lock the restore parks on the owner-row lock. Without it the restore never takes the
+            // lock, so this barrier times out — the failure signal when serialization is absent.
+            gate.awaitCondition(() -> gate.blockedSessions() >= 1, "restore parked on the owner-row lock");
+            // The self-delete that won the lock commits the owner's soft-deletion under the held lock, then
+            // releases it. Staging the delete inside the gate transaction makes "the self-delete acquired
+            // and committed first" deterministic — there is no second waiter racing the restore for the lock.
+            gateLocked.setDeleteDate(new Date());
+            gate.commitAndRelease();
         } finally {
             gate.release();
         }
 
-        deleteThread.join(JOIN_TIMEOUT_MS);
         restoreThread.join(JOIN_TIMEOUT_MS);
-        Assertions.assertFalse(deleteThread.isAlive(), "self-delete request must complete");
         Assertions.assertFalse(restoreThread.isAlive(), "restore request must complete");
-        Assertions.assertNull(deleteError.get(), "self-delete request failed: " + deleteError.get());
         Assertions.assertNull(restoreError.get(), "restore request failed: " + restoreError.get());
 
-        Assertions.assertEquals(Response.Status.OK.getStatusCode(), deleteStatus.get().intValue(),
-                "self-delete succeeds: the trashed shared document is invisible to its guard");
         Assertions.assertEquals(Response.Status.NOT_FOUND.getStatusCode(), restoreStatus.get().intValue(),
                 "restore aborts non-disclosively once the owner was soft-deleted under the lock");
 
@@ -212,9 +235,10 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
     }
 
     /**
-     * Ordering (ii) — restore acquires the owner-row lock first. It resurrects the document (active + shared)
-     * and commits; the waiting self-delete then re-reads the now-active shared document under the lock and is
-     * refused.
+     * Ordering (ii) — the restore acquires the owner-row lock first. It parks on the owner-row lock; the gate
+     * releases without deleting the owner, so the sole waiting restore acquires the lock, resurrects the
+     * document (active + shared), and commits (200). Only AFTER that commit is the self-delete issued: it now
+     * re-reads the now-active shared document under the same guard and is refused (400).
      */
     @Test
     public void restoreFirstRefusesTheWaitingSelfDelete() throws Exception {
@@ -228,10 +252,7 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
         String ownerId = userIdOf("restore_race_sf_owner");
 
         AtomicReference<Integer> restoreStatus = new AtomicReference<>();
-        AtomicReference<Integer> deleteStatus = new AtomicReference<>();
-        AtomicReference<JsonObject> deleteBody = new AtomicReference<>();
         AtomicReference<Throwable> restoreError = new AtomicReference<>();
-        AtomicReference<Throwable> deleteError = new AtomicReference<>();
 
         Thread restoreThread = new Thread(() -> {
             try {
@@ -243,16 +264,6 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
                 restoreError.set(t);
             }
         });
-        Thread deleteThread = new Thread(() -> {
-            try {
-                Response r = target().path("/user").request()
-                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken).delete();
-                deleteStatus.set(r.getStatus());
-                deleteBody.set(r.readEntity(JsonObject.class));
-            } catch (Throwable t) {
-                deleteError.set(t);
-            }
-        });
 
         Gate gate = new Gate();
         User gateLocked = new UserDao().getActiveByIdForUpdate(ownerId);
@@ -262,24 +273,26 @@ public class TestDocumentRestoreOwnershipRace extends BaseJerseyTest {
             // With the lock the restore parks on the owner-row lock. Without it the restore never takes the
             // lock, so this barrier times out — the failure signal when serialization is absent.
             gate.awaitCondition(() -> gate.blockedSessions() >= 1, "restore parked on the owner-row lock");
-            deleteThread.start();
-            gate.awaitCondition(() -> gate.blockedSessions() >= 2, "self-delete parked on the owner-row lock");
         } finally {
+            // Release without deleting the owner: the restore is the sole waiter and deterministically wins.
             gate.release();
         }
 
         restoreThread.join(JOIN_TIMEOUT_MS);
-        deleteThread.join(JOIN_TIMEOUT_MS);
         Assertions.assertFalse(restoreThread.isAlive(), "restore request must complete");
-        Assertions.assertFalse(deleteThread.isAlive(), "self-delete request must complete");
         Assertions.assertNull(restoreError.get(), "restore request failed: " + restoreError.get());
-        Assertions.assertNull(deleteError.get(), "self-delete request failed: " + deleteError.get());
-
         Assertions.assertEquals(Response.Status.OK.getStatusCode(), restoreStatus.get().intValue(),
                 "restore succeeds: the owner is still active when it holds the lock first");
-        Assertions.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), deleteStatus.get().intValue(),
-                "self-delete is refused once it sees the newly-active shared document under the lock");
-        Assertions.assertEquals("SharedDocumentsError", deleteBody.get().getString("type"),
+
+        // The restore has committed the resurrection. A self-delete issued now (sequentially, with no race)
+        // sees the newly-active shared document under the #111 guard and is refused.
+        Response deleteResponse = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken).delete();
+        int deleteStatus = deleteResponse.getStatus();
+        JsonObject deleteBody = deleteResponse.readEntity(JsonObject.class);
+        Assertions.assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), deleteStatus,
+                "self-delete is refused once it sees the newly-active shared document under the guard");
+        Assertions.assertEquals("SharedDocumentsError", deleteBody.getString("type"),
                 "the refusal is the #111 shared-documents guard, not an unrelated error");
 
         Assertions.assertTrue(userActive("restore_race_sf_owner"), "the owner is NOT deleted (self-delete refused)");
