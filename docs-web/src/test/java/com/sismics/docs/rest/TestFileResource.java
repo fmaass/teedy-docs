@@ -708,7 +708,7 @@ public class TestFileResource extends BaseJerseyTest {
      * investigable outcome, never a silently missed leak.
      */
     private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
-        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        Path tmpDir = com.sismics.docs.core.service.FileService.getTemporaryDirectory();
         try (java.util.stream.Stream<Path> files = Files.list(tmpDir)) {
             return files.filter(p -> p.getFileName().toString().startsWith("sismics_docs"))
                     .collect(java.util.stream.Collectors.toSet());

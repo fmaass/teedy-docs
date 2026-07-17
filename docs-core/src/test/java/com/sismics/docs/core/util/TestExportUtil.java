@@ -7,6 +7,7 @@ import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
@@ -106,8 +107,14 @@ public class TestExportUtil extends BaseTransactionalTest {
 
         File file = createFile(owner, FILE_JPG_SIZE);
         file.setDocumentId(documentId);
-        file.setLatestVersion(true);
         new FileDao().update(file);
+        // A freshly created single file IS the latest version. The generic update no longer writes that
+        // CAS-managed column (chain identity changes only through the CAS paths), so establish this fixture's
+        // latest state directly — the same approach seedStorageCurrent uses for the quota column.
+        ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_FILE set FIL_LATESTVERSION_B = true where FIL_ID_C = :id")
+                .setParameter("id", file.getId())
+                .executeUpdate();
 
         List<Document> documentList = documentDao.findByUserId(owner.getId());
         Assertions.assertEquals(1, documentList.size());

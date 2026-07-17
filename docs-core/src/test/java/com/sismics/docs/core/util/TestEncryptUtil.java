@@ -63,7 +63,7 @@ public class TestEncryptUtil extends BaseTest {
     // Files.newInputStream, which runs after createTemporaryFile has already produced the temp.
     @Test
     public void decryptFileDeletesTempOnFailureTest() throws Exception {
-        Path tmpDir = Paths.get(System.getProperty("java.io.tmpdir"));
+        Path tmpDir = com.sismics.docs.core.service.FileService.getTemporaryDirectory();
         Path missingSource = tmpDir.resolve("sismics_docs_missing_source_" + UUID.randomUUID());
         Assertions.assertFalse(Files.exists(missingSource));
 

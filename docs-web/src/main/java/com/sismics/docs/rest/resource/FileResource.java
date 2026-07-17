@@ -34,8 +34,11 @@ import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.PreviousVersionMismatchException;
 import com.sismics.docs.core.util.RasterGenerationUtil;
+import com.sismics.docs.core.util.VersionConcurrencyException;
 import com.sismics.rest.exception.ClientException;
+import com.sismics.rest.exception.ConflictException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.RestUtil;
@@ -182,6 +185,12 @@ public class FileResource extends BaseResource {
             return Response.ok().entity(response.build()).build();
         } catch (ClientException | ServerException e) {
             throw e;
+        } catch (PreviousVersionMismatchException e) {
+            // Unknown / cross-document previous version: a client error (400), never a 500.
+            throw new ClientException("PreviousVersionMismatch", e.getMessage());
+        } catch (VersionConcurrencyException e) {
+            // Lost the single-writer race on the version chain: a retryable conflict (409).
+            throw new ConflictException("VersionConflict", e.getMessage());
         } catch (IOException e) {
             throw new ClientException(e.getMessage(), e.getMessage(), e);
         } catch (Exception e) {
@@ -732,7 +741,10 @@ public class FileResource extends BaseResource {
         // double-subtracting.
         FileUtil.reclaimSingleFileOnDelete(file.getId());
 
-        // Delete the file
+        // Delete the file. When it is the current latest version of a chain, FileDao.delete promotes the
+        // immediately-prior active version to latest under an affected-row compare-and-swap, so deleting the
+        // current version never leaves the chain with zero (or two) latest rows — the file stays visible
+        // with its history.
         FileDao fileDao = new FileDao();
         fileDao.delete(file.getId(), principal.getId());
 

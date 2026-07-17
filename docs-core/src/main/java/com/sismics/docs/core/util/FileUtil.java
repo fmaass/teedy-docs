@@ -162,24 +162,33 @@ public class FileUtil {
                 // It's not a new version, so put it in last order
                 file.setOrder(fileDao.getByDocumentId(userId, documentId).size());
             } else {
-                // It's a new version, update the previous version
+                // It's a new version replacing an existing one. Validate the base BEFORE dereferencing it:
+                // an unknown/inactive predecessor, or one belonging to another document, is a client error.
+                // documentId is non-null in this branch, so comparing from it never dereferences a null base
+                // (an orphan predecessor with a null document id would otherwise NPE into a 500).
                 File previousFile = fileDao.getActiveById(previousFileId);
-                if (previousFile == null || !previousFile.getDocumentId().equals(documentId)) {
-                    throw new IOException("Previous version mismatch");
+                if (previousFile == null || !documentId.equals(previousFile.getDocumentId())) {
+                    throw new PreviousVersionMismatchException("The previous file version is unknown or belongs to another document");
                 }
 
-                if (previousFile.getVersionId() == null) {
-                    previousFile.setVersionId(UUID.randomUUID().toString());
+                // Resolve the version-chain id (a first replacement mints one shared by both rows).
+                String versionId = previousFile.getVersionId() == null
+                        ? UUID.randomUUID().toString() : previousFile.getVersionId();
+
+                // Atomic compare-and-swap: demote the predecessor IFF it is still the current active latest.
+                // Zero affected rows means a concurrent writer already replaced or deleted it (a stale base):
+                // fail with a typed conflict BEFORE inserting any successor, so a lost race can never leave
+                // two latest rows in the chain.
+                if (fileDao.demoteCurrentLatestVersion(previousFileId, versionId) == 0) {
+                    throw new VersionConcurrencyException("The file version was modified concurrently");
                 }
 
-                // Copy the previous file metadata
+                // Copy the predecessor metadata onto the successor, including its display rotation so the new
+                // version renders the same way.
                 file.setOrder(previousFile.getOrder());
-                file.setVersionId(previousFile.getVersionId());
+                file.setVersionId(versionId);
                 file.setVersion(previousFile.getVersion() + 1);
-
-                // Update the previous file
-                previousFile.setLatestVersion(false);
-                fileDao.update(previousFile);
+                file.setRotation(previousFile.getRotation());
             }
         }
 

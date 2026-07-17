@@ -3,7 +3,6 @@ package com.sismics.docs.core.util.format;
 import com.google.common.io.Closer;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfWriter;
-import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.util.mime.MimeType;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -41,21 +40,22 @@ public class TextPlainFormatHandler implements FormatHandler {
      * @throws Exception e
      */
     private Path generatePdf(Path file) throws Exception {
-        Document output = new Document(PageSize.A4, 40, 40, 40, 40);
-        Path tempFile = AppContext.getInstance().getFileService().createTemporaryFile();
-        try (OutputStream pdfOutputStream = Files.newOutputStream(tempFile)) {
-            PdfWriter.getInstance(output, pdfOutputStream);
+        // On a conversion failure (e.g. reading the source file throws after the temp is created) the temp is
+        // deleted before the exception propagates, so a plaintext-derived PDF is never stranded on disk.
+        return FormatConversionUtil.convertToTemporaryPdf(tempFile -> {
+            Document output = new Document(PageSize.A4, 40, 40, 40, 40);
+            try (OutputStream pdfOutputStream = Files.newOutputStream(tempFile)) {
+                PdfWriter.getInstance(output, pdfOutputStream);
 
-            output.open();
-            String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-            Font font = FontFactory.getFont("LiberationMono-Regular");
-            Paragraph paragraph = new Paragraph(content, font);
-            paragraph.setAlignment(Element.ALIGN_LEFT);
-            output.add(paragraph);
-            output.close();
-        }
-
-        return tempFile;
+                output.open();
+                String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                Font font = FontFactory.getFont("LiberationMono-Regular");
+                Paragraph paragraph = new Paragraph(content, font);
+                paragraph.setAlignment(Element.ALIGN_LEFT);
+                output.add(paragraph);
+                output.close();
+            }
+        });
     }
 
     @Override

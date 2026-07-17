@@ -1,7 +1,6 @@
 package com.sismics.docs.core.util.format;
 
 import com.google.common.io.Closer;
-import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.util.mime.MimeType;
 import fr.opensagres.poi.xwpf.converter.pdf.PdfConverter;
 import fr.opensagres.poi.xwpf.converter.pdf.PdfOptions;
@@ -58,13 +57,16 @@ public class DocxFormatHandler implements FormatHandler {
      */
     private Path getGeneratedPdf(Path file) throws Exception {
         if (temporaryPdfFile == null) {
-            temporaryPdfFile = AppContext.getInstance().getFileService().createTemporaryFile();
-            try (InputStream inputStream = Files.newInputStream(file);
-                 OutputStream outputStream = Files.newOutputStream(temporaryPdfFile)) {
-                XWPFDocument document = new XWPFDocument(inputStream);
-                PdfOptions options = PdfOptions.create();
-                PdfConverter.getInstance().convert(document, outputStream, options);
-            }
+            // On a conversion failure the temp is deleted before the exception propagates, and the field
+            // stays null (assignment happens only on success) so a retry is not left holding a stale temp.
+            temporaryPdfFile = FormatConversionUtil.convertToTemporaryPdf(tempFile -> {
+                try (InputStream inputStream = Files.newInputStream(file);
+                     OutputStream outputStream = Files.newOutputStream(tempFile)) {
+                    XWPFDocument document = new XWPFDocument(inputStream);
+                    PdfOptions options = PdfOptions.create();
+                    PdfConverter.getInstance().convert(document, outputStream, options);
+                }
+            });
         }
 
         return temporaryPdfFile;

@@ -33,7 +33,7 @@ public class TestEmailUtilTempLeak extends BaseTransactionalTest {
         // fonts). Snapshotting AFTER this keeps those out of the leak measurement, so the diff reflects
         // only the temp our attachment parse creates.
         com.sismics.docs.core.model.context.AppContext.getInstance().getFileService().createTemporaryFile();
-        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        Path tmpDir = com.sismics.docs.core.service.FileService.getTemporaryDirectory();
         Set<Path> before = sismicsTemps(tmpDir);
 
         // A message with one attachment whose content stream throws mid-read.
