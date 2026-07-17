@@ -1174,7 +1174,11 @@ jobs:
           stage_prefix="staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup_ref="${REPOSITORY}:${stage_prefix}-cleanup"
           cleanup_status=0
-          if ! crane append --oci-empty-base --new_tag "${cleanup_ref}"; then
+          # Newer crane requires --new_layer even with --oci-empty-base; an empty
+          # tar keeps the manifest disposable and satisfies both crane generations.
+          empty_layer="$(mktemp)"
+          tar -cf "${empty_layer}" --files-from /dev/null
+          if ! crane append --oci-empty-base --new_layer "${empty_layer}" --new_tag "${cleanup_ref}"; then
             echo "Could not create disposable cleanup manifest" >&2
             exit 1
           fi
