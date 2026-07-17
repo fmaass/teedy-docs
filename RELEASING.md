@@ -28,6 +28,14 @@ Playwright against the single candidate image; `smoke` boots that image; `codeql
 `smoke` + every security gate and promotes the exact signed+verified candidate digest to the release
 tag. `e2e-harness` runs but is **non-gating** (#76). Full pipeline runbook: **`docs/ci-pipeline.md`**.
 
+## Pre-tag regression (standing rule)
+
+Every rc/version closeout runs, in addition to CI: the Playwright suites AND the **full**
+browser-harness regression (`scripts/e2e-browser-harness.sh`) against a locally-running build.
+The CI `e2e-harness` job is a trimmed smoke and is non-gating — it does not satisfy this rule.
+Record the harness scenario counts and the script's exit code in the release evidence before
+requesting the tag go.
+
 ## Migration mechanism
 
 Custom incremental SQL: `docs-core/src/main/resources/db/update/dbupdate-NNN-0.sql`, applied by
