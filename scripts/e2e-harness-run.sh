@@ -31,6 +31,8 @@
 #   E2E_PORT      host port to expose 8080 on (default 8080)
 #   E2E_TIMEOUT   seconds to wait for /api/app readiness (default 180)
 #   CHROME_BIN    path to the Chrome/Chromium binary (default: autodetect)
+#   E2E_CDP_PORT  Chrome remote-debugging port (default 9222); set when 9222 is
+#                 already bound on the host (e.g. an ssh tunnel)
 #   E2E_EXPECT_VERSION   REQUIRED — passed through to the harness version gate, which
 #                        has no default and fails fast if it is unset (CI derives it
 #                        from the checked-out pom.xml; a local caller must export it)
@@ -40,6 +42,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 image="${E2E_IMAGE:-}"
 host_port="${E2E_PORT:-8080}"
+cdp_port="${E2E_CDP_PORT:-9222}"
 max_wait="${E2E_TIMEOUT:-180}"
 container="teedy-harness-$$"
 chrome_profile=""
@@ -121,7 +124,7 @@ chrome_profile="$(mktemp -d)"
   --headless=new --no-first-run --no-default-browser-check --disable-gpu \
   --no-sandbox --disable-dev-shm-usage --window-size=1280,900 \
   --user-data-dir="${chrome_profile}" \
-  --remote-debugging-port=9222 --remote-allow-origins='*' \
+  --remote-debugging-port="${cdp_port}" --remote-allow-origins='*' \
   about:blank >"${chrome_log}" 2>&1 &
 chrome_pid=$!
 
@@ -143,7 +146,7 @@ if [ -z "${ws}" ]; then
   cat "${chrome_log}" >&2 || true
   exit 1
 fi
-# The log prints the IPv6 loopback form (ws://[::1]:9222/...); force IPv4 loopback,
+# The log prints the IPv6 loopback form (ws://[::1]:<port>/...); force IPv4 loopback,
 # which the daemon connects to reliably on CI.
 ws="${ws//\[::1\]/127.0.0.1}"
 echo "OK: Chrome DevTools at ${ws}"
