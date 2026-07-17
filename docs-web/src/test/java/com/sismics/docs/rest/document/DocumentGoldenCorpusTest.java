@@ -575,8 +575,8 @@ public class DocumentGoldenCorpusTest extends BaseJerseyTest {
         for (AuditLogDto row : auditRows(docId)) {
             String rowKey = switch (row.getEntityClass() + "." + row.getType().name()
                     + ("Acl".equals(row.getEntityClass()) ? "." + row.getMessage() : "")) {
-                case "Acl.CREATE.READ" -> "audit.acl.read";
-                case "Acl.CREATE.WRITE" -> "audit.acl.write";
+                case "Acl.CREATE.READ granted to gc_audit_owner" -> "audit.acl.read";
+                case "Acl.CREATE.WRITE granted to gc_audit_owner" -> "audit.acl.write";
                 case "Document.CREATE" -> "audit.doc.create";
                 case "Document.UPDATE" -> "audit.doc.update";
                 default -> "audit.other." + row.getEntityClass() + "." + row.getType().name();

@@ -39,6 +39,7 @@ public class AclDao {
         em.persist(acl);
 
         // Create audit log
+        acl.setAuditMessage(acl.getPerm().name() + " granted to " + resolveTargetName(acl.getTargetId()));
         AuditLogUtil.create(acl, AuditLogType.CREATE, userId);
 
         return acl.getId();
@@ -186,6 +187,7 @@ public class AclDao {
     @SuppressWarnings("unchecked")
     public void delete(String sourceId, PermType perm, String targetId, String userId, AclType type) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
+        String auditMessage = perm.name() + " revoked from " + resolveTargetName(targetId);
 
         // Create audit log
         Query q = em.createQuery("from Acl a where a.sourceId = :sourceId and a.perm = :perm and a.targetId = :targetId and a.type = :type and a.deleteDate is null");
@@ -195,6 +197,7 @@ public class AclDao {
         q.setParameter("type", type);
         List<Acl> aclList = q.getResultList();
         for (Acl acl : aclList) {
+            acl.setAuditMessage(auditMessage);
             AuditLogUtil.create(acl, AuditLogType.DELETE, userId);
         }
 
@@ -206,5 +209,23 @@ public class AclDao {
         q.setParameter("type", type);
         q.setParameter("dateNow", new Date());
         q.executeUpdate();
+    }
+
+    /**
+     * Resolves an ACL target to the label visible to users.
+     *
+     * @param targetId Target ID
+     * @return Target label, falling back to the target ID
+     */
+    private String resolveTargetName(String targetId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select coalesce("
+                + "(select u.USE_USERNAME_C from T_USER u where u.USE_ID_C = :targetId), "
+                + "(select g.GRP_NAME_C from T_GROUP g where g.GRP_ID_C = :targetId), "
+                + "(select coalesce(s.SHA_NAME_C, s.SHA_ID_C) from T_SHARE s where s.SHA_ID_C = :targetId), "
+                + ":targetId)");
+        q.setParameter("targetId", targetId);
+        Object targetName = q.getSingleResult();
+        return targetName != null ? targetName.toString() : targetId;
     }
 }
