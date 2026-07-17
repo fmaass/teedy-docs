@@ -11,6 +11,7 @@ import com.sismics.docs.core.dao.dto.GroupDto;
 import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.event.AclCreatedAsyncEvent;
 import com.sismics.docs.core.event.AclDeletedAsyncEvent;
+import com.sismics.docs.core.exception.TagWriteLockoutException;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.Tag;
@@ -180,31 +181,22 @@ public class AclResource extends BaseResource {
             throw new ClientException("AclError", "Cannot delete base ACL on a document");
         }
 
-        // #88: the ACL REVOCATION path must never remove a tag's final WRITE grant — refuse it,
-        // even the creator's own, before the creator base-ACL check so a sole-owner tag reports the
-        // precise last-write reason rather than the generic base-ACL one. (This guards revocation
-        // only; the user-deletion path can still soft-delete a creator's ACLs, and a tag left with
-        // no owner is collected by the orphan-tag purge lifecycle, not here.) The tag row is loaded
-        // FOR UPDATE so this count-then-delete is serialised against a concurrent revoke on the same
-        // tag: two co-owner revokes cannot both observe two holders and both delete (which would
-        // strand the tag at zero) — the second blocks, then re-reads one holder under the lock and is
-        // refused. The count is of DISTINCT holders, so duplicate rows of one holder (a raced
-        // double-grant) cannot masquerade as a second owner.
-        TagDao tagDao = new TagDao();
-        Tag tag = tagDao.getByIdForUpdate(sourceId);
-        if (tag != null && perm == PermType.WRITE
-                && aclDao.hasDirectUserAcl(sourceId, PermType.WRITE, targetId)
-                && aclDao.countAcls(sourceId, PermType.WRITE, AclType.USER) <= 1) {
-            throw new ClientException("AclError", "Cannot remove the last write permission on a tag");
-        }
-
         // Cannot delete R/W on a source tag if the target is the creator
+        TagDao tagDao = new TagDao();
+        Tag tag = tagDao.getById(sourceId);
         if (tag != null && tag.getUserId().equals(targetId)) {
             throw new ClientException("AclError", "Cannot delete base ACL on a tag");
         }
 
-        // Delete the ACL
-        aclDao.delete(sourceId, perm, targetId, principal.getId(), AclType.USER);
+        // Delete the ACL. #88: AclDao.delete enforces the last-WRITE lockout under the tag row lock
+        // (a tag must keep at least one WRITE owner); surface its signal as a client error here.
+        // Mapping the exception is NOT a rest.resource -> core.dao dependency, so the frozen layering
+        // web is unchanged — the guard's DAO calls live in the DAO, off the ratcheted edge.
+        try {
+            aclDao.delete(sourceId, perm, targetId, principal.getId(), AclType.USER);
+        } catch (TagWriteLockoutException e) {
+            throw new ClientException("AclError", "Cannot remove the last write permission on a tag");
+        }
 
         // Raise an ACL deleted event
         AclDeletedAsyncEvent event = new AclDeletedAsyncEvent();

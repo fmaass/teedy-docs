@@ -3,6 +3,7 @@ package com.sismics.docs.core.dao;
 import com.sismics.BaseTest;
 import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.exception.TagWriteLockoutException;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.model.jpa.User;
@@ -18,8 +19,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Deterministic cross-transaction race test for the #88 last-WRITE lockout guard
- * (AclResource.delete). Two co-owner revokes on the SAME tag race: without serialization each
+ * Deterministic cross-transaction race test for the #88 last-WRITE lockout guard, which lives inside
+ * {@code AclDao.delete}. Two co-owner revokes on the SAME tag race: without serialization each
  * observes two owners, each removes one, and both commit → the tag is stranded at zero owners
  * (unmanageable). The guard loads the tag row FOR UPDATE (TagDao.getByIdForUpdate), so the second
  * revoke blocks on the row lock until the first commits, then re-reads one owner under
@@ -157,45 +158,45 @@ public class TestTagAclLockoutRace extends BaseTest {
         grantWrite(tagId, userB);
         Assertions.assertEquals(2L, writeHolders(tagId), "two distinct WRITE holders at the start");
 
-        CountDownLatch aHasLock = new CountDownLatch(1);
-        CountDownLatch aMayProceed = new CountDownLatch(1);
+        CountDownLatch aHasActed = new CountDownLatch(1);
+        CountDownLatch aMayCommit = new CountDownLatch(1);
         AtomicBoolean aDeleted = new AtomicBoolean(false);
+        AtomicBoolean bRefused = new AtomicBoolean(false);
         AtomicBoolean bDeleted = new AtomicBoolean(false);
 
-        // Revoke A: lock the tag row first, then (once released) re-run the guard sequence and remove
-        // A's WRITE. Mirrors AclResource.delete: getByIdForUpdate -> countAcls -> conditional delete.
+        // Revoke A: the REAL guarded delete. AclDao.delete locks the tag row FOR UPDATE, counts two
+        // holders, and removes A. Then A holds the transaction (and the lock) open on the latch.
         Thread threadA = new Thread(() -> TransactionUtil.handle(() -> {
-            new TagDao().getByIdForUpdate(tagId);
-            aHasLock.countDown();
-            await(aMayProceed);
-            if (new AclDao().countAcls(tagId, PermType.WRITE, AclType.USER) > 1) {
-                new AclDao().delete(tagId, PermType.WRITE, userA, userA, AclType.USER);
-                aDeleted.set(true);
-            }
+            new AclDao().delete(tagId, PermType.WRITE, userA, userA, AclType.USER);
+            aDeleted.set(true);
+            aHasActed.countDown();
+            await(aMayCommit);
         }));
 
-        // Revoke B: attempts the same sequence; its getByIdForUpdate BLOCKS on A's row lock until A
-        // commits, then it re-reads one owner and the guard refuses the delete.
+        // Revoke B: its AclDao.delete BLOCKS on A's tag-row lock until A commits, then re-reads one
+        // holder under the lock and the guard refuses it with TagWriteLockoutException.
         Thread threadB = new Thread(() -> {
-            await(aHasLock);
+            await(aHasActed);
             TransactionUtil.handle(() -> {
-                new TagDao().getByIdForUpdate(tagId);
-                if (new AclDao().countAcls(tagId, PermType.WRITE, AclType.USER) > 1) {
+                try {
                     new AclDao().delete(tagId, PermType.WRITE, userB, userB, AclType.USER);
                     bDeleted.set(true);
+                } catch (TagWriteLockoutException e) {
+                    bRefused.set(true);
                 }
             });
         });
 
         threadA.start();
         threadB.start();
-        await(aHasLock);
+        await(aHasActed);
         awaitBlockedSession();       // B is genuinely blocked on the tag-row lock (fails if the lock is gone)
-        aMayProceed.countDown();
+        aMayCommit.countDown();
         joinAll(threadA, threadB);
 
         Assertions.assertTrue(aDeleted.get(), "the first revoke saw two owners and removed one");
-        Assertions.assertFalse(bDeleted.get(), "the second revoke re-read one owner under the lock and was refused");
+        Assertions.assertTrue(bRefused.get(), "the second revoke re-read one owner under the lock and was refused");
+        Assertions.assertFalse(bDeleted.get(), "the second revoke did not delete");
         Assertions.assertEquals(1L, writeHolders(tagId), "exactly one WRITE owner remains — the tag is never stranded at zero");
         Assertions.assertFalse(hasWrite(tagId, userA), "the first owner's WRITE was removed");
         Assertions.assertTrue(hasWrite(tagId, userB), "the second owner's WRITE survived");

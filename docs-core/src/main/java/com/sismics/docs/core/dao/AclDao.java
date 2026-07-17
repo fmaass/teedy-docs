@@ -5,7 +5,9 @@ import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.AclDto;
+import com.sismics.docs.core.exception.TagWriteLockoutException;
 import com.sismics.docs.core.model.jpa.Acl;
+import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -207,9 +209,27 @@ public class AclDao {
      * @param targetId Target ID
      * @param userId User ID
      * @param type Type
+     * @throws TagWriteLockoutException if this would remove the final WRITE holder of a live tag (#88)
      */
     @SuppressWarnings("unchecked")
     public void delete(String sourceId, PermType perm, String targetId, String userId, AclType type) {
+        // #88: the last-WRITE lockout lives HERE so every caller upholds it, not just the REST path.
+        // When the source is a live tag and this revokes a USER WRITE grant, lock the tag row FOR
+        // UPDATE and refuse if the target holds the sole remaining WRITE — a concurrent revoke on the
+        // same tag blocks on the lock, then re-reads one holder under READ_COMMITTED and is refused,
+        // so two revokes can never both delete and strand the tag at zero. DISTINCT holders are
+        // counted, so duplicate rows of one holder (a raced double-grant) cannot pose as a second
+        // owner. (Only the revocation path is guarded; a creator's ACLs removed by user deletion are
+        // collected by the orphan-tag purge lifecycle.)
+        if (perm == PermType.WRITE && type == AclType.USER) {
+            Tag tag = new TagDao().getByIdForUpdate(sourceId);
+            if (tag != null && tag.getDeleteDate() == null
+                    && hasDirectUserAcl(sourceId, PermType.WRITE, targetId)
+                    && countAcls(sourceId, PermType.WRITE, AclType.USER) <= 1) {
+                throw new TagWriteLockoutException();
+            }
+        }
+
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         String auditMessage = perm.name() + " revoked from " + resolveTargetName(targetId);
 
