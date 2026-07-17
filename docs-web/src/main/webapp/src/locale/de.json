@@ -924,6 +924,15 @@
     "user": "Benutzer",
     "action": "Aktion",
     "no_activity": "Keine Aktivität aufgezeichnet",
+    "activity": {
+      "type": "Typ",
+      "filter_label": "Nach Ereignistyp filtern",
+      "filter_all_types": "Alle Ereignistypen",
+      "type_create": "Erstellt",
+      "type_update": "Aktualisiert",
+      "type_delete": "Gelöscht",
+      "type_authentication": "Authentifizierung"
+    },
     "text_extracted": "Text extrahiert",
     "no_text": "Kein Text",
     "reprocess": "Erneut verarbeiten",

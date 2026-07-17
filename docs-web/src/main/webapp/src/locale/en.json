@@ -924,6 +924,15 @@
     "user": "User",
     "action": "Action",
     "no_activity": "No activity recorded",
+    "activity": {
+      "type": "Type",
+      "filter_label": "Filter by event type",
+      "filter_all_types": "All event types",
+      "type_create": "Created",
+      "type_update": "Updated",
+      "type_delete": "Deleted",
+      "type_authentication": "Authentication"
+    },
     "text_extracted": "Text extracted",
     "no_text": "No text",
     "reprocess": "Reprocess",
