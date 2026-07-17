@@ -1191,8 +1191,11 @@ jobs:
               cleanup_status=1
             fi
           done
+          # GHCR does not implement the OCI manifest DELETE operation (returns
+          # UNSUPPORTED), so removing the disposable manifest is best-effort: the
+          # repoint above already detached every staging tag from real digests,
+          # and what remains is one ~400-byte empty manifest per run.
           if ! crane delete "${cleanup_ref}"; then
-            echo "Could not delete disposable cleanup manifest" >&2
-            cleanup_status=1
+            echo "::notice::Registry refused manifest deletion (expected on GHCR); run-scoped staging tags now point at an empty manifest."
           fi
           exit "${cleanup_status}"
