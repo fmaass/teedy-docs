@@ -180,9 +180,25 @@ public class AclResource extends BaseResource {
             throw new ClientException("AclError", "Cannot delete base ACL on a document");
         }
 
-        // Cannot delete R/W on a source tag if the target is the creator
+        // #88: the ACL REVOCATION path must never remove a tag's final WRITE grant — refuse it,
+        // even the creator's own, before the creator base-ACL check so a sole-owner tag reports the
+        // precise last-write reason rather than the generic base-ACL one. (This guards revocation
+        // only; the user-deletion path can still soft-delete a creator's ACLs, and a tag left with
+        // no owner is collected by the orphan-tag purge lifecycle, not here.) The tag row is loaded
+        // FOR UPDATE so this count-then-delete is serialised against a concurrent revoke on the same
+        // tag: two co-owner revokes cannot both observe two holders and both delete (which would
+        // strand the tag at zero) — the second blocks, then re-reads one holder under the lock and is
+        // refused. The count is of DISTINCT holders, so duplicate rows of one holder (a raced
+        // double-grant) cannot masquerade as a second owner.
         TagDao tagDao = new TagDao();
-        Tag tag = tagDao.getById(sourceId);
+        Tag tag = tagDao.getByIdForUpdate(sourceId);
+        if (tag != null && perm == PermType.WRITE
+                && aclDao.hasDirectUserAcl(sourceId, PermType.WRITE, targetId)
+                && aclDao.countAcls(sourceId, PermType.WRITE, AclType.USER) <= 1) {
+            throw new ClientException("AclError", "Cannot remove the last write permission on a tag");
+        }
+
+        // Cannot delete R/W on a source tag if the target is the creator
         if (tag != null && tag.getUserId().equals(targetId)) {
             throw new ClientException("AclError", "Cannot delete base ACL on a tag");
         }

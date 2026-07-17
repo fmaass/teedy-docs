@@ -645,7 +645,15 @@
       "remove": "Berechtigung entfernen",
       "remove_confirm": "Berechtigung {perm} für {name} entfernen?",
       "failed_add": "Berechtigung konnte nicht hinzugefügt werden",
-      "failed_remove": "Berechtigung konnte nicht entfernt werden"
+      "failed_remove": "Berechtigung konnte nicht entfernt werden",
+      "owner_locked": "Eigentümer-Berechtigung (kann nicht entfernt werden)"
+    },
+    "tag_acl": {
+      "title": "Berechtigungen",
+      "description": "Benutzer und Gruppen, denen du Zugriff gewährst, sehen jedes Dokument mit diesem Tag.",
+      "disclose_header": "Lesezugriff gewähren?",
+      "disclose_message": "Mit dem Lesezugriff werden alle {count} Dokument(e), die dieses Tag derzeit tragen, sowie später hinzugefügte sichtbar. Fortfahren?",
+      "last_owner_locked": "Einziger Eigentümer – gewähre einem weiteren Eigentümer Zugriff, bevor du diesen entfernst"
     },
     "vocabulary": {
       "title": "Vokabulare",

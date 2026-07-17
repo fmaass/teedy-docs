@@ -1,4 +1,5 @@
 import api from './client'
+import type { AclEntry } from './acl'
 
 export interface Tag {
   id: string
@@ -6,6 +7,21 @@ export interface Tag {
   color: string
   parent: string | null
   count?: number
+}
+
+/**
+ * GET /tag/{id}. Carries the direct ACLs and the caller's writability, plus the creator's
+ * username — the creator's own base READ/WRITE grants are mandatory and cannot be removed
+ * (see AclResource base-ACL protection), so the editor renders them as immutable.
+ */
+export interface TagDetail {
+  id: string
+  name: string
+  creator: string
+  color: string
+  parent: string | null
+  acls: AclEntry[]
+  writable: boolean
 }
 
 /**
@@ -20,6 +36,10 @@ export function isMetaTag(name: string | undefined | null): boolean {
 
 export function listTags() {
   return api.get<{ tags: Tag[] }>('/tag/list')
+}
+
+export function getTag(id: string) {
+  return api.get<TagDetail>(`/tag/${id}`)
 }
 
 export function createTag(name: string, color: string, parent?: string) {

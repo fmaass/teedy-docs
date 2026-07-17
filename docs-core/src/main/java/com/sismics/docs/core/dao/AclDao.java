@@ -143,6 +143,30 @@ public class AclDao {
     }
 
     /**
+     * Counts the DISTINCT holders (target ids) of a given {@link AclType} that hold {@code perm}
+     * on {@code sourceId}. Used to enforce the last-owner invariant (a tag must always retain at
+     * least one WRITE holder) — the count includes both user and group grants, since a group with
+     * WRITE is as much an owner as a user, and counts each holder once even if duplicate rows exist.
+     *
+     * @param sourceId ACL source entity ID
+     * @param perm Permission
+     * @param type ACL type
+     * @return Number of distinct non-deleted holders
+     */
+    public long countAcls(String sourceId, PermType perm, AclType type) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        // Count DISTINCT holders, not rows: AclDao.delete removes ALL rows matching a
+        // (sourceId, perm, targetId), so a sole holder represented by duplicate rows (a raced
+        // double-grant) is still exactly one owner — counting rows would let it defeat the guard.
+        Query q = em.createQuery("select count(distinct a.targetId) from Acl a where a.sourceId = :sourceId"
+                + " and a.perm = :perm and a.type = :type and a.deleteDate is null");
+        q.setParameter("sourceId", sourceId);
+        q.setParameter("perm", perm);
+        q.setParameter("type", type);
+        return ((Number) q.getSingleResult()).longValue();
+    }
+
+    /**
      * Check if a source is accessible to a target.
      *
      * @param sourceId ACL source entity ID

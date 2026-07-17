@@ -135,6 +135,29 @@ public class TagDao {
             return null;
         }
     }
+
+    /**
+     * Loads a tag by id under a PESSIMISTIC_WRITE row lock held for the rest of the caller's
+     * transaction. Serialises concurrent ACL mutations on the same tag so the last-WRITE lockout
+     * guard (AclResource.delete) is a real check-then-act: a second revoke blocks on this row until
+     * the first commits, then re-reads the committed ACL state under READ_COMMITTED and sees the
+     * reduced holder count. A JVM lock cannot do this — it releases before the transaction commits.
+     * Behaves identically on H2 and PostgreSQL (both map to SELECT ... FOR UPDATE).
+     *
+     * @param id Tag ID
+     * @return the locked tag, or null if no such row exists
+     */
+    public Tag getByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select t from Tag t where t.id = :id");
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return (Tag) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
     
     /**
      * Update tags on a document.

@@ -10,7 +10,7 @@
  */
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { addAcl, deleteAcl, searchAclTargets, type AclTarget } from '../api/acl'
+import { addAcl, deleteAcl, searchAclTargets, type AclTarget, type AclEntry } from '../api/acl'
 import AutoComplete from 'primevue/autocomplete'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
@@ -18,17 +18,28 @@ import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../composables/useConfirmDanger'
 
-export interface DirectAcl {
-  perm: 'READ' | 'WRITE'
-  id: string
-  name: string | null
-  type: 'USER' | 'GROUP'
-}
+// Kept as an alias (not a re-declaration) so existing consumers importing `DirectAcl`
+// keep working while the shape lives in one place — api/acl.ts.
+export type DirectAcl = AclEntry
 
 const props = defineProps<{
   sourceId: string
   acls: DirectAcl[]
   writable: boolean
+  /**
+   * Optional per-entry immutability predicate. A truthy result removes the row's delete
+   * button (a mandatory grant, e.g. a tag owner's base ACL or the sole remaining owner) and
+   * shows a lock marker instead; return a string to override the marker's label for that row
+   * (e.g. a "sole owner" reason vs the default owner label). Defaults to "nothing is
+   * immutable" so existing consumers are unchanged.
+   */
+  immutable?: (acl: DirectAcl) => boolean | string
+  /**
+   * Optional gate run before a grant is added. Return false (or a promise resolving false)
+   * to cancel the add — used by the tag editor to surface the READ grant-disclosure
+   * confirmation. Omitted by consumers that need no confirmation.
+   */
+  beforeAdd?: (perm: 'READ' | 'WRITE', target: AclTarget) => boolean | Promise<boolean>
 }>()
 
 const emit = defineEmits<{ changed: [] }>()
@@ -51,6 +62,18 @@ function permLabel(perm: string) {
   return perm === 'WRITE' ? t('ui.acl_editor.can_edit') : t('ui.acl_editor.can_view')
 }
 
+// Resolve a row's immutability to its lock-marker label, or null when the row is mutable.
+// A string result is used verbatim; a bare `true` falls back to the default owner label.
+function immutableLabel(acl: DirectAcl): string | null {
+  const result = props.immutable ? props.immutable(acl) : false
+  if (!result) return null
+  return typeof result === 'string' ? result : t('ui.acl_editor.owner_locked')
+}
+
+function isImmutable(acl: DirectAcl): boolean {
+  return immutableLabel(acl) !== null
+}
+
 async function completeSearch(event: { query: string }) {
   const query = event.query.trim()
   if (!query) {
@@ -69,6 +92,10 @@ async function completeSearch(event: { query: string }) {
 
 async function handleAdd() {
   if (!selectedTarget.value) return
+  if (props.beforeAdd) {
+    const proceed = await props.beforeAdd(selectedPerm.value, selectedTarget.value)
+    if (!proceed) return
+  }
   adding.value = true
   try {
     await addAcl(props.sourceId, selectedPerm.value, selectedTarget.value.name, selectedTarget.value.type)
@@ -112,7 +139,7 @@ function confirmRemove(acl: DirectAcl) {
         </span>
         <Tag :value="permLabel(acl.perm)" severity="secondary" />
         <Button
-          v-if="writable"
+          v-if="writable && !isImmutable(acl)"
           icon="pi pi-times"
           text
           rounded
@@ -120,6 +147,12 @@ function confirmRemove(acl: DirectAcl) {
           severity="danger"
           :aria-label="t('ui.acl_editor.remove')"
           @click="confirmRemove(acl)"
+        />
+        <i
+          v-else-if="isImmutable(acl)"
+          class="pi pi-lock acl-immutable"
+          v-tooltip.top="immutableLabel(acl) || ''"
+          :aria-label="immutableLabel(acl) || ''"
         />
       </li>
       <li v-if="acls.length === 0" class="acl-empty">{{ t('ui.acl_editor.none') }}</li>
@@ -179,14 +212,21 @@ function confirmRemove(acl: DirectAcl) {
   color: var(--p-text-muted-color);
   padding: 0.375rem 0;
 }
+.acl-immutable {
+  color: var(--p-text-muted-color);
+  font-size: 0.875rem;
+  padding: 0 0.5rem;
+}
 .acl-add {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.5rem;
+  flex-wrap: wrap;
 }
 .acl-add-target {
   flex: 1;
+  min-width: 12rem;
 }
 .acl-option {
   display: flex;

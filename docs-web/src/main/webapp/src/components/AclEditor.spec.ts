@@ -102,4 +102,47 @@ describe('AclEditor', () => {
     expect(aclApi.deleteAcl).toHaveBeenCalledWith('src1', 'WRITE', 'u1')
     expect(wrapper.emitted('changed')).toBeTruthy()
   })
+
+  // #88: the immutable predicate marks the owner's mandatory grants as non-removable so the
+  // UI never offers a delete the backend would reject. A matching row loses its remove
+  // button and shows the lock marker; a non-matching row stays removable.
+  it('hides the remove button and shows a lock marker for immutable rows only', () => {
+    const immutable = (acl: { name: string | null }) => acl.name === 'admin'
+    const wrapper = mountEditor({ sourceId: 'src1', acls, writable: true, immutable })
+    const rows = wrapper.findAll('.acl-row')
+    // Row 0 (WRITE/admin) is immutable: no remove button, lock marker present.
+    expect(rows[0].find('button').exists()).toBe(false)
+    expect(rows[0].find('.acl-immutable').exists()).toBe(true)
+    // Row 1 (READ/team) is mutable: remove button present, no lock marker.
+    expect(rows[1].find('button').exists()).toBe(true)
+    expect(rows[1].find('.acl-immutable').exists()).toBe(false)
+  })
+
+  // #88: the beforeAdd gate lets a consumer (the tag editor) confirm a grant before it lands.
+  // Resolving false cancels the add entirely; resolving true lets it through unchanged.
+  it('cancels the add when beforeAdd resolves false', async () => {
+    const beforeAdd = vi.fn().mockResolvedValue(false)
+    const wrapper = mountEditor({ sourceId: 'src1', acls, writable: true, beforeAdd })
+    const target = { id: 'u9', name: 'newuser', type: 'USER' as const }
+    wrapper.findComponent('.autocomplete').vm.$emit('update:modelValue', target)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.acl-add button').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(beforeAdd).toHaveBeenCalledWith('READ', target)
+    expect(aclApi.addAcl).not.toHaveBeenCalled()
+  })
+
+  it('proceeds with the add when beforeAdd resolves true', async () => {
+    const beforeAdd = vi.fn().mockResolvedValue(true)
+    const wrapper = mountEditor({ sourceId: 'src1', acls, writable: true, beforeAdd })
+    const target = { id: 'u9', name: 'newuser', type: 'USER' as const }
+    wrapper.findComponent('.autocomplete').vm.$emit('update:modelValue', target)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.acl-add button').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(beforeAdd).toHaveBeenCalledWith('READ', target)
+    expect(aclApi.addAcl).toHaveBeenCalledWith('src1', 'READ', 'newuser', 'USER')
+  })
 })

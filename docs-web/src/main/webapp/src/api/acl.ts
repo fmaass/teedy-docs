@@ -6,6 +6,18 @@ export interface AclTarget {
   type: 'USER' | 'GROUP'
 }
 
+/**
+ * A direct ACL entry as returned by the backend's AclUtil.addAcls on any ACL source
+ * (documents, tags, route models): {perm, id (the target id), name, type}. Shared so the
+ * AclEditor component and every source's detail typing agree on one shape.
+ */
+export interface AclEntry {
+  perm: 'READ' | 'WRITE'
+  id: string
+  name: string | null
+  type: 'USER' | 'GROUP'
+}
+
 export function searchAclTargets(search: string) {
   return api.get<{ users: AclTarget[]; groups: AclTarget[] }>('/acl/target/search', { params: { search } })
 }

@@ -645,7 +645,15 @@
       "remove": "Remove permission",
       "remove_confirm": "Remove {perm} permission for {name}?",
       "failed_add": "Failed to add permission",
-      "failed_remove": "Failed to remove permission"
+      "failed_remove": "Failed to remove permission",
+      "owner_locked": "Owner permission (cannot be removed)"
+    },
+    "tag_acl": {
+      "title": "Permissions",
+      "description": "Users and groups you grant access to can see every document that carries this tag.",
+      "disclose_header": "Grant view access?",
+      "disclose_message": "Granting view access reveals all {count} document(s) that currently carry this tag, and any added later. Continue?",
+      "last_owner_locked": "Sole owner — grant another owner before removing this one"
     },
     "vocabulary": {
       "title": "Vocabularies",
