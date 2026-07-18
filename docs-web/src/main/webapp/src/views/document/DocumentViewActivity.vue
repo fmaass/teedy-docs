@@ -18,7 +18,9 @@ interface AuditEntry {
   create_date: number
   username: string
   type: string
-  message: string
+  // Serialized via JsonUtil.nullable (AuditLogResource): a legacy row with a null LOG_MESSAGE_C
+  // arrives as JSON null, so the Action cell must fall back rather than render blank.
+  message: string | null
 }
 
 const docId = computed(() => doc.value?.id)
@@ -98,7 +100,14 @@ function formatDate(ts: number) {
           <span class="activity-type">{{ activityTypeLabel(data.type, t) }}</span>
         </template>
       </Column>
-      <Column field="message" :header="t('ui.action')" />
+      <Column field="message" :header="t('ui.action')">
+        <template #body="{ data }">
+          <!-- A legacy audit row can have a null (or empty) message; show a neutral placeholder
+               instead of a blank Action cell. Not the file displayName helper — an audit message
+               is not a file name. -->
+          <span class="activity-message">{{ data.message || '—' }}</span>
+        </template>
+      </Column>
       <template #empty>
         <ErrorState v-if="isError" @retry="refetch()" />
         <EmptyState v-else icon="pi pi-history" :message="t('ui.no_activity')" />

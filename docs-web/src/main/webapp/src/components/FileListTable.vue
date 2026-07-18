@@ -10,6 +10,7 @@ import Popover from 'primevue/popover'
 import Checkbox from 'primevue/checkbox'
 import { getFileUrl } from '../api/file'
 import { formatDate, formatFileSize } from '../utils/formatters'
+import { displayName } from '../utils/fileName'
 import FileActionMenu from './FileActionMenu.vue'
 
 // Enriched, authenticated file LIST (the grid⇄list toggle's "list" mode). Owns the
@@ -26,7 +27,9 @@ export interface FilePanelFile {
   mimetype: string
   size: number
   create_date: number
-  creator: string
+  // Nullable: the backend serializes a file's uploader (creator) as nullable, so a legacy file
+  // can arrive without one. The uploader column renders it directly (an absent value shows blank).
+  creator: string | null
   version: number
   rotation?: number
 }
@@ -191,11 +194,6 @@ function fileIcon(mime: string) {
   return 'pi pi-file'
 }
 
-// A file may be served without a name; show a stable localized label instead of an empty cell.
-function displayName(name: string | null | undefined): string {
-  return name || t('ui.file_view.untitled')
-}
-
 // --- Inline rename (double-click name cell + F2 + the pencil in the action menu) ---
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
@@ -310,7 +308,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             :href="getFileUrl(data.id)"
             target="_blank"
             rel="noopener"
-            :aria-label="t('ui.file_view.open_file', { name: displayName(data.name) })"
+            :aria-label="t('ui.file_view.open_file', { name: displayName(data.name, t) })"
             @dblclick.stop
           >
             <i :class="fileIcon(data.mimetype)" aria-hidden="true" />
@@ -336,7 +334,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             tabindex="0"
             @dblclick.stop="startRename(data)"
             @keydown="onNameKeydown($event, data)"
-          >{{ displayName(data.name) }}</span>
+          >{{ displayName(data.name, t) }}</span>
         </template>
       </Column>
 

@@ -14,6 +14,7 @@ import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { getAppInfo } from '../../api/app'
 import { queryKeys } from '../../api/queryKeys'
 import { formatFileSize } from '../../utils/formatters'
+import { displayName } from '../../utils/fileName'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
@@ -61,7 +62,8 @@ const form = ref(defaultForm())
 
 interface AttachedFile {
   id: string
-  name: string
+  // Serialized nullable by the backend (JsonUtil.nullable): a legacy/inbox file can have no name.
+  name: string | null
   mimetype: string
   size: number
 }
@@ -327,7 +329,7 @@ function onCameraCapture(captured: File[]) {
 
 function confirmDeleteExisting(file: AttachedFile) {
   confirmDanger({
-    message: t('ui.remove_file_confirm', { name: file.name }),
+    message: t('ui.remove_file_confirm', { name: displayName(file.name, t) }),
     header: t('ui.remove_file'),
     accept: async () => {
       try {
@@ -704,7 +706,7 @@ async function onEmlSelected(event: Event) {
       <div v-if="existingFiles.length" class="existing-files">
         <div v-for="file in existingFiles" :key="file.id" class="file-row">
           <i :class="file.mimetype.startsWith('image/') ? 'pi pi-image' : file.mimetype === 'application/pdf' ? 'pi pi-file-pdf' : 'pi pi-file'" class="file-icon" />
-          <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ file.name }}</a>
+          <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ displayName(file.name, t) }}</a>
           <span class="file-size">{{ formatFileSize(file.size) }}</span>
           <Button
             icon="pi pi-times"

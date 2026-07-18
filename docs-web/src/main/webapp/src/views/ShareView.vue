@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 import { getDocument } from '../api/document'
 import { getFileUrl } from '../api/file'
 import { formatFileSize } from '../utils/formatters'
+import { displayName } from '../utils/fileName'
 import Skeleton from 'primevue/skeleton'
 import ErrorState from '../components/ErrorState.vue'
 
@@ -82,13 +83,13 @@ function formatDate(ts: number) {
               <img
                 v-if="isImage(file.mimetype)"
                 :src="fileUrl(file.id, 'web', file.rotation)"
-                :alt="file.name"
+                :alt="displayName(file.name, t)"
                 loading="lazy"
               />
               <i v-else :class="fileIcon(file.mimetype)" aria-hidden="true" />
             </div>
             <div class="share-file-label">
-              <span class="share-file-name">{{ file.name }}</span>
+              <span class="share-file-name">{{ displayName(file.name, t) }}</span>
               <span class="share-file-size">{{ formatFileSize(file.size) }}</span>
             </div>
           </a>
