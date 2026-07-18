@@ -1772,6 +1772,63 @@
         }
       }
     },
+    "/file/{id}/pages": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Apply a page-operations manifest to a PDF file",
+        "operationId": "post_file_id_pages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "manifest"
+                ],
+                "properties": {
+                  "manifest": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid manifest, non-PDF, over-ceiling, signed, encrypted, or unprocessable source"
+          },
+          "403": {
+            "description": "Write permission on the parent document is required"
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "409": {
+            "description": "The base version was modified concurrently (stale base)"
+          },
+          "429": {
+            "description": "A page operation is already running for this file or the server is at capacity"
+          }
+        }
+      }
+    },
     "/file/{id}/process": {
       "post": {
         "tags": [

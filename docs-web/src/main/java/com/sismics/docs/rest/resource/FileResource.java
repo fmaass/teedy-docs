@@ -37,10 +37,14 @@ import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.PreviousVersionMismatchException;
 import com.sismics.docs.core.util.RasterGenerationUtil;
 import com.sismics.docs.core.util.VersionConcurrencyException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationBusyException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationService;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ConflictException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
+import com.sismics.rest.exception.TooManyRequestsException;
 import com.sismics.rest.util.RestUtil;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.rest.util.ValidationUtil;
@@ -436,6 +440,56 @@ public class FileResource extends BaseResource {
                 .add("status", "ok")
                 .add("rotation", normalized);
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Apply a v1 page-operation manifest (reorder / delete / per-page rotate) to a PDF file, saving the
+     * result as a new version. The heavy lifting (concurrency ceilings, decrypt, PDFBox rewrite,
+     * validation, versioned create) lives in {@link PdfPageOperationService}; this method only
+     * authenticates, enforces WRITE on the parent document, and maps the typed outcomes to HTTP.
+     *
+     * @param id File ID (the expected latest base — the compare-and-swap rejects a stale base with 409)
+     * @param manifest The v1 page-operation manifest, as a JSON string
+     * @return Response with the new file version ID
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/pages")
+    public Response pages(@PathParam("id") String id,
+                          @FormParam("manifest") String manifest) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        // WRITE on the parent document — a READ-only or share user must be rejected.
+        File file = findFile(id, null, PermType.WRITE);
+        ValidationUtil.validateRequired(manifest, "manifest");
+
+        try {
+            String newFileId = PdfPageOperationService.applyPageOperations(file, manifest, principal.getId());
+            JsonObjectBuilder pagesResponse = Json.createObjectBuilder()
+                    .add("status", "ok")
+                    .add("id", newFileId);
+            return Response.ok().entity(pagesResponse.build()).build();
+        } catch (ClientException | ServerException e) {
+            throw e;
+        } catch (PdfPageOperationBusyException e) {
+            // A saturated concurrency ceiling is transient — the request was refused, not queued. Surface a
+            // real 429 (retry shortly), distinct from the 400s below. Must precede the generic catch since
+            // it is a PdfPageOperationException subtype.
+            throw new TooManyRequestsException(e.getType(), e.getMessage());
+        } catch (PdfPageOperationException e) {
+            // A client-attributable page-operation failure (bad manifest, non-PDF, over-ceiling, signed,
+            // encrypted, unprocessable PDF): a typed 400, never a 500 or a hang.
+            throw new ClientException(e.getType(), e.getMessage());
+        } catch (PreviousVersionMismatchException e) {
+            // Unknown / cross-document previous version: a client error (400), never a 500.
+            throw new ClientException("PreviousVersionMismatch", e.getMessage());
+        } catch (VersionConcurrencyException e) {
+            // Lost the single-writer race on the version chain: a retryable conflict (409).
+            throw new ConflictException("VersionConflict", e.getMessage());
+        } catch (Exception e) {
+            throw new ServerException("FileError", "Error applying page operations", e);
+        }
     }
 
     /**

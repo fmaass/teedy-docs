@@ -157,6 +157,13 @@ public class FileUtil {
 
         // Get files of this document
         FileDao fileDao = new FileDao();
+        // A previous version is only meaningful for a document-attached file: the version chain and the
+        // compare-and-swap below both live inside the documentId != null branch. Creating a "new version"
+        // of an orphan (no document) would silently fork an unrelated brand-new file while leaving the
+        // original as-is, so reject it as a typed client error rather than performing that fork.
+        if (previousFileId != null && documentId == null) {
+            throw new PreviousVersionMismatchException("A previous file version requires a parent document");
+        }
         if (documentId != null) {
             if (previousFileId == null) {
                 // It's not a new version, so put it in last order
