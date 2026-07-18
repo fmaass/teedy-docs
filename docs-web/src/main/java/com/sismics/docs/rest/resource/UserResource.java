@@ -681,6 +681,18 @@ public class UserResource extends BaseResource {
                     "This account owns documents shared with other users and cannot be deleted");
         }
 
+        // #122 self-delete guard (evaluated under the self owner-row lock held above): refuse when this
+        // account is the SOLE WRITE holder of a tag that a SURVIVING document (owned by another user) still
+        // uses. Self-delete has no reassignment target, so silently deleting would orphan the tag (its owner
+        // soft-deleted) and clean_storage would later purge it, stripping the tag from the other owner's
+        // document — data loss. The only non-destructive answer is to refuse and direct the user to an admin
+        // reassign-delete (DELETE /user/:username?reassign_to_username=…), which reassigns such tags.
+        if (CredentialLifecycleUtil.hasSoleWriteTagLinkedToSurvivingDocument(principal.getId())) {
+            throw new ClientException("SoleTagWriteHolderError",
+                    "This account is the sole editor of a tag used on another user's document; an admin must "
+                    + "reassign your documents and tags before your account can be deleted");
+        }
+
         // Gracefully handle workflow references (never blocks): collect affected route models and
         // cancel active routes with an open step targeting this user.
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(principal.getId());
@@ -767,10 +779,10 @@ public class UserResource extends BaseResource {
             throw new ClientException("ValidationError", "Cannot reassign a user's documents to the user being deleted");
         }
 
-        // Gracefully handle workflow references (never blocks): collect affected route models and
-        // cancel active routes with an open step targeting this user.
+        // Collect affected route models for the response payload (a read; takes no lock). The actual route
+        // cancellation — which locks each route's DOCUMENT row FOR UPDATE — is DEFERRED until AFTER the
+        // user-row locks below, so this path acquires USER before DOCUMENT (see the ordering note there).
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
-        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
         // Lock BOTH the departing and the target owner rows FOR UPDATE, in a deterministic id order so
         // every multi-owner locker uses the same order (deadlock-safe). Each lock is eligibility-scoped, so
@@ -791,6 +803,15 @@ public class UserResource extends BaseResource {
         if (lockedDeparting == null || lockedTarget == null) {
             throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
         }
+
+        // Cancel active routes with an open step targeting the departing user. This locks each affected
+        // route's DOCUMENT row FOR UPDATE, so it MUST run AFTER the user-row locks above: this path then
+        // acquires USER before DOCUMENT, the SAME order the self-delete path uses (lock self, then cancel
+        // routes). Running it BEFORE the user locks (as the code previously did) made the admin path lock
+        // DOCUMENT->USER while self-delete locks USER->DOCUMENT — a genuine cross-path deadlock cycle
+        // (PG 40P01) when a document's route targets a self-deleting user who is also this admin-delete's
+        // reassignment target. It still runs before the reassignment, the user soft-delete, and the events.
+        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
         // Reassign the departing user's ACTIVE documents (and the departing user's tags linked to them)
         // to the target, then grant the target READ+WRITE access on each reassigned document. This must

@@ -91,13 +91,15 @@ public class AclResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // #111: when the ACL source is a DOCUMENT (not a tag or route model), lock the document owner's row
-        // FOR UPDATE — the same lock a self-delete of the owner takes — and confirm the document is still
-        // active under it, so a grant cannot attach to a document being concurrently trashed by the owner's
-        // deletion (nor ride a stale owner past a reassignment). Tag/route sources do not participate. A
-        // null result means the document was deleted / its owner could not be locked active — abort.
-        if (CredentialLifecycleUtil.documentExists(sourceId)
-                && CredentialLifecycleUtil.lockDocumentOwnerForGrant(sourceId) == null) {
+        // #121: serialize concurrent identical grants by locking the ACL SOURCE row FOR UPDATE before the
+        // duplicate-check below. A DOCUMENT source keeps the #111 owner-row lock (the same lock a self-delete
+        // of the owner takes, so a grant cannot attach to a document being concurrently trashed nor ride a
+        // stale owner past a reassignment); a TAG source locks the tag row; a ROUTE-MODEL source locks the
+        // route-model row. Two racing identical grants thus serialize on the source row: the second blocks,
+        // then re-reads the now-present grant under READ_COMMITTED and skips the insert (exactly one row).
+        // A false result means a DOCUMENT source's owner could not be locked active (deleted / reassigned
+        // away) — abort with the same not-found contract as before.
+        if (!CredentialLifecycleUtil.lockAclSourceForGrant(sourceId)) {
             throw new NotFoundException();
         }
 

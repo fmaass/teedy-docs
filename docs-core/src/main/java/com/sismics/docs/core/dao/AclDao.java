@@ -169,6 +169,37 @@ public class AclDao {
     }
 
     /**
+     * #122: true when {@code userId} is the SOLE active USER WRITE holder of at least one active tag that
+     * is linked (via an active document-tag) to an active document owned by a DIFFERENT user. Used by the
+     * self-delete guard (there is no reassignment target on that path): soft-deleting the user would drop
+     * such a tag to zero WRITE holders while another owner's surviving document still uses it, and the
+     * orphan-tag purge (keyed on the tag owner being soft-deleted) would then strip the tag from that
+     * document — a #54-class data loss the guard refuses rather than allows. Distinct holders are counted so
+     * duplicate rows of the one holder (a raced double-grant) cannot pose as a second owner.
+     *
+     * @param userId Departing user ID
+     * @return true if the user solely holds WRITE on a tag a surviving foreign document uses
+     */
+    public boolean hasSoleWriteTagLinkedToForeignDocument(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select count(*) from T_TAG t"
+                        + " where t.TAG_DELETEDATE_D is null"
+                        + " and exists (select 1 from T_ACL a where a.ACL_SOURCEID_C = t.TAG_ID_C"
+                        + "   and a.ACL_PERM_C = 'WRITE' and a.ACL_TYPE_C = 'USER'"
+                        + "   and a.ACL_TARGETID_C = :userId and a.ACL_DELETEDATE_D is null)"
+                        + " and (select count(distinct a2.ACL_TARGETID_C) from T_ACL a2"
+                        + "   where a2.ACL_SOURCEID_C = t.TAG_ID_C and a2.ACL_PERM_C = 'WRITE'"
+                        + "   and a2.ACL_TYPE_C = 'USER' and a2.ACL_DELETEDATE_D is null) <= 1"
+                        + " and exists (select 1 from T_DOCUMENT_TAG dt"
+                        + "   join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C"
+                        + "   where dt.DOT_IDTAG_C = t.TAG_ID_C and dt.DOT_DELETEDATE_D is null"
+                        + "   and d.DOC_DELETEDATE_D is null and d.DOC_IDUSER_C <> :userId)");
+        q.setParameter("userId", userId);
+        return ((Number) q.getSingleResult()).longValue() > 0;
+    }
+
+    /**
      * Check if a source is accessible to a target.
      *
      * @param sourceId ACL source entity ID

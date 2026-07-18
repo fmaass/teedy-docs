@@ -1,6 +1,9 @@
 package com.sismics.docs.core.util;
 
+import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.RouteModelDao;
+import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
@@ -97,5 +100,57 @@ public final class CredentialLifecycleUtil {
      */
     public static String lockDocumentOwnerForGrant(String documentId) {
         return new DocumentDao().lockOwnerForGrant(documentId);
+    }
+
+    /**
+     * #121 grant-path SOURCE serialization: locks the ACL source row FOR UPDATE (held to the caller's
+     * transaction commit) BEFORE the add duplicate-check, so two concurrent identical grants on the same
+     * source serialize — the second blocks on the row, then re-reads the now-present grant under
+     * READ_COMMITTED and skips the insert, leaving exactly one {@code (source, perm, target)} row.
+     *
+     * <p>The source is polymorphic. A DOCUMENT source keeps the #111 owner-row lock
+     * ({@link DocumentDao#lockOwnerForGrant}); this returns {@code false} — the caller must ABORT — when
+     * that owner cannot be locked active (the document was deleted / its owner reassigned away). A TAG
+     * source locks the tag row ({@link TagDao#getByIdForUpdate}, any state). A ROUTE-MODEL source locks the
+     * ACTIVE route-model row ({@link RouteModelDao#getActiveByIdForUpdate}) and returns {@code false} when no
+     * such row could be locked — a soft-deleted route model OR a {@code sourceId} matching no
+     * document/tag/route-model — so the caller aborts (NotFoundException) rather than inserting an
+     * UNSERIALIZED (and dangling) grant on an absent source.</p>
+     *
+     * <p>Only one source row is locked per grant, so within a single grant there is no lock-ordering
+     * concern; across paths the canonical acquisition order is user rows, then tag rows, then document rows
+     * (the {@code T_ACL} table carries no foreign keys, so an insert takes no implicit lock on the target
+     * user's row — the grant path is deadlock-free by construction).</p>
+     *
+     * @param sourceId ACL source entity ID
+     * @return {@code false} only when a DOCUMENT source's owner cannot be locked active (abort the grant);
+     *         {@code true} otherwise
+     */
+    public static boolean lockAclSourceForGrant(String sourceId) {
+        DocumentDao documentDao = new DocumentDao();
+        if (documentDao.existsById(sourceId)) {
+            return documentDao.lockOwnerForGrant(sourceId) != null;
+        }
+        if (new TagDao().getByIdForUpdate(sourceId) != null) {
+            return true;
+        }
+        // Route-model source: lock the ACTIVE route-model row and return whether it was actually lockable.
+        // A soft-deleted route model (null) or a sourceId matching no document/tag/route-model returns false,
+        // so AclResource.add aborts (NotFoundException) instead of inserting an unserialized/dangling grant.
+        return new RouteModelDao().getActiveByIdForUpdate(sourceId) != null;
+    }
+
+    /**
+     * #122 self-delete guard; see {@link AclDao#hasSoleWriteTagLinkedToForeignDocument(String)}. True when
+     * soft-deleting {@code userId} would strand a tag with zero WRITE holders that a SURVIVING document
+     * (owned by another user) still uses — the self-delete has no reassignment target, so it must be
+     * refused rather than silently orphan the tag (which clean_storage would later purge, stripping the tag
+     * from the other owner's document).
+     *
+     * @param userId Departing user ID
+     * @return true if the departing user is the sole WRITE holder of a tag a surviving foreign document uses
+     */
+    public static boolean hasSoleWriteTagLinkedToSurvivingDocument(String userId) {
+        return new AclDao().hasSoleWriteTagLinkedToForeignDocument(userId);
     }
 }

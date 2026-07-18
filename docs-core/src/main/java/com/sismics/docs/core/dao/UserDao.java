@@ -545,7 +545,8 @@ public class UserDao {
 
     /**
      * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves the
-     * departing user's tags that are linked to those documents to the target so no tag link is lost.
+     * departing user's tags that are linked to ANY surviving document to the target so no tag link is lost
+     * and no surviving document is left carrying a tag that would be orphaned by the deletion (#122).
      *
      * <p>Only {@code DOC_IDUSER_C} (document ownership) is reassigned — NEVER a file's
      * {@code FIL_IDUSER_C}. Each file is encrypted with its uploader's key and is never re-encrypted,
@@ -573,24 +574,42 @@ public class UserDao {
         Query q = em.createQuery("select d.id from Document d where d.userId = :departingUserId and d.deleteDate is null");
         q.setParameter("departingUserId", departingUserId);
         List<String> reassignedDocumentIds = q.getResultList();
-        if (reassignedDocumentIds.isEmpty()) {
-            return reassignedDocumentIds;
-        }
+        // NOTE: no early return on an empty document set — the #122 tag handling below must still run, because
+        // a tag the departing user solely owns can be applied to ANOTHER user's document even when the
+        // departing user owns no documents of their own (that tag would otherwise be orphaned by the delete).
 
-        // Capture the departing user's tags that are linked (via a live document-tag row) to the
-        // snapshotted documents, BEFORE moving ownership (once moved they are indistinguishable from the
-        // target's own tags). These are moved to the target so clean_storage's orphan-tag purge — keyed
-        // on the tag owner being soft-deleted — does not soft- then hard-delete them and cascade the loss
-        // of the surviving reassigned document's tag links (the #54-class FK / tag-loss failure). Only
-        // tags OWNED by the departing user are moved; a shared tag owned by someone else is untouched.
+        // #122: capture the departing user's tags that are still linked (via a live document-tag row) to
+        // ANY active (surviving) document — NOT only the reassigned documents — BEFORE moving ownership (once
+        // moved they are indistinguishable from the target's own tags). These are moved to the target so
+        // clean_storage's orphan-tag purge — keyed on the tag owner being soft-deleted — does not soft- then
+        // hard-delete them and cascade the loss of a surviving document's tag links (the #54-class tag-loss
+        // failure). Broadening the scope from the reassigned documents to every surviving-document-linked
+        // owned tag closes the gap for a tag the departing user solely owns but applied to ANOTHER user's
+        // document (whose document survives this delete): the admin reassign path now preserves it exactly as
+        // the self-delete refusal guard would have required. Only tags OWNED by the departing user are moved;
+        // a shared tag owned by someone else is untouched. Tags linked to no surviving document are left to
+        // the orphan-tag purge (harmless — no document loses a link).
         Query tagSel = em.createQuery("select distinct t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null and t.id in ("
-                + " select dt.tagId from DocumentTag dt where dt.documentId in :docIds and dt.deleteDate is null)");
+                + " select dt.tagId from DocumentTag dt join Document d on d.id = dt.documentId"
+                + " where dt.deleteDate is null and d.deleteDate is null)");
         tagSel.setParameter("departingUserId", departingUserId);
-        tagSel.setParameter("docIds", reassignedDocumentIds);
         List<String> reassignedTagIds = tagSel.getResultList();
 
         // Move those tags' ownership to the target.
         if (!reassignedTagIds.isEmpty()) {
+            // #121 canonical lock order: lock each affected tag row FOR UPDATE in a stable ascending id
+            // order BEFORE mutating, so this reassignment serializes against any concurrent grant/revoke on
+            // the same tag (which take the same tag-row lock) and two multi-tag lockers cannot deadlock. The
+            // departing+target user rows are already locked by the caller (users sort before tags in the
+            // canonical type order), so the full acquisition order across this delete is user -> tag ->
+            // document (the document rows are locked later, in UserDao.delete).
+            List<String> tagLockOrder = new ArrayList<>(reassignedTagIds);
+            Collections.sort(tagLockOrder);
+            TagDao tagDao = new TagDao();
+            for (String tagId : tagLockOrder) {
+                tagDao.getByIdForUpdate(tagId);
+            }
+
             Query tagUpd = em.createQuery("update Tag t set t.userId = :targetUserId where t.id in :tagIds and t.deleteDate is null");
             tagUpd.setParameter("targetUserId", targetUserId);
             tagUpd.setParameter("tagIds", reassignedTagIds);
@@ -616,11 +635,14 @@ public class UserDao {
             }
         }
 
-        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot.
-        Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
-        docUpd.setParameter("targetUserId", targetUserId);
-        docUpd.setParameter("docIds", reassignedDocumentIds);
-        docUpd.executeUpdate();
+        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot. Guarded on a
+        // non-empty set: an `in :docIds` bind with an empty list is both pointless and unsafe on some dialects.
+        if (!reassignedDocumentIds.isEmpty()) {
+            Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
+            docUpd.setParameter("targetUserId", targetUserId);
+            docUpd.setParameter("docIds", reassignedDocumentIds);
+            docUpd.executeUpdate();
+        }
 
         return reassignedDocumentIds;
     }
