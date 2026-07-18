@@ -52,7 +52,18 @@ chrome_log="$(mktemp)"
 cleanup() {
   # Stop the browser-harness daemon so it does not linger holding the CDP socket.
   BU_NAME="harness-$$" browser-harness --reload >/dev/null 2>&1 || true
-  [ -n "${chrome_pid}" ] && kill "${chrome_pid}" >/dev/null 2>&1 || true
+  # Only kill the Chrome we launched. A captured PID can be recycled to an unrelated process
+  # once our Chrome exits, so confirm the PID is (a) still alive (kill -0) and (b) still a
+  # Chrome/Chromium process by its command name before signalling it. Never a pattern/pkill.
+  if [ -n "${chrome_pid}" ] && kill -0 "${chrome_pid}" 2>/dev/null; then
+    pid_comm="$(ps -p "${chrome_pid}" -o comm= 2>/dev/null || true)"
+    # Exact-match an allowlist of Chrome/Chromium process command names (comm truncates to 15 chars),
+    # never a substring/pattern — so e.g. an unrelated "chromatic" process is not mistaken for ours.
+    case "${pid_comm}" in
+      chrome|chromium|chromium-browse|google-chrome|headless_shell|chrome_crashpad)
+        kill "${chrome_pid}" >/dev/null 2>&1 || true ;;
+    esac
+  fi
   [ -n "${chrome_profile}" ] && rm -rf "${chrome_profile}" >/dev/null 2>&1 || true
   rm -f "${chrome_log}" >/dev/null 2>&1 || true
   echo "::group::container logs (${container})"

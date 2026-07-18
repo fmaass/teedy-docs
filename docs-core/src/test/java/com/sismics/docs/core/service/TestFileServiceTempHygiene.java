@@ -4,12 +4,19 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.channels.FileChannel;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
 import java.util.Set;
@@ -20,10 +27,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
- * Cleartext-temp hygiene: plaintext temps live in a private, owner-only subdirectory of the OS temp dir; the
- * startup sweep clears stale temps in that namespace only; and the reference set survives concurrent
- * add/remove without corruption or exceptions. In package {@code com.sismics.docs.core.service} so it can
- * drive the protected {@code runOneIteration()} and the package-private {@code referenceCount()} test seam.
+ * Cleartext-temp hygiene and multi-JVM temp-directory liveness.
+ *
+ * <p>Each running JVM owns its OWN app-prefixed, owner-only temp directory ({@code teedy_temp_<random>}) held
+ * under a lifetime {@link java.nio.channels.FileLock}. The startup sweep reclaims ONLY the directories of DEAD
+ * prior runs (lock acquirable — the OS released a crashed process's lock) and never a live instance's
+ * directory (lock held), never follows a symlink, and never touches an entry that fails owner-only validation.
+ * These are the deterministic invariants of #123; the reference set also survives concurrent add/remove without
+ * corruption. In package {@code com.sismics.docs.core.service} so it can drive the protected
+ * {@code startUp()}/{@code runOneIteration()} and the package-private test seams.</p>
  */
 public class TestFileServiceTempHygiene {
 
@@ -50,25 +62,192 @@ public class TestFileServiceTempHygiene {
         }
     }
 
+    /**
+     * #123 invariant — a DEAD prior run's directory (app-prefixed, owner-only, lock FREE) is swept and removed,
+     * while a file OUTSIDE the app-prefixed namespace is never touched.
+     */
     @Test
-    public void startupSweepRemovesStaleTempsInPrivateDirectoryOnly() throws Exception {
-        Path dir = FileService.getTemporaryDirectory();
-
-        // A stale plaintext temp left in the private namespace by a previous (crashed) run.
-        Path stale = Files.createTempFile(dir, "sismics_docs_stale", ".tmp");
-        Assertions.assertTrue(Files.exists(stale));
-
-        // A file OUTSIDE the private namespace (directly in the OS temp root) must NOT be touched.
-        Path outside = Files.createTempFile("unrelated_outside_namespace", ".tmp");
+    public void deadSiblingWithFreeLockIsSweptAndRemoved() throws Exception {
+        Assumptions.assumeTrue(posix(), "requires a POSIX filesystem");
+        String originalTmpDir = System.getProperty("java.io.tmpdir");
+        Path scratch = Files.createTempDirectory("teedy_sweep_free");
         try {
-            // startUp() runs the namespace-restricted sweep.
+            System.setProperty("java.io.tmpdir", scratch.toString());
+            FileService.resetTemporaryDirectoryForTest();
+
+            // A dead prior run's directory: app-prefixed, owner-only, holding an UNLOCKED lock file (the OS
+            // released the crashed owner's lock) plus a leftover decrypted-plaintext temp.
+            Path dead = Files.createDirectory(scratch.resolve("teedy_temp_dead"), ownerOnlyAttr());
+            Files.createFile(dead.resolve(".lock"));
+            Path deadPlaintext = Files.createFile(dead.resolve("sismics_docs_leftover.tmp"));
+
+            // A legacy dead directory with NO lock file yet (e.g. a pre-lock-model run): the sweep must CREATE
+            // the lock file (with NOFOLLOW, which still makes a regular file when absent), acquire it, and
+            // reclaim the directory.
+            Path legacyDead = Files.createDirectory(scratch.resolve("teedy_temp_legacy"), ownerOnlyAttr());
+            Path legacyPlaintext = Files.createFile(legacyDead.resolve("sismics_docs_legacy.tmp"));
+
+            // A file directly in the OS temp root — outside the app-prefixed namespace — must be spared.
+            Path outside = Files.createFile(scratch.resolve("unrelated_outside.tmp"));
+
             new FileService().startUp();
 
-            Assertions.assertFalse(Files.exists(stale), "the startup sweep must remove stale temps in the private directory");
-            Assertions.assertTrue(Files.exists(outside), "the startup sweep must never touch files outside the application namespace");
+            Assertions.assertFalse(Files.exists(dead, LinkOption.NOFOLLOW_LINKS),
+                    "the startup sweep must reclaim a dead prior run's directory whose lock is free");
+            Assertions.assertFalse(Files.exists(deadPlaintext),
+                    "the reclaimed directory's leftover plaintext temp must be deleted");
+            Assertions.assertFalse(Files.exists(legacyDead, LinkOption.NOFOLLOW_LINKS),
+                    "the sweep must reclaim a dead directory that has no lock file yet (creating one to probe it)");
+            Assertions.assertFalse(Files.exists(legacyPlaintext),
+                    "the legacy dead directory's leftover plaintext temp must be deleted");
+            Assertions.assertTrue(Files.exists(outside),
+                    "the startup sweep must never touch files outside the app-prefixed namespace");
         } finally {
-            Files.deleteIfExists(stale);
-            Files.deleteIfExists(outside);
+            System.setProperty("java.io.tmpdir", originalTmpDir);
+            FileService.resetTemporaryDirectoryForTest();
+            deleteRecursively(scratch);
+        }
+    }
+
+    /**
+     * #123 invariant (the core safety guarantee) — a directory whose lock is HELD by a live instance is NOT
+     * swept. A SEPARATE OS process holds the {@link java.nio.channels.FileLock}, so this JVM's {@code tryLock}
+     * returns null exactly as it would against a concurrent rolling-deploy JVM; the sweep must skip it.
+     */
+    @Test
+    public void liveSiblingWithHeldLockIsNotSwept() throws Exception {
+        Assumptions.assumeTrue(posix(), "requires a POSIX filesystem");
+        String originalTmpDir = System.getProperty("java.io.tmpdir");
+        Path scratch = Files.createTempDirectory("teedy_sweep_held");
+        Path helperSource = writeLockHolderSource();
+        Process holder = null;
+        try {
+            System.setProperty("java.io.tmpdir", scratch.toString());
+            FileService.resetTemporaryDirectoryForTest();
+
+            Path live = Files.createDirectory(scratch.resolve("teedy_temp_live"), ownerOnlyAttr());
+            Path liveLock = live.resolve(".lock");
+            Path livePlaintext = Files.createFile(live.resolve("sismics_docs_inflight.tmp"));
+
+            // A different OS process acquires and HOLDS the lock; the OS keeps it until that process exits.
+            holder = spawnLockProbe(helperSource, liveLock, "hold");
+            String reported = readProbeLine(holder);
+            Assertions.assertEquals("LOCKED", reported,
+                    "the helper process must acquire the lock before the sweep runs (got: " + reported + ")");
+
+            new FileService().startUp();
+
+            Assertions.assertTrue(Files.exists(live, LinkOption.NOFOLLOW_LINKS),
+                    "a directory whose lock a live instance holds must NOT be swept");
+            Assertions.assertTrue(Files.exists(livePlaintext),
+                    "a live instance's in-flight temp must survive a concurrent JVM's startup sweep");
+        } finally {
+            if (holder != null) {
+                holder.getOutputStream().close();
+                holder.destroyForcibly();
+                holder.waitFor(10, TimeUnit.SECONDS);
+            }
+            System.setProperty("java.io.tmpdir", originalTmpDir);
+            FileService.resetTemporaryDirectoryForTest();
+            Files.deleteIfExists(helperSource);
+            deleteRecursively(scratch);
+        }
+    }
+
+    /**
+     * #123 invariant — an app-prefixed entry that FAILS the NOFOLLOW owner-only validation (a symlink, or a
+     * wrong-permission directory) is never followed and never deleted.
+     */
+    @Test
+    public void namespaceEntryFailingValidationIsNotTouched() throws Exception {
+        Assumptions.assumeTrue(posix(), "requires a POSIX filesystem");
+        String originalTmpDir = System.getProperty("java.io.tmpdir");
+        Path scratch = Files.createTempDirectory("teedy_sweep_unsafe");
+        Path victim = Files.createDirectory(scratch.resolve("victim"));
+        Path victimFile = Files.createFile(victim.resolve("precious.txt"));
+        try {
+            System.setProperty("java.io.tmpdir", scratch.toString());
+            FileService.resetTemporaryDirectoryForTest();
+
+            // A symlink planted INSIDE the swept namespace, pointing at the victim.
+            Path namespaceSymlink = scratch.resolve("teedy_temp_symlinked");
+            Files.createSymbolicLink(namespaceSymlink, victim);
+
+            // A wrong-permission (group/other-readable) directory inside the namespace.
+            Path wrongPerms = Files.createDirectory(scratch.resolve("teedy_temp_wrongperms"),
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwxr-xr-x")));
+            Path wrongPermsFile = Files.createFile(wrongPerms.resolve("keep.tmp"));
+
+            new FileService().startUp();
+
+            Assertions.assertTrue(Files.exists(victimFile),
+                    "the sweep must not follow a namespaced symlink and delete files outside the app namespace");
+            Assertions.assertTrue(Files.exists(namespaceSymlink, LinkOption.NOFOLLOW_LINKS),
+                    "a namespaced symlink is never a valid owned directory and must be left untouched");
+            Assertions.assertTrue(Files.exists(wrongPermsFile),
+                    "a wrong-permission namespaced directory fails owner-only validation and must be left alone");
+        } finally {
+            System.setProperty("java.io.tmpdir", originalTmpDir);
+            FileService.resetTemporaryDirectoryForTest();
+            deleteRecursively(scratch);
+        }
+    }
+
+    /**
+     * #123 invariant — the live JVM's own directory is published INTO the swept namespace with its lock ALREADY
+     * held (TOCTOU closed: a concurrent sweeper can never see it lock-free), no staging directory is left
+     * behind, and the own directory (and an in-flight temp in it) is never a sweep target.
+     */
+    @Test
+    public void ownLockedDirectoryIsPublishedWithLockHeldAndNeverSwept() throws Exception {
+        Assumptions.assumeTrue(posix(), "requires a POSIX filesystem");
+        String originalTmpDir = System.getProperty("java.io.tmpdir");
+        Path scratch = Files.createTempDirectory("teedy_own_dir");
+        Path helperSource = writeLockHolderSource();
+        try {
+            System.setProperty("java.io.tmpdir", scratch.toString());
+            FileService.resetTemporaryDirectoryForTest();
+
+            Path own = FileService.getTemporaryDirectory();
+            Assertions.assertTrue(own.getFileName().toString().startsWith("teedy_temp_"),
+                    "the published own directory must live in the swept app-prefixed namespace");
+            Path ownLock = own.resolve(".lock");
+            Assertions.assertTrue(Files.exists(ownLock),
+                    "the published own directory must carry its lock file");
+
+            // TOCTOU closed: a SEPARATE process cannot acquire the published directory's lock, proving it is
+            // already held the instant the directory becomes discoverable in the swept namespace.
+            Process probe = spawnLockProbe(helperSource, ownLock, "probe");
+            try {
+                String reported = readProbeLine(probe);
+                Assertions.assertEquals("FAILED", reported,
+                        "a concurrent process must NOT be able to lock the just-published own directory "
+                                + "(it must already be held): " + reported);
+            } finally {
+                probe.getOutputStream().close();
+                probe.waitFor(10, TimeUnit.SECONDS);
+                probe.destroyForcibly();
+            }
+
+            // No staging directory is left behind after publication.
+            try (Stream<Path> entries = Files.list(scratch)) {
+                Assertions.assertTrue(
+                        entries.noneMatch(p -> p.getFileName().toString().startsWith("teedy_stage_")),
+                        "no staging directory may be left behind after publication");
+            }
+
+            // A temp created in the own directory must survive this JVM's own startup sweep.
+            Path inFlight = new FileService().createTemporaryFile();
+            new FileService().startUp();
+            Assertions.assertTrue(Files.exists(own, LinkOption.NOFOLLOW_LINKS),
+                    "the live JVM's own locked directory must never be a sweep target");
+            Assertions.assertTrue(Files.exists(inFlight),
+                    "the live JVM's own in-flight temp must survive its own startup sweep");
+        } finally {
+            System.setProperty("java.io.tmpdir", originalTmpDir);
+            FileService.resetTemporaryDirectoryForTest();
+            Files.deleteIfExists(helperSource);
+            deleteRecursively(scratch);
         }
     }
 
@@ -85,7 +264,8 @@ public class TestFileServiceTempHygiene {
         Path plantedTeedyTemp = scratch.resolve("teedy_temp");
         try {
             // Plant teedy_temp as a symlink to a victim directory, and point the OS temp dir at the scratch
-            // area so resolution targets our planted entry (never the real shared teedy_temp).
+            // area. The per-JVM model never adopts a canonical teedy_temp, so resolution creates a fresh
+            // owner-only directory instead, and the sweep must never follow the planted symlink.
             Files.createSymbolicLink(plantedTeedyTemp, victim);
             System.setProperty("java.io.tmpdir", scratch.toString());
             FileService.resetTemporaryDirectoryForTest();
@@ -192,6 +372,66 @@ public class TestFileServiceTempHygiene {
         sweeper.join(60_000);
 
         Assertions.assertNull(error.get(), "concurrent add/remove on the reference set must not throw: " + error.get());
+    }
+
+    private static boolean posix() {
+        return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    }
+
+    private static FileAttribute<?> ownerOnlyAttr() {
+        return PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"));
+    }
+
+    /**
+     * Write a self-contained, JDK-only single-file Java source that acquires a {@link FileChannel} lock on the
+     * given file. Run in a SEPARATE JVM (via the single-file source launcher), it holds a real cross-process
+     * lock — the only way to make {@code tryLock} return null in this JVM, which is what distinguishes a live
+     * owner from a dead one. Kept dependency-free so it needs no project classpath.
+     */
+    private static Path writeLockHolderSource() throws IOException {
+        String source =
+                "import java.nio.channels.FileChannel;\n" +
+                "import java.nio.channels.FileLock;\n" +
+                "import java.nio.file.Path;\n" +
+                "import java.nio.file.Paths;\n" +
+                "import java.nio.file.StandardOpenOption;\n" +
+                "public class LockHolder {\n" +
+                "  public static void main(String[] a) throws Exception {\n" +
+                "    Path lockFile = Paths.get(a[0]);\n" +
+                "    boolean hold = a.length < 2 || a[1].equals(\"hold\");\n" +
+                "    try (FileChannel ch = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {\n" +
+                "      FileLock lock = ch.tryLock();\n" +
+                "      if (lock == null) { System.out.println(\"FAILED\"); System.out.flush(); return; }\n" +
+                "      System.out.println(\"LOCKED\"); System.out.flush();\n" +
+                "      if (hold) { System.in.read(); } else { lock.release(); }\n" +
+                "    }\n" +
+                "  }\n" +
+                "}\n";
+        Path file = Files.createTempFile("LockHolder", ".java");
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+        return file;
+    }
+
+    private static Process spawnLockProbe(Path helperSource, Path lockFile, String mode) throws IOException {
+        String javaBin = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        ProcessBuilder pb = new ProcessBuilder(javaBin, helperSource.toString(), lockFile.toString(), mode);
+        pb.redirectErrorStream(true);
+        return pb.start();
+    }
+
+    /** Read the helper process's stdout until it reports LOCKED or FAILED; returns that token, or null on EOF. */
+    private static String readProbeLine(Process p) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.contains("LOCKED")) {
+                return "LOCKED";
+            }
+            if (line.contains("FAILED")) {
+                return "FAILED";
+            }
+        }
+        return null;
     }
 
     private static void awaitStart(CountDownLatch start) {
