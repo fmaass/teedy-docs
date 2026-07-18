@@ -488,6 +488,15 @@ public class FileResource extends BaseResource {
         } catch (VersionConcurrencyException e) {
             // Lost the single-writer race on the version chain: a retryable conflict (409).
             throw new ConflictException("VersionConflict", e.getMessage());
+        } catch (IOException e) {
+            // #129: createFile signals an exceeded per-user/global quota with IOException("QuotaReached");
+            // the SPA maps that type to a quota message, so surface ONLY it as a typed 400. Every OTHER
+            // IOException (e.g. the setup/open failure #126 hoists out of the PDF parse) is a server fault:
+            // rethrow it as a 500 rather than mislabeling it a client error the way add()'s broad catch does.
+            if ("QuotaReached".equals(e.getMessage())) {
+                throw new ClientException("QuotaReached", e.getMessage());
+            }
+            throw new ServerException("FileError", "Error applying page operations", e);
         } catch (Exception e) {
             throw new ServerException("FileError", "Error applying page operations", e);
         }

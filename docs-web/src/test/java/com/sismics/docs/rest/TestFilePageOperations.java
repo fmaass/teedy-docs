@@ -1,6 +1,11 @@
 package com.sismics.docs.rest;
 
+import com.google.common.eventbus.Subscribe;
 import com.google.common.io.ByteStreams;
+import com.sismics.docs.core.event.FileCreatedAsyncEvent;
+import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.util.pdf.PdfPageOperationLimiter;
+import com.sismics.docs.core.util.pdf.PdfPageOperationService;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -14,6 +19,11 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 
 import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * End-to-end HTTP tests for the PDF page-operations endpoint (POST /file/:id/pages): it saves a new
@@ -262,5 +272,125 @@ public class TestFilePageOperations extends BaseJerseyTest {
         Response response = applyPages(readerToken, fileId, "{\"version\":1,\"baseVersion\":0,\"pages\":[{\"source\":0}]}");
         Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
                 "a READ-only principal must get 403 from the page-operations endpoint");
+    }
+
+    /** Captures FileCreatedAsyncEvents off the (synchronous, under test) async bus for the #124 assertion. */
+    public static final class LanguageCapturingListener {
+        final List<FileCreatedAsyncEvent> events = Collections.synchronizedList(new java.util.ArrayList<>());
+
+        @Subscribe
+        public void on(FileCreatedAsyncEvent event) {
+            events.add(event);
+        }
+    }
+
+    @Test
+    public void newVersionCarriesDocumentLanguage() throws Exception {
+        // #124: a page-operation version must be indexed under the OWNING DOCUMENT's language, not the
+        // default. createFile carries that language on the FileCreatedAsyncEvent (consumed by the indexing
+        // listener), so we capture that event at its bus seam and assert it carries the document's language
+        // ("fra"), not the null the endpoint passed before the fix.
+        clientUtil.createUser("pageops_lang", 100_000_000);
+        String token = clientUtil.login("pageops_lang");
+
+        // A document with a distinctive, non-default OCR language.
+        String documentId = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("title", "Document Langue")
+                        .param("language", "fra")
+                        .param("create_date", Long.toString(System.currentTimeMillis()))), JsonObject.class)
+                .getString("id");
+        String fileId = clientUtil.addFileToDocument(FILE_WIKIPEDIA_PDF, token, documentId);
+
+        // Register the capturer AFTER the initial add so only the page-operation version's event is observed.
+        LanguageCapturingListener listener = new LanguageCapturingListener();
+        AppContext.getInstance().getAsyncEventBus().register(listener);
+        try {
+            Response response = applyPages(token, fileId,
+                    "{\"version\":1,\"baseVersion\":0,\"pages\":[{\"source\":0}]}");
+            Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+            String newFileId = response.readEntity(JsonObject.class).getString("id");
+
+            FileCreatedAsyncEvent event = listener.events.stream()
+                    .filter(e -> newFileId.equals(e.getFileId()))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "no file-created event was fired for the page-operation version"));
+            Assertions.assertEquals("fra", event.getLanguage(),
+                    "the derived version must inherit the document's language, not null/default");
+        } finally {
+            AppContext.getInstance().getAsyncEventBus().unregister(listener);
+        }
+    }
+
+    @Test
+    public void quotaExceededReturnsBadRequest() throws Exception {
+        // #129: createFile reserves storage for the new version and throws IOException("QuotaReached") when
+        // the user's quota would be exceeded. pages() must map ONLY that to a typed 400 (the SPA shows a
+        // quota message); without the catch it fell through to the generic 500. The quota admits one copy of
+        // the fixture but not the near-same-size page-operation output.
+        clientUtil.createUser("pageops_quota", 600_000);
+        String token = clientUtil.login("pageops_quota");
+        String documentId = clientUtil.createDocument(token);
+        String fileId = clientUtil.addFileToDocument(FILE_WIKIPEDIA_PDF, token, documentId);
+        int sourcePages = downloadedPageCount(token, fileId);
+
+        // Keeping ALL pages yields an output about the source size; the remaining quota cannot admit it.
+        Response response = applyPages(token, fileId, keepAllReversedManifest(sourcePages, 0));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "an exceeded quota must be a typed 400, not the generic 500");
+        Assertions.assertEquals("QuotaReached", response.readEntity(JsonObject.class).getString("type"));
+
+        // The rejected attempt created no new version.
+        JsonObject list = target().path("/file/list").queryParam("id", documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, list.getJsonArray("files").size());
+    }
+
+    @Test
+    public void saturatedLimiterReturnsTooManyRequests() throws Exception {
+        // The limiter's rejection is unit-tested, but the RESOURCE's catch ORDER (PdfPageOperationBusyException
+        // must be caught as 429 BEFORE the generic PdfPageOperationException 400) is not. Hold the service's
+        // real per-file slot on a background thread, then assert a concurrent request on the SAME file maps to
+        // 429 — not the 400/409/500 a mis-ordered or missing busy catch would produce.
+        clientUtil.createUser("pageops_busy", 100_000_000);
+        String token = clientUtil.login("pageops_busy");
+        String documentId = clientUtil.createDocument(token);
+        String fileId = clientUtil.addFileToDocument(FILE_WIKIPEDIA_PDF, token, documentId);
+
+        // Reach the service's own static limiter and occupy the per-file slot for this file.
+        Field limiterField = PdfPageOperationService.class.getDeclaredField("LIMITER");
+        limiterField.setAccessible(true);
+        PdfPageOperationLimiter limiter = (PdfPageOperationLimiter) limiterField.get(null);
+
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        Thread holder = new Thread(() -> {
+            try {
+                limiter.runExclusive(fileId, () -> {
+                    holding.countDown();
+                    release.await();
+                    return null;
+                });
+            } catch (Exception ignored) {
+                // The slot is released when the job returns; the assertion is on the HTTP response.
+            }
+        });
+        holder.setDaemon(true);
+        holder.start();
+        try {
+            Assertions.assertTrue(holding.await(10, TimeUnit.SECONDS),
+                    "the per-file slot must be held before the request is issued");
+
+            Response response = applyPages(token, fileId,
+                    "{\"version\":1,\"baseVersion\":0,\"pages\":[{\"source\":0}]}");
+            Assertions.assertEquals(429, response.getStatus(),
+                    "a saturated concurrency ceiling must surface as 429, not 400/409/500");
+        } finally {
+            release.countDown();
+            holder.join(TimeUnit.SECONDS.toMillis(10));
+        }
     }
 }

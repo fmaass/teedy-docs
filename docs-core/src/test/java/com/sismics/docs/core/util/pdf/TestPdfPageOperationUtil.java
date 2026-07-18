@@ -245,6 +245,25 @@ public class TestPdfPageOperationUtil {
     }
 
     @Test
+    public void propagatesSourceOpenFailureAsRawIoException() throws Exception {
+        // #126: a source-open / setup failure (here a missing source file) is infrastructure, not
+        // unprocessable input. It must surface as a RAW IOException (a logged 500 at the resource), never
+        // the typed InvalidPdf that maps to a client 400. Before the hoist, Loader.loadPDF's File overload
+        // opened the source INSIDE the parse try, so a missing/unreadable file was mislabeled InvalidPdf.
+        Path missing = temp(".pdf");
+        Files.deleteIfExists(missing);
+        Path output = temp(".pdf");
+        PdfPageManifest m = manifest("[{\"source\":0}]");
+
+        // assertThrows(IOException.class) alone is discriminating: PdfPageOperationException is NOT an
+        // IOException, so the pre-fix InvalidPdf mapping would fail this call. isInstance makes it explicit.
+        IOException e = Assertions.assertThrows(IOException.class,
+                () -> PdfPageOperationUtil.transform(missing, output, m, mem(), NOT_EXPIRED));
+        Assertions.assertFalse(PdfPageOperationException.class.isInstance(e),
+                "a source-open failure must propagate as a raw IOException, not the typed InvalidPdf (400)");
+    }
+
+    @Test
     public void rejectsOutOfRangeSourceIndex() throws Exception {
         Path input = writePdf(2);
         Path output = temp(".pdf");

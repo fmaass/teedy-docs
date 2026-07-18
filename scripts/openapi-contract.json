@@ -2,7 +2,7 @@
   "_comment": "Hand-curated response-code + requiredness contract for security/behaviour-relevant endpoints. Response codes CANNOT be source-derived (JAX-RS throws them ad hoc), so this checklist freezes the codes each listed endpoint MUST document plus which request bodies/fields MUST be required. check-openapi-parity.mjs enforces it in BOTH directions per endpoint: a dropped OR added documented response code fails, and a removed OR added required flag fails. Keys are 'VERB /path' with OpenAPI-normalized paths. Only endpoints that need the guard are listed; unlisted endpoints are not response-code-checked. Keep in sync with the spec deliberately — a change here is a conscious contract change.",
   "endpoints": {
     "POST /file/{id}/pages": {
-      "responses": ["200", "400", "403", "404", "409", "429"],
+      "responses": ["200", "400", "403", "404", "409", "429", "500"],
       "requestBodyRequired": true,
       "requiredFields": ["manifest"]
     }

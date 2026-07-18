@@ -1,7 +1,10 @@
 package com.sismics.docs.core.util.pdf;
 
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.MemoryUsageSetting;
+import org.apache.pdfbox.io.RandomAccessRead;
+import org.apache.pdfbox.io.RandomAccessReadBufferedFile;
 import org.apache.pdfbox.io.ScratchFile;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -135,13 +138,44 @@ public final class PdfPageOperationUtil {
 
     private static PDDocument load(Path input, MemoryUsageSetting memUsageSetting)
             throws PdfPageOperationException, IOException {
+        // #126: the source open and the PDFBox scratch-file CONSTRUCTION are hoisted OUT of the parse try so
+        // their IOException propagates RAW to the resource's generic catch (a logged 500), never the typed
+        // InvalidPdf. This reliably routes to 500 the two setup failures the hoist can see up front: opening
+        // the source (RandomAccessReadBufferedFile) and constructing the ScratchFile (which validates the
+        // temp dir). Only Loader.loadPDF stays inside the try, so a malformed/truncated PDF stays a client
+        // 400. Accepted, documented residual: PDFBox 3.0.7 allocates the physical scratch SPILL file LAZILY
+        // inside Loader.loadPDF, so a spill write that fails mid-parse (only if the temp filesystem fills
+        // while parsing a PDF large enough to spill) surfaces there as an IOException indistinguishable from
+        // a malformed-PDF one and is reported as 400. This is bounded — the scratch dir is the app's own
+        // owner-writable FileService temp dir, writable by construction — and is preferred over reintroducing
+        // the message-text classification #126 forbids (PDFBox 3.x exposes no reliable parse-vs-infra
+        // IOException subtype).
+        ScratchFile scratchFile = new ScratchFile(memUsageSetting);
+        RandomAccessRead source;
         try {
-            return Loader.loadPDF(input.toFile(), () -> new ScratchFile(memUsageSetting));
+            source = new RandomAccessReadBufferedFile(input);
+        } catch (IOException e) {
+            IOUtils.closeQuietly(scratchFile);
+            throw e;
+        }
+
+        boolean ownershipTransferred = false;
+        try {
+            PDDocument document = Loader.loadPDF(source, () -> scratchFile);
+            // The returned document owns both the source and the scratch file and closes them when the caller
+            // closes it; every failure path below releases them via the finally.
+            ownershipTransferred = true;
+            return document;
         } catch (InvalidPasswordException e) {
             throw new PdfPageOperationException("EncryptedSource", "The PDF is password-protected");
         } catch (IOException e) {
             // A malformed / truncated stored PDF is unprocessable input, not a server fault: a typed 400.
             throw new PdfPageOperationException("InvalidPdf", "The file is not a readable PDF");
+        } finally {
+            if (!ownershipTransferred) {
+                IOUtils.closeQuietly(source);
+                IOUtils.closeQuietly(scratchFile);
+            }
         }
     }
 

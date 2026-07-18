@@ -1812,7 +1812,7 @@
             "description": "Success"
           },
           "400": {
-            "description": "Invalid manifest, non-PDF, over-ceiling, signed, encrypted, or unprocessable source"
+            "description": "Invalid manifest, non-PDF, over-ceiling, signed, encrypted, unprocessable source, or storage quota exceeded"
           },
           "403": {
             "description": "Write permission on the parent document is required"
@@ -1825,6 +1825,9 @@
           },
           "429": {
             "description": "A page operation is already running for this file or the server is at capacity"
+          },
+          "500": {
+            "description": "A server-side processing failure (e.g. the source could not be opened or the scratch file could not be allocated)"
           }
         }
       }

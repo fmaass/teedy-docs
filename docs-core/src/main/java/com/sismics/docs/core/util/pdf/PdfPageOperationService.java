@@ -1,7 +1,9 @@
 package com.sismics.docs.core.util.pdf;
 
+import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.service.FileService;
@@ -143,9 +145,17 @@ public final class PdfPageOperationService {
 
             // Save as a new version under the single-writer version contract: previousFileId is the operated file itself, so
             // the affected-row compare-and-swap rejects a stale base (409) and inherits the rotation.
+            // Carry the owning document's OCR/index language onto the derived version so a non-English
+            // document's search fidelity survives a page operation (#124). Resolve defensively: an orphan
+            // file (no document) still flows through here on its way to createFile's own
+            // PreviousVersionMismatch rejection, and a document could be concurrently deleted — in either
+            // case fall back to null (the pre-fix behaviour) instead of NPEing into a 500.
+            Document document = file.getDocumentId() == null
+                    ? null : new DocumentDao().getById(file.getDocumentId());
+            String language = document == null ? null : document.getLanguage();
             long outputSize = Files.size(output);
             String newFileId = FileUtil.createFile(file.getName(), file.getId(), output, outputSize,
-                    null, actingUserId, file.getDocumentId());
+                    language, actingUserId, file.getDocumentId());
             ownershipTransferred = true;
             return newFileId;
         } finally {
