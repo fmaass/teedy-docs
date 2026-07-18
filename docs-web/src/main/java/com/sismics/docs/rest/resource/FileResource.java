@@ -32,8 +32,10 @@ import com.sismics.docs.core.event.FileUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
+import com.sismics.docs.core.util.FileCreatedResult;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.PreviousVersionMismatchException;
 import com.sismics.docs.core.util.RasterGenerationUtil;
@@ -157,8 +159,13 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             long fileSize;
+            // #119: compute the content MAC in the SAME pass that writes the plaintext temp — no separate
+            // read. The sink is null when duplicate detection is off or the upload has no document (orphan),
+            // leaving the MAC null and every path unchanged.
+            String contentMac;
             try {
                 unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile(name);
+                ContentMacUtil.MacSink macSink = ContentMacUtil.newSink(documentId);
                 try (InputStream in = fileBodyPart.getValueAs(InputStream.class);
                      java.io.OutputStream out = Files.newOutputStream(unencryptedFile)) {
                     long totalRead = 0;
@@ -171,22 +178,35 @@ public class FileResource extends BaseResource {
                                     "File exceeds maximum upload size of " + (maxUploadSize / (1024 * 1024)) + " MB");
                         }
                         out.write(buf, 0, n);
+                        if (macSink != null) {
+                            macSink.update(buf, 0, n);
+                        }
                     }
                 }
                 fileSize = Files.size(unencryptedFile);
+                contentMac = macSink == null ? null : macSink.finish();
             } catch (IOException e) {
                 throw new ServerException("StreamError", "Error reading the input file", e);
             }
 
-            String fileId = FileUtil.createFile(name, previousFileId, unencryptedFile, fileSize, documentDto == null ?
-                    null : documentDto.getLanguage(), principal.getId(), documentId);
-            ownershipTransferred = true;
+            FileCreatedResult result = FileUtil.createFile(name, previousFileId, unencryptedFile, fileSize,
+                    documentDto == null ? null : documentDto.getLanguage(), principal.getId(), documentId, contentMac);
+            // Key temp cleanup off the ACTUAL resource the call accepted: a real create hands the plaintext
+            // temp to the async pipeline (tempAccepted=true, request must not delete it); a #119 no-op takes
+            // nothing (tempAccepted=false), so the finally below deletes the temp — no leak.
+            ownershipTransferred = result.isTempAccepted();
 
-            // Always return OK
+            // Always return OK. For a no-op the id is the existing current version the upload collapsed onto.
             JsonObjectBuilder response = Json.createObjectBuilder()
                     .add("status", "ok")
-                    .add("id", fileId)
+                    .add("id", result.getFileId())
                     .add("size", fileSize);
+            if (result.getDuplicateKind() != null) {
+                response.add("duplicateKind", result.getDuplicateKind());
+                if (result.getDuplicateOfId() != null) {
+                    response.add("duplicateOfId", result.getDuplicateOfId());
+                }
+            }
             return Response.ok().entity(response.build()).build();
         } catch (ClientException | ServerException e) {
             throw e;

@@ -9,11 +9,13 @@ import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.listener.async.*;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.service.ContentMacBackfillService;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
+import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
@@ -113,6 +115,11 @@ public class AppContext {
     private FileSizeService fileSizeService;
 
     /**
+     * Content MAC backfill service (#119).
+     */
+    private ContentMacBackfillService contentMacBackfillService;
+
+    /**
      * Trash purge service.
      */
     private TrashPurgeService trashPurgeService;
@@ -187,6 +194,25 @@ public class AppContext {
             fileSizeService.awaitRunning();
         } catch (IllegalStateException e) {
             Service.State state = fileSizeService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
+
+        // Resolve the content-hash duplicate detection master secret ONCE (#119) and log ON/OFF.
+        ContentMacUtil.init();
+
+        // Start the content MAC backfill service. Like FileSizeService it SELF-COMPLETES (it stops as soon
+        // as the null-MAC work set drains — and immediately, on its first iteration, when the feature is off
+        // for lack of a master secret), so it can reach TERMINATED before awaitRunning() observes RUNNING.
+        // Tolerate exactly that benign self-stop (TERMINATED/STOPPING) while still propagating a genuine
+        // startup failure — runOneIteration() catches every Throwable, so it can never enter FAILED on its own.
+        contentMacBackfillService = new ContentMacBackfillService();
+        contentMacBackfillService.startAsync();
+        try {
+            contentMacBackfillService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = contentMacBackfillService.state();
             if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
                 throw e;
             }
@@ -453,6 +479,10 @@ public class AppContext {
 
         if (fileSizeService != null) {
             fileSizeService.stopAsync();
+        }
+
+        if (contentMacBackfillService != null) {
+            contentMacBackfillService.stopAsync();
         }
 
         if (trashPurgeService != null) {

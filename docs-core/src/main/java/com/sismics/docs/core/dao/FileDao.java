@@ -338,6 +338,87 @@ public class FileDao {
             return null;
         }
     }
+
+    /**
+     * Locks and re-reads a single ACTIVE file row FOR UPDATE (PESSIMISTIC_WRITE) — the non-mutating
+     * re-validation hop of the #119 content-dedup no-op. The lock is on ONLY this one predecessor row and
+     * NO quota lock is ever taken on the no-op path, so it cannot invert the canonical GLOBAL->user->T_FILE
+     * order. Returns {@code null} when the row does not exist or was concurrently soft-deleted (its active
+     * filter matched nothing, so nothing is locked), letting the caller treat a superseded base as a
+     * version conflict rather than a spurious success.
+     *
+     * @param id File ID
+     * @return the locked, freshly re-read active file, or {@code null} if absent/soft-deleted
+     */
+    public File getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.id = :id and f.deleteDate is null", File.class);
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Read-only lookup of another ACTIVE latest file in the same document carrying an identical content MAC
+     * (#119) — the source of the advisory "identical to an existing file" upload hint. Returns the
+     * oldest-created match so the hint is stable, or {@code null} when no other current file matches. Never
+     * mutates and never locks; the returned id is advisory only (no server-side reparent/replace in v1).
+     *
+     * @param documentId Owning document id
+     * @param contentMac Lowercase-hex content MAC to match
+     * @param excludeFileId File id to exclude (the just-created file itself)
+     * @return an existing active latest file with the same content, or {@code null}
+     */
+    public File findActiveByDocumentIdAndMac(String documentId, String contentMac, String excludeFileId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.documentId = :documentId" +
+                " and f.contentMac = :contentMac and f.id <> :excludeFileId" +
+                " and f.latestVersion = true and f.deleteDate is null order by f.createDate asc", File.class);
+        q.setParameter("documentId", documentId);
+        q.setParameter("contentMac", contentMac);
+        q.setParameter("excludeFileId", excludeFileId);
+        q.setMaxResults(1);
+        List<File> result = q.getResultList();
+        return result.isEmpty() ? null : result.get(0);
+    }
+
+    /**
+     * A batch of ACTIVE, document-attached files whose content MAC is still null — the #119 backfill work
+     * set. Excludes orphans (no document to key a MAC on) and rows already stamped (a real MAC or a terminal
+     * skip marker), so the scan drains and never re-selects a processed row forever.
+     *
+     * @param limit Batch size
+     * @return up to {@code limit} null-MAC active document-attached files
+     */
+    public List<File> getActiveFilesWithNullMac(int limit) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.contentMac is null" +
+                " and f.documentId is not null and f.deleteDate is null order by f.createDate asc", File.class);
+        q.setMaxResults(limit);
+        return q.getResultList();
+    }
+
+    /**
+     * Conditionally set a file's content MAC only while it is still null (#119 backfill). The {@code where
+     * FIL_CONTENTMAC_C is null} guard makes the write idempotent across instances: a second backfiller that
+     * already lost the race updates zero rows instead of overwriting.
+     *
+     * @param id File ID
+     * @param contentMac MAC (or terminal skip marker) to store
+     * @return number of rows updated (1 when it filled a null cell, 0 when already set)
+     */
+    public int setContentMacIfNull(String id, String contentMac) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f set f.contentMac = :contentMac" +
+                " where f.id = :id and f.contentMac is null");
+        q.setParameter("contentMac", contentMac);
+        q.setParameter("id", id);
+        return q.executeUpdate();
+    }
     
     /**
      * Get files by document ID or all orphan files of a user.

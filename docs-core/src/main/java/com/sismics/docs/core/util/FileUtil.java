@@ -126,12 +126,94 @@ public class FileUtil {
      * @throws Exception e
      */
     public static String createFile(String name, String previousFileId, Path unencryptedFile, long fileSize, String language, String userId, String documentId) throws Exception {
+        // Backward-compatible wrapper for the import/inbox/page-operation callers (and every legacy caller):
+        // compute the content MAC over the plaintext in a single pass — null when the feature is off or the
+        // upload has no document — then delegate to the rich overload and return only the resulting file id.
+        // These callers pass no previousFileId (import/inbox) so they can never hit the no-op; page-ops
+        // passes one but its re-serialised output always has a different MAC, so it can never no-op either.
+        String contentMac;
+        try (InputStream plaintext = Files.newInputStream(unencryptedFile)) {
+            contentMac = ContentMacUtil.computeMac(documentId, plaintext);
+        }
+        return createFile(name, previousFileId, unencryptedFile, fileSize, language, userId, documentId, contentMac)
+                .getFileId();
+    }
+
+    /**
+     * Create a new file, computing content-hash duplicate detection (#119) from a precomputed content MAC.
+     *
+     * <p>The MAC is computed by the caller (streaming the plaintext as the upload temp is written, so there
+     * is no separate read pass) and is {@code null} whenever the feature is disabled or the upload has no
+     * document — in which case this behaves exactly as before: the column stays null and every code path is
+     * unchanged. When the MAC is present it drives two behaviours:</p>
+     *
+     * <ol>
+     *   <li><b>No-op collapse</b> (only for a doc-attached NEW-version upload — {@code previousFileId} and
+     *       {@code documentId} both non-null): if the named predecessor is still the current latest active
+     *       version AND its stored MAC equals the computed one, the upload is IDENTICAL to what is already
+     *       there, so no new version is created — no quota reserved, no predecessor demoted, no blob written,
+     *       no processing queued. The decision reads the predecessor first WITHOUT a lock; only on a MATCH
+     *       does it lock ONLY that one row to re-validate, and it NEVER takes a quota lock, so it cannot
+     *       invert the canonical GLOBAL->user->T_FILE order. A predecessor superseded between the two reads
+     *       is a version conflict (409), never a spurious success.</li>
+     *   <li><b>Advisory hint</b>: a real create still records an advisory {@code duplicateKind=content} +
+     *       {@code duplicateOfId} when another active file in the same document already has identical content
+     *       (a read-only lookup). No server-side reparent/replace — the client surfaces a non-blocking hint.</li>
+     * </ol>
+     *
+     * @param name File name, can be null
+     * @param previousFileId ID of the previous version of the file, if the new file is a new version
+     * @param unencryptedFile Path to the unencrypted file
+     * @param fileSize File size
+     * @param language File language, can be null if associated to no document
+     * @param userId User ID creating the file
+     * @param documentId Associated document ID or null if no document
+     * @param contentMac Precomputed lowercase-hex content MAC, or null when the feature is off / no document
+     * @return the rich creation result (file id + acquired-resource flags + advisory duplicate hint)
+     * @throws Exception e
+     */
+    public static FileCreatedResult createFile(String name, String previousFileId, Path unencryptedFile, long fileSize, String language, String userId, String documentId, String contentMac) throws Exception {
         // Validate mime type
         String mimeType;
         try {
             mimeType = MimeTypeUtil.guessMimeType(unencryptedFile, name);
         } catch (IOException e) {
             throw new IOException("ErrorGuessMime", e);
+        }
+
+        FileDao fileDao = new FileDao();
+
+        // #119 content-dedup NO-OP short-circuit — evaluated BEFORE any quota lock or blob I/O so a collapse
+        // reserves nothing. Only a doc-attached new-version upload with the feature on is eligible; an absent
+        // previousFileId (plain/keep-both/import/inbox) or a null MAC (feature off / orphan) never no-ops.
+        if (contentMac != null && documentId != null && previousFileId != null) {
+            // Unlocked read of the named predecessor; a genuine MISMATCH carries NO T_FILE lock into the
+            // quota path below.
+            File predecessor = fileDao.getActiveById(previousFileId);
+            if (predecessor != null
+                    && documentId.equals(predecessor.getDocumentId())
+                    && predecessor.isLatestVersion()
+                    && contentMac.equals(predecessor.getContentMac())) {
+                // MATCH -> lock ONLY that predecessor row and re-validate it under the lock (non-mutating).
+                File locked = fileDao.getActiveByIdForUpdate(previousFileId);
+                if (locked != null
+                        && locked.isLatestVersion()
+                        && documentId.equals(locked.getDocumentId())
+                        && contentMac.equals(locked.getContentMac())) {
+                    // Still the current, identical predecessor: collapse to a no-op bound to THIS specific
+                    // current version. Reserved no quota, demoted nothing, wrote no blob, queued no
+                    // processing, and did not take the plaintext temp (the request's finally deletes it).
+                    return FileCreatedResult.noop(previousFileId);
+                }
+                // The predecessor was demoted or deleted between the unlocked read and the locked re-check.
+                // The rc.7 compare-and-swap would reject this stale base with a version conflict; raise it
+                // directly (equivalent 409) rather than proceeding into reserveStorage while holding this
+                // T_FILE row lock — that keeps the no-op decision path free of ANY quota lock, so it can
+                // never invert the canonical GLOBAL->user->T_FILE order. THE INVARIANT: an equal MAC against
+                // a superseded predecessor is a 409, never a spurious success.
+                throw new VersionConcurrencyException("The file version was modified concurrently");
+            }
+            // MISMATCH: no lock was taken; fall through to the normal create in canonical lock order.
         }
 
         // Reserve the storage BEFORE any T_FILE mutation or blob I/O. This atomically validates the
@@ -154,9 +236,9 @@ public class FileUtil {
         file.setMimeType(mimeType);
         file.setUserId(userId);
         file.setSize(fileSize);
+        // Persist the content MAC (null when the feature is off / no document -> column stays null).
+        file.setContentMac(contentMac);
 
-        // Get files of this document
-        FileDao fileDao = new FileDao();
         // A previous version is only meaningful for a document-attached file: the version chain and the
         // compare-and-swap below both live inside the documentId != null branch. Creating a "new version"
         // of an orphan (no document) would silently fork an unrelated brand-new file while leaving the
@@ -244,7 +326,20 @@ public class FileUtil {
             ThreadLocalContext.get().addAsyncEvent(documentUpdatedAsyncEvent);
         }
 
-        return fileId;
+        // #119 advisory renamed-duplicate hint: a read-only look for ANOTHER active current file in this
+        // document with identical content. Informational only (no server-side reparent) — the client shows a
+        // non-blocking "add it as a version instead" toast. Never fires when the feature is off (null MAC).
+        String duplicateKind = null;
+        String duplicateOfId = null;
+        if (contentMac != null && documentId != null) {
+            File twin = fileDao.findActiveByDocumentIdAndMac(documentId, contentMac, fileId);
+            if (twin != null) {
+                duplicateKind = FileCreatedResult.DUPLICATE_CONTENT;
+                duplicateOfId = twin.getId();
+            }
+        }
+
+        return FileCreatedResult.created(fileId, duplicateKind, duplicateOfId);
     }
 
     /**

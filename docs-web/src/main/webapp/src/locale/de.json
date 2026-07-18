@@ -203,6 +203,7 @@
     "uploading": "Wird hochgeladen …",
     "upload_failed": "Hochladen fehlgeschlagen",
     "files_uploaded": "Dateien hochgeladen",
+    "duplicate_content_hint": "Diese Datei ist identisch mit \"{name}\" in diesem Dokument — Sie können sie stattdessen als neue Version hinzufügen.",
     "no_files": "Diesem Dokument sind keine Dateien angehängt",
     "versions": {
       "title": "Versionsverlauf",

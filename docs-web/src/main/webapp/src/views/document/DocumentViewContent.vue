@@ -250,9 +250,13 @@ async function runUploads(documentId: string, jobs: UploadJob[]) {
   uploadProgress.value = {}
   uploadingNames.value = jobs.map((j) => j.file.name)
   try {
+    // #119: the backend flags a content-identical upload (a renamed duplicate, or an identical new
+    // version it collapsed) with duplicateKind='content' + duplicateOfId. Surface ONE non-blocking,
+    // purely informational hint per batch — no action is taken server-side. Absent (feature off) it never fires.
+    let duplicateHint: { name: string } | null = null
     for (let i = 0; i < jobs.length; i++) {
       uploadProgress.value[i] = 0
-      await uploadFile(
+      const res = await uploadFile(
         documentId,
         jobs[i].file,
         (pct) => {
@@ -261,8 +265,20 @@ async function runUploads(documentId: string, jobs: UploadJob[]) {
         jobs[i].previousFileId,
       )
       uploadProgress.value[i] = 100
+      const data = (res as { data?: { duplicateKind?: string; duplicateOfId?: string } } | undefined)?.data
+      if (data?.duplicateKind === 'content' && !duplicateHint) {
+        const existing = (doc.value?.files ?? []).find((f) => f.id === data.duplicateOfId)
+        duplicateHint = { name: existing?.name ?? jobs[i].file.name }
+      }
     }
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
+    if (duplicateHint) {
+      toast.add({
+        severity: 'info',
+        summary: t('ui.duplicate_content_hint', { name: duplicateHint.name }),
+        life: 6000,
+      })
+    }
   } catch (e) {
     const status = (e as { response?: { status?: number } })?.response?.status
     const staleBase = status === 409

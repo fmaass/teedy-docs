@@ -203,6 +203,7 @@
     "uploading": "Uploading...",
     "upload_failed": "Upload failed",
     "files_uploaded": "Files uploaded",
+    "duplicate_content_hint": "This file is identical to \"{name}\" already in this document — you can add it as a new version instead.",
     "no_files": "No files attached to this document",
     "versions": {
       "title": "Version history",
