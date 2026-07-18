@@ -11,7 +11,7 @@
       "removal_issue"
     ]
   },
-  "recorded": "2026-07-16",
+  "recorded": "2026-07-19",
   "identity_scheme": "<ruleId>@<artifact uri>:<startLine>:<startColumn> of the result's primary location (one-to-one with code-scanning alerts; line shifts in flagged files require a deliberate baseline update)",
   "findings": [
     {
@@ -165,7 +165,7 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:433:42",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:453:42",
       "finding": "CodeQL path-injection: cleanup delete of decrypted rotation temp flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical.",
       "owner": "fmaass",
@@ -175,7 +175,7 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:589:34",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:618:34",
       "finding": "CodeQL path-injection: cleanup delete of orphan decrypted temp flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical.",
       "owner": "fmaass",
@@ -185,7 +185,7 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:879:31",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:908:31",
       "finding": "CodeQL path-injection: existence check on sized variant path flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical.",
       "owner": "fmaass",
@@ -195,7 +195,7 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:881:67",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:910:67",
       "finding": "CodeQL path-injection: placeholder image classpath lookup flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical.",
       "owner": "fmaass",
