@@ -39,11 +39,14 @@ const resourceDirs = [
   join(repoRoot, 'docs-web/src/main/java/com/sismics/docs/rest/resource'),
   join(repoRoot, 'docs-web/src/main/java/com/sismics/docs/rest/document'),
 ];
-const specPath = join(
-  repoRoot,
-  'docs-web/src/main/webapp/public/apidoc/openapi.json'
-);
+// OPENAPI_SPEC_PATH lets a caller point the checker at an alternate spec copy (used
+// by the negative-control test to prove a mutated spec fails). CI never sets it, so
+// the default committed spec is used in the pipeline.
+const specPath = process.env.OPENAPI_SPEC_PATH
+  ? resolve(process.env.OPENAPI_SPEC_PATH)
+  : join(repoRoot, 'docs-web/src/main/webapp/public/apidoc/openapi.json');
 const checklistPath = join(scriptDir, 'openapi-multivaluedmap-checklist.json');
+const contractPath = join(scriptDir, 'openapi-contract.json');
 
 const HTTP_VERBS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
@@ -287,6 +290,98 @@ function documentedParamNames(op) {
   return names;
 }
 
+/**
+ * Union of the field names marked `required` across every requestBody media-type
+ * schema of an operation (urlencoded, multipart, json). Removing a field from any
+ * schema's `required` array drops it from this set.
+ */
+function requiredRequestFields(op) {
+  const names = new Set();
+  const content =
+    op.requestBody && op.requestBody.content ? op.requestBody.content : {};
+  for (const mediaType of Object.keys(content)) {
+    const schema = content[mediaType] && content[mediaType].schema;
+    if (schema && Array.isArray(schema.required)) {
+      for (const name of schema.required) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Enforce the hand-curated response-code + requiredness contract. Response codes
+ * cannot be derived from JAX-RS sources (they are thrown ad hoc), so this is the
+ * only guard that a documented status (e.g. a rate-limit 429) or a `required` flag
+ * is not silently dropped — or silently added without updating the contract. The
+ * comparison is bidirectional per listed endpoint.
+ */
+function checkContract(spec, contract) {
+  const endpoints = contract.endpoints || {};
+  let checkedCodes = 0;
+  let checkedRequired = 0;
+  for (const key of Object.keys(endpoints)) {
+    const expected = endpoints[key];
+    const spaceIdx = key.indexOf(' ');
+    const method = key.slice(0, spaceIdx).toLowerCase();
+    const path = key.slice(spaceIdx + 1);
+    const op = specHasOperation(spec, path, method);
+    if (!op) {
+      fail(
+        `Contract endpoint "${key}" is not present in the spec (removed endpoint or stale contract entry — ${'scripts/openapi-contract.json'}).`
+      );
+      continue;
+    }
+
+    // Response codes: exact set equality (both directions).
+    const specCodes = new Set(Object.keys(op.responses || {}));
+    const expectedCodes = new Set(expected.responses || []);
+    for (const code of expectedCodes) {
+      checkedCodes++;
+      if (!specCodes.has(code)) {
+        fail(
+          `Contract "${key}": documented response code ${code} is required by the contract but missing from the spec.`
+        );
+      }
+    }
+    for (const code of specCodes) {
+      if (!expectedCodes.has(code)) {
+        fail(
+          `Contract "${key}": spec documents response code ${code} not listed in the contract ${'scripts/openapi-contract.json'} (add it, or remove it from the spec).`
+        );
+      }
+    }
+
+    // requestBody.required flag.
+    const specBodyRequired = !!(op.requestBody && op.requestBody.required === true);
+    if (specBodyRequired !== !!expected.requestBodyRequired) {
+      checkedRequired++;
+      fail(
+        `Contract "${key}": requestBody.required is ${specBodyRequired} in the spec but the contract expects ${!!expected.requestBodyRequired}.`
+      );
+    }
+
+    // Required request-body fields: exact set equality (both directions).
+    const specRequired = requiredRequestFields(op);
+    const expectedRequired = new Set(expected.requiredFields || []);
+    for (const name of expectedRequired) {
+      checkedRequired++;
+      if (!specRequired.has(name)) {
+        fail(
+          `Contract "${key}": field "${name}" must be marked required in the spec but is not.`
+        );
+      }
+    }
+    for (const name of specRequired) {
+      if (!expectedRequired.has(name)) {
+        fail(
+          `Contract "${key}": spec marks field "${name}" required but the contract ${'scripts/openapi-contract.json'} does not list it (add it, or drop required in the spec).`
+        );
+      }
+    }
+  }
+  return { checkedCodes, checkedRequired, endpointCount: Object.keys(endpoints).length };
+}
+
 function main() {
   const dump = process.argv.includes('--dump');
   const { endpoints } = loadSurface();
@@ -298,6 +393,7 @@ function main() {
 
   const spec = loadSpec();
   const checklist = JSON.parse(readFileSync(checklistPath, 'utf8'));
+  const contract = JSON.parse(readFileSync(contractPath, 'utf8'));
 
   // 1. Every derived endpoint is present with all its VISIBLE parameters.
   let checkedParams = 0;
@@ -376,6 +472,11 @@ function main() {
     }
   }
 
+  // 4. Response-code + requiredness contract (source-derivation-proof): the hand-
+  //    curated contract freezes each listed endpoint's documented response-code set
+  //    and required request bodies/fields, enforced bidirectionally.
+  const contractStats = checkContract(spec, contract);
+
   if (errors.length > 0) {
     console.error(
       `\nOpenAPI parity FAILED: ${errors.length} problem(s). ` +
@@ -386,7 +487,8 @@ function main() {
 
   console.log(
     `OpenAPI parity OK: ${endpoints.length} endpoints, ${checkedParams} visible parameters, ` +
-      `${mvmEndpoints.length} MultivaluedMap endpoint(s) checklisted (${checkedFormKeys} source form key(s) verified) — all documented.`
+      `${mvmEndpoints.length} MultivaluedMap endpoint(s) checklisted (${checkedFormKeys} source form key(s) verified) — all documented. ` +
+      `Contract: ${contractStats.endpointCount} endpoint(s), ${contractStats.checkedCodes} response code(s) + ${contractStats.checkedRequired} requiredness assertion(s) matched.`
   );
 }
 
