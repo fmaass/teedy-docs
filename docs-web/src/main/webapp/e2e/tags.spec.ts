@@ -56,7 +56,9 @@ test.describe('tag filter panel', () => {
     await page.goto('/#/tag')
     await page.getByPlaceholder('Tag name').fill(name)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
-    await expect(page.getByText('Tag created')).toBeVisible()
+    // The success signal is the new node in the tree — the transient "Tag created"
+    // toast can stack across successive creates (this describe creates two tags
+    // back-to-back), so we do not assert on it here.
     await expect(page.locator('.tag-tree').getByText(name, { exact: true })).toBeVisible()
   }
 

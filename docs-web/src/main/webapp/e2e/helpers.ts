@@ -131,10 +131,14 @@ export async function expectTagNodeState(
 
 let counter = 0
 export function unique(prefix: string): string {
-  // Date.now() runs in Node inside the spec; add a monotonic counter so two
-  // calls in the same millisecond still differ. No spaces — keeps tag names
-  // single-token so the panel's accessible-name regex matches cleanly.
-  return `${prefix}-${Date.now()}-${counter++}`
+  // Date.now() plus a monotonic counter makes two calls in the same millisecond
+  // differ WITHIN a worker; process.pid makes names differ ACROSS parallel worker
+  // processes (Playwright runs each worker in its own process with its own
+  // module-scoped counter starting at 0, so without the pid two workers can mint
+  // the identical name in the same millisecond and a durable getByText(exact)
+  // assertion then matches two tree nodes). No spaces — keeps tag names single
+  // -token so the panel's accessible-name regex matches cleanly.
+  return `${prefix}-${Date.now()}-${process.pid}-${counter++}`
 }
 
 // Create a document via the real Add-document form. Returns the new document id
