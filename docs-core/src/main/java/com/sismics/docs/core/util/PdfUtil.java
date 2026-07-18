@@ -8,6 +8,7 @@ import com.lowagie.text.FontFactory;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.format.FormatHandlerUtil;
 import com.sismics.docs.core.util.pdf.PdfPage;
@@ -55,7 +56,10 @@ public class PdfUtil {
         // Setup PDFBox
         Closer closer = Closer.create();
         MemoryUsageSetting memUsageSettings = MemoryUsageSetting.setupMixed(1000000); // 1MB max memory usage
-        memUsageSettings.setTempDir(new java.io.File(System.getProperty("java.io.tmpdir"))); // To OS temp
+        // Point PDFBox scratch at the application's private, owner-only temp directory rather than the
+        // world-listable OS temp root, so decrypted document content spilled to the scratch file cannot be
+        // enumerated or read by other local users (matching the page-operations scratch configuration).
+        memUsageSettings.setTempDir(FileService.getTemporaryDirectory().toFile());
 
         // Plaintext temp files decrypted below; they must outlive doc.save()/closer.close()
         // because format handlers may lazily read them via the deferred closer, so they are
