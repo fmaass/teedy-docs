@@ -105,9 +105,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/DocxFormatHandler.java:62:65",
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/DocxFormatHandler.java:63:69",
       "finding": "CodeQL path-injection: docx source stream open during PDF conversion flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -115,9 +115,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/OdtFormatHandler.java:62:65",
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/OdtFormatHandler.java:63:69",
       "finding": "CodeQL path-injection: odt source stream open during PDF conversion flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -155,9 +155,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/TextPlainFormatHandler.java:50:60",
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/TextPlainFormatHandler.java:51:64",
       "finding": "CodeQL path-injection: plain-text content read flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -165,9 +165,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:419:42",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:428:42",
       "finding": "CodeQL path-injection: cleanup delete of decrypted rotation temp flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -175,9 +175,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:525:34",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:534:34",
       "finding": "CodeQL path-injection: cleanup delete of orphan decrypted temp flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -185,9 +185,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:811:31",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:823:31",
       "finding": "CodeQL path-injection: existence check on sized variant path flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
@@ -195,9 +195,9 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:813:67",
+      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:825:67",
       "finding": "CodeQL path-injection: placeholder image classpath lookup flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
