@@ -202,3 +202,25 @@ export async function getFileContent(fileId: string): Promise<string> {
   })
   return res.data
 }
+
+/**
+ * Build the GET URL for a document's whole-file ZIP (server-side zip of every file of the
+ * document, GET /file/zip?id=<docId>). Used by the per-document Download affordance when a
+ * document has more than one file; a single-file document links straight to the file instead.
+ */
+export function getDocumentZipUrl(documentId: string): string {
+  return `api/file/zip?id=${encodeURIComponent(documentId)}`
+}
+
+/**
+ * POST an explicit list of file IDs to /file/zip and resolve the ZIP as a Blob. The backend
+ * zips exactly these files (it does not scope by document), so the caller assembles the id
+ * list — e.g. the union of several documents' files for a bulk download. Sent form-encoded
+ * (repeated `files` params) to match the existing @FormParam("files") endpoint.
+ */
+export async function zipFilesBlob(fileIds: string[]): Promise<Blob> {
+  const params = new URLSearchParams()
+  for (const id of fileIds) params.append('files', id)
+  const res = await api.post('/file/zip', params, { responseType: 'blob' })
+  return res.data as Blob
+}

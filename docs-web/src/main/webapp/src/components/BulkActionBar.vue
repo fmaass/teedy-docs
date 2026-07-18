@@ -15,6 +15,8 @@ defineProps<{
   tags: Tag[]
   /** Progress of an in-flight bulk op as [done, total]; null when idle. */
   progress: [number, number] | null
+  /** True while a bulk ZIP download is being assembled/fetched. */
+  downloading: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +24,7 @@ const emit = defineEmits<{
   setLanguage: [language: string]
   delete: []
   clear: []
+  download: []
 }>()
 
 const languages = SUPPORTED_LANGUAGES
@@ -64,7 +67,7 @@ function applyLang() {
         severity="secondary"
         icon="pi pi-tag"
         :label="t('ui.bulk.add_tag')"
-        :disabled="!!progress"
+        :disabled="!!progress || downloading"
         @click="openTagPopover"
       />
       <Button
@@ -72,15 +75,24 @@ function applyLang() {
         severity="secondary"
         icon="pi pi-language"
         :label="t('ui.bulk.set_language')"
-        :disabled="!!progress"
+        :disabled="!!progress || downloading"
         @click="openLangPopover"
+      />
+      <Button
+        size="small"
+        severity="secondary"
+        icon="pi pi-download"
+        :label="t('ui.bulk.download')"
+        :disabled="!!progress"
+        :loading="downloading"
+        @click="emit('download')"
       />
       <Button
         size="small"
         severity="danger"
         icon="pi pi-trash"
         :label="t('ui.bulk.delete')"
-        :disabled="!!progress"
+        :disabled="!!progress || downloading"
         @click="emit('delete')"
       />
       <Button
@@ -89,7 +101,7 @@ function applyLang() {
         text
         icon="pi pi-times"
         :label="t('ui.bulk.clear')"
-        :disabled="!!progress"
+        :disabled="!!progress || downloading"
         @click="emit('clear')"
       />
     </div>

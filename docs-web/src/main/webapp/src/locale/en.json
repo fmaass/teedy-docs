@@ -428,6 +428,13 @@
         "revoked": "Other sessions signed out",
         "revoke_failed": "Failed to sign out other sessions",
         "load_failed": "Failed to load sessions"
+      },
+      "export": {
+        "title": "Export",
+        "description": "Download a ZIP of your documents and their files. This exports your content only — it does not include sharing permissions, tags, comments, relations, users or settings.",
+        "button": "Export my documents",
+        "started": "Your export is downloading",
+        "failed": "Export failed"
       }
     },
     "default_password_banner": {
@@ -1058,6 +1065,9 @@
       "selected_count": "{count} selected",
       "add_tag": "Add tag",
       "set_language": "Set language",
+      "download": "Download ZIP",
+      "download_empty": "The selected documents have no files to download",
+      "download_failed": "Could not download the selected documents",
       "delete": "Delete",
       "clear": "Clear selection",
       "choose_tag": "Choose a tag",

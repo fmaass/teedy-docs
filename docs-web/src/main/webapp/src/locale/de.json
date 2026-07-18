@@ -428,6 +428,13 @@
         "revoked": "Andere Sitzungen abgemeldet",
         "revoke_failed": "Andere Sitzungen konnten nicht abgemeldet werden",
         "load_failed": "Sitzungen konnten nicht geladen werden"
+      },
+      "export": {
+        "title": "Export",
+        "description": "Lade ein ZIP deiner Dokumente und ihrer Dateien herunter. Dies exportiert nur deine Inhalte — es enthält keine Freigabeberechtigungen, Schlagwörter, Kommentare, Beziehungen, Benutzer oder Einstellungen.",
+        "button": "Meine Dokumente exportieren",
+        "started": "Dein Export wird heruntergeladen",
+        "failed": "Export fehlgeschlagen"
       }
     },
     "default_password_banner": {
@@ -1058,6 +1065,9 @@
       "selected_count": "{count} ausgewählt",
       "add_tag": "Schlagwort hinzufügen",
       "set_language": "Sprache festlegen",
+      "download": "ZIP herunterladen",
+      "download_empty": "Die ausgewählten Dokumente haben keine Dateien zum Herunterladen",
+      "download_failed": "Die ausgewählten Dokumente konnten nicht heruntergeladen werden",
       "delete": "Löschen",
       "clear": "Auswahl aufheben",
       "choose_tag": "Schlagwort auswählen",

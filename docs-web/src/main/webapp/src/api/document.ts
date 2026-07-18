@@ -192,3 +192,16 @@ export function permanentDeleteDocument(id: string) {
 export function emptyTrash() {
   return api.delete<{ deleted_count: number }>('/document/trash')
 }
+
+/**
+ * Download the current user's account export as a ZIP Blob via GET /document/export. The
+ * archive contains the caller's own documents + their files + a manifest.json describing
+ * them. It is an EXPORT, not a backup: it omits sharing permissions (ACLs), tags, comments,
+ * relations, users and configuration. The endpoint enforces a kill switch, a document-count
+ * cap and a concurrency limit — a rejection comes back as a typed error (ExportDisabled /
+ * ExportTooLarge / ExportBusy) whose message the caller surfaces.
+ */
+export async function exportAccountBlob(): Promise<Blob> {
+  const res = await api.get('/document/export', { responseType: 'blob' })
+  return res.data as Blob
+}

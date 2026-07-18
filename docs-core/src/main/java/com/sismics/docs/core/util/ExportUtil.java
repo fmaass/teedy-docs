@@ -26,11 +26,15 @@ import java.util.zip.ZipOutputStream;
  *
  * <p>Given a caller and their document list, this writes one decrypted copy of every file
  * into a per-document folder plus a {@code manifest.json} describing every document and file.
- * Files are decrypted with their own creator's key. A file that cannot be read or decrypted
- * is skipped and recorded as {@code exported: false} in the manifest rather than aborting the
- * whole archive. Both the document-title path segment and the file name are sanitised so a
- * crafted title or file name cannot escape the archive layout (ZIP-slip) on the recipient's
- * machine.</p>
+ * Files are decrypted with their own creator's key. Each file is fully decrypted to a private
+ * staging file, and its length is checked against the recorded decrypted size, BEFORE its
+ * archive entry is opened; a file that cannot be read/decrypted, or whose decrypted length does
+ * not match its recorded size (truncation/short-read corruption — AES/CTR does not throw on a
+ * short ciphertext), is omitted cleanly and recorded as {@code exported: false} in the manifest.
+ * The archive therefore never carries an entry that contradicts its own manifest, and one bad
+ * file does not abort the whole archive. Both the document-title path segment and the file name
+ * are sanitised so a crafted title or file name cannot escape the archive layout (ZIP-slip) on
+ * the recipient's machine.</p>
  *
  * <p>This class does no authentication, concurrency-capping, or auditing — those remain the
  * caller's responsibility. It only serialises the archive to the given stream, which lets it
@@ -73,16 +77,55 @@ public final class ExportUtil {
                     java.nio.file.Path storedFile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
                     // Files are encrypted with their creator's key.
                     User fileUser = userDao.getById(file.getUserId());
-                    // A single missing/undecryptable file must not corrupt the whole export:
-                    // skip it and record the failure in the manifest instead of aborting.
-                    boolean exported = true;
-                    try (InputStream fileInputStream = Files.newInputStream(storedFile);
-                         InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, fileUser.getPrivateKey())) {
-                        zipOutputStream.putNextEntry(new ZipEntry(entryName));
-                        ByteStreams.copy(decryptedStream, zipOutputStream);
-                        zipOutputStream.closeEntry();
+
+                    // Fully decrypt to a private staging file BEFORE opening the ZIP entry. A file that
+                    // cannot be read or decrypted throws here — while no archive entry has been opened for it
+                    // — so a single missing/undecryptable file is omitted cleanly and recorded as
+                    // exported:false, and the archive can never carry a half-written entry that contradicts
+                    // its own manifest. Only the fully-materialised, validated plaintext is then streamed in.
+                    java.nio.file.Path decryptedFile = null;
+                    try {
+                        decryptedFile = EncryptionUtil.decryptFile(storedFile, fileUser.getPrivateKey());
                     } catch (Exception e) {
-                        exported = false;
+                        decryptedFile = null;
+                    }
+                    boolean exported = false;
+                    if (decryptedFile != null) {
+                        try {
+                            // Size guard for truncation / short-read corruption. AES/CTR is a stream cipher:
+                            // a truncated (or partially readable) ciphertext decrypts to SHORTER plaintext
+                            // WITHOUT throwing, so "decrypt succeeded" alone does not prove the bytes are
+                            // whole. When the file's decrypted size is recorded, reject a staged file whose
+                            // length disagrees — CTR ciphertext length equals plaintext length, so
+                            // File.getSize() IS the expected staged length. A mismatch omits the file cleanly
+                            // (exported:false, no entry), the same clean-omit path a read failure takes, so
+                            // the archive never carries an entry whose bytes contradict the manifest's size.
+                            //
+                            // A file whose size is not yet recorded (UNKNOWN_SIZE, sized asynchronously) cannot
+                            // be validated this way, so it is archived as-is rather than dropped. Same-length
+                            // bit corruption is NOT detectable here: the at-rest scheme is unauthenticated
+                            // AES/CTR with no integrity tag and no content hash (ADR-0012 accepted limitation;
+                            // the authenticated-envelope v2 / content-hash work #119 is the roadmap fix), but a
+                            // same-size entry does not contradict a size-based manifest.
+                            Long expectedSize = file.getSize();
+                            boolean sizeOk = expectedSize == null
+                                    || expectedSize.equals(File.UNKNOWN_SIZE)
+                                    || Files.size(decryptedFile) == expectedSize;
+                            if (sizeOk) {
+                                try (InputStream decryptedStream = Files.newInputStream(decryptedFile)) {
+                                    zipOutputStream.putNextEntry(new ZipEntry(entryName));
+                                    ByteStreams.copy(decryptedStream, zipOutputStream);
+                                    zipOutputStream.closeEntry();
+                                    exported = true;
+                                }
+                            }
+                        } finally {
+                            // decryptFile returns the source path itself when no key is set (test-only);
+                            // never delete the caller's real stored file in that case.
+                            if (!decryptedFile.equals(storedFile)) {
+                                Files.deleteIfExists(decryptedFile);
+                            }
+                        }
                     }
                     JsonObjectBuilder fileJson = Json.createObjectBuilder()
                             .add("id", file.getId())
