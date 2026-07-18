@@ -116,6 +116,42 @@ export function reorderFiles(documentId: string, orderedIds: string[]) {
   return api.post('/file/reorder', params)
 }
 
+/**
+ * One page in a page-operation manifest. `source` is the 0-based index of a page in the
+ * CURRENT PDF; the array order is the new page order and omitting a source deletes that
+ * page. `rotate` (optional) is the ABSOLUTE clockwise orientation in degrees, a multiple
+ * of 90 — omit it (or 0) to keep the page's current orientation.
+ */
+export interface PageOperation {
+  source: number
+  rotate?: number
+}
+
+/**
+ * The v1 page-operation manifest posted to POST /file/:id/pages. `baseVersion` is the
+ * expected version of the file being operated on (optimistic concurrency): the backend
+ * rejects a stale base so two editors cannot silently clobber each other.
+ */
+export interface PageManifest {
+  version: 1
+  baseVersion: number
+  pages: PageOperation[]
+}
+
+/**
+ * Apply a v1 page-operation manifest (reorder / delete / per-page rotate) to a PDF file,
+ * saving the result as a NEW version via POST /file/:id/pages (form-encoded, like the
+ * rotation/reorder endpoints). `fileId` is the current (latest) file id; the original is
+ * preserved as a prior version. The backend rejects a stale base (409), an over-ceiling /
+ * signed / encrypted / empty-output result (typed 4xx), or a saturated concurrency limit
+ * (429) — each surfaced to the caller via the error `type`/status.
+ */
+export function applyPageOperations(fileId: string, manifest: PageManifest) {
+  const params = new URLSearchParams()
+  params.set('manifest', JSON.stringify(manifest))
+  return api.post(`/file/${fileId}/pages`, params)
+}
+
 export function deleteFile(fileId: string) {
   return api.delete(`/file/${fileId}`)
 }

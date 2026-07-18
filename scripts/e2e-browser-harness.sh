@@ -134,14 +134,27 @@ rich_doc_id="$(api_put --data-urlencode "title=${rich_doc_title}" \
   -d "language=eng" "${base_url}/api/document" | json_field id || true)"
 [ -z "${rich_doc_id}" ] && note FAIL "seed: could not create rich-description document"
 
-echo "[seed] ovf_doc=${ovf_doc_id} rich_doc=${rich_doc_id}" \
+# --- Seed for the PDF page-organizer check (22, #73) --------------------------
+# A document carrying a 3-page PDF so the organizer has a real multi-page document to
+# rasterize client-side (pdf.js) in the browser check below.
+org_pdf="${repo_root}/docs-web/src/main/webapp/e2e/fixtures/multipage.pdf"
+org_doc_title="${run_token} PDF Organizer Document"
+org_doc_id="$(api_put --data-urlencode "title=${org_doc_title}" \
+  -d "language=eng" "${base_url}/api/document" | json_field id || true)"
+[ -z "${org_doc_id}" ] && note FAIL "seed: could not create organizer document"
+if [ -n "${org_doc_id}" ]; then
+  api_put -F "id=${org_doc_id}" -F "file=@${org_pdf};type=application/pdf" \
+    "${base_url}/api/file" >/dev/null || note FAIL "seed: could not attach organizer PDF"
+fi
+
+echo "[seed] ovf_doc=${ovf_doc_id} rich_doc=${rich_doc_id} org_doc=${org_doc_id}" \
   | tee -a "${art_dir}/checks.log"
 
 # --- Checks 2, 8, 9, 14, 21: real-browser flow --------------------------------
 BH_OUT="$(BH_BASE_URL="${base_url}" BH_ART="${art_dir}" \
   BH_RUN="${run_token}" \
   BH_OVF_DOC_TITLE="${ovf_doc_title}" BH_OVF_TAG4="${run_token}-ovf4" BH_OVF_TAG5="${run_token}-ovf5" \
-  BH_RICH_DOC_ID="${rich_doc_id}" \
+  BH_RICH_DOC_ID="${rich_doc_id}" BH_ORG_DOC_ID="${org_doc_id}" \
   browser-harness <<'PY'
 import json, os, time, urllib.parse
 
@@ -152,6 +165,7 @@ ovf_doc_title = os.environ.get("BH_OVF_DOC_TITLE", "")
 ovf_tag4 = os.environ.get("BH_OVF_TAG4", "")
 ovf_tag5 = os.environ.get("BH_OVF_TAG5", "")
 rich_doc_id = os.environ.get("BH_RICH_DOC_ID", "")
+org_doc_id = os.environ.get("BH_ORG_DOC_ID", "")
 results = {}
 
 def shot(name):
@@ -306,6 +320,32 @@ shot("21-rich-description")
 rich_ok = (int(rich_put or 0) == 200) and inert and legit and bool(quill_present)
 results["rich_description_sanitized"] = (rich_ok, f"put={rich_put} inert={inert} legit={legit} quill={quill_present} stored={stored[:160]!r}")
 
+# --- Check 22 (#73): PDF page organizer renders a populated thumbnail grid ----
+# Open the organizer on the seeded 3-page PDF (grid is the default file view, so the "Edit
+# pages" action is on the PDF tile) and assert pdf.js actually rasterized one non-empty
+# <canvas> thumbnail per source page — the client-side render is the #73 known-unknown.
+goto_url(base + "/#/document/view/" + org_doc_id + "/content"); time.sleep(2.5); wait_for_load()
+js("""
+  (() => {
+    const b = [...document.querySelectorAll('button')]
+      .find(x => /edit pages/i.test(x.getAttribute('aria-label') || ''));
+    if (b) b.click();
+  })();
+""")
+time.sleep(3.5); wait_for_load()
+org = js("""
+  return (() => {
+    const dialog = document.querySelector('.p-dialog');
+    const cards = document.querySelectorAll('.pdf-page-card');
+    const painted = [...document.querySelectorAll('.pdf-page-card canvas')]
+      .filter(c => c.width > 0 && c.height > 0).length;
+    return {open: !!dialog, cards: cards.length, painted};
+  })();
+""")
+shot("22-pdf-organizer")
+org_ok = bool(org.get("open")) and int(org.get("cards") or 0) == 3 and int(org.get("painted") or 0) >= 1
+results["pdf_organizer"] = (org_ok, f"open={org.get('open')} cards={org.get('cards')} painted_canvases={org.get('painted')}")
+
 print("BH_RESULTS " + json.dumps(results))
 PY
 )" || note FAIL "browser-harness invocation failed"
@@ -323,6 +363,7 @@ labels = {
     "monitoring_logs": "check9: monitoring log viewer rendered log rows",
     "tag_overflow": "check14: +N tag overflow popover revealed the hidden tags, not clipped (behavior D)",
     "rich_description_sanitized": "check21: rich description stored inert (no script/onerror/javascript:) with legit formatting kept + Quill editor present (#38)",
+    "pdf_organizer": "check22: PDF page organizer opened and pdf.js rendered a populated 3-page thumbnail grid (#73)",
 }
 order = list(labels.keys())
 bad = 0
@@ -344,7 +385,7 @@ PY
 # Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
 # never collides with a later run. The top-of-script cookie_jar admin session is
 # still valid (the harness never logs it out).
-for d in "${ovf_doc_id:-}" "${rich_doc_id:-}"; do
+for d in "${ovf_doc_id:-}" "${rich_doc_id:-}" "${org_doc_id:-}"; do
   [ -n "${d}" ] || continue
   curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
     && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
