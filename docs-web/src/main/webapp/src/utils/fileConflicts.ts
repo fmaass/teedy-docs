@@ -5,7 +5,10 @@
  */
 export interface ExistingFile {
   id: string
-  name: string
+  // The backend serializes a file name as nullable; legacy and inbox-imported files can be
+  // served without one. A null-name file has no name to collide with, so conflict matching
+  // excludes it entirely (see the map build below).
+  name: string | null
 }
 
 /** A dropped file whose name collides with an existing document file. */
@@ -43,6 +46,9 @@ export function partitionByNameConflict(
   // deterministic version base.
   const byLowerName = new Map<string, ExistingFile>()
   for (const f of existing) {
+    // A file with no name cannot be a by-name collision target — keep it out of the map so a
+    // named drop is never matched against it (the lookup below simply misses on it).
+    if (f.name == null) continue
     const key = f.name.toLowerCase()
     if (!byLowerName.has(key)) byLowerName.set(key, f)
   }

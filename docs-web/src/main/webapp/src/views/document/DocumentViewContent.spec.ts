@@ -283,7 +283,7 @@ describe('DocumentViewContent — persisted image rotation', () => {
   })
 })
 
-// #58 Decision 4 — the reusable per-file action slot (#file-extra). A per-file action
+// #58 — the shared per-file action slot (#file-extra). A per-file action
 // defined ONCE at the view level must light up in BOTH the grid tiles and the list rows
 // (this is the mount point #73 "Edit pages" / #117 "Upload new version" use) and inherit
 // FileActionMenu's writable gate. Proven by injecting slot content through the view.
@@ -327,7 +327,7 @@ describe('DocumentViewContent — #file-extra per-file action slot (#73/#117 mou
   })
 })
 
-// The grid tiles gained the shared action menu (Decision 4). Its rename control must be
+// The grid tiles gained the shared action menu. Its rename control must be
 // live (a compact per-card editor), not a dead button.
 describe('DocumentViewContent — grid tile actions', () => {
   beforeEach(() => {

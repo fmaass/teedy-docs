@@ -6,7 +6,7 @@ import { unique, confirmDanger, login, openFileList, deleteUser } from './helper
 
 // #73 — the PDF page organizer: an "Edit pages" launcher in the #58 file panel that opens a
 // client-rendered (pdf.js) thumbnail grid; reorder / rotate / delete pages, then save as a new
-// version by posting the Phase-1 v1 manifest with the expected base version. Runs under both
+// version by posting the v1 page-operations manifest with the expected base version. Runs under both
 // the desktop and mobile Playwright projects.
 
 const here = dirname(fileURLToPath(import.meta.url))

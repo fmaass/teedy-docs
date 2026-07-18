@@ -20,7 +20,9 @@ import FileActionMenu from './FileActionMenu.vue'
 // gated on `writable` so a read-only viewer sees a browse-only table.
 export interface FilePanelFile {
   id: string
-  name: string
+  // Nullable: the backend serializes a file name as nullable, so legacy/inbox rows can arrive
+  // without one. Every name read here guards against that.
+  name: string | null
   mimetype: string
   size: number
   create_date: number
@@ -127,7 +129,9 @@ const filteredFiles = computed(() => {
   const q = filterText.value.trim().toLowerCase()
   if (!q) return orderedFiles.value
   return orderedFiles.value.filter(
-    (f) => f.name.toLowerCase().includes(q) || f.mimetype.toLowerCase().includes(q),
+    // A null-name file has no name to match: it survives an empty filter (handled above) but a
+    // non-empty query can only match it on mimetype, never on the missing name.
+    (f) => (f.name ?? '').toLowerCase().includes(q) || f.mimetype.toLowerCase().includes(q),
   )
 })
 
@@ -187,6 +191,11 @@ function fileIcon(mime: string) {
   return 'pi pi-file'
 }
 
+// A file may be served without a name; show a stable localized label instead of an empty cell.
+function displayName(name: string | null | undefined): string {
+  return name || t('ui.file_view.untitled')
+}
+
 // --- Inline rename (double-click name cell + F2 + the pencil in the action menu) ---
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
@@ -194,7 +203,9 @@ const renameValue = ref('')
 function startRename(file: FilePanelFile) {
   if (!props.writable) return
   renamingId.value = file.id
-  renameValue.value = file.name
+  // Seed the editor with an empty string for a null-name file so the user names it from scratch
+  // (and the trim() on commit never sees a null).
+  renameValue.value = file.name ?? ''
 }
 
 function cancelRename() {
@@ -299,7 +310,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             :href="getFileUrl(data.id)"
             target="_blank"
             rel="noopener"
-            :aria-label="t('ui.file_view.open_file', { name: data.name })"
+            :aria-label="t('ui.file_view.open_file', { name: displayName(data.name) })"
             @dblclick.stop
           >
             <i :class="fileIcon(data.mimetype)" aria-hidden="true" />
@@ -325,7 +336,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             tabindex="0"
             @dblclick.stop="startRename(data)"
             @keydown="onNameKeydown($event, data)"
-          >{{ data.name }}</span>
+          >{{ displayName(data.name) }}</span>
         </template>
       </Column>
 

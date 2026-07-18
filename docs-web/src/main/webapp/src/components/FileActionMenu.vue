@@ -9,7 +9,8 @@ import Button from 'primevue/button'
 // gate for per-file mutations lives, so every consumer inherits it.
 export interface FileActionTarget {
   id: string
-  name: string
+  // Nullable to match the file panel's model — a file can be served without a name.
+  name: string | null
   mimetype: string
 }
 

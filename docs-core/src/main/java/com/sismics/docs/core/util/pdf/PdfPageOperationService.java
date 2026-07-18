@@ -141,7 +141,7 @@ public final class PdfPageOperationService {
             output = AppContext.getInstance().getFileService().createTemporaryFile();
             PdfPageOperationUtil.transform(decrypted, output, manifest, memUsageSetting, deadlineExceeded);
 
-            // Save as a new version on the Phase-0 contract: previousFileId is the operated file itself, so
+            // Save as a new version under the single-writer version contract: previousFileId is the operated file itself, so
             // the affected-row compare-and-swap rejects a stale base (409) and inherits the rotation.
             long outputSize = Files.size(output);
             String newFileId = FileUtil.createFile(file.getName(), file.getId(), output, outputSize,

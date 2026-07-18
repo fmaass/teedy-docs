@@ -243,6 +243,7 @@
       "grid": "Grid",
       "list": "List",
       "toggle_label": "File view mode",
+      "untitled": "Untitled file",
       "open_file": "Open {name}",
       "filter_placeholder": "Filter files…",
       "filter_aria": "Filter files by name or type",

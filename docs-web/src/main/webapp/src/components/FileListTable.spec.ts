@@ -82,6 +82,27 @@ describe('FileListTable', () => {
     expect(wrapper.findAll('tbody tr').length).toBe(1)
   })
 
+  it('filters a list containing a null-name file without throwing (shown unfiltered, excluded by a name query)', async () => {
+    // A legacy/inbox file can arrive with a null name; the quick filter must not crash on it.
+    const files: FilePanelFile[] = [
+      makeFile({ id: 'f1', name: 'alpha.txt', mimetype: 'text/plain' }),
+      makeFile({ id: 'f2', name: null, mimetype: 'application/pdf' }),
+    ]
+    const wrapper = mountTable(files)
+    // Unfiltered: both rows show, including the null-name one.
+    expect(wrapper.findAll('tbody tr').length).toBe(2)
+    // A non-empty NAME query must not throw and must exclude the null-name row (no name to match).
+    await wrapper.find('input.file-filter-input').setValue('alpha')
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows.length).toBe(1)
+    expect(rows[0].text()).toContain('alpha.txt')
+    // The null-name row is still matchable on its mimetype (its only remaining searchable field).
+    await wrapper.find('input.file-filter-input').setValue('pdf')
+    const pdfRows = wrapper.findAll('tbody tr')
+    expect(pdfRows.length).toBe(1)
+    expect(pdfRows[0].text()).toContain('ui.file_view.untitled')
+  })
+
   it('renames via double-click on the name cell (Enter commits, emits fileId + new name)', async () => {
     const wrapper = mountTable(twoFiles)
     const name = wrapper.findAll('.file-name-text')[0]

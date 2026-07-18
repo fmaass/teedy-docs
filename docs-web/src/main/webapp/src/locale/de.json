@@ -243,6 +243,7 @@
       "grid": "Raster",
       "list": "Liste",
       "toggle_label": "Dateiansicht",
+      "untitled": "Unbenannte Datei",
       "open_file": "{name} öffnen",
       "filter_placeholder": "Dateien filtern…",
       "filter_aria": "Dateien nach Name oder Typ filtern",

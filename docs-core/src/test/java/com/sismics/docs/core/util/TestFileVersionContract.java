@@ -364,7 +364,7 @@ public class TestFileVersionContract extends BaseTest {
         }
     }
 
-    // --- concurrency: a create racing a delete of its base loses deterministically (advisory) ---------
+    // --- concurrency: a create racing a delete of its base loses deterministically -------------------
 
     /**
      * A create racing a delete of the SAME current-latest base must lose with a version conflict, never a

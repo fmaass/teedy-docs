@@ -17,13 +17,13 @@ import { createGeneration } from '../utils/staleGuard'
 // The #73 PDF page organizer, mounted per PDF file row from FileExtraActions (writable-only).
 // It renders every page of the CURRENT pdf client-side (pdf.js — no server rasters), lets the
 // user reorder (drag OR keyboard move buttons), rotate and delete pages, then saves the result
-// as a NEW file version by posting the Phase-1 v1 manifest with the expected base version. The
+// as a NEW file version by posting the v1 page-operations manifest with the expected base version. The
 // original is preserved as a prior version; a stale base, an over-ceiling/signed/encrypted/empty
 // result, or a saturated concurrency limit are surfaced distinctly and keep the dialog open.
 
 const props = defineProps<{
   fileId: string
-  fileName?: string
+  fileName?: string | null
 }>()
 
 const { t } = useI18n()

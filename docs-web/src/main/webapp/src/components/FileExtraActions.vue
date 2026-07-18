@@ -7,14 +7,14 @@ import { useVersionUpload } from '../composables/useVersionUpload'
 // Single-source mount point for per-file EXTRA actions, shared by the grid tiles and
 // the list rows. It is rendered inside FileActionMenu's writable-only `#extra` slot in
 // BOTH views, so any control added here appears in both and inherits the writable gate —
-// with no edits to FileListTable or the grid markup (Decision 4).
+// with no edits to FileListTable or the grid markup.
 //
 // >>> Per-file controls live HERE (and only here): <<<
 //   #73  "Edit pages"         — PDF page operations (guard on file.mimetype === 'application/pdf')
 //   #117 "Upload new version" — replace-with-new-version upload
 // Each control owns its own applicability; `writable` is already enforced by the slot.
 const props = defineProps<{
-  file: { id: string; name: string; mimetype: string }
+  file: { id: string; name: string | null; mimetype: string }
   writable: boolean
 }>()
 

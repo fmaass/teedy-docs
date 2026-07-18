@@ -54,4 +54,21 @@ describe('partitionByNameConflict', () => {
     expect(conflicts).toHaveLength(1)
     expect(conflicts[0].existing.id).toBe('first')
   })
+
+  it('never matches a named drop against a null-name existing file (and does not throw)', () => {
+    // A legacy/inbox file can be served with `name: null`; it has no name to collide with.
+    const withNull: ExistingFile[] = [
+      { id: 'file-a', name: 'Report.pdf' },
+      { id: 'file-null', name: null },
+    ]
+    let result!: ReturnType<typeof partitionByNameConflict>
+    expect(() => {
+      result = partitionByNameConflict([f('anything.txt'), f('Report.pdf')], withNull)
+    }).not.toThrow()
+    // The null-name row is excluded from matching: the unrelated drop is fresh, and the named
+    // drop still collides only with the real named row — never with the null one.
+    expect(result.fresh.map((x) => x.name)).toEqual(['anything.txt'])
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0].existing.id).toBe('file-a')
+  })
 })

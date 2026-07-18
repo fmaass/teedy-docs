@@ -170,9 +170,9 @@ const versionsDialogVisible = ref(false)
 const versionsFileId = ref<string | null>(null)
 const versionsFileName = ref('')
 
-function showVersions(file: { id: string; name: string }) {
+function showVersions(file: { id: string; name: string | null }) {
   versionsFileId.value = file.id
-  versionsFileName.value = file.name
+  versionsFileName.value = displayName(file.name)
   versionsDialogVisible.value = true
 }
 const uploading = ref(false)
@@ -383,6 +383,12 @@ function fileIcon(mime: string) {
   return 'pi pi-file'
 }
 
+// A file can be served without a name (legacy/inbox imports). Everywhere the name is shown,
+// fall back to a stable localized label so the UI never renders an empty title.
+function displayName(name: string | null | undefined): string {
+  return name || t('ui.file_view.untitled')
+}
+
 // Open the original file in a new tab (the list's "double-click elsewhere" action and
 // the grid card / icon open link both route here).
 function openFile(file: { id: string }) {
@@ -409,10 +415,11 @@ async function renameFileTo(fileId: string, name: string) {
 // in-cell editor); both funnel through renameFileTo for the real mutation.
 const gridRenamingId = ref<string | null>(null)
 const gridRenameValue = ref('')
-function startGridRename(file: { id: string; name: string }) {
+function startGridRename(file: { id: string; name: string | null }) {
   if (!doc.value?.writable) return
   gridRenamingId.value = file.id
-  gridRenameValue.value = file.name
+  // Empty-seed a null-name file so it is named from scratch and commit's trim() never sees null.
+  gridRenameValue.value = file.name ?? ''
 }
 function cancelGridRename() {
   gridRenamingId.value = null
@@ -455,9 +462,9 @@ async function onReorderFiles(orderedIds: string[]) {
   }
 }
 
-function confirmDelete(file: { id: string; name: string }) {
+function confirmDelete(file: { id: string; name: string | null }) {
   confirmDanger({
-    message: t('ui.remove_file_confirm', { name: file.name }),
+    message: t('ui.remove_file_confirm', { name: displayName(file.name) }),
     header: t('ui.remove_file'),
     accept: async () => {
       try {
@@ -607,7 +614,7 @@ function confirmDelete(file: { id: string; name: string }) {
                    server. The rotation only cache-busts the URL so the fresh raster loads. -->
               <img
                 :src="getFileUrl(file.id, 'web', undefined, effectiveRotation(file))"
-                :alt="file.name"
+                :alt="displayName(file.name)"
                 loading="lazy"
                 class="rotatable-image"
               />
@@ -634,7 +641,7 @@ function confirmDelete(file: { id: string; name: string }) {
                 :aria-label="t('ui.rotate_right')"
               />
             </div>
-            <div class="file-preview-label">{{ file.name }}</div>
+            <div class="file-preview-label">{{ displayName(file.name) }}</div>
             <div class="file-card-actions">
               <InputText
                 v-if="gridRenamingId === file.id"
@@ -667,7 +674,7 @@ function confirmDelete(file: { id: string; name: string }) {
               :persistable="doc.writable"
               @rotate="(deg: number) => persistRotation(file, deg)"
             />
-            <div class="file-preview-label">{{ file.name }}</div>
+            <div class="file-preview-label">{{ displayName(file.name) }}</div>
             <div class="file-card-actions">
               <InputText
                 v-if="gridRenamingId === file.id"
@@ -702,12 +709,12 @@ function confirmDelete(file: { id: string; name: string }) {
               :href="getFileUrl(file.id)"
               target="_blank"
               rel="noopener"
-              :aria-label="t('ui.file_view.open_file', { name: file.name })"
+              :aria-label="t('ui.file_view.open_file', { name: displayName(file.name) })"
             >
               <div class="generic-preview-stage">
                 <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
               </div>
-              <div class="file-preview-label">{{ file.name }}</div>
+              <div class="file-preview-label">{{ displayName(file.name) }}</div>
             </a>
             <div class="file-card-actions">
               <InputText
