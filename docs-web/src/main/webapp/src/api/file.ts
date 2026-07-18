@@ -53,15 +53,23 @@ export interface FileListItem {
  * `onProgress` receives an integer 0..100 as the browser streams the body up,
  * so callers can render a real per-file progress bar. The percentage is derived
  * from axios's native onUploadProgress (loaded/total), not simulated.
+ *
+ * When `previousFileId` is the id of the document's current latest file, the
+ * backend supersedes that file and this upload becomes v(n+1) of the same version
+ * chain (FileResource.add). Omit it for a plain new-file upload. A stale base (the
+ * file was already replaced) comes back as HTTP 409, which the caller surfaces as
+ * "the file changed, reload".
  */
 export function uploadFile(
   documentId: string,
   file: File,
   onProgress?: (percent: number) => void,
+  previousFileId?: string,
 ) {
   const formData = new FormData()
   formData.append('id', documentId)
   formData.append('file', file)
+  if (previousFileId) formData.append('previousFileId', previousFileId)
   return api.put('/file', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: onProgress

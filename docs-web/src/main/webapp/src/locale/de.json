@@ -215,7 +215,18 @@
       "view": "Diese Version öffnen",
       "empty": "Diese Datei hat keine früheren Versionen.",
       "load_failed": "Versionsverlauf konnte nicht geladen werden",
-      "loading": "Versionsverlauf wird geladen …"
+      "loading": "Versionsverlauf wird geladen …",
+      "upload_new": "Neue Version hochladen",
+      "uploaded_new": "Neue Version hochgeladen",
+      "upload_new_failed": "Neue Version konnte nicht hochgeladen werden",
+      "stale_base": "Die Datei wurde geändert – bitte Seite neu laden und erneut versuchen"
+    },
+    "conflict": {
+      "title": "Datei existiert bereits",
+      "message": "Eine Datei mit dem Namen „{name}“ existiert bereits in diesem Dokument. Was möchten Sie tun?",
+      "new_version": "Als neue Version hinzufügen",
+      "keep_both": "Beide behalten",
+      "apply_to_all": "Auf alle {count} betroffenen Dateien anwenden"
     },
     "relations": {
       "title": "Verknüpfte Dokumente",

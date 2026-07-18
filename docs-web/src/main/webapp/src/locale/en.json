@@ -215,7 +215,18 @@
       "view": "Open this version",
       "empty": "This file has no previous versions.",
       "load_failed": "Failed to load version history",
-      "loading": "Loading version history…"
+      "loading": "Loading version history…",
+      "upload_new": "Upload new version",
+      "uploaded_new": "New version uploaded",
+      "upload_new_failed": "Failed to upload new version",
+      "stale_base": "The file changed — reload the page and try again"
+    },
+    "conflict": {
+      "title": "File already exists",
+      "message": "A file named \"{name}\" already exists in this document. What would you like to do?",
+      "new_version": "Add as new version",
+      "keep_both": "Keep both",
+      "apply_to_all": "Apply to all {count} conflicting files"
     },
     "relations": {
       "title": "Related documents",

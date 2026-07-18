@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles } from '../../api/file'
+import { partitionByNameConflict, type FileConflict, type ConflictAction } from '../../utils/fileConflicts'
 import {
   listDocuments,
   updateDocument,
@@ -26,6 +27,7 @@ import UploadProgressList from '../../components/UploadProgressList.vue'
 import FileListTable from '../../components/FileListTable.vue'
 import FileActionMenu from '../../components/FileActionMenu.vue'
 import FileExtraActions from '../../components/FileExtraActions.vue'
+import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { useAuthStore } from '../../stores/auth'
@@ -177,26 +179,98 @@ const uploading = ref(false)
 const uploadProgress = ref<Record<number, number>>({})
 const uploadingNames = ref<string[]>([])
 const fileUploadRef = ref()
+// Whole-batch guard: true for the ENTIRE add-files flow — the actual upload AND the
+// (interactive) conflict resolution in between, during which `uploading` is briefly
+// false. It disables every add-file affordance and rejects a second batch, so a drop
+// arriving mid-resolution can never overwrite the single conflict resolver and strand
+// the first batch's undecided files.
+const busy = ref(false)
 
-async function uploadAll(files: File[]) {
-  if (!doc.value || !files.length) return
-  // Snapshot the id: the injected ref can be cleared/replaced while a batch is
-  // in flight, and the finally block must still target the original document.
-  const documentId = doc.value.id
+// One upload job: a file, and — when the user chose "add as new version" for a name
+// conflict — the id of the file it supersedes (previousFileId → v(n+1)).
+interface UploadJob {
+  file: File
+  previousFileId?: string
+}
+
+// --- Name-conflict prompt (#117.2) -------------------------------------------------
+// A manual upload-bar drop whose name matches an existing active file of THIS document
+// is intercepted so the user can choose add-as-new-version / keep-both / cancel. The
+// dialog presents one conflict at a time; `askConflict` resolves when the user clicks.
+const conflictDialogVisible = ref(false)
+const conflictFileName = ref('')
+const conflictRemaining = ref(0)
+let conflictResolver: ((decision: { action: ConflictAction; applyToAll: boolean }) => void) | null =
+  null
+
+function askConflict(
+  fileName: string,
+  remaining: number,
+): Promise<{ action: ConflictAction; applyToAll: boolean }> {
+  conflictFileName.value = fileName
+  conflictRemaining.value = remaining
+  conflictDialogVisible.value = true
+  return new Promise((resolve) => {
+    conflictResolver = resolve
+  })
+}
+
+function onConflictDecision(decision: { action: ConflictAction; applyToAll: boolean }) {
+  conflictDialogVisible.value = false
+  const resolve = conflictResolver
+  conflictResolver = null
+  resolve?.(decision)
+}
+
+// Turn the conflicting drops into upload jobs by asking the user per conflict, honouring
+// an apply-to-all choice for the rest of the batch. A cancelled conflict is dropped.
+async function resolveConflicts(conflicts: FileConflict[]): Promise<UploadJob[]> {
+  const jobs: UploadJob[] = []
+  let bulkAction: ConflictAction | null = null
+  for (let i = 0; i < conflicts.length; i++) {
+    const conflict = conflicts[i]
+    let action = bulkAction
+    if (!action) {
+      const decision = await askConflict(conflict.file.name, conflicts.length - i)
+      action = decision.action
+      if (decision.applyToAll) bulkAction = decision.action
+    }
+    if (action === 'version') jobs.push({ file: conflict.file, previousFileId: conflict.existing.id })
+    else if (action === 'keep-both') jobs.push({ file: conflict.file })
+    // 'cancel' → skip this file entirely.
+  }
+  return jobs
+}
+
+// Upload a batch of jobs sequentially with per-file progress. A stale-base 409 (the
+// version chain moved under an "add as new version" job) surfaces the reload path.
+async function runUploads(documentId: string, jobs: UploadJob[]) {
+  if (!jobs.length) return
   uploading.value = true
   uploadProgress.value = {}
-  uploadingNames.value = files.map((f) => f.name)
+  uploadingNames.value = jobs.map((j) => j.file.name)
   try {
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < jobs.length; i++) {
       uploadProgress.value[i] = 0
-      await uploadFile(documentId, files[i], (pct) => {
-        uploadProgress.value[i] = pct
-      })
+      await uploadFile(
+        documentId,
+        jobs[i].file,
+        (pct) => {
+          uploadProgress.value[i] = pct
+        },
+        jobs[i].previousFileId,
+      )
       uploadProgress.value[i] = 100
     }
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
-  } catch {
-    toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
+  } catch (e) {
+    const status = (e as { response?: { status?: number } })?.response?.status
+    const staleBase = status === 409
+    toast.add({
+      severity: 'error',
+      summary: staleBase ? t('ui.versions.stale_base') : t('ui.upload_failed'),
+      life: staleBase ? 4000 : 3000,
+    })
   } finally {
     // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
     // and skipping the refetch would leave them invisible (users re-upload dupes).
@@ -208,15 +282,50 @@ async function uploadAll(files: File[]) {
   }
 }
 
+async function uploadAll(files: File[]) {
+  // Reject a second batch while one is in flight (upload OR conflict resolution): the
+  // conflict resolver is a single slot, so a concurrent batch would clobber it.
+  if (!doc.value || !files.length || busy.value) return
+  // Snapshot the id and existing-file names up front: the injected ref can be cleared
+  // or refetched while the (possibly interactive) batch is in flight, but the version
+  // bases and the target document must stay fixed to the drop moment.
+  const documentId = doc.value.id
+  const existing = (doc.value.files ?? []).map((f) => ({ id: f.id, name: f.name }))
+  const { conflicts, fresh } = partitionByNameConflict(files, existing)
+
+  busy.value = true
+  try {
+    // Non-conflicting files upload straight away — no prompt.
+    await runUploads(documentId, fresh.map((f) => ({ file: f })))
+
+    // Then resolve each name conflict with the user and upload the chosen jobs.
+    if (conflicts.length) {
+      const jobs = await resolveConflicts(conflicts)
+      await runUploads(documentId, jobs)
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
 async function handleUpload(event: FileUploadUploaderEvent) {
   const files = Array.isArray(event.files) ? event.files : [event.files]
   await uploadAll(files as File[])
 }
 
-// Camera capture: photos from CameraCaptureButton upload immediately via the same
-// real PUT /api/file path.
+// Camera capture: photos upload IMMEDIATELY via the same real PUT /api/file path,
+// BYPASSING the name-conflict prompt. That interception (#117.2) is scoped to the
+// manual upload bar; a camera capture keeps its prior add-a-new-file behavior even when
+// a same-named file already exists.
 async function onCameraCapture(captured: File[]) {
-  await uploadAll(captured)
+  if (!doc.value || !captured.length || busy.value) return
+  const documentId = doc.value.id
+  busy.value = true
+  try {
+    await runUploads(documentId, captured.map((f) => ({ file: f })))
+  } finally {
+    busy.value = false
+  }
 }
 
 // Persisted, non-destructive image rotation, per file. The server bakes the rotation into the
@@ -660,7 +769,7 @@ function confirmDelete(file: { id: string; name: string }) {
         auto
         :showUploadButton="false"
         :showCancelButton="false"
-        :disabled="uploading"
+        :disabled="busy"
         @uploader="handleUpload"
         class="view-file-upload"
       >
@@ -674,7 +783,7 @@ function confirmDelete(file: { id: string; name: string }) {
       </FileUpload>
 
       <!-- Camera capture: opens the device camera on mobile; photos upload at once. -->
-      <CameraCaptureButton :disabled="uploading" @capture="onCameraCapture" />
+      <CameraCaptureButton :disabled="busy" @capture="onCameraCapture" />
 
       <!-- Real per-file upload progress. -->
       <UploadProgressList v-if="uploading" :names="uploadingNames" :progress="uploadProgress" />
@@ -692,6 +801,15 @@ function confirmDelete(file: { id: string; name: string }) {
       v-model:visible="versionsDialogVisible"
       :file-id="versionsFileId"
       :file-name="versionsFileName"
+      :writable="doc.writable"
+    />
+
+    <!-- Upload-bar name-conflict prompt (#117.2). -->
+    <FileConflictDialog
+      v-model:visible="conflictDialogVisible"
+      :file-name="conflictFileName"
+      :remaining="conflictRemaining"
+      @decide="onConflictDecision"
     />
   </div>
 </template>
