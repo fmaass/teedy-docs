@@ -60,7 +60,18 @@ export interface DocumentDetail extends DocumentListItem {
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
   metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
-  files?: Array<{ id: string; name: string; mimetype: string; size: number; rotation?: number }>
+  // `version` (zero-based), `create_date` (timestamp) and `creator` (current-version uploader's
+  // username) are served additively by /document/:id and /file/list; the enriched file view uses them.
+  files?: Array<{
+    id: string
+    name: string
+    mimetype: string
+    size: number
+    rotation?: number
+    version: number
+    create_date: number
+    creator: string
+  }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
   // Current active route step, present only when a route is active on this document AND the caller

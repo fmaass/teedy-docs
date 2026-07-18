@@ -28,6 +28,7 @@ import com.sismics.docs.core.dao.MetadataDao;
 import com.sismics.docs.core.dao.RelationDao;
 import com.sismics.docs.core.dao.RouteStepDao;
 import com.sismics.docs.core.dao.TagDao;
+import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.MetadataCriteria;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.AclDto;
@@ -53,6 +54,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -161,9 +163,16 @@ public class JpaDocumentRepository implements DocumentRepository {
         // Files: OMITTED unless files=true.
         Optional<List<FileView>> files;
         if (query.includeFiles()) {
+            List<File> documentFiles = new FileDao().getByDocumentsIds(Collections.singleton(documentId));
+            // Resolve every file's current-version uploader (creator) in one batched lookup.
+            Set<String> fileUserIds = new HashSet<>();
+            for (File file : documentFiles) {
+                fileUserIds.add(file.getUserId());
+            }
+            Map<String, String> creatorsByUserId = new UserDao().getUsernamesByIds(fileUserIds);
             List<FileView> fileViews = new ArrayList<>();
-            for (File file : new FileDao().getByDocumentsIds(Collections.singleton(documentId))) {
-                fileViews.add(toFileView(file));
+            for (File file : documentFiles) {
+                fileViews.add(toFileView(file, creatorsByUserId.get(file.getUserId())));
             }
             files = Optional.of(fileViews);
         } else {
@@ -229,7 +238,7 @@ public class JpaDocumentRepository implements DocumentRepository {
      * Reproduces {@code RestUtil.fileToJsonObjectBuilder}'s size resolution: a legacy UNKNOWN_SIZE row
      * falls back to the physical on-disk size, and an I/O failure there surfaces as the 500 FileError.
      */
-    private FileView toFileView(File file) {
+    private FileView toFileView(File file, String creator) {
         long size;
         if (File.UNKNOWN_SIZE.equals(file.getSize())) {
             try {
@@ -242,7 +251,7 @@ public class JpaDocumentRepository implements DocumentRepository {
         }
         return new FileView(file.getId(), FileUtil.isProcessingFile(file.getId()), file.getName(),
                 file.getVersion(), file.getMimeType(), file.getDocumentId(),
-                file.getCreateDate().getTime(), file.getRotation(), size);
+                file.getCreateDate().getTime(), file.getRotation(), size, creator);
     }
 
     @Override

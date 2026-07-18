@@ -39,7 +39,6 @@ import com.sismics.docs.rest.util.DocumentSearchCriteriaUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
-import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EmailUtil;
 import com.sismics.util.JsonUtil;
@@ -226,6 +225,7 @@ public class DocumentResource extends BaseResource {
      * @apiSuccess {String} documents.files.version Zero-based version number
      * @apiSuccess {String} documents.files.mimetype MIME type
      * @apiSuccess {String} documents.files.create_date Create date (timestamp)
+     * @apiSuccess {String} documents.files.creator Username of the current version's uploader
      * @apiSuccess {String[]} suggestions List of search suggestions
      *
      * @apiError (client) ForbiddenError Access denied
@@ -325,8 +325,11 @@ public class DocumentResource extends BaseResource {
         FileDao fileDao = new FileDao();
         List<File> filesList = null;
         Map<String, Long> filesCountByDocument = null;
+        // Resolved once for the whole page so each file's creator is attached without a per-file lookup.
+        Map<String, String> creatorsByUserId = null;
         if (Boolean.TRUE == files) {
             filesList = fileDao.getByDocumentsIds(documentsIds);
+            creatorsByUserId = DocumentResourceHelper.resolveFileCreators(filesList);
         } else {
             filesCountByDocument = fileDao.countByDocumentsIds(documentsIds);
         }
@@ -356,11 +359,7 @@ public class DocumentResource extends BaseResource {
                     .add("tags", DocumentResourceHelper.createTagsArrayBuilder(tagDtoList));
 
             if (Boolean.TRUE == files) {
-                JsonArrayBuilder filesArrayBuilder = Json.createArrayBuilder();
-                for (File fileDb : filesOfDocument) {
-                    filesArrayBuilder.add(RestUtil.fileToJsonObjectBuilder(fileDb));
-                }
-                documentObjectBuilder.add("files", filesArrayBuilder);
+                documentObjectBuilder.add("files", DocumentResourceHelper.buildFileArray(filesOfDocument, creatorsByUserId));
             }
             documents.add(documentObjectBuilder);
         }

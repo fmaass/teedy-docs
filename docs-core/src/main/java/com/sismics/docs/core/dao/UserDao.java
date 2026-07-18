@@ -4,6 +4,8 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -378,6 +380,30 @@ public class UserDao {
         } catch (NoResultException e) {
             return null;
         }
+    }
+
+    /**
+     * Resolves usernames for a set of user IDs in a single query. Deliberately unfiltered on delete
+     * date so a since-deleted user still resolves, mirroring the document-creator join in
+     * {@link DocumentDao#getDocument} (a file's creator stays displayable after its uploader is
+     * removed). Callers batch the distinct IDs of a file list here to avoid a per-file lookup.
+     *
+     * @param ids User IDs to resolve (may be empty)
+     * @return Map of user ID to username; an ID with no matching user row is absent from the map
+     */
+    public Map<String, String> getUsernamesByIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u.id, u.username from User u where u.id in :ids");
+        q.setParameter("ids", ids);
+        Map<String, String> usernamesById = new HashMap<>();
+        for (Object result : q.getResultList()) {
+            Object[] row = (Object[]) result;
+            usernamesById.put((String) row[0], (String) row[1]);
+        }
+        return usernamesById;
     }
     
     /**

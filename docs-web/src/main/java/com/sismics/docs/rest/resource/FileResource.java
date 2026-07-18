@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.text.MessageFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -45,7 +46,7 @@ import com.sismics.rest.exception.ConflictException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.exception.TooManyRequestsException;
-import com.sismics.rest.util.RestUtil;
+import com.sismics.docs.rest.util.DocumentResourceHelper;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EnvironmentUtil;
@@ -666,6 +667,7 @@ public class FileResource extends BaseResource {
      * @apiSuccess {String} files.mimetype MIME type
      * @apiSuccess {String} files.document_id Document ID
      * @apiSuccess {String} files.create_date Create date (timestamp)
+     * @apiSuccess {String} files.creator Username of the current version's uploader
      * @apiSuccess {Number} files.rotation Baked clockwise rotation of the file's raster
      * @apiSuccess {String} files.size File size (in bytes)
      * @apiError (client) ForbiddenError Access denied
@@ -696,12 +698,12 @@ public class FileResource extends BaseResource {
         }
 
         FileDao fileDao = new FileDao();
-        JsonArrayBuilder files = Json.createArrayBuilder();
-        for (File fileDb : fileDao.getByDocumentId(principal.getId(), documentId)) {
-            files.add(RestUtil.fileToJsonObjectBuilder(fileDb));
-        }
+        List<File> fileList = fileDao.getByDocumentId(principal.getId(), documentId);
+        // Resolve every file's current-version uploader (creator) in one batched lookup so the
+        // serialization stays free of a per-file query.
+        Map<String, String> creatorsByUserId = DocumentResourceHelper.resolveFileCreators(fileList);
         JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("files", files);
+                .add("files", DocumentResourceHelper.buildFileArray(fileList, creatorsByUserId));
 
         return Response.ok().entity(response.build()).build();
     }

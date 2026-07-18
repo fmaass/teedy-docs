@@ -99,9 +99,10 @@ public record DocumentView(
     /**
      * A file of the document (present only when the caller requested {@code files=true}).
      * {@code name} and {@code documentId} are nullable. {@code size} is already resolved (legacy
-     * UNKNOWN_SIZE rows fall back to the on-disk size in the repository).
+     * UNKNOWN_SIZE rows fall back to the on-disk size in the repository). {@code creator} is the
+     * current-version uploader's username, or null when it cannot be resolved.
      */
     public record FileView(String id, boolean processing, String name, int version, String mimetype,
-                           String documentId, long createDate, int rotation, long size) {
+                           String documentId, long createDate, int rotation, long size, String creator) {
     }
 }

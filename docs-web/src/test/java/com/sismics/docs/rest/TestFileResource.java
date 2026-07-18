@@ -106,6 +106,9 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertEquals("image/jpeg", files.getJsonObject(0).getString("mimetype"));
         Assertions.assertEquals(0, files.getJsonObject(0).getInt("version"));
         Assertions.assertEquals(FILE_PIA_00452_JPG_SIZE, files.getJsonObject(0).getJsonNumber("size").longValue());
+        // The current-version uploader (creator) and its create date are exposed additively.
+        Assertions.assertEquals("file_resources", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
         Assertions.assertEquals(file2Id, files.getJsonObject(1).getString("id"));
         Assertions.assertEquals("PIA00452.jpg", files.getJsonObject(1).getString("name"));
         Assertions.assertEquals(0, files.getJsonObject(1).getInt("version"));

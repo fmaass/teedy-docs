@@ -4,6 +4,7 @@ import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.RelationDao;
 import com.sismics.docs.core.dao.TagDao;
+import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.dao.dto.TagDto;
@@ -15,6 +16,7 @@ import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.rest.exception.ClientException;
+import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
@@ -23,9 +25,11 @@ import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
 import jakarta.ws.rs.NotFoundException;
 import java.text.MessageFormat;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -49,6 +53,38 @@ public final class DocumentResourceHelper {
 
     private DocumentResourceHelper() {
         // Utility class
+    }
+
+    /**
+     * Resolves each file's creator (the current-version uploader's username), keyed by user ID, in a
+     * single batched lookup so serialization stays free of a per-file query. Routing the lookup through
+     * this helper also keeps the legacy resources from opening a new {@code rest.resource -> core.dao}
+     * edge (a frozen ArchUnit ratchet that only shrinks).
+     *
+     * @param files Files whose uploaders to resolve
+     * @return Map of user ID to username; an ID with no matching user is absent
+     */
+    public static Map<String, String> resolveFileCreators(Collection<File> files) {
+        Set<String> userIds = new HashSet<>();
+        for (File file : files) {
+            userIds.add(file.getUserId());
+        }
+        return new UserDao().getUsernamesByIds(userIds);
+    }
+
+    /**
+     * Build the JSON array of a document's files, attaching each file's resolved creator.
+     *
+     * @param files Files to serialize
+     * @param creatorsByUserId User ID to username map from {@link #resolveFileCreators(Collection)}
+     * @return JSON array builder
+     */
+    public static JsonArrayBuilder buildFileArray(Collection<File> files, Map<String, String> creatorsByUserId) {
+        JsonArrayBuilder filesArrayBuilder = Json.createArrayBuilder();
+        for (File file : files) {
+            filesArrayBuilder.add(RestUtil.fileToJsonObjectBuilder(file, creatorsByUserId.get(file.getUserId())));
+        }
+        return filesArrayBuilder;
     }
 
     /**

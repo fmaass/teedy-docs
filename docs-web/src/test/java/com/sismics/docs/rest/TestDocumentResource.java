@@ -391,6 +391,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
         Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        // The document-list files carry the current-version uploader (creator) additively.
+        Assertions.assertEquals("document1", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
 
         // Get document 1
         json = target().path("/document/" + document1Id).request()
@@ -427,6 +430,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
         Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        // The document-detail files carry the current-version uploader (creator) additively.
+        Assertions.assertEquals("document1", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
 
         // Get document 1 again (relations preserved by partial update)
         json = target().path("/document/" + document1Id).request()

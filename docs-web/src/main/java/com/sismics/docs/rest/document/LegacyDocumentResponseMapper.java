@@ -141,6 +141,7 @@ public final class LegacyDocumentResponseMapper {
                         .add("size", file.size());
                 nullableString(fileBuilder, "name", file.name());
                 nullableString(fileBuilder, "document_id", file.documentId());
+                nullableString(fileBuilder, "creator", file.creator());
                 files.add(fileBuilder);
             }
             document.add("files", files);
