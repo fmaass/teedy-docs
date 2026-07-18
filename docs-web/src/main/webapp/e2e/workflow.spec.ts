@@ -69,9 +69,13 @@ async function configureStep(
   await card.locator('.step-field').nth(1).locator('.p-select').click()
   await page.getByRole('option', { name: 'Group', exact: true }).click()
 
-  // Assignee AutoComplete -> type the group name, pick the option.
+  // Assignee AutoComplete -> type the group name, pick the option. Type key by key:
+  // this is a search-as-you-type field (/api/acl/target/search, debounced), and a
+  // one-shot fill() can race the controlled re-render so the search runs with an empty
+  // query and no option renders — the pick then times out under load.
   const targetInput = card.locator('.step-field-target input')
-  await targetInput.fill(opts.groupName)
+  await targetInput.click()
+  await targetInput.pressSequentially(opts.groupName)
   await page.getByRole('option', { name: opts.groupName, exact: true }).click()
   await expect(targetInput).toHaveValue(opts.groupName)
 }
