@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, openFileList } from './helpers'
 
 // End-to-end acceptance for the office-document -> PDF conversion pipeline behind
 // PdfUtil.convertToPdf (the XDocReport ODT/DOCX converters + the text/CSV writer).
@@ -46,7 +46,8 @@ for (const { label, fixture } of CASES) {
     // UI success surface: the upload toast appears and the file is listed, with no
     // error toast.
     await expect(page.getByText('Files uploaded').first()).toBeVisible()
-    await expect(page.locator('.file-list-section').getByRole('link', { name: fixture })).toBeVisible()
+    await openFileList(page)
+    await expect(page.locator('.file-list-section .file-name-text', { hasText: fixture })).toBeVisible()
 
     // Server-side conversion acceptance: export the document to PDF. This runs
     // PdfUtil.convertToPdf over the uploaded file synchronously.

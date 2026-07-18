@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, openFileList } from './helpers'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const v1 = resolve(here, 'fixtures/sample.txt')
@@ -21,10 +21,11 @@ test('the version-history dialog opens and lists the current version', async ({ 
     await page.goto(`/#/document/view/${id}/content`)
     await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(v1)
     await expect(page.getByText('Files uploaded').first()).toBeVisible()
-    await expect(page.locator('.file-row', { hasText: 'sample.txt' })).toBeVisible()
+    // Version history lives in the list's per-file action menu.
+    await openFileList(page)
+    await expect(page.locator('.file-list-section .file-name-text', { hasText: 'sample.txt' })).toBeVisible()
 
-    const row = page.locator('.file-row', { hasText: 'sample.txt' }).first()
-    await row.getByRole('button', { name: 'Version history' }).click()
+    await page.locator('.file-list-section').getByRole('button', { name: 'Version history' }).click()
 
     const dialog = page.getByRole('dialog', { name: /Version history/ })
     await expect(dialog).toBeVisible()

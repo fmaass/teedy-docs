@@ -34,6 +34,12 @@ function isImage(mime: string) {
   return mime.startsWith('image/')
 }
 
+function fileIcon(mime: string) {
+  if (mime.startsWith('image/')) return 'pi pi-image'
+  if (mime === 'application/pdf') return 'pi pi-file-pdf'
+  return 'pi pi-file'
+}
+
 function formatDate(ts: number) {
   return new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
 }
@@ -61,28 +67,31 @@ function formatDate(ts: number) {
 
         <div v-if="sanitizedDescription" class="share-description" v-html="sanitizedDescription" />
 
-        <div v-if="doc.files?.length" class="share-files">
-          <template v-for="file in doc.files" :key="file.id">
-            <div v-if="isImage(file.mimetype)" class="share-file-card">
-              <img :src="fileUrl(file.id, 'web', file.rotation)" :alt="file.name" loading="lazy" />
-              <div class="share-file-label">{{ file.name }}</div>
+        <!-- Anonymous share is read-only and grid-only: every file is an open/download
+             link card (image preview or a type icon). No list toggle, no edit controls. -->
+        <div v-if="doc.files?.length" class="share-file-grid">
+          <a
+            v-for="file in doc.files"
+            :key="file.id"
+            :href="fileUrl(file.id)"
+            target="_blank"
+            rel="noopener"
+            class="share-file-card"
+          >
+            <div class="share-file-stage">
+              <img
+                v-if="isImage(file.mimetype)"
+                :src="fileUrl(file.id, 'web', file.rotation)"
+                :alt="file.name"
+                loading="lazy"
+              />
+              <i v-else :class="fileIcon(file.mimetype)" aria-hidden="true" />
             </div>
-          </template>
-
-          <div class="share-file-table">
-            <a
-              v-for="file in doc.files"
-              :key="file.id"
-              :href="fileUrl(file.id)"
-              target="_blank"
-              rel="noopener"
-              class="share-file-row"
-            >
-              <i class="pi pi-download share-file-icon" aria-hidden="true" />
+            <div class="share-file-label">
               <span class="share-file-name">{{ file.name }}</span>
               <span class="share-file-size">{{ formatFileSize(file.size) }}</span>
-            </a>
-          </div>
+            </div>
+          </a>
         </div>
 
         <p class="share-footer">{{ t('ui.share.view.footer') }}</p>
@@ -136,66 +145,59 @@ function formatDate(ts: number) {
 .share-description :deep(ol) { list-style: decimal outside; padding-left: 1.5em; }
 .share-description :deep(ul) { list-style: disc outside; padding-left: 1.5em; }
 
-.share-files {
+.share-file-grid {
   margin-top: 1.5rem;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
 }
 
 .share-file-card {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--p-content-border-color);
   border-radius: var(--p-content-border-radius, 6px);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
-.share-file-card img {
-  width: 100%;
-  display: block;
-  max-height: 480px;
-  object-fit: contain;
-  background: var(--p-content-hover-background);
+.share-file-card:hover {
+  border-color: var(--p-primary-color);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
 }
-.share-file-label {
-  padding: 0.375rem 0.625rem;
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-  border-top: 1px solid var(--p-content-border-color);
-}
-
-.share-file-table {
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.share-file-row {
+.share-file-stage {
+  aspect-ratio: 4 / 3;
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-  text-decoration: none;
-  color: var(--p-text-color);
-}
-.share-file-row:last-child {
-  border-bottom: none;
-}
-.share-file-row:hover {
+  justify-content: center;
+  overflow: hidden;
   background: var(--p-content-hover-background);
-}
-.share-file-icon {
   color: var(--p-text-muted-color);
-  font-size: 0.875rem;
-  flex-shrink: 0;
+  font-size: 2.5rem;
+}
+.share-file-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.share-file-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  border-top: 1px solid var(--p-content-border-color);
 }
 .share-file-name {
-  flex: 1;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+  color: var(--p-text-color);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .share-file-size {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: var(--p-text-muted-color);
   flex-shrink: 0;
 }

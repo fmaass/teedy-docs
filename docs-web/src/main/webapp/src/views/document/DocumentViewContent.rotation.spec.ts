@@ -1,11 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import ConfirmationService from 'primevue/confirmationservice'
 import ToastService from 'primevue/toastservice'
 import type { DocumentDetail } from '../../api/document'
 import { DocumentKey } from './documentKey'
+
+// The view derives its per-user file-view-mode key from the auth store, so every mount
+// needs an active pinia (no user → anonymous username → grid default, where the rotation
+// preview cards live).
+beforeEach(() => setActivePinia(createPinia()))
 
 // v3.5.2 — PERSISTED, non-destructive IMAGE rotation, per file card. The API modules are
 // DEPENDENCIES (mocked); the unit under test is DocumentViewContent's image preview rotation
@@ -28,7 +34,10 @@ vi.mock('../../api/file', () => ({
   renameFile: vi.fn(),
   uploadFile: vi.fn(),
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({ t: (k: string) => k }),
+}))
 // PdfViewer pulls in the real pdf.js (needs DOMMatrix/canvas, absent in jsdom).
 vi.mock('../../components/PdfViewer.vue', () => ({
   default: { name: 'PdfViewer', render: () => null },

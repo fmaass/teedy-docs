@@ -167,6 +167,14 @@ export async function fillDescription(page: Page, text: string): Promise<void> {
   await editor.fill(text)
 }
 
+// The document-view file panel defaults to GRID (#58). Switch it to the enriched
+// LIST mode (a per-user localStorage preference) so the list-only affordances
+// (rows, columns, action menu, drag reorder) are present for assertions.
+export async function openFileList(page: Page): Promise<void> {
+  await page.locator('.file-view-toggle').getByText('List', { exact: true }).click()
+  await expect(page.locator('.file-data-table')).toBeVisible()
+}
+
 // Delete a document (currently on its full view) via the header Delete button +
 // the danger confirm dialog. Lands back on the documents list.
 export async function deleteCurrentDocument(page: Page): Promise<void> {

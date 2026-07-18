@@ -103,6 +103,19 @@ export function setRotation(fileId: string, degrees: number) {
   return api.post(`/file/${fileId}/rotation`, params)
 }
 
+/**
+ * Persist a new file order for a document via POST /file/reorder (form-encoded).
+ * `orderedIds` is the FULL list of the document's file IDs in the desired order;
+ * the backend rewrites each file's `order` from its position in the list and
+ * requires WRITE permission on the document (a read-only viewer is rejected).
+ */
+export function reorderFiles(documentId: string, orderedIds: string[]) {
+  const params = new URLSearchParams()
+  params.set('id', documentId)
+  for (const id of orderedIds) params.append('order', id)
+  return api.post('/file/reorder', params)
+}
+
 export function deleteFile(fileId: string) {
   return api.delete(`/file/${fileId}`)
 }
