@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -59,9 +59,8 @@ async function mountOverflow(tags: Pick<Tag, 'id' | 'name' | 'color'>[]) {
   })
 }
 
-afterEach(() => {
-  document.body.innerHTML = ''
-})
+// (Body cleanup is handled by the global enableAutoUnmount in vitest.setup.ts, which unmounts
+// each wrapper — removing its attached root and teleported panel — inside the live environment.)
 
 describe('TagOverflow — reveal panel (#24)', () => {
   it('renders a focusable +N trigger labelled with the hidden count', async () => {
