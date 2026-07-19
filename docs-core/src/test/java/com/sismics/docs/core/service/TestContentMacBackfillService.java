@@ -280,6 +280,105 @@ public class TestContentMacBackfillService extends BaseTest {
                 "runOneIteration must self-stop once the null-MAC scan drains (a short batch)");
     }
 
+    // --- FIX 2: a partial batch with a swallowed TRANSIENT failure must NOT self-stop -----------------
+
+    /**
+     * The drain/self-stop decision must distinguish a genuinely-exhausted partial batch from one where a
+     * file failed transiently (a caught DB/commit hiccup) and was skipped. A partial batch ({@code <
+     * BATCH_SIZE}) that contains a swallowed transient failure still has a null-MAC row left, so work
+     * REMAINS: the service must NOT stop — the next scheduled iteration retries the still-null row. The
+     * other (non-failing) files must still be committed. Mutation proof: the pre-fix
+     * {@code if (files.size() < BATCH_SIZE) stopAsync()} (stopping on ANY partial batch, regardless of a
+     * swallowed failure) terminates the service here, making this test fail with a null-MAC row stranded.
+     */
+    @Test
+    public void backfill_doesNotSelfStopWhenPartialBatchHasTransientFailure() throws Exception {
+        String userId = createUser();
+        String docId = createDocument(userId);
+        String good = createLegacyFile(userId, docId, "committed-alongside-a-transient-failure");
+        String poison = createLegacyFile(userId, docId, "transiently-failing-row");
+        ContentMacUtil.setMasterKeyForTest(MASTER_KEY);
+
+        // A partial batch (2 < BATCH_SIZE) whose poison row throws a TRANSIENT failure (caught + swallowed
+        // by processBatch), the good row committing normally. fetchNullMacBatch is overridden to isolate the
+        // stop decision from shared-DB state (sibling tests may hold their own null-MAC rows on the PG gate).
+        List<File> batch = inTx(() -> List.of(
+                new FileDao().getActiveById(good),
+                new FileDao().getActiveById(poison)));
+        ContentMacBackfillService service = new ContentMacBackfillService() {
+            @Override
+            List<File> fetchNullMacBatch() {
+                return batch;
+            }
+
+            @Override
+            void processFile(File file) {
+                if (poison.equals(file.getId())) {
+                    throw new RuntimeException("simulated transient DB/commit hiccup");
+                }
+                super.processFile(file);
+            }
+        };
+        service.runOneIteration();
+
+        Assertions.assertNotEquals(Service.State.TERMINATED, service.state(),
+                "a partial batch with a swallowed transient failure must NOT self-stop the service (work remains)");
+        Assertions.assertNotNull(macOf(good),
+                "the non-failing file must be committed even though a sibling row failed transiently");
+        Assertions.assertNull(macOf(poison),
+                "the transiently-failed row stays null so the next scheduled iteration retries it");
+    }
+
+    // --- FIX 2: a partial batch fully processed (commit + terminal skip) IS a genuine drain -> stop -----
+
+    /**
+     * The counterpart to the transient-failure case: a partial batch where EVERY file was processed —
+     * one committed a real MAC and one was terminal-skip-marked (undecryptable content) — is a genuine
+     * drain, so the service DOES self-stop. This pins that a terminal skip counts as PROCESSED and does
+     * NOT block the stop (SKIP_MARKER is written inside processFile without throwing, so it is not a
+     * transient failure). Mutation proof: inverting the guard to {@code failures != 0} (treating a
+     * fully-processed batch as "not drained") stops the service only when a failure occurred, so this
+     * fully-processed batch would never terminate and the test fails.
+     */
+    @Test
+    public void backfill_selfStopsWhenPartialBatchFullyProcessedIncludingTerminalSkip() throws Exception {
+        String userId = createUser();
+        String docId = createDocument(userId);
+        String good = createLegacyFile(userId, docId, "committed-content");
+        // A file row with NO blob on disk: undecryptable -> a TERMINAL skip (SKIP_MARKER), which is a
+        // processed/DONE row, NOT a transient failure that would block the drain/stop.
+        String ghost = inTx(() -> {
+            File file = new File();
+            file.setId(UUID.randomUUID().toString());
+            file.setUserId(userId);
+            file.setDocumentId(docId);
+            file.setName("ghost.txt");
+            file.setMimeType("text/plain");
+            file.setVersion(0);
+            file.setLatestVersion(true);
+            file.setSize(10L);
+            return new FileDao().create(file, userId);
+        });
+        ContentMacUtil.setMasterKeyForTest(MASTER_KEY);
+
+        List<File> batch = inTx(() -> List.of(
+                new FileDao().getActiveById(good),
+                new FileDao().getActiveById(ghost)));
+        ContentMacBackfillService service = new ContentMacBackfillService() {
+            @Override
+            List<File> fetchNullMacBatch() {
+                return batch;
+            }
+        };
+        service.runOneIteration();
+
+        Assertions.assertEquals(Service.State.TERMINATED, service.state(),
+                "a partial batch fully processed (a commit + a terminal skip) is a genuine drain -> self-stop");
+        Assertions.assertNotNull(macOf(good), "the recoverable file is hashed");
+        Assertions.assertEquals(ContentMacBackfillService.SKIP_MARKER, macOf(ghost),
+                "the undecryptable row is terminal-skip-marked (processed), not a transient failure blocking the stop");
+    }
+
     // --- no-op when the feature is off: rows stay NULL, the service stops ------------------------------
 
     @Test

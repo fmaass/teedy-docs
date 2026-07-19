@@ -65,10 +65,18 @@ public class ContentMacBackfillService extends AbstractScheduledService {
             // file in its OWN transaction below — the backfill therefore never holds more than a single
             // T_FILE row lock at a time.
             List<File> files = fetchNullMacBatch();
-            processBatch(files);
-            if (files.size() < BATCH_SIZE) {
+            int failures = processBatch(files);
+            // Drain detection. A partial batch (< BATCH_SIZE) normally means the null-MAC scan is exhausted,
+            // BUT only when every file in it was actually processed. "Processed" = committed a real MAC OR
+            // terminal-skip-marked (an undecryptable row stamped with SKIP_MARKER — a DONE row, not a
+            // failure). A swallowed TRANSIENT failure (a caught DB/commit hiccup) leaves that row's MAC
+            // still null, so work REMAINS: we must NOT stop, and the next scheduled iteration retries the
+            // still-null row. Stop only on a partial batch with ZERO swallowed failures.
+            if (files.size() < BATCH_SIZE && failures == 0) {
                 log.info("No more file to backfill with a content MAC, stopping the service");
                 stopAsync();
+            } else if (failures > 0) {
+                log.info("{} file(s) failed transiently this iteration, keeping the backfill service running to retry", failures);
             }
         } catch (Throwable e) {
             log.error("Exception during content MAC backfill iteration", e);
@@ -96,16 +104,31 @@ public class ContentMacBackfillService extends AbstractScheduledService {
      * null} write keeps each per-file commit restartable and multi-instance idempotent, and naturally absorbs
      * a row that became ineligible (already stamped) between the fetch and its per-file transaction.
      *
+     * <p>Returns the number of files that failed with a swallowed TRANSIENT error so the caller can tell a
+     * genuinely-drained partial batch (every file processed) from one that still has work. Note the
+     * distinction: a terminal skip (undecryptable content stamped with {@link #SKIP_MARKER}) is handled
+     * INSIDE {@link #processFile} and does NOT throw — it is a processed/DONE row and is NOT counted here.
+     * Only a transaction that throws out of {@code processFile} (a DB/commit hiccup) is a transient failure:
+     * that row's MAC is still null, so work remains and the count is incremented.</p>
+     *
      * @param files The batch of null-MAC files to backfill
+     * @return the count of files whose per-file transaction threw a (caught) transient failure — {@code 0}
+     *         means every file was processed (committed or terminal-skip-marked)
      */
-    void processBatch(List<File> files) {
+    int processBatch(List<File> files) {
+        int failures = 0;
         for (File file : files) {
             try {
                 TransactionUtil.handle(() -> processFile(file));
             } catch (Throwable e) {
+                // Swallowed TRANSIENT failure: the per-file transaction rolled back with this row's MAC
+                // still null, so work REMAINS. (A terminal skip never reaches here — processFile stamps
+                // SKIP_MARKER without throwing, so it is a DONE row and is not counted as a failure.)
+                failures++;
                 log.error("Content MAC backfill failed for file {}, skipping to the next", file.getId(), e);
             }
         }
+        return failures;
     }
 
     /**
