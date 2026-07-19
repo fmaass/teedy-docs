@@ -686,7 +686,12 @@ public class AppResource extends BaseResource {
         if (!Strings.isNullOrEmpty(folder)) {
             configDao.update(ConfigType.INBOX_FOLDER, folder);
         }
-        if (!Strings.isNullOrEmpty(tag)) {
+        if (tag != null) {
+            // Save an explicitly-provided tag as-is, INCLUDING an empty value, so the operator can CLEAR
+            // the auto-import tag by submitting an empty one — previously an empty tag was skipped and the
+            // tag could never be removed once set (#141). An empty stored value applies no tag (InboxService
+            // resolves it via tagDao.getById, which returns null for an empty id). A truly absent field
+            // (null) still leaves the existing tag untouched.
             configDao.update(ConfigType.INBOX_TAG, tag);
         }
 

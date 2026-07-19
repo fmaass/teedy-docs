@@ -18,10 +18,14 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [3.6.6] - 2026-07-19
 
-A security hotfix. No database migration (db.version stays 57).
+A security and bug-fix release. No database migration (db.version stays 57).
 
 ### Security
 - Fixed an unauthenticated access-control bypass via the `?share=` request parameter (CVE-2026-50885, CVE-2025-11853). The share value was trusted as an ACL target without validation, so `?share=admin` matched the reserved administrator ACL name and skipped the permission check, returning any document — its files, PDF export, ZIP download, and comments — to an anonymous caller by id. The parameter is now honoured only when it resolves to a genuine active share (share ids are server-generated random UUIDs, so a reserved name or another account's id can never match); legitimate share links are unaffected.
+- The related-documents list is now filtered by the caller's read permission, so a related document a user cannot read no longer leaks its title through another document's relations (#140).
+
+### Fixed
+- The inbox auto-import tag can now be cleared: re-saving the inbox configuration with an empty tag removes it, where previously an empty tag was ignored and the tag could never be removed once set (#141).
 
 ## [3.6.5] - 2026-07-19
 
