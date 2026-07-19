@@ -16,6 +16,13 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.6.6] - 2026-07-19
+
+A security hotfix. No database migration (db.version stays 57).
+
+### Security
+- Fixed an unauthenticated access-control bypass via the `?share=` request parameter (CVE-2026-50885, CVE-2025-11853). The share value was trusted as an ACL target without validation, so `?share=admin` matched the reserved administrator ACL name and skipped the permission check, returning any document — its files, PDF export, ZIP download, and comments — to an anonymous caller by id. The parameter is now honoured only when it resolves to a genuine active share (share ids are server-generated random UUIDs, so a reserved name or another account's id can never match); legitimate share links are unaffected.
+
 ## [3.6.5] - 2026-07-19
 
 The whole rc.1–rc.8 candidate train plus a final ACL-hardening batch, released as one version. Five database migrations this release: db.version moves from 52 to 57. `dbupdate-053` adds the IMAP exactly-once import-receipt table and seeds the global storage-quota lock sentinel; `dbupdate-054` adds a per-user preferred-locale column so the interface language can be remembered server-side; `dbupdate-055` adds the credential-epoch columns to users, session tokens, and API keys, adds account-origin integrity constraints, and forces every existing credential to re-authenticate once on upgrade; `dbupdate-056` adds a covering index for the global storage-quota scan; `dbupdate-057` adds a nullable per-file content-MAC column and index for duplicate detection. All migrations are additive and portable across PostgreSQL 17 and H2, and each re-runs cleanly after a partial apply. The content-MAC column stays empty (and duplicate detection stays off) unless a deploy-time master key is supplied, so an existing install upgrades with no behaviour change.
