@@ -4,11 +4,11 @@ import com.google.common.base.Strings;
 import com.google.common.net.InetAddresses;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.util.net.CidrMatcher;
 
 import jakarta.servlet.FilterConfig;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.InetAddress;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -71,17 +71,30 @@ public class HeaderBasedSecurityFilter extends SecurityFilter {
     }
 
     @Override
-    protected User authenticate(HttpServletRequest request) {
+    protected String getMechanism() {
+        return MECHANISM_TRUSTED_HEADER;
+    }
+
+    @Override
+    protected AuthAttempt attempt(HttpServletRequest request) {
         if (!enabled) {
-            return null;
+            return AuthAttempt.absent();
         }
 
         List<String> headerValues = Collections.list(request.getHeaders(AUTHENTICATED_USER_HEADER));
+        if (headerValues.isEmpty()) {
+            return AuthAttempt.absent();
+        }
         String username = resolveAuthenticatedUsername(request.getRemoteAddr(), headerValues);
         if (username == null) {
-            return null;
+            // Header present but not trusted / not usable: fall through to anonymous (denied downstream).
+            return AuthAttempt.ignore();
         }
-        return new UserDao().getActiveByUsername(username);
+        User user = new UserDao().getActiveByUsername(username);
+        if (!isEligible(user)) {
+            return AuthAttempt.ignore();
+        }
+        return AuthAttempt.authenticated(user, null);
     }
 
     /**
@@ -134,102 +147,15 @@ public class HeaderBasedSecurityFilter extends SecurityFilter {
         } catch (IllegalArgumentException e) {
             return false;
         }
-        for (CidrMatcher matcher : trustedProxies) {
-            if (matcher.matches(address)) {
-                return true;
-            }
-        }
-        return false;
+        return CidrMatcher.matchesAny(trustedProxies, address);
     }
 
     /**
      * Parses a comma-separated list of trusted-proxy entries (exact IPs and/or {@code addr/prefix} CIDR ranges).
-     * Blank and unparseable entries are skipped (and logged). Package-private for testing.
+     * Blank and unparseable entries are skipped (and logged). Package-private for testing. Delegates to the
+     * single shared {@link CidrMatcher} parser.
      */
     static List<CidrMatcher> parseTrustedProxies(String csv) {
-        List<CidrMatcher> matchers = new ArrayList<>();
-        if (Strings.isNullOrEmpty(csv)) {
-            return matchers;
-        }
-        for (String rawEntry : csv.split(",")) {
-            String entry = rawEntry.trim();
-            if (entry.isEmpty()) {
-                continue;
-            }
-            CidrMatcher matcher = CidrMatcher.parse(entry);
-            if (matcher == null) {
-                LOG.warn("Ignoring unparseable trusted-proxy entry: " + entry);
-            } else {
-                matchers.add(matcher);
-            }
-        }
-        return matchers;
-    }
-
-    /**
-     * Matches an IP address against a single exact IP or CIDR range (IPv4 or IPv6).
-     */
-    static final class CidrMatcher {
-        private final byte[] network;
-        private final int prefixLength;
-
-        private CidrMatcher(byte[] network, int prefixLength) {
-            this.network = network;
-            this.prefixLength = prefixLength;
-        }
-
-        /**
-         * @return a matcher for the given entry, or null if it cannot be parsed
-         */
-        static CidrMatcher parse(String entry) {
-            String addressPart = entry;
-            Integer prefix = null;
-            int slash = entry.indexOf('/');
-            if (slash >= 0) {
-                addressPart = entry.substring(0, slash);
-                try {
-                    prefix = Integer.parseInt(entry.substring(slash + 1).trim());
-                } catch (NumberFormatException e) {
-                    return null;
-                }
-            }
-            InetAddress address;
-            try {
-                address = InetAddresses.forString(addressPart.trim());
-            } catch (IllegalArgumentException e) {
-                return null;
-            }
-            byte[] bytes = address.getAddress();
-            int maxPrefix = bytes.length * 8;
-            if (prefix == null) {
-                prefix = maxPrefix;
-            }
-            if (prefix < 0 || prefix > maxPrefix) {
-                return null;
-            }
-            return new CidrMatcher(bytes, prefix);
-        }
-
-        boolean matches(InetAddress candidate) {
-            byte[] candidateBytes = candidate.getAddress();
-            if (candidateBytes.length != network.length) {
-                // Different address families (IPv4 vs IPv6) never match.
-                return false;
-            }
-            int fullBytes = prefixLength / 8;
-            for (int i = 0; i < fullBytes; i++) {
-                if (candidateBytes[i] != network[i]) {
-                    return false;
-                }
-            }
-            int remainingBits = prefixLength % 8;
-            if (remainingBits > 0) {
-                int mask = 0xFF << (8 - remainingBits);
-                if ((candidateBytes[fullBytes] & mask) != (network[fullBytes] & mask)) {
-                    return false;
-                }
-            }
-            return true;
-        }
+        return CidrMatcher.parseList(csv);
     }
 }

@@ -154,6 +154,31 @@ public class ValidationUtil {
         }
     }
     
+    /**
+     * Validates that a user-supplied file name is a single safe path segment: it must not contain a
+     * path separator ({@code /} or {@code \}), a NUL, or any control character. Such characters are
+     * REJECTED (not silently rewritten) so a rename can never introduce a traversal or a name that would
+     * later escape an archive/extraction directory. Shared so any future rename endpoint validates
+     * identically and cannot bypass the guard. The length bounds stay with the caller's own
+     * {@link #validateLength} check.
+     *
+     * @param s File name to validate
+     * @param name Name of the parameter (for the error message)
+     * @throws ClientException if the name contains a separator, NUL, or control character
+     */
+    public static void validateFileName(String s, String name) throws ClientException {
+        if (s == null) {
+            return;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '/' || c == '\\' || c == '\0' || Character.isISOControl(c)) {
+                throw new ClientException("ValidationError",
+                        MessageFormat.format("{0} must not contain path separators or control characters", name));
+            }
+        }
+    }
+
     public static void validateUsername(String s, String name) throws ClientException {
         if (!USERNAME_PATTERN.matcher(s).matches()) {
             throw new ClientException("ValidationError", MessageFormat.format("{0} must have only alphanumeric, underscore characters or @ and .", name));
@@ -198,6 +223,19 @@ public class ValidationUtil {
         }
     }
     
+    /**
+     * Validates that a parsed number is not negative.
+     *
+     * @param value Value to validate
+     * @param name Name of the parameter
+     * @throws ClientException if the value is negative
+     */
+    public static void validateNonNegative(long value, String name) throws ClientException {
+        if (value < 0) {
+            throw new ClientException("ValidationError", MessageFormat.format("{0} must not be negative", name));
+        }
+    }
+
     /**
      * Validates and parses a date.
      * 

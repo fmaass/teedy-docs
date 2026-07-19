@@ -184,4 +184,31 @@ describe('uploadFile (progress plumbing)', () => {
     const config = mock.put.mock.calls[0][2] as { onUploadProgress?: unknown }
     expect(config.onUploadProgress).toBeUndefined()
   })
+
+  it('does NOT send a previousFileId field for a plain (new-file) upload', async () => {
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' })
+    await uploadFile('doc-1', file)
+    const body = mock.put.mock.calls[0][1] as FormData
+    expect(body.has('previousFileId')).toBe(false)
+  })
+
+  it('sends previousFileId when replacing a file with a new version', async () => {
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' })
+    await uploadFile('doc-1', file, undefined, 'base-9')
+    const body = mock.put.mock.calls[0][1] as FormData
+    expect(body.get('id')).toBe('doc-1')
+    expect(body.get('file')).toBe(file)
+    expect(body.get('previousFileId')).toBe('base-9')
+  })
+
+  it('threads previousFileId alongside a progress callback', async () => {
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' })
+    const seen: number[] = []
+    await uploadFile('doc-1', file, (pct) => seen.push(pct), 'base-9')
+    const [, body, config] = mock.put.mock.calls[0]
+    expect((body as FormData).get('previousFileId')).toBe('base-9')
+    const cfg = config as { onUploadProgress: (e: { loaded: number; total?: number }) => void }
+    cfg.onUploadProgress({ loaded: 100, total: 400 })
+    expect(seen).toEqual([25])
+  })
 })

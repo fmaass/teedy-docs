@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * Side-effect-free computation of what a {@code clean_storage} run would reclaim (#60).
@@ -70,6 +71,141 @@ public class CleanupStorageUtil {
     public static final long ORPHAN_MIN_AGE_MS = 24L * 60L * 60L * 1000L;
 
     private CleanupStorageUtil() {
+    }
+
+    /**
+     * Outcome of one {@link #deleteAndMeasure} call on a single logical file id.
+     */
+    public static final class ReclaimResult {
+        /** A logical file with nothing to reclaim (no variant removed by this run). */
+        public static final ReclaimResult NONE = new ReclaimResult(false, 0L, null);
+
+        private final boolean reclaimed;
+        private final long bytesFreed;
+        private final IOException failure;
+
+        ReclaimResult(boolean reclaimed, long bytesFreed, IOException failure) {
+            this.reclaimed = reclaimed;
+            this.bytesFreed = bytesFreed;
+            this.failure = failure;
+        }
+
+        /**
+         * True if THIS run's own {@code deleteIfExists} actually removed at least one physical variant —
+         * so the id counts as ONE reclaimed logical file. A variant that was already gone (deleted by a
+         * concurrent non-clean_storage deleter, e.g. {@code FileDeletedAsyncListener}) does NOT count, so
+         * two actors never both claim to have reclaimed the same bytes. Remains true even when a LATER
+         * variant's delete failed, so the bytes/count for variants this run already removed are not lost.
+         */
+        public boolean isReclaimed() {
+            return reclaimed;
+        }
+
+        /**
+         * Bytes THIS run actually freed for the id: the summed size of ONLY the variants whose delete by
+         * this run succeeded (measured at deletion time). A variant already removed by another actor, or
+         * one whose own delete failed, contributes 0 — so the reported total never over-counts, and a
+         * mid-sequence failure never discards the bytes already freed for earlier variants.
+         */
+        public long getBytesFreed() {
+            return bytesFreed;
+        }
+
+        /**
+         * The delete failure that stopped this call after some variants were already freed, or null on a
+         * fully-successful reclaim. The caller records {@link #getBytesFreed()}/{@link #isReclaimed()} for
+         * the variants already removed AND logs this failure (the un-deleted variant is left for a later
+         * age-thresholded orphan sweep) — the run continues, exactly as before.
+         */
+        public IOException getFailure() {
+            return failure;
+        }
+    }
+
+    /**
+     * Deletes ALL physical variants of a logical file id (base + {@code _web} + {@code _thumb}), counting
+     * ONLY what THIS run's own delete actually removed (#79).
+     *
+     * <p><b>Concurrency.</b> The whole post-commit filesystem sweep is serialized by an in-process lock in
+     * {@code AppResource} (concurrent {@code clean_storage} runs are REST requests handled by threads in
+     * the SAME JVM, which owns the storage directory), so two runs never delete a file's variants at the
+     * same time — the second run recomputes its orphan set against the current filesystem after the first
+     * completes and only reclaims what still remains. This method's per-variant "count only what my own
+     * {@code deleteIfExists} removed" accounting is belt-and-suspenders that ALSO stays correct against the
+     * async {@code FileDeletedAsyncListener}, which deletes storage bytes OUTSIDE the sweep.</p>
+     *
+     * <p><b>Partial-failure accounting.</b> Bytes are accumulated as each variant is removed, so if a
+     * LATER variant's {@code deleteIfExists} throws {@link IOException}, the bytes/count for the variants
+     * this run ALREADY removed are NOT discarded: the call stops at the failing variant and returns the
+     * accumulated {@link ReclaimResult} carrying {@link ReclaimResult#getFailure()}. The caller records the
+     * already-freed bytes/count and logs the failure — the run continues (it does not abort), exactly as
+     * the sweep did before; the un-deleted variant is left for a later age-thresholded orphan sweep.</p>
+     *
+     * @param storageDir storage directory (may be null → {@link ReclaimResult#NONE})
+     * @param fileId logical file id whose variants to delete
+     * @param afterBaseDeleteHook nullable test seam — when non-null it is invoked (with {@code fileId})
+     *   AFTER the base variant is deleted but BEFORE the derivatives. Used by the serialization test to
+     *   hold a run inside the sweep lock; the production caller passes null, so it is inert in the webapp.
+     * @return what this run reclaimed for the id (with {@link ReclaimResult#getFailure()} set if a variant
+     *   delete failed after earlier variants were already freed)
+     */
+    public static ReclaimResult deleteAndMeasure(Path storageDir, String fileId, Consumer<String> afterBaseDeleteHook) {
+        if (storageDir == null) {
+            return ReclaimResult.NONE;
+        }
+        // Count a variant's bytes ONLY when THIS run's own delete actually removes it: a variant a
+        // concurrent deleter already removed contributes 0. Base first, then (optionally) the test seam,
+        // then the derivatives. Accumulate as we go so a mid-sequence IOException never discards bytes we
+        // already freed — we return the partial accounting plus the failure.
+        long freed = 0L;
+        boolean reclaimed = false;
+        try {
+            long baseFreed = deleteVariantAndMeasure(storageDir.resolve(fileId));
+            if (baseFreed >= 0L) {
+                reclaimed = true;
+                freed += baseFreed;
+            }
+            if (afterBaseDeleteHook != null) {
+                afterBaseDeleteHook.accept(fileId);
+            }
+            long webFreed = deleteVariantAndMeasure(storageDir.resolve(fileId + "_web"));
+            if (webFreed >= 0L) {
+                reclaimed = true;
+                freed += webFreed;
+            }
+            long thumbFreed = deleteVariantAndMeasure(storageDir.resolve(fileId + "_thumb"));
+            if (thumbFreed >= 0L) {
+                reclaimed = true;
+                freed += thumbFreed;
+            }
+            return new ReclaimResult(reclaimed, freed, null);
+        } catch (IOException e) {
+            // A variant delete failed AFTER earlier variants were already freed — keep their accounting.
+            return new ReclaimResult(reclaimed, freed, e);
+        }
+    }
+
+    /**
+     * Deletes one physical variant and reports the bytes THIS call freed: the variant's size when this
+     * call's {@link Files#deleteIfExists} actually removed it, or {@code -1} when the variant was already
+     * gone (so a concurrent deleter's removal is never counted as this run's freed bytes). The size is
+     * read immediately before the delete; storage blobs are write-once (never truncated), so the measured
+     * size equals what this delete freed.
+     *
+     * @param variant the variant path
+     * @return bytes freed by this delete ({@code >= 0}), or {@code -1} if this call did not delete it
+     * @throws IOException if the delete fails for a reason other than the file being absent
+     */
+    private static long deleteVariantAndMeasure(Path variant) throws IOException {
+        long size = 0L;
+        try {
+            if (Files.isRegularFile(variant)) {
+                size = Files.size(variant);
+            }
+        } catch (IOException e) {
+            size = 0L; // size unreadable → count 0 bytes for this variant, but still delete it below
+        }
+        return Files.deleteIfExists(variant) ? size : -1L;
     }
 
     /**
@@ -323,23 +459,37 @@ public class CleanupStorageUtil {
     }
 
     /**
-     * Enumerates the storage directory for age-eligible filesystem orphans (#72): on-disk base ids with
-     * no {@code T_FILE} row (any state) whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}.
-     * Read-only. Groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb} under the base id.
+     * DB-snapshot half of the orphan sweep: reads every {@code T_FILE.FIL_ID_C} (any delete state) into a
+     * set. Kept separate from the pure-filesystem enumeration below so the apply (#103) can capture this
+     * snapshot in a SHORT owned transaction that is fully committed and closed BEFORE the potentially long
+     * filesystem sweep — the sweep then holds no open request transaction across the filesystem I/O.
      *
      * @param em entity manager (to read all file ids)
+     * @return the set of all known file ids
+     */
+    public static Set<String> snapshotAllFileIds(EntityManager em) {
+        @SuppressWarnings("unchecked")
+        List<String> allIds = em.createNativeQuery("select f.FIL_ID_C from T_FILE f").getResultList();
+        return new HashSet<>(allIds);
+    }
+
+    /**
+     * Pure-filesystem half of the orphan sweep: enumerates the storage directory for age-eligible
+     * filesystem orphans (#72) against an ALREADY-CAPTURED id snapshot, with NO database access. On-disk
+     * base ids not in {@code knownFileIds} whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}
+     * are returned. Read-only on the filesystem; groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb}
+     * under the base id. This is the half the apply runs during the sweep, off-database (#103).
+     *
      * @param storageDir storage directory (may be null/non-existent → empty)
+     * @param knownFileIds set of all {@code T_FILE.FIL_ID_C} (any delete state), captured beforehand
      * @param nowMs current epoch millis (for the age comparison)
      * @return the age-eligible orphan candidates
      */
-    public static List<OrphanCandidate> findAgeEligibleOrphans(EntityManager em, Path storageDir, long nowMs) {
+    public static List<OrphanCandidate> enumerateFilesystemOrphans(Path storageDir, Set<String> knownFileIds, long nowMs) {
         List<OrphanCandidate> result = new ArrayList<>();
         if (storageDir == null || !Files.isDirectory(storageDir)) {
             return result;
         }
-        @SuppressWarnings("unchecked")
-        List<String> allIds = em.createNativeQuery("select f.FIL_ID_C from T_FILE f").getResultList();
-        Set<String> knownFileIds = new HashSet<>(allIds);
 
         // Collect the distinct base ids present on disk (derivative suffixes stripped). File ids are
         // UUIDs (no underscores), so the base id is the segment before the first underscore.
@@ -362,5 +512,26 @@ public class CleanupStorageUtil {
             }
         }
         return result;
+    }
+
+    /**
+     * Enumerates the storage directory for age-eligible filesystem orphans (#72): on-disk base ids with
+     * no {@code T_FILE} row (any state) whose variants are all older than {@link #ORPHAN_MIN_AGE_MS}.
+     * Read-only. Groups {@code {id}}/{@code {id}_web}/{@code {id}_thumb} under the base id. Composes the
+     * DB snapshot ({@link #snapshotAllFileIds}) and the filesystem enumeration
+     * ({@link #enumerateFilesystemOrphans}); used by the dry-run manifest, where both halves run in the
+     * one read-only transaction.
+     *
+     * @param em entity manager (to read all file ids)
+     * @param storageDir storage directory (may be null/non-existent → empty)
+     * @param nowMs current epoch millis (for the age comparison)
+     * @return the age-eligible orphan candidates
+     */
+    public static List<OrphanCandidate> findAgeEligibleOrphans(EntityManager em, Path storageDir, long nowMs) {
+        // Skip the DB read entirely when there is no storage directory to enumerate (unchanged behavior).
+        if (storageDir == null || !Files.isDirectory(storageDir)) {
+            return new ArrayList<>();
+        }
+        return enumerateFilesystemOrphans(storageDir, snapshotAllFileIds(em), nowMs);
     }
 }

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
-import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation } from '../../api/file'
+import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles } from '../../api/file'
+import { partitionByNameConflict, type FileConflict, type ConflictAction } from '../../utils/fileConflicts'
+import { displayName } from '../../utils/fileName'
 import {
   listDocuments,
   updateDocument,
@@ -19,12 +21,18 @@ import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import AutoComplete from 'primevue/autocomplete'
+import SelectButton from 'primevue/selectbutton'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
+import FileListTable from '../../components/FileListTable.vue'
+import FileActionMenu from '../../components/FileActionMenu.vue'
+import FileExtraActions from '../../components/FileExtraActions.vue'
+import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
-import { formatDate, formatFileSize } from '../../utils/formatters'
+import { useAuthStore } from '../../stores/auth'
+import { formatDate } from '../../utils/formatters'
 import { injectDocument } from './documentKey'
 
 const doc = injectDocument()
@@ -32,6 +40,25 @@ const { t } = useI18n()
 const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
+const authStore = useAuthStore()
+
+// Grid⇄list toggle for the file view. Grid is the default; the choice is remembered
+// per user (localStorage) so two accounts sharing a browser keep independent
+// preferences. The stored value is validated on read so a stale/tampered entry can
+// only ever resolve to a valid mode.
+const FILE_VIEW_MODE_KEY = 'teedy_file_view_mode'
+type FileViewMode = 'grid' | 'list'
+function fileViewStorageKey() {
+  return `${FILE_VIEW_MODE_KEY}:${authStore.username}`
+}
+const fileViewMode = ref<FileViewMode>(
+  localStorage.getItem(`${FILE_VIEW_MODE_KEY}:${authStore.username}`) === 'list' ? 'list' : 'grid',
+)
+watch(fileViewMode, (v) => localStorage.setItem(fileViewStorageKey(), v))
+const fileViewOptions = computed(() => [
+  { label: t('ui.file_view.grid'), value: 'grid' as FileViewMode, icon: 'pi pi-th-large' },
+  { label: t('ui.file_view.list'), value: 'list' as FileViewMode, icon: 'pi pi-list' },
+])
 
 const sanitizedDescription = computed(() => {
   if (!doc.value?.description) return ''
@@ -140,42 +167,127 @@ function confirmRemoveRelation(relation: { id: string; title: string }) {
   })
 }
 
-const renamingId = ref<string | null>(null)
-const renameValue = ref('')
-
 const versionsDialogVisible = ref(false)
 const versionsFileId = ref<string | null>(null)
 const versionsFileName = ref('')
 
-function showVersions(file: { id: string; name: string }) {
+function showVersions(file: { id: string; name: string | null }) {
   versionsFileId.value = file.id
-  versionsFileName.value = file.name
+  versionsFileName.value = displayName(file.name, t)
   versionsDialogVisible.value = true
 }
 const uploading = ref(false)
 const uploadProgress = ref<Record<number, number>>({})
 const uploadingNames = ref<string[]>([])
 const fileUploadRef = ref()
+// Whole-batch guard: true for the ENTIRE add-files flow — the actual upload AND the
+// (interactive) conflict resolution in between, during which `uploading` is briefly
+// false. It disables every add-file affordance and rejects a second batch, so a drop
+// arriving mid-resolution can never overwrite the single conflict resolver and strand
+// the first batch's undecided files.
+const busy = ref(false)
 
-async function uploadAll(files: File[]) {
-  if (!doc.value || !files.length) return
-  // Snapshot the id: the injected ref can be cleared/replaced while a batch is
-  // in flight, and the finally block must still target the original document.
-  const documentId = doc.value.id
+// One upload job: a file, and — when the user chose "add as new version" for a name
+// conflict — the id of the file it supersedes (previousFileId → v(n+1)).
+interface UploadJob {
+  file: File
+  previousFileId?: string
+}
+
+// --- Name-conflict prompt (#117.2) -------------------------------------------------
+// A manual upload-bar drop whose name matches an existing active file of THIS document
+// is intercepted so the user can choose add-as-new-version / keep-both / cancel. The
+// dialog presents one conflict at a time; `askConflict` resolves when the user clicks.
+const conflictDialogVisible = ref(false)
+const conflictFileName = ref('')
+const conflictRemaining = ref(0)
+let conflictResolver: ((decision: { action: ConflictAction; applyToAll: boolean }) => void) | null =
+  null
+
+function askConflict(
+  fileName: string,
+  remaining: number,
+): Promise<{ action: ConflictAction; applyToAll: boolean }> {
+  conflictFileName.value = fileName
+  conflictRemaining.value = remaining
+  conflictDialogVisible.value = true
+  return new Promise((resolve) => {
+    conflictResolver = resolve
+  })
+}
+
+function onConflictDecision(decision: { action: ConflictAction; applyToAll: boolean }) {
+  conflictDialogVisible.value = false
+  const resolve = conflictResolver
+  conflictResolver = null
+  resolve?.(decision)
+}
+
+// Turn the conflicting drops into upload jobs by asking the user per conflict, honouring
+// an apply-to-all choice for the rest of the batch. A cancelled conflict is dropped.
+async function resolveConflicts(conflicts: FileConflict[]): Promise<UploadJob[]> {
+  const jobs: UploadJob[] = []
+  let bulkAction: ConflictAction | null = null
+  for (let i = 0; i < conflicts.length; i++) {
+    const conflict = conflicts[i]
+    let action = bulkAction
+    if (!action) {
+      const decision = await askConflict(conflict.file.name, conflicts.length - i)
+      action = decision.action
+      if (decision.applyToAll) bulkAction = decision.action
+    }
+    if (action === 'version') jobs.push({ file: conflict.file, previousFileId: conflict.existing.id })
+    else if (action === 'keep-both') jobs.push({ file: conflict.file })
+    // 'cancel' → skip this file entirely.
+  }
+  return jobs
+}
+
+// Upload a batch of jobs sequentially with per-file progress. A stale-base 409 (the
+// version chain moved under an "add as new version" job) surfaces the reload path.
+async function runUploads(documentId: string, jobs: UploadJob[]) {
+  if (!jobs.length) return
   uploading.value = true
   uploadProgress.value = {}
-  uploadingNames.value = files.map((f) => f.name)
+  uploadingNames.value = jobs.map((j) => j.file.name)
   try {
-    for (let i = 0; i < files.length; i++) {
+    // #119: the backend flags a content-identical upload (a renamed duplicate, or an identical new
+    // version it collapsed) with duplicateKind='content' + duplicateOfId. Surface ONE non-blocking,
+    // purely informational hint per batch — no action is taken server-side. Absent (feature off) it never fires.
+    let duplicateHint: { name: string } | null = null
+    for (let i = 0; i < jobs.length; i++) {
       uploadProgress.value[i] = 0
-      await uploadFile(documentId, files[i], (pct) => {
-        uploadProgress.value[i] = pct
-      })
+      const res = await uploadFile(
+        documentId,
+        jobs[i].file,
+        (pct) => {
+          uploadProgress.value[i] = pct
+        },
+        jobs[i].previousFileId,
+      )
       uploadProgress.value[i] = 100
+      const data = (res as { data?: { duplicateKind?: string; duplicateOfId?: string } } | undefined)?.data
+      if (data?.duplicateKind === 'content' && !duplicateHint) {
+        const existing = (doc.value?.files ?? []).find((f) => f.id === data.duplicateOfId)
+        duplicateHint = { name: existing?.name ?? jobs[i].file.name }
+      }
     }
     toast.add({ severity: 'success', summary: t('ui.files_uploaded'), life: 2000 })
-  } catch {
-    toast.add({ severity: 'error', summary: t('ui.upload_failed'), life: 3000 })
+    if (duplicateHint) {
+      toast.add({
+        severity: 'info',
+        summary: t('ui.duplicate_content_hint', { name: duplicateHint.name }),
+        life: 6000,
+      })
+    }
+  } catch (e) {
+    const status = (e as { response?: { status?: number } })?.response?.status
+    const staleBase = status === 409
+    toast.add({
+      severity: 'error',
+      summary: staleBase ? t('ui.versions.stale_base') : t('ui.upload_failed'),
+      life: staleBase ? 4000 : 3000,
+    })
   } finally {
     // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
     // and skipping the refetch would leave them invisible (users re-upload dupes).
@@ -187,15 +299,50 @@ async function uploadAll(files: File[]) {
   }
 }
 
+async function uploadAll(files: File[]) {
+  // Reject a second batch while one is in flight (upload OR conflict resolution): the
+  // conflict resolver is a single slot, so a concurrent batch would clobber it.
+  if (!doc.value || !files.length || busy.value) return
+  // Snapshot the id and existing-file names up front: the injected ref can be cleared
+  // or refetched while the (possibly interactive) batch is in flight, but the version
+  // bases and the target document must stay fixed to the drop moment.
+  const documentId = doc.value.id
+  const existing = (doc.value.files ?? []).map((f) => ({ id: f.id, name: f.name }))
+  const { conflicts, fresh } = partitionByNameConflict(files, existing)
+
+  busy.value = true
+  try {
+    // Non-conflicting files upload straight away — no prompt.
+    await runUploads(documentId, fresh.map((f) => ({ file: f })))
+
+    // Then resolve each name conflict with the user and upload the chosen jobs.
+    if (conflicts.length) {
+      const jobs = await resolveConflicts(conflicts)
+      await runUploads(documentId, jobs)
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
 async function handleUpload(event: FileUploadUploaderEvent) {
   const files = Array.isArray(event.files) ? event.files : [event.files]
   await uploadAll(files as File[])
 }
 
-// Camera capture: photos from CameraCaptureButton upload immediately via the same
-// real PUT /api/file path.
+// Camera capture: photos upload IMMEDIATELY via the same real PUT /api/file path,
+// BYPASSING the name-conflict prompt. That interception (#117.2) is scoped to the
+// manual upload bar; a camera capture keeps its prior add-a-new-file behavior even when
+// a same-named file already exists.
 async function onCameraCapture(captured: File[]) {
-  await uploadAll(captured)
+  if (!doc.value || !captured.length || busy.value) return
+  const documentId = doc.value.id
+  busy.value = true
+  try {
+    await runUploads(documentId, captured.map((f) => ({ file: f })))
+  } finally {
+    busy.value = false
+  }
 }
 
 // Persisted, non-destructive image rotation, per file. The server bakes the rotation into the
@@ -253,33 +400,82 @@ function fileIcon(mime: string) {
   return 'pi pi-file'
 }
 
-function startRename(file: { id: string; name: string }) {
-  renamingId.value = file.id
-  renameValue.value = file.name
+// Open the original file in a new tab (the list's "double-click elsewhere" action and
+// the grid card / icon open link both route here).
+function openFile(file: { id: string }) {
+  window.open(getFileUrl(file.id), '_blank', 'noopener')
 }
 
-function cancelRename() {
-  renamingId.value = null
-  renameValue.value = ''
-}
-
-async function commitRename(fileId: string) {
-  const name = renameValue.value.trim()
-  if (!name) return cancelRename()
+// Commit an inline rename requested by the grid tile or the list. Both edit surfaces
+// funnel through here — the single write boundary — so a read-only document (or a mid-
+// edit permission flip to read-only) can never issue a rename, whatever opened the editor.
+async function renameFileTo(fileId: string, name: string) {
+  if (!doc.value?.writable) return
+  const trimmed = name.trim()
+  if (!trimmed) return
   try {
-    await renameFile(fileId, name)
+    await renameFile(fileId, trimmed)
     queryClient.invalidateQueries({ queryKey: ['document', doc.value?.id] })
     toast.add({ severity: 'success', summary: t('ui.file_renamed'), life: 2000 })
   } catch {
     toast.add({ severity: 'error', summary: t('ui.failed_rename_file'), life: 3000 })
-  } finally {
-    cancelRename()
   }
 }
 
-function confirmDelete(file: { id: string; name: string }) {
+// Grid-tile inline rename. The grid uses a compact per-card editor (the list has its own
+// in-cell editor); both funnel through renameFileTo for the real mutation.
+const gridRenamingId = ref<string | null>(null)
+const gridRenameValue = ref('')
+function startGridRename(file: { id: string; name: string | null }) {
+  if (!doc.value?.writable) return
+  gridRenamingId.value = file.id
+  // Empty-seed a null-name file so it is named from scratch and commit's trim() never sees null.
+  gridRenameValue.value = file.name ?? ''
+}
+function cancelGridRename() {
+  gridRenamingId.value = null
+  gridRenameValue.value = ''
+}
+function commitGridRename(fileId: string) {
+  if (gridRenamingId.value !== fileId) return
+  // Guard the commit too: a permission refetch to read-only WHILE the editor is open
+  // must not let Enter/blur fire the write.
+  if (!doc.value?.writable) return cancelGridRename()
+  const name = gridRenameValue.value.trim()
+  const original = doc.value?.files?.find((f) => f.id === fileId)?.name
+  if (name && name !== original) void renameFileTo(fileId, name)
+  cancelGridRename()
+}
+
+// Reference to the list so a failed reorder can be rolled back deterministically at the
+// component that owns the optimistic order (present only while the list view is mounted).
+const fileListRef = ref<InstanceType<typeof FileListTable> | null>(null)
+
+// Persist an explicit drag reorder (the only order-persisting action) via the existing
+// reorder endpoint. On success the refetch re-seeds the list from the authoritative
+// order (so it survives reload); on failure the list rolls back its optimistic order to
+// the last saved sequence and shows the not-saved indicator — never a false "saved".
+async function onReorderFiles(orderedIds: string[]) {
+  const documentId = doc.value?.id
+  if (!documentId) return
+  try {
+    await reorderFiles(documentId, orderedIds)
+    toast.add({ severity: 'success', summary: t('ui.file_view.reorder_saved'), life: 2000 })
+    // Release the list's in-flight lock so the drag re-enables promptly (before the
+    // refetch settles); the optimistic order already equals the persisted one.
+    fileListRef.value?.confirmReorder()
+    queryClient.invalidateQueries({ queryKey: ['document', documentId] })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.file_view.reorder_failed'), life: 3000 })
+    // Deterministic local rollback independent of the refetch (which may also fail).
+    fileListRef.value?.rollbackReorder()
+    queryClient.invalidateQueries({ queryKey: ['document', documentId] })
+  }
+}
+
+function confirmDelete(file: { id: string; name: string | null }) {
   confirmDanger({
-    message: t('ui.remove_file_confirm', { name: file.name }),
+    message: t('ui.remove_file_confirm', { name: displayName(file.name, t) }),
     header: t('ui.remove_file'),
     accept: async () => {
       try {
@@ -394,158 +590,228 @@ function confirmDelete(file: { id: string; name: string }) {
       </div>
     </div>
 
-    <!-- File previews -->
-    <div v-if="doc.files?.length" class="file-preview-grid">
-      <template v-for="file in doc.files" :key="file.id">
-        <div v-if="isImage(file.mimetype)" class="file-preview-card">
-          <div class="image-preview-stage">
-            <!-- No CSS transform: the served _web raster is already physically rotated by the
-                 server. The rotation only cache-busts the URL so the fresh raster loads. -->
-            <img
-              :src="getFileUrl(file.id, 'web', undefined, effectiveRotation(file))"
-              :alt="file.name"
-              loading="lazy"
-              class="rotatable-image"
-            />
-          </div>
-          <div v-if="doc.writable" class="image-preview-controls">
-            <Button
-              icon="pi pi-replay"
-              text
-              rounded
-              size="small"
-              severity="secondary"
-              :disabled="rotating[file.id]"
-              @click="rotateImageLeft(file)"
-              :aria-label="t('ui.rotate_left')"
-            />
-            <Button
-              icon="pi pi-refresh"
-              text
-              rounded
-              size="small"
-              severity="secondary"
-              :disabled="rotating[file.id]"
-              @click="rotateImageRight(file)"
-              :aria-label="t('ui.rotate_right')"
-            />
-          </div>
-          <div class="file-preview-label">{{ file.name }}</div>
-        </div>
-        <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
-          <PdfViewer
-            :src="getFileUrl(file.id)"
-            :initial-rotation="file.rotation ?? 0"
-            :persistable="doc.writable"
-            @rotate="(deg: number) => persistRotation(file, deg)"
-          />
-          <div class="file-preview-label">{{ file.name }}</div>
-        </div>
-      </template>
-    </div>
-
-    <!-- File list -->
-    <div v-if="doc.files?.length" class="file-list-section">
-      <h3>{{ t('ui.files_count', { count: doc.files.length }) }}</h3>
-      <div class="file-table">
-        <div v-for="file in doc.files" :key="file.id" class="file-row">
-          <i :class="fileIcon(file.mimetype)" class="file-type-icon" />
-
-          <!-- Name: either link or rename input -->
-          <div class="file-name-cell">
-            <template v-if="renamingId === file.id">
-              <InputText
-                v-model="renameValue"
-                size="small"
-                class="rename-input"
-                @keyup.enter="commitRename(file.id)"
-                @keyup.escape="cancelRename"
-                autofocus
-              />
-            </template>
-            <a v-else :href="getFileUrl(file.id)" target="_blank" class="file-link">
-              {{ file.name }}
-            </a>
-          </div>
-
-          <span class="file-mime">{{ file.mimetype }}</span>
-          <span class="file-size">{{ formatFileSize(file.size) }}</span>
-
-          <div class="file-actions">
-            <template v-if="renamingId === file.id">
-              <Button icon="pi pi-check" text rounded size="small" severity="success" @click="commitRename(file.id)" :aria-label="t('ui.confirm_rename')" />
-              <Button icon="pi pi-times" text rounded size="small" severity="secondary" @click="cancelRename" :aria-label="t('ui.cancel_rename')" />
-            </template>
-            <template v-else>
-              <Button
-                icon="pi pi-history"
-                text
-                rounded
-                size="small"
-                severity="secondary"
-                @click="showVersions(file)"
-                v-tooltip="t('ui.versions.title')"
-                :aria-label="t('ui.versions.title')"
-              />
-              <Button
-                icon="pi pi-pencil"
-                text
-                rounded
-                size="small"
-                severity="secondary"
-                @click="startRename(file)"
-                v-tooltip="t('rename')"
-                :aria-label="t('rename')"
-              />
-              <Button
-                icon="pi pi-trash"
-                text
-                rounded
-                size="small"
-                severity="danger"
-                @click="confirmDelete(file)"
-                v-tooltip="t('ui.remove_file')"
-                :aria-label="t('ui.remove_file')"
-              />
-            </template>
-          </div>
-        </div>
+    <!-- File view: one section with a grid⇄list toggle (grid default, per-user). -->
+    <div v-if="doc.files?.length" class="file-panel">
+      <div class="file-panel-header">
+        <h3>{{ t('ui.files_count', { count: doc.files.length }) }}</h3>
+        <SelectButton
+          :model-value="fileViewMode"
+          :options="fileViewOptions"
+          optionLabel="label"
+          optionValue="value"
+          dataKey="value"
+          :allowEmpty="false"
+          :aria-label="t('ui.file_view.toggle_label')"
+          class="file-view-toggle"
+          @update:model-value="(v: FileViewMode) => { if (v) fileViewMode = v }"
+        >
+          <template #option="{ option }">
+            <i :class="option.icon" aria-hidden="true" />
+            <span class="file-view-label">{{ option.label }}</span>
+          </template>
+        </SelectButton>
       </div>
+
+      <!-- GRID: rich previews. Images keep their persisted-rotation controls and the
+           PDF viewer is unchanged (preview DOM untouched); every other type gets an icon
+           card with an open link so nothing is hidden in the default view. Each tile also
+           carries the shared FileActionMenu, so the per-file action menu (and the
+           #file-extra mount point) is present in BOTH views. -->
+      <div v-if="fileViewMode === 'grid'" class="file-preview-grid">
+        <template v-for="file in doc.files" :key="file.id">
+          <div v-if="isImage(file.mimetype)" class="file-preview-card">
+            <div class="image-preview-stage">
+              <!-- No CSS transform: the served _web raster is already physically rotated by the
+                   server. The rotation only cache-busts the URL so the fresh raster loads. -->
+              <img
+                :src="getFileUrl(file.id, 'web', undefined, effectiveRotation(file))"
+                :alt="displayName(file.name, t)"
+                loading="lazy"
+                class="rotatable-image"
+              />
+            </div>
+            <div v-if="doc.writable" class="image-preview-controls">
+              <Button
+                icon="pi pi-replay"
+                text
+                rounded
+                size="small"
+                severity="secondary"
+                :disabled="rotating[file.id]"
+                @click="rotateImageLeft(file)"
+                :aria-label="t('ui.rotate_left')"
+              />
+              <Button
+                icon="pi pi-refresh"
+                text
+                rounded
+                size="small"
+                severity="secondary"
+                :disabled="rotating[file.id]"
+                @click="rotateImageRight(file)"
+                :aria-label="t('ui.rotate_right')"
+              />
+            </div>
+            <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+            <div class="file-card-actions">
+              <InputText
+                v-if="gridRenamingId === file.id"
+                v-model="gridRenameValue"
+                class="grid-rename-input"
+                size="small"
+                autofocus
+                @keyup.enter="commitGridRename(file.id)"
+                @keyup.escape="cancelGridRename"
+                @blur="commitGridRename(file.id)"
+              />
+              <FileActionMenu
+                v-else
+                :file="file"
+                :writable="doc.writable"
+                @versions="showVersions"
+                @rename="startGridRename"
+                @delete="confirmDelete"
+              >
+                <template #extra="s">
+                  <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
+                </template>
+              </FileActionMenu>
+            </div>
+          </div>
+          <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
+            <PdfViewer
+              :src="getFileUrl(file.id)"
+              :initial-rotation="file.rotation ?? 0"
+              :persistable="doc.writable"
+              @rotate="(deg: number) => persistRotation(file, deg)"
+            />
+            <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+            <div class="file-card-actions">
+              <InputText
+                v-if="gridRenamingId === file.id"
+                v-model="gridRenameValue"
+                class="grid-rename-input"
+                size="small"
+                autofocus
+                @keyup.enter="commitGridRename(file.id)"
+                @keyup.escape="cancelGridRename"
+                @blur="commitGridRename(file.id)"
+              />
+              <FileActionMenu
+                v-else
+                :file="file"
+                :writable="doc.writable"
+                @versions="showVersions"
+                @rename="startGridRename"
+                @delete="confirmDelete"
+              >
+                <template #extra="s">
+                  <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
+                </template>
+              </FileActionMenu>
+            </div>
+          </div>
+          <div v-else class="file-preview-card file-preview-generic">
+            <!-- The icon stage AND the filename label are one open link (a genuine href,
+                 keyboard-focusable) so the whole tile body opens the file — the action
+                 buttons below are separate, non-navigating targets. -->
+            <a
+              class="generic-open"
+              :href="getFileUrl(file.id)"
+              target="_blank"
+              rel="noopener"
+              :aria-label="t('ui.file_view.open_file', { name: displayName(file.name, t) })"
+            >
+              <div class="generic-preview-stage">
+                <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
+              </div>
+              <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+            </a>
+            <div class="file-card-actions">
+              <InputText
+                v-if="gridRenamingId === file.id"
+                v-model="gridRenameValue"
+                class="grid-rename-input"
+                size="small"
+                autofocus
+                @keyup.enter="commitGridRename(file.id)"
+                @keyup.escape="cancelGridRename"
+                @blur="commitGridRename(file.id)"
+              />
+              <FileActionMenu
+                v-else
+                :file="file"
+                :writable="doc.writable"
+                @versions="showVersions"
+                @rename="startGridRename"
+                @delete="confirmDelete"
+              >
+                <template #extra="s">
+                  <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
+                </template>
+              </FileActionMenu>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- LIST: enriched DataTable (optional columns, quick filter, inline rename,
+           drag-handle reorder, list virtualization). The same #file-extra mount point is
+           forwarded into each row's action menu. -->
+      <FileListTable
+        v-else
+        ref="fileListRef"
+        :files="doc.files"
+        :writable="doc.writable"
+        @open="openFile"
+        @rename="renameFileTo"
+        @delete="confirmDelete"
+        @versions="showVersions"
+        @reorder="onReorderFiles"
+      >
+        <template #file-extra="s">
+          <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
+        </template>
+      </FileListTable>
     </div>
 
-    <!-- Upload zone -->
-    <FileUpload
-      ref="fileUploadRef"
-      mode="advanced"
-      multiple
-      customUpload
-      auto
-      :showUploadButton="false"
-      :showCancelButton="false"
-      :disabled="uploading"
-      @uploader="handleUpload"
-      class="view-file-upload"
-    >
-      <template #empty>
-        <div class="file-upload-empty">
-          <i class="pi pi-cloud-upload" aria-hidden="true" />
-          <span v-if="uploading">{{ t('ui.uploading') }}</span>
-          <span v-else>{{ t('ui.drag_or_choose_upload') }}</span>
-        </div>
-      </template>
-    </FileUpload>
+    <!-- Upload + camera: write-only. A read-only viewer (share ACL / READ grant) must
+         see no add-file affordance. -->
+    <template v-if="doc.writable">
+      <!-- Upload zone -->
+      <FileUpload
+        ref="fileUploadRef"
+        mode="advanced"
+        multiple
+        customUpload
+        auto
+        :showUploadButton="false"
+        :showCancelButton="false"
+        :disabled="busy"
+        @uploader="handleUpload"
+        class="view-file-upload"
+      >
+        <template #empty>
+          <div class="file-upload-empty">
+            <i class="pi pi-cloud-upload" aria-hidden="true" />
+            <span v-if="uploading">{{ t('ui.uploading') }}</span>
+            <span v-else>{{ t('ui.drag_or_choose_upload') }}</span>
+          </div>
+        </template>
+      </FileUpload>
 
-    <!-- Camera capture: opens the device camera on mobile; photos upload at once. -->
-    <CameraCaptureButton :disabled="uploading" @capture="onCameraCapture" />
+      <!-- Camera capture: opens the device camera on mobile; photos upload at once. -->
+      <CameraCaptureButton :disabled="busy" @capture="onCameraCapture" />
 
-    <!-- Real per-file upload progress. -->
-    <UploadProgressList v-if="uploading" :names="uploadingNames" :progress="uploadProgress" />
+      <!-- Real per-file upload progress. -->
+      <UploadProgressList v-if="uploading" :names="uploadingNames" :progress="uploadProgress" />
+    </template>
 
     <EmptyState
       v-if="!doc.files?.length"
       icon="pi pi-file"
       :message="t('ui.no_files')"
-      :action-label="t('ui.edit_to_add_files')"
+      :action-label="doc.writable ? t('ui.edit_to_add_files') : undefined"
       @action="$router.push({ name: 'document-edit', params: { id: doc.id } })"
     />
 
@@ -553,6 +819,15 @@ function confirmDelete(file: { id: string; name: string }) {
       v-model:visible="versionsDialogVisible"
       :file-id="versionsFileId"
       :file-name="versionsFileName"
+      :writable="doc.writable"
+    />
+
+    <!-- Upload-bar name-conflict prompt (#117.2). -->
+    <FileConflictDialog
+      v-model:visible="conflictDialogVisible"
+      :file-name="conflictFileName"
+      :remaining="conflictRemaining"
+      @decide="onConflictDecision"
     />
   </div>
 </template>
@@ -715,94 +990,63 @@ function confirmDelete(file: { id: string; name: string }) {
   white-space: nowrap;
 }
 
-.file-list-section {
+.file-panel {
   margin-top: 1rem;
 }
-.file-list-section h3 {
-  margin: 0 0 0.75rem;
+.file-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.file-panel-header h3 {
+  margin: 0;
   font-size: 1rem;
   font-weight: 600;
 }
-
-.file-table {
-  border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
-  overflow: hidden;
+.file-view-label {
+  margin-left: 0.35rem;
 }
 
-.file-row {
+/* Generic (non-image, non-PDF) grid card: a large type icon + the file name. The stage
+   is an open link; the action menu (with rename/delete/versions) sits below. */
+.file-preview-generic {
+  display: flex;
+  flex-direction: column;
+}
+.generic-open {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.generic-preview-stage {
+  height: 400px;
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--p-content-border-color);
-  transition: background 0.1s;
-}
-.file-row:last-child {
-  border-bottom: none;
-}
-.file-row:hover {
+  justify-content: center;
   background: var(--p-content-hover-background);
-}
-
-.file-type-icon {
   color: var(--p-text-muted-color);
-  font-size: 0.9rem;
-  flex-shrink: 0;
+  font-size: 3rem;
+}
+.file-preview-generic:hover {
+  border-color: var(--p-primary-color);
 }
 
-.file-name-cell {
-  flex: 1;
-  min-width: 0;
-}
-
-.file-link {
-  font-size: 0.875rem;
-  color: var(--p-text-color);
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: block;
-}
-.file-link:hover {
-  color: var(--teedy-brand);
-  text-decoration: underline;
-}
-
-.rename-input {
-  width: 100%;
-  font-size: 0.875rem;
-}
-
-.file-mime {
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-  flex-shrink: 0;
-  width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-size {
-  font-size: 0.75rem;
-  color: var(--p-text-muted-color);
-  flex-shrink: 0;
-  width: 70px;
-  text-align: right;
-}
-
-.file-actions {
+/* Per-tile action row: hosts the shared FileActionMenu (or the grid inline-rename
+   editor). Sits under the label so it never overlaps the preview/rotation controls. */
+.file-card-actions {
   display: flex;
-  gap: 0.125rem;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  padding: 0.125rem 0.375rem;
+  border-top: 1px solid var(--p-content-border-color);
+  min-height: 2.25rem;
 }
-.file-row:hover .file-actions,
-.file-row:focus-within .file-actions {
-  opacity: 1;
+.grid-rename-input {
+  width: 100%;
+  font-size: 0.8125rem;
 }
 
 .view-file-upload {
@@ -820,11 +1064,5 @@ function confirmDelete(file: { id: string; name: string }) {
 }
 .file-upload-empty i {
   font-size: 1.25rem;
-}
-
-@media (max-width: 600px) {
-  .file-mime {
-    display: none;
-  }
 }
 </style>

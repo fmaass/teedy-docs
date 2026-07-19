@@ -7,6 +7,7 @@ import { type DocumentDetail } from '../api/document'
 import { type Tag } from '../api/tag'
 import { languageLabel } from '../constants/languages'
 import { formatDate, formatFileSize } from '../utils/formatters'
+import { displayName } from '../utils/fileName'
 import { useResizablePanel, type ClampCfg } from '../composables/useResizablePanel'
 import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
@@ -196,7 +197,7 @@ const drawerStyle = computed(() =>
                     <img :src="getFileUrl(file.id, 'web', undefined, file.rotation)" alt="" loading="lazy" />
                   </div>
                   <div class="file-card-row">
-                    <i class="pi pi-file" /><span class="file-name">{{ file.name }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>
+                    <i class="pi pi-file" /><span class="file-name">{{ displayName(file.name, t) }}</span><span class="file-size">{{ formatFileSize(file.size) }}</span>
                     <a :href="getFileUrl(file.id)" target="_blank" class="file-dl-btn" :title="t('download')" :aria-label="t('download')"><i class="pi pi-download" /></a>
                   </div>
                 </div>

@@ -11,10 +11,14 @@ import ErrorState from './ErrorState.vue'
 import { getFileVersions, getFileUrl, type FileVersion } from '../api/file'
 import { formatDate } from '../utils/formatters'
 import { createGeneration } from '../utils/staleGuard'
+import { useVersionUpload } from '../composables/useVersionUpload'
 
 const props = defineProps<{
   fileId: string | null
   fileName?: string
+  // Writable gate: the upload-new-version footer action is offered only when the
+  // document is writable (a read-only viewer still sees the read-only history).
+  writable?: boolean
 }>()
 
 const visible = defineModel<boolean>('visible', { required: true })
@@ -64,6 +68,20 @@ watch(
 
 function versionUrl(version: FileVersion) {
   return getFileUrl(version.id)
+}
+
+// #117.1 — "Upload new version" from the versions dialog (same wiring as the per-file
+// action). The base is the CURRENT chain head (versions are sorted newest-first, so
+// versions[0] is the latest), which keeps repeat uploads in one open dialog correct
+// after the list refreshes. On success the version list reloads to show v(n+1).
+const { input: versionInput, uploading: uploadingVersion, pick: pickNewVersion, onPicked } =
+  useVersionUpload(() => {
+    if (props.fileId) load(props.fileId)
+  })
+
+function onVersionPicked(event: Event) {
+  const base = versions.value[0]?.id
+  if (base) return onPicked(event, base)
 }
 </script>
 
@@ -122,7 +140,25 @@ function versionUrl(version: FileVersion) {
     </template>
 
     <template #footer>
-      <Button :label="t('close')" text @click="visible = false" />
+      <div class="versions-footer">
+        <template v-if="writable && !loading && versions.length">
+          <Button
+            :label="t('ui.versions.upload_new')"
+            icon="pi pi-upload"
+            text
+            :loading="uploadingVersion"
+            @click="pickNewVersion"
+          />
+          <input
+            ref="versionInput"
+            type="file"
+            class="upload-version-input"
+            hidden
+            @change="onVersionPicked"
+          />
+        </template>
+        <Button :label="t('close')" text severity="secondary" @click="visible = false" />
+      </div>
     </template>
   </Dialog>
 </template>
@@ -149,5 +185,12 @@ function versionUrl(version: FileVersion) {
 .version-mime {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
+}
+.versions-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
 }
 </style>

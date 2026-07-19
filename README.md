@@ -81,7 +81,7 @@ A preconfigured Docker image (with OCR and media-conversion tools) listens on po
 `8080`. With no `DATABASE_URL`, Teedy uses an embedded H2 database — **for testing
 only**; use the PostgreSQL configuration in production.
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.6.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.6.5`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data` — mount a volume on it — and `DOCS_BASE_URL` must be
@@ -128,7 +128,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.6.0
+    image: ghcr.io/fmaass/teedy-docs:v3.6.5
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -187,7 +187,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.6.0
+    image: ghcr.io/fmaass/teedy-docs:v3.6.5
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -200,7 +200,11 @@ services:
       - ./docs/data:/data
 ```
 
-# Manual installation
+# Building from source
+
+The supported runtime for this fork is the Docker image (see **Installation** above). This section is
+for developers who want to build and run Teedy from source; the production WAR it produces is the same
+artifact baked into that image.
 
 ## Requirements
 
@@ -208,11 +212,18 @@ services:
 - Tesseract 4+ for OCR
 - ffmpeg for video thumbnails
 - mediainfo for video metadata extraction
-- A webapp server like [Jetty](http://eclipse.org/jetty/) or [Tomcat](http://tomcat.apache.org/)
 
-## Download
+The build produces a standard WAR that requires a servlet container to run. The release Docker image
+bundles Jetty (it downloads a standalone Jetty distribution and deploys `docs.war` into its `webapps`
+directory), so you don't need to provide one when running the image. For local development the
+`mvnw jetty:run` target below runs the app via the Jetty Maven plugin — no separate container needed
+during development.
 
-The latest release is downloadable here: <https://github.com/fmaass/teedy-docs/releases> in WAR format.
+## Releases
+
+Releases are published as multi-arch (amd64 + arm64) Docker images on GHCR:
+[`ghcr.io/fmaass/teedy-docs`](https://github.com/fmaass/teedy-docs/pkgs/container/teedy-docs). Pin a
+version tag (e.g. `ghcr.io/fmaass/teedy-docs:v3.6.5`) as shown in the **Installation** compose examples.
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
 ## How to build Teedy from the sources
@@ -244,7 +255,7 @@ From the `docs-web` directory:
 ../mvnw jetty:run
 ```
 
-### Build a .war to deploy to your servlet container
+### Build the production WAR
 
 From the root directory:
 
@@ -252,7 +263,9 @@ From the root directory:
 ./mvnw -Pprod -DskipTests clean install
 ```
 
-You will get your deployable WAR in the `docs-web/target` directory.
+You will get the production WAR (with the built Vue frontend) in the `docs-web/target` directory. This
+is the same artifact the release Docker image deploys into its bundled Jetty; the `Dockerfile` copies it
+in as `docs.war` under Jetty's `webapps` directory.
 
 ### End-to-end tests
 

@@ -14,9 +14,14 @@ import Tag from 'primevue/tag'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
 import { listSessions, deleteOtherSessions, type UserSession } from '../../api/user'
+import { exportAccountBlob } from '../../api/document'
+import { triggerBlobDownload } from '../../utils/download'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
-const { t } = useI18n()
+// `useI18n()` with no options binds to the GLOBAL scope, so `locale` is the effective active UI
+// locale (including a value server-seeded at login via the auth store) — the source of truth for
+// what is actually rendered, unlike localStorage which is only the explicit on-device choice.
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const { switchTheme } = useThemeSwitch()
@@ -44,7 +49,9 @@ const languages = [
 
 const themeOptions = themeNames.map((n) => ({ label: n, value: n }))
 
-const selectedLocale = ref(localStorage.getItem('teedy-locale') || 'en')
+// Seed the selector from the ACTIVE locale (may have been server-seeded), so the shown selection
+// matches what is rendered — not from localStorage, which is empty on a freshly-seeded device.
+const selectedLocale = ref(locale.value as string)
 const selectedTheme = ref(getStoredTheme())
 
 interface SelectChangeEvent {
@@ -98,7 +105,7 @@ function formatSessionDate(ts?: number): string {
 }
 
 onMounted(() => {
-  selectedLocale.value = localStorage.getItem('teedy-locale') || 'en'
+  selectedLocale.value = locale.value as string
   loadSessions()
 })
 
@@ -134,9 +141,22 @@ async function handleSave() {
 }
 
 async function handleLocaleChange(locale: string) {
+  // Apply on-device immediately and record the explicit choice (this localStorage write is what
+  // makes the local choice win over the server-seeded value on later logins — see stores/auth.ts).
   await setLocale(locale)
   localStorage.setItem('teedy-locale', locale)
   toast.add({ severity: 'success', summary: t('ui.account.language_updated'), life: 2000 })
+
+  // #82: persist the preference server-side so a fresh device / new login seeds this language.
+  // A server failure never blocks the local switch — the choice already applied and persisted
+  // on-device; we only warn that cross-device sync did not happen.
+  try {
+    const params = new URLSearchParams()
+    params.set('locale', locale)
+    await api.post('/user', params)
+  } catch {
+    toast.add({ severity: 'warn', summary: t('ui.account.language_sync_failed'), life: 3000 })
+  }
 }
 
 async function handleThemeChange(name: string) {
@@ -150,6 +170,39 @@ function onThemeSelect(event: SelectChangeEvent) {
 
 function onLocaleSelect(event: SelectChangeEvent) {
   handleLocaleChange(event.value)
+}
+
+// --- Export my documents (#89c) ---
+// Downloads a ZIP of the user's own documents + files via GET /document/export. It is an
+// EXPORT, not a backup (it omits ACLs/tags/comments/relations/users/config). The endpoint's
+// kill switch / size cap / concurrency limit come back as typed errors whose message we surface.
+const exporting = ref(false)
+
+async function readBlobErrorMessage(err: unknown): Promise<string | undefined> {
+  const data = (err as { response?: { data?: unknown } })?.response?.data
+  if (data instanceof Blob) {
+    try {
+      return JSON.parse(await data.text())?.message as string | undefined
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+async function handleExport() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const blob = await exportAccountBlob()
+    triggerBlobDownload(blob, 'teedy-export.zip')
+    toast.add({ severity: 'success', summary: t('ui.account.export.started'), life: 2000 })
+  } catch (e) {
+    const detail = await readBlobErrorMessage(e)
+    toast.add({ severity: 'error', summary: t('ui.account.export.failed'), detail, life: 5000 })
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 
@@ -248,6 +301,20 @@ function onLocaleSelect(event: SelectChangeEvent) {
         </template>
       </DataTable>
     </template></Card>
+
+    <!-- Export my documents (#89c) -->
+    <Card class="mt-3 export-card"><template #content>
+      <h3 class="section-title">{{ t('ui.account.export.title') }}</h3>
+      <p class="text-sm text-muted mb-3">{{ t('ui.account.export.description') }}</p>
+      <Button
+        :label="t('ui.account.export.button')"
+        icon="pi pi-download"
+        severity="secondary"
+        outlined
+        :loading="exporting"
+        @click="handleExport"
+      />
+    </template></Card>
   </div>
 </template>
 
@@ -268,6 +335,9 @@ function onLocaleSelect(event: SelectChangeEvent) {
   color: var(--p-text-color);
 }
 .sessions-card {
+  max-width: 720px;
+}
+.export-card {
   max-width: 720px;
 }
 .sessions-header {

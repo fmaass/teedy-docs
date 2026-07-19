@@ -1,5 +1,11 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.constant.AclType;
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.dao.AclDao;
+import com.sismics.docs.core.model.jpa.Acl;
+import com.sismics.docs.core.util.TransactionUtil;
+import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -449,6 +455,200 @@ public class TestAclResource extends BaseJerseyTest {
                         .param("title", "My super document 1")
                         .param("tags", tag1Id)
                         .param("language", "eng")), JsonObject.class);
+    }
+
+    /**
+     * #88: a tag's ACL revocation must never remove its final WRITE holder. The guard lives inside
+     * {@code AclDao.delete} (under the tag row lock) and runs AFTER the resource's creator base-ACL
+     * check, so the API-reachable state it protects (issue #122) is a NON-creator sole WRITE holder —
+     * which arises when the creator's account is deleted ({@code UserDao.delete} soft-deletes the
+     * creator's ACLs). We reproduce that by soft-deleting the creator's ACL rows, then assert the
+     * surviving co-owner cannot revoke its own last WRITE (mapped to the last-write client error).
+     */
+    @Test
+    public void testTagLastWriteLockout() {
+        // Creator (acllock1) and a co-owner (acllockco)
+        clientUtil.createUser("acllock1");
+        String acllock1Token = clientUtil.login("acllock1");
+        clientUtil.createUser("acllockco");
+        String acllockcoToken = clientUtil.login("acllockco");
+
+        // acllock1 creates a tag and grants acllockco READ + WRITE -> a full co-owner, two WRITE holders
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock1Token)
+                .put(Entity.form(new Form()
+                        .param("name", "LockoutTag")
+                        .param("color", "#00ff00")), JsonObject.class);
+        String tagId = json.getString("id");
+        grantAcl(acllock1Token, tagId, "READ", "acllockco");
+        grantAcl(acllock1Token, tagId, "WRITE", "acllockco");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock1Token)
+                .get(JsonObject.class);
+        String creatorId = writeTargetId(json.getJsonArray("acls"), "acllock1");
+        String coOwnerId = writeTargetId(json.getJsonArray("acls"), "acllockco");
+        Assertions.assertNotNull(creatorId, "creator must hold a WRITE ACL on a freshly created tag");
+        Assertions.assertNotNull(coOwnerId, "co-owner must hold a WRITE ACL after the grant");
+
+        // Mirror user deletion: soft-delete the creator's ACL rows, leaving acllockco as the
+        // NON-creator sole WRITE holder — the state the creator base-ACL check no longer covers.
+        softDeleteAcls(tagId, creatorId);
+
+        // The sole owner cannot revoke its own last WRITE — the guard refuses it.
+        Response response = target().path("/acl/" + tagId + "/WRITE/" + coOwnerId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllockcoToken)
+                .delete();
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        JsonObject error = response.readEntity(JsonObject.class);
+        Assertions.assertEquals("AclError", error.getString("type"));
+        Assertions.assertEquals("Cannot remove the last write permission on a tag", error.getString("message"));
+
+        // The WRITE ACL is still present
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllockcoToken)
+                .get(JsonObject.class);
+        Assertions.assertNotNull(writeTargetId(json.getJsonArray("acls"), "acllockco"),
+                "the last WRITE ACL must survive a lockout-guarded delete");
+    }
+
+    /**
+     * #88: the last-write guard must be precise — a WRITE grant that is NOT the last one is
+     * removable. Two owners hold WRITE; revoking one leaves the other, so the delete
+     * succeeds. A guard that blocked every WRITE removal would fail this.
+     */
+    @Test
+    public void testTagWriteRemovableWhenNotLast() {
+        // Login acllock2 (owner) and acllock3 (co-owner)
+        clientUtil.createUser("acllock2");
+        String acllock2Token = clientUtil.login("acllock2");
+        clientUtil.createUser("acllock3");
+        clientUtil.login("acllock3");
+
+        // acllock2 creates a tag, then grants acllock3 WRITE -> two WRITE holders
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock2Token)
+                .put(Entity.form(new Form()
+                        .param("name", "TwoOwnersTag")
+                        .param("color", "#0000ff")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock2Token)
+                .put(Entity.form(new Form()
+                        .param("source", tagId)
+                        .param("perm", "WRITE")
+                        .param("target", "acllock3")
+                        .param("type", "USER")), JsonObject.class);
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock2Token)
+                .get(JsonObject.class);
+        String coOwnerId = writeTargetId(json.getJsonArray("acls"), "acllock3");
+        Assertions.assertNotNull(coOwnerId, "co-owner must hold a WRITE ACL after the grant");
+
+        // Revoking the co-owner's WRITE succeeds — the creator still holds WRITE
+        target().path("/acl/" + tagId + "/WRITE/" + coOwnerId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock2Token)
+                .delete(JsonObject.class);
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, acllock2Token)
+                .get(JsonObject.class);
+        Assertions.assertNull(writeTargetId(json.getJsonArray("acls"), "acllock3"),
+                "the co-owner's WRITE ACL must be removed");
+        Assertions.assertNotNull(writeTargetId(json.getJsonArray("acls"), "acllock2"),
+                "the creator's WRITE ACL must remain");
+    }
+
+    /**
+     * #88 (R2): the last-write guard counts DISTINCT holders, not rows. A sole holder represented
+     * by two duplicate WRITE rows (a raced double-grant the API dedup normally prevents) must still
+     * trip the guard — {@code AclDao.delete} removes ALL of that holder's rows, so two rows are still
+     * one owner. A row-count guard would see 2, skip, and strand the tag at zero. The duplicate is
+     * inserted straight through the DAO; the creator's ACLs are soft-deleted so the reachable state
+     * (a NON-creator sole holder) is what the guard evaluates.
+     */
+    @Test
+    public void testTagLastWriteLockoutIgnoresDuplicateWriteRows() {
+        clientUtil.createUser("acldupw1");
+        String creatorToken = clientUtil.login("acldupw1");
+        clientUtil.createUser("acldupw2");
+        String coOwnerToken = clientUtil.login("acldupw2");
+
+        // Creator makes a tag and grants acldupw2 READ + WRITE.
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, creatorToken)
+                .put(Entity.form(new Form()
+                        .param("name", "DupWriteTag")
+                        .param("color", "#123456")), JsonObject.class);
+        String tagId = json.getString("id");
+        grantAcl(creatorToken, tagId, "READ", "acldupw2");
+        grantAcl(creatorToken, tagId, "WRITE", "acldupw2");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, creatorToken)
+                .get(JsonObject.class);
+        String creatorId = writeTargetId(json.getJsonArray("acls"), "acldupw1");
+        String coOwnerId = writeTargetId(json.getJsonArray("acls"), "acldupw2");
+        Assertions.assertNotNull(coOwnerId);
+
+        // Insert a DUPLICATE WRITE row for the co-owner (bypassing the API dedup) — two rows, one
+        // distinct holder — then soft-delete the creator's ACLs so acldupw2 is the sole holder.
+        TransactionUtil.handle(() -> {
+            Acl duplicate = new Acl();
+            duplicate.setSourceId(tagId);
+            duplicate.setPerm(PermType.WRITE);
+            duplicate.setType(AclType.USER);
+            duplicate.setTargetId(coOwnerId);
+            new AclDao().create(duplicate, coOwnerId);
+        });
+        softDeleteAcls(tagId, creatorId);
+
+        // Removing acldupw2's WRITE is refused: DISTINCT holders == 1 despite the two rows (a
+        // row-count guard would see 2, skip, and delete both rows).
+        Response response = target().path("/acl/" + tagId + "/WRITE/" + coOwnerId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, coOwnerToken)
+                .delete();
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+        JsonObject error = response.readEntity(JsonObject.class);
+        Assertions.assertEquals("AclError", error.getString("type"));
+        Assertions.assertEquals("Cannot remove the last write permission on a tag", error.getString("message"));
+    }
+
+    /** Grants an ACL on {@code sourceId} to {@code targetName} via the real API as the given principal. */
+    private void grantAcl(String token, String sourceId, String perm, String targetName) {
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("source", sourceId)
+                        .param("perm", perm)
+                        .param("target", targetName)
+                        .param("type", "USER")), JsonObject.class);
+    }
+
+    /** Soft-deletes every non-deleted ACL of {@code targetId} on {@code sourceId} (mirrors user deletion). */
+    private static void softDeleteAcls(String sourceId, String targetId) {
+        TransactionUtil.handle(() -> ThreadLocalContext.get().getEntityManager()
+                .createQuery("update Acl a set a.deleteDate = :now where a.sourceId = :src"
+                        + " and a.targetId = :target and a.deleteDate is null")
+                .setParameter("now", new Date())
+                .setParameter("src", sourceId)
+                .setParameter("target", targetId)
+                .executeUpdate());
+    }
+
+    /**
+     * Returns the target id of the WRITE ACL granted to {@code name}, or null if none.
+     */
+    private static String writeTargetId(JsonArray acls, String name) {
+        for (int i = 0; i < acls.size(); i++) {
+            JsonObject acl = acls.getJsonObject(i);
+            if ("WRITE".equals(acl.getString("perm")) && name.equals(acl.getString("name"))) {
+                return acl.getString("id");
+            }
+        }
+        return null;
     }
 
     /**

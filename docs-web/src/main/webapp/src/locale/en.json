@@ -203,6 +203,7 @@
     "uploading": "Uploading...",
     "upload_failed": "Upload failed",
     "files_uploaded": "Files uploaded",
+    "duplicate_content_hint": "This file is identical to \"{name}\" already in this document — you can add it as a new version instead.",
     "no_files": "No files attached to this document",
     "versions": {
       "title": "Version history",
@@ -215,7 +216,18 @@
       "view": "Open this version",
       "empty": "This file has no previous versions.",
       "load_failed": "Failed to load version history",
-      "loading": "Loading version history…"
+      "loading": "Loading version history…",
+      "upload_new": "Upload new version",
+      "uploaded_new": "New version uploaded",
+      "upload_new_failed": "Failed to upload new version",
+      "stale_base": "The file changed — reload the page and try again"
+    },
+    "conflict": {
+      "title": "File already exists",
+      "message": "A file named \"{name}\" already exists in this document. What would you like to do?",
+      "new_version": "Add as new version",
+      "keep_both": "Keep both",
+      "apply_to_all": "Apply to all {count} conflicting files"
     },
     "relations": {
       "title": "Related documents",
@@ -227,6 +239,58 @@
       "remove": "Remove relation",
       "remove_confirm": "Remove the link to \"{title}\"?",
       "remove_from_source": "Linked from \"{title}\" — remove it from that document"
+    },
+    "file_view": {
+      "grid": "Grid",
+      "list": "List",
+      "toggle_label": "File view mode",
+      "untitled": "Untitled file",
+      "open_file": "Open {name}",
+      "filter_placeholder": "Filter files…",
+      "filter_aria": "Filter files by name or type",
+      "columns": "Columns",
+      "col_name": "Name",
+      "col_created": "Created",
+      "col_size": "Size",
+      "col_uploader": "Uploader",
+      "order_custom": "Custom order",
+      "order_custom_hint": "Drag the handle to reorder; the order is saved.",
+      "order_sorted": "Sorted · not saved",
+      "order_sorted_hint": "Sorting is temporary — drag to set a saved order.",
+      "order_failed": "Order not saved",
+      "order_failed_hint": "The new order could not be saved and was reverted. Try again.",
+      "no_matches": "No files match the filter",
+      "reorder_saved": "File order saved",
+      "reorder_failed": "Failed to save file order"
+    },
+    "pdf_organizer": {
+      "edit_pages": "Edit pages",
+      "title": "Edit pages",
+      "title_named": "Edit pages — {name}",
+      "loading": "Loading pages…",
+      "load_failed": "This PDF could not be opened for editing.",
+      "empty_hint": "A PDF must keep at least one page — add one back before saving.",
+      "drag_hint": "Drag a page, or use its move buttons, to reorder. Rotate or remove each page with its controls.",
+      "page_label": "Page {n}",
+      "move_backward": "Move page {n} earlier",
+      "move_forward": "Move page {n} later",
+      "rotate_left": "Rotate page {n} left",
+      "rotate_right": "Rotate page {n} right",
+      "delete_page": "Remove page {n}",
+      "reset": "Reset changes",
+      "save": "Save as new version",
+      "saving": "Saving…",
+      "saved": "Pages saved as a new version",
+      "error": {
+        "stale": "This file changed since you opened it. Reload the document and try again.",
+        "too_many_pages": "The result has too many pages. Remove some pages and try again.",
+        "too_large": "This PDF is too large to edit.",
+        "signed": "This PDF is digitally signed, so its pages can't be changed.",
+        "encrypted": "This PDF is password-protected, so its pages can't be changed.",
+        "empty": "A PDF must keep at least one page.",
+        "busy": "The server is busy right now. Please try again in a moment.",
+        "generic": "The changes could not be saved. Please try again."
+      }
     },
     "edit_to_add_files": "Edit document to add files",
     "file_removed": "File removed",
@@ -350,6 +414,7 @@
       "password_updated": "Password updated",
       "failed_update_password": "Failed to update password",
       "language_updated": "Language updated",
+      "language_sync_failed": "Language changed on this device, but could not be saved to your account",
       "theme_switched": "Theme switched to {name}",
       "sessions": {
         "title": "Active sessions",
@@ -365,6 +430,13 @@
         "revoked": "Other sessions signed out",
         "revoke_failed": "Failed to sign out other sessions",
         "load_failed": "Failed to load sessions"
+      },
+      "export": {
+        "title": "Export",
+        "description": "Download a ZIP of your documents and their files. This exports your content only — it does not include sharing permissions, tags, comments, relations, users or settings.",
+        "button": "Export my documents",
+        "started": "Your export is downloading",
+        "failed": "Export failed"
       }
     },
     "default_password_banner": {
@@ -644,7 +716,15 @@
       "remove": "Remove permission",
       "remove_confirm": "Remove {perm} permission for {name}?",
       "failed_add": "Failed to add permission",
-      "failed_remove": "Failed to remove permission"
+      "failed_remove": "Failed to remove permission",
+      "owner_locked": "Owner permission (cannot be removed)"
+    },
+    "tag_acl": {
+      "title": "Permissions",
+      "description": "Users and groups you grant access to can see every document that carries this tag.",
+      "disclose_header": "Grant view access?",
+      "disclose_message": "Granting view access reveals all {count} document(s) that currently carry this tag, and any added later. Continue?",
+      "last_owner_locked": "Sole owner — grant another owner before removing this one"
     },
     "vocabulary": {
       "title": "Vocabularies",
@@ -923,6 +1003,15 @@
     "user": "User",
     "action": "Action",
     "no_activity": "No activity recorded",
+    "activity": {
+      "type": "Type",
+      "filter_label": "Filter by event type",
+      "filter_all_types": "All event types",
+      "type_create": "Created",
+      "type_update": "Updated",
+      "type_delete": "Deleted",
+      "type_authentication": "Authentication"
+    },
     "text_extracted": "Text extracted",
     "no_text": "No text",
     "reprocess": "Reprocess",
@@ -978,6 +1067,9 @@
       "selected_count": "{count} selected",
       "add_tag": "Add tag",
       "set_language": "Set language",
+      "download": "Download ZIP",
+      "download_empty": "The selected documents have no files to download",
+      "download_failed": "Could not download the selected documents",
       "delete": "Delete",
       "clear": "Clear selection",
       "choose_tag": "Choose a tag",

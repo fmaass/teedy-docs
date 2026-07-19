@@ -1772,6 +1772,66 @@
         }
       }
     },
+    "/file/{id}/pages": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Apply a page-operations manifest to a PDF file",
+        "operationId": "post_file_id_pages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "manifest"
+                ],
+                "properties": {
+                  "manifest": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid manifest, non-PDF, over-ceiling, signed, encrypted, unprocessable source, or storage quota exceeded"
+          },
+          "403": {
+            "description": "Write permission on the parent document is required"
+          },
+          "404": {
+            "description": "File not found"
+          },
+          "409": {
+            "description": "The base version was modified concurrently (stale base)"
+          },
+          "429": {
+            "description": "A page operation is already running for this file or the server is at capacity"
+          },
+          "500": {
+            "description": "A server-side processing failure (e.g. the source could not be opened or the scratch file could not be allocated)"
+          }
+        }
+      }
+    },
     "/file/{id}/process": {
       "post": {
         "tags": [
@@ -3306,6 +3366,10 @@
                   },
                   "email": {
                     "type": "string"
+                  },
+                  "locale": {
+                    "type": "string",
+                    "description": "Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale"
                   }
                 }
               }
@@ -3339,7 +3403,58 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Current user information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "anonymous": {
+                      "type": "boolean"
+                    },
+                    "username": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "storage_quota": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "storage_current": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "totp_enabled": {
+                      "type": "boolean"
+                    },
+                    "onboarding": {
+                      "type": "boolean"
+                    },
+                    "locale": {
+                      "type": "string",
+                      "description": "Preferred UI locale code; present only when the user has set one (#82)"
+                    },
+                    "base_functions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "is_default_password": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

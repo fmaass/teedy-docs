@@ -23,9 +23,11 @@ public class RestUtil {
      * If the file size it is not stored in the database the size can be wrong
      * because the encrypted file size is used.
      * @param fileDb a file
+     * @param creatorUsername the username of the file's current-version uploader (its {@code userId}
+     *        resolved to a name), or null when it cannot be resolved; emitted as {@code creator}
      * @return the JSON
      */
-    public static JsonObjectBuilder fileToJsonObjectBuilder(File fileDb) {
+    public static JsonObjectBuilder fileToJsonObjectBuilder(File fileDb, String creatorUsername) {
         try {
             long fileSize = fileDb.getSize().equals(File.UNKNOWN_SIZE) ? Files.size(DirectoryUtil.getStorageDirectory().resolve(fileDb.getId())) : fileDb.getSize();
             return Json.createObjectBuilder()
@@ -36,6 +38,7 @@ public class RestUtil {
                     .add("mimetype", fileDb.getMimeType())
                     .add("document_id", JsonUtil.nullable(fileDb.getDocumentId()))
                     .add("create_date", fileDb.getCreateDate().getTime())
+                    .add("creator", JsonUtil.nullable(creatorUsername))
                     .add("rotation", fileDb.getRotation())
                     .add("size", fileSize);
         } catch (IOException e) {

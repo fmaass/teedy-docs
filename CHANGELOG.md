@@ -16,6 +16,49 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.6.5] - 2026-07-19
+
+The whole rc.1–rc.8 candidate train plus a final ACL-hardening batch, released as one version. Five database migrations this release: db.version moves from 52 to 57. `dbupdate-053` adds the IMAP exactly-once import-receipt table and seeds the global storage-quota lock sentinel; `dbupdate-054` adds a per-user preferred-locale column so the interface language can be remembered server-side; `dbupdate-055` adds the credential-epoch columns to users, session tokens, and API keys, adds account-origin integrity constraints, and forces every existing credential to re-authenticate once on upgrade; `dbupdate-056` adds a covering index for the global storage-quota scan; `dbupdate-057` adds a nullable per-file content-MAC column and index for duplicate detection. All migrations are additive and portable across PostgreSQL 17 and H2, and each re-runs cleanly after a partial apply. The content-MAC column stays empty (and duplicate detection stays off) unless a deploy-time master key is supplied, so an existing install upgrades with no behaviour change.
+
+### Added
+- A grid-or-list file panel for a document's files, with a remembered per-user view, inline rename, and drag-to-reorder; the file list APIs now also return each file's creator and creation date (#58).
+- A PDF page organizer: reorder, rotate, and delete pages of a PDF and save the result as a new file version, through a server-side page-operations endpoint (#73).
+- A tag permissions and ownership editor: manage who can read and write a tag and hand a tag's ownership to another account, with a race-safe guard that stops a tag from being left with no owner or no editor (#88).
+- Document download and account export: download a multi-file document or a selection of documents as a single ZIP, and export all of your own documents from account settings as a backup archive (#89).
+- Upload a new file revision from the UI: replace a file with an updated copy that is stored as the next version of that file instead of an unrelated new file, and dropping a same-named file now offers add-as-new-version, keep-both, or cancel (#117).
+- Per-upload duplicate detection: an upload whose contents match an existing file in the same document is flagged as a likely duplicate. It is opt-in and privacy-preserving — it uses a per-document keyed MAC (never a raw hash), and it stays entirely off unless the operator supplies a `DOCS_DEDUP_MASTER_KEY` (or `DOCS_DEDUP_MASTER_KEY_FILE`) of at least 32 bytes at deploy time; a missing or too-weak key leaves uploads unchanged (#119).
+- A readable, filterable document activity log: each entry shows a localized event-type label and its date at the normal text size, and the tab can be filtered by event type (#113).
+- Tag colors now appear on the search filter chips, not only on tags already assigned to a document (#115).
+
+### Changed
+- The interface language is now remembered per user on the server, so it follows the account across devices and sessions instead of living only in the browser (#82).
+- ODT and DOCX to-PDF conversion now uses OpenPDF 2.0.2 in place of the transitive iText 2.1.7, removing CVE-2017-9096 (XXE in iText's XML parsers, unfixed in that lineage) with no change to the conversion behaviour (#105).
+- A hardened CI security and coverage gate stack: dependency and container-image CVE scanning, CodeQL static analysis against a governed baseline, coverage gates, and exact-digest image promotion so only the exact artifact that passed the gates is published — and the full real-browser regression suite is now required before every release tag (#76, #104, #105).
+
+### Fixed
+- Storage cleanup (`clean_storage`) is now correct under concurrent runs: the on-disk sweep runs entirely outside the database transaction, concurrent runs no longer double-count reclaimed files, and the global storage quota now counts the bytes still held by soft-deleted "ghost" users; a covering index keeps the global-quota scan fast while it holds its lock (#79, #99, #103, #106).
+- ACL and tag ownership stay correct when a user is deleted: ACL grants are serialized so a tag keeps at least one editor through a deletion, every tag the departing user owns is reassigned (not only the ones currently linked to a document), and ACL rows left pointing at a soft-deleted user are excluded from the tag and holder counts so an orphaned grant can no longer mask a sole-editor condition (#121, #122, #134, #135).
+- The PDF page-operations endpoint now reports infrastructure, quota, and error conditions with the correct HTTP status instead of a misleading one, and a page-operation new version keeps the document's OCR language instead of losing it (#124, #126, #129).
+- A file uploaded with no filename is now stored with an empty name instead of failing with a server error, and the file panel and API clients handle a null file name throughout (#131, #132, #136).
+- The LDAP settings form now populates its stored host, port, base DN, and filter even when LDAP is currently disabled, instead of appearing wiped (#83).
+- Inbox import survives a batch that contains several messages from the same sender address instead of aborting the sync (#116).
+- Clicking a tag in the sidebar now filters by that exact tag name when one matches, so the result no longer includes documents whose tags merely start with the clicked name and no longer exceeds the count shown next to the tag (#114).
+- Gallery thumbnails recover on their own from a transient load error instead of staying blank (#80).
+- Assorted mobile layout glitches: the tag-create and metadata buttons and the tag-overflow popover no longer collide or get clipped on narrow viewports (#86, #118).
+- A broad test-stabilization sweep removed the timing-related flakiness in the backend and end-to-end suites (deterministic per-test application-context lifecycle, quiesced async processing before observations, per-run test isolation, and de-flaked mobile e2e specs), so the suite no longer fails on races rather than real regressions (#81, #85, #94, #101, #130).
+
+### Security
+- CSRF protection infrastructure is now present. It runs in report-only mode by default: the filter fully evaluates every state-changing request and logs a structured would-block record when the proof is missing or wrong, but it never rejects a request unless enforcement is switched on with `DOCS_CSRF_ENFORCE=true` (environment variable) or the `docs.csrf_enforce` system property. See `docs/csrf.md`.
+- Authentication was substantially hardened. A per-user credential epoch stamps every session token and API key at creation and honours it only while it still matches the user's current epoch, so a single epoch bump revokes every credential that account holds at once; password recovery, an admin password reset, disabling an account, and deleting a user now all revoke sessions and API keys immediately instead of leaving them live (#96, #97, #108, #110). Authentication is partitioned by account origin: an OIDC- or LDAP-provisioned account can no longer sign in (or mint an API key) with a local password, closing a path where a recovered or admin-set password bypassed the identity provider and its MFA, and the TOTP-disable reauthentication now routes through the same origin-aware check (#98, #109, #111).
+- Password recovery, login throttling, and session revocation were fixed: the forgot-password endpoint could mint a recovery key for an arbitrary account (now a generic, timing-matched response whether or not the account exists); the login rate-limiter was unbounded and spoofable through `X-Forwarded-For` (now a bounded, per-account/per-network throttle behind a single trusted-proxy-aware address resolver); and a lost-password or admin reset now revokes every session while a self-service change rotates the current session only.
+- Concurrent uploads can no longer bypass the storage quota: the quota check and update were an unprotected read-modify-write that let two uploads both pass and undercount usage; reservations now take place under portable pessimistic locks in one canonical order before any file is written (#92).
+- IMAP inbox import is crash-safe and exactly-once: each message is imported in its own transaction with a durable receipt and the source message is only expunged after commit, so a crash or a single bad message can no longer permanently lose mail or roll back the whole batch, and network I/O no longer runs inside an open transaction (#90, #91).
+- A zip-slip path-traversal weakness in the document ZIP download was fixed.
+- The above resolve several privately-reported advisories, including an OIDC local-credential authentication bypass, the download zip-slip, missing session revocation on password reset, login rate-limiter spoofing, and issuance of a recovery token for an unauthenticated arbitrary account.
+
+### Documentation
+- New `docs/csrf.md` documenting the CSRF mechanism and the credential-precedence model; corrected README build and release instructions (#87); and a documented CI build/publish pipeline (`docs/ci-pipeline.md`).
+
 ## [3.6.0] - 2026-07-13
 
 Three database migrations this release: db.version moves from 49 to 52. `dbupdate-050` adds a case-insensitive unique index on active usernames, so verbatim OIDC provisioning relies on a database-level constraint instead of a race-prone application precheck (it aborts with a clear failure if duplicate active usernames already exist); `dbupdate-051` adds the storage-cleanup run-protocol table; `dbupdate-052` adds a single-run lock sentinel for storage cleanup. All portable across PostgreSQL 17 and H2 2.3.232.

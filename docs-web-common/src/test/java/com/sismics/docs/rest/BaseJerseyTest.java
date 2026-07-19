@@ -2,7 +2,11 @@ package com.sismics.docs.rest;
 
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.ServerSetup;
+import com.sismics.docs.core.model.context.AppContext;
+import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.rest.util.ClientUtil;
+import com.sismics.util.csrf.CsrfFilter;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.RequestContextFilter;
@@ -59,7 +63,14 @@ public abstract class BaseJerseyTest extends JerseyTest {
      * Test HTTP server.
      */
     private HttpServer httpServer;
-    
+
+    /**
+     * The deployed servlet context. Held so teardown can {@link WebappContext#undeploy()} it
+     * SYNCHRONOUSLY, which destroys the filters (and thus shuts the AppContext singleton down) before
+     * the next test starts — see {@link #tearDown()}.
+     */
+    private WebappContext webappContext;
+
     /**
      * Utility class for the REST client.
      */
@@ -159,17 +170,22 @@ public abstract class BaseJerseyTest extends JerseyTest {
         NetworkListener listener = new NetworkListener("grizzly", "localhost", 0);
         httpServer.addListener(listener);
         WebappContext context = new WebappContext("GrizzlyContext", "/docs");
+        webappContext = context;
         context.addListener("com.sismics.util.listener.IIOProviderContextListener");
+        // Mirror the production filter order (web.xml): request context, then the security filters in
+        // explicit-scheme-first precedence (api-key, token-cookie, trusted-header), then the CSRF filter.
         context.addFilter("requestContextFilter", RequestContextFilter.class)
-                .addMappingForUrlPatterns(null, "/*");
-        context.addFilter("tokenBasedSecurityFilter", TokenBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
         context.addFilter("apiKeyBasedSecurityFilter", ApiKeyBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
+        context.addFilter("tokenBasedSecurityFilter", TokenBasedSecurityFilter.class)
+                .addMappingForUrlPatterns(null, "/*");
         context.addFilter("headerBasedSecurityFilter", HeaderBasedSecurityFilter.class)
                 .addMappingForUrlPatterns(null, "/*");
+        context.addFilter("csrfFilter", CsrfFilter.class)
+                .addMappingForUrlPatterns(null, "/*");
         ServletRegistration reg = context.addServlet("jerseyServlet", ServletContainer.class);
-        reg.setInitParameter("jersey.config.server.provider.packages", "com.sismics.docs.rest.resource");
+        reg.setInitParameter("jersey.config.server.provider.packages", "com.sismics.docs.rest.resource,com.sismics.docs.rest.document");
         reg.setInitParameter("jersey.config.server.provider.classnames", "org.glassfish.jersey.media.multipart.MultiPartFeature");
         reg.setInitParameter("jersey.config.server.response.setStatusOverSendError", "true");
         reg.setLoadOnStartup(1);
@@ -183,6 +199,15 @@ public abstract class BaseJerseyTest extends JerseyTest {
 
         super.setUp();
         clientUtil = new ClientUtil(target());
+
+        // Force the AppContext to start up NOW, on the setUp thread, so its one-time startup side effect
+        // (the fresh RAM Lucene index) is established BEFORE the test body's baseline snapshots — never
+        // lazily by the body's first request. (registerFonts extracts its mono font once per JVM, so a
+        // start no longer leaks a temp, but a mid-body index swap still corrupts a test's observations.)
+        // Paired with the synchronous undeploy in tearDown, this pins one deterministic AppContext per test.
+        // Wrapped like the filter's own warm-up: AppContext.startUp() touches the DB, so it needs an
+        // entity manager / transaction on this thread.
+        TransactionUtil.handle(AppContext::getInstance);
 
         consumedEmailIndices.clear();
         greenMail = new GreenMail(ServerSetup.SMTP.dynamicPort());
@@ -284,14 +309,103 @@ public abstract class BaseJerseyTest extends JerseyTest {
         }
     }
 
+    /**
+     * Upper bound for {@link #awaitProcessingQuiescence()}. Generous so heavy content extraction
+     * (OCR, PDF/office rasterization) on a slow CI host finishes, yet the poll returns the instant the
+     * processing set drains, so a healthy run pays only milliseconds.
+     */
+    private static final long QUIESCENCE_TIMEOUT_MS = 30_000;
+
+    /**
+     * Block until asynchronous file processing has drained — no file remains marked in-flight in
+     * {@link FileUtil}'s process-wide processing set.
+     *
+     * <p>File content extraction and thumbnail/raster generation run <em>after</em> the triggering
+     * request has already returned to the client (the request commits, then the queued file-processing
+     * event is dispatched on a worker). That post-response work writes {@code sismics_docs} temp files
+     * into the shared system tmpdir and mutates the Lucene index — global resources that other tests
+     * observe. A test that snapshots those resources, and this base class's per-test teardown, must
+     * first let any in-flight processing finish, otherwise a straggler from this (or an immediately
+     * preceding) test races the observation and produces a spurious, order-dependent failure. Returns
+     * as soon as the set is empty; on a genuinely stuck processor it stops waiting after
+     * {@link #QUIESCENCE_TIMEOUT_MS} and lets the caller proceed (best-effort — never fails a test).</p>
+     */
+    protected static void awaitProcessingQuiescence() throws InterruptedException {
+        long deadline = System.nanoTime() + QUIESCENCE_TIMEOUT_MS * 1_000_000L;
+        while (FileUtil.getProcessingFileCount() != 0) {
+            if (System.nanoTime() >= deadline) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    /**
+     * Strict async-work barrier: block until ALL post-response asynchronous work driven by the
+     * {@link AppContext} has drained, then return — or FAIL the test if it has not drained within
+     * {@link #QUIESCENCE_TIMEOUT_MS}. This is the deterministic seam a test uses when a later assertion
+     * depends on async side effects being complete; unlike {@link #awaitProcessingQuiescence()} (a
+     * best-effort drain used in teardown, which silently returns on timeout), a timeout here is a
+     * FAILURE, so a genuinely stuck or never-delivered async task surfaces loudly instead of racing the
+     * assertion into an order-dependent flake.
+     *
+     * <p>It covers BOTH independent kinds of async work, because the two are tracked separately and
+     * neither alone is sufficient:</p>
+     * <ul>
+     *   <li>{@link FileUtil#getProcessingFileCount()} — files still marked in-flight for content
+     *       extraction / raster generation ({@code FileProcessingAsyncListener}).</li>
+     *   <li>{@link AppContext#getQueuedTaskCount()} — tasks QUEUED or ACTIVELY EXECUTING on the async
+     *       event-bus executors ({@code taskCount − completedTaskCount}). This is what catches the
+     *       independent subscribers that do NOT touch the file-processing marker — notably
+     *       {@code FileDeletedAsyncListener}, whose physical byte removal + index delete the
+     *       file-processing barrier never observes. In unit-test mode the event bus is synchronous
+     *       (no executor), so this term is 0 and the inline subscriber has already run by the time the
+     *       triggering request returns; under an async-bus configuration it blocks until the executor
+     *       is idle.</li>
+     * </ul>
+     *
+     * @param message Failure message if async work has not drained within the deadline
+     */
+    protected static void awaitAsyncQuiescence(String message) throws InterruptedException {
+        long deadline = System.nanoTime() + QUIESCENCE_TIMEOUT_MS * 1_000_000L;
+        while (true) {
+            if (FileUtil.getProcessingFileCount() == 0
+                    && AppContext.getInstance().getQueuedTaskCount() == 0) {
+                return;
+            }
+            if (System.nanoTime() >= deadline) {
+                Assertions.fail(message + " (async work did not drain within " + QUIESCENCE_TIMEOUT_MS + "ms)");
+                return;
+            }
+            Thread.sleep(50);
+        }
+    }
+
     @Override
     @AfterEach
     public void tearDown() throws Exception {
+        // Drain any in-flight post-response file processing BEFORE tearing the server down, so a
+        // straggler cannot cross into the next test and pollute its view of the shared tmpdir / index.
+        awaitProcessingQuiescence();
         super.tearDown();
         System.clearProperty("docs.header_authentication");
         System.clearProperty(HeaderBasedSecurityFilter.TRUSTED_PROXIES_PROPERTY);
         if (greenMail != null) {
             greenMail.stop();
+        }
+        // Undeploy the servlet context SYNCHRONOUSLY first: this destroys the filters (RequestContextFilter
+        // .destroy() -> AppContext.shutDown()) on THIS thread, before the next test begins. httpServer
+        // .shutdownNow() alone destroys the filters asynchronously, so the AppContext singleton could be
+        // nulled LATE — after the next test's warm-up had already re-created it — making that test's first
+        // request lazily re-run AppContext.startUp() mid-body. That late startup swaps in a fresh empty
+        // RAM Lucene index that drops a document indexed earlier in the same test — the shared root cause
+        // of the order-dependent observation flakes.
+        if (webappContext != null) {
+            try {
+                webappContext.undeploy();
+            } catch (RuntimeException e) {
+                // Best-effort: an undeploy failure must not mask the test outcome.
+            }
         }
         if (httpServer != null) {
             httpServer.shutdownNow();

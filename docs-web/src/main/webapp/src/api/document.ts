@@ -4,7 +4,9 @@ import type { RouteStepSummary } from './route'
 export interface DocumentListItem {
   id: string
   title: string
-  description: string
+  // Serialized via JsonUtil.nullable (DocumentResourceHelper / LegacyDocumentResponseMapper): a
+  // document with no description arrives as JSON null, so consumers must guard the null case.
+  description: string | null
   create_date: number
   update_date: number
   language: string
@@ -17,7 +19,9 @@ export interface DocumentListItem {
   shared: boolean
   active_route?: boolean
   current_step_name?: string | null
-  highlight?: string
+  // Serialized via JsonUtil.nullable (DocumentResource): present only on search results, and null
+  // when this row carries no highlight.
+  highlight?: string | null
   // True if the current user has favorited this document (additive; per-user private state).
   favorite?: boolean
 }
@@ -31,7 +35,8 @@ export interface DocumentListResponse {
 export interface Acl {
   id: string
   perm: 'READ' | 'WRITE'
-  name: string
+  // Serialized via JsonUtil.nullable (LegacyDocumentResponseMapper): null for an unnamed SHARE ACL.
+  name: string | null
   type: 'USER' | 'GROUP' | 'SHARE'
 }
 
@@ -41,26 +46,45 @@ export interface InheritedAcl {
   source_name: string
   source_color: string
   id: string
-  name: string
+  // Serialized via JsonUtil.nullable (LegacyDocumentResponseMapper): null for an unnamed SHARE ACL.
+  name: string | null
   type: 'USER' | 'GROUP' | 'SHARE'
 }
 
 export interface DocumentDetail extends DocumentListItem {
-  subject: string
-  identifier: string
-  publisher: string
-  format: string
-  source: string
-  type: string
-  coverage: string
-  rights: string
+  // Dublin-core metadata: each is serialized via JsonUtil.nullable
+  // (LegacyDocumentResponseMapper / ExportUtil) and arrives as JSON null when unset.
+  subject: string | null
+  identifier: string | null
+  publisher: string | null
+  format: string | null
+  source: string | null
+  type: string | null
+  coverage: string | null
+  rights: string | null
+  // The document creator is always present (added non-nullable server-side) — not on the
+  // JsonUtil.nullable surface.
   creator: string
   writable: boolean
   file_count: number
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
   metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
-  files?: Array<{ id: string; name: string; mimetype: string; size: number; rotation?: number }>
+  // `version` (zero-based), `create_date` (timestamp) and `creator` (current-version uploader's
+  // username) are served additively by /document/:id and /file/list; the enriched file view uses them.
+  files?: Array<{
+    id: string
+    // `name` and `creator` are serialized via JsonUtil.nullable (LegacyDocumentResponseMapper):
+    // a legacy/inbox file can arrive with a null name, and a file's uploader can be null. Render
+    // the name through the shared displayName() helper so a null never shows as a blank cell.
+    name: string | null
+    mimetype: string
+    size: number
+    rotation?: number
+    version: number
+    create_date: number
+    creator: string | null
+  }>
   acls?: Acl[]
   inherited_acls?: InheritedAcl[]
   // Current active route step, present only when a route is active on this document AND the caller
@@ -180,4 +204,17 @@ export function permanentDeleteDocument(id: string) {
 
 export function emptyTrash() {
   return api.delete<{ deleted_count: number }>('/document/trash')
+}
+
+/**
+ * Download the current user's account export as a ZIP Blob via GET /document/export. The
+ * archive contains the caller's own documents + their files + a manifest.json describing
+ * them. It is an EXPORT, not a backup: it omits sharing permissions (ACLs), tags, comments,
+ * relations, users and configuration. The endpoint enforces a kill switch, a document-count
+ * cap and a concurrency limit — a rejection comes back as a typed error (ExportDisabled /
+ * ExportTooLarge / ExportBusy) whose message the caller surfaces.
+ */
+export async function exportAccountBlob(): Promise<Blob> {
+  const res = await api.get('/document/export', { responseType: 'blob' })
+  return res.data as Blob
 }

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from './fixtures'
 import { resolve } from 'node:path'
-import { unique, login } from './helpers'
+import { unique, login, openFileList } from './helpers'
 
 const here = new URL('.', import.meta.url).pathname
 const sampleFile = resolve(here, 'fixtures/sample.txt')
@@ -54,7 +54,9 @@ test('deleting a user reassigns their document to a chosen target, whose file st
 
     // Attach a file to the document (advanced FileUpload on the document view).
     await departingPage.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(sampleFile)
-    await expect(departingPage.locator('.file-row', { hasText: 'sample.txt' })).toBeVisible()
+    await expect(departingPage.getByText('Files uploaded').first()).toBeVisible()
+    await openFileList(departingPage)
+    await expect(departingPage.locator('.file-list-section .file-name-text', { hasText: 'sample.txt' })).toBeVisible()
     await departingContext.close()
     departingContext = null
 

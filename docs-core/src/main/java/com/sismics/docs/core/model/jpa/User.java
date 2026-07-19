@@ -1,6 +1,7 @@
 package com.sismics.docs.core.model.jpa;
 
 import com.google.common.base.MoreObjects;
+import org.hibernate.annotations.DynamicUpdate;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -10,11 +11,20 @@ import java.util.Date;
 
 /**
  * User entity.
- * 
+ *
+ * <p>{@code @DynamicUpdate} makes Hibernate emit an UPDATE listing ONLY the columns whose values
+ * actually changed, instead of a full-row UPDATE that re-binds every column. This protects the
+ * storage-quota accounting: {@code USE_STORAGECURRENT_N} is mutated only by the locked reserve/reclaim
+ * paths, so a generic profile update (email/TOTP/OIDC binding/quota) that loaded the row earlier must
+ * NOT rewrite storageCurrent with its stale in-memory value and clobber a concurrent reservation. With
+ * a full-row UPDATE, removing the {@code setStorageCurrent} call in {@code UserDao.update} alone is not
+ * enough — the stale column value would still be bound; the dynamic update is what leaves it untouched.
+ *
  * @author jtremeaux
  */
 @Entity
 @Table(name = "T_USER")
+@DynamicUpdate
 public class User implements Loggable {
     /**
      * User ID.
@@ -108,12 +118,37 @@ public class User implements Loggable {
     private String oidcSubject;
 
     /**
+     * Preferred UI locale as an SPA locale code (e.g. "de", "zh_CN"). Nullable: null means "no
+     * server-side preference", so the SPA falls back to its on-device / default locale (#82).
+     */
+    @Column(name = "USE_LOCALE_C", length = 10)
+    private String locale;
+
+    /**
      * True if this account was provisioned by LDAP authentication. Used so the LDAP
      * handler never adopts a pre-existing INTERNAL account that happens to share a
      * username with an LDAP directory entry (account-hijack guard).
      */
     @Column(name = "USE_LDAP_B", nullable = false)
     private boolean ldap;
+
+    /**
+     * Credential epoch: a monotonic counter that is incremented whenever this account's credentials are
+     * globally invalidated (the increment itself is wired to credential-lifecycle events in a later phase;
+     * this phase ships only the mechanism). Every session token and API key is stamped at mint with the
+     * epoch that authorized it, and a credential is honored only while its stamp still equals this value —
+     * so one increment revokes every previously-issued credential at once.
+     *
+     * <p>Declared as a primitive {@code long} so a freshly-constructed {@code User} binds a concrete 0
+     * rather than a null: {@code @DynamicUpdate} aside, Hibernate would otherwise bind an explicit null
+     * for a wrapper and the NOT NULL column would reject it — the SQL default only applies when the column
+     * is omitted from the INSERT, which is not the case here. The sole writer of this column after insert
+     * is {@link com.sismics.docs.core.dao.UserDao#bumpCredentialEpoch(String)} (an atomic in-place +1); it
+     * is deliberately absent from {@code UserDao.update}'s field-copy list so a stale profile/OIDC update
+     * cannot lower it.</p>
+     */
+    @Column(name = "USE_CREDENTIALEPOCH_N", nullable = false)
+    private long credentialEpoch;
 
     public String getId() {
         return id;
@@ -264,12 +299,30 @@ public class User implements Loggable {
         return this;
     }
 
+    public String getLocale() {
+        return locale;
+    }
+
+    public User setLocale(String locale) {
+        this.locale = locale;
+        return this;
+    }
+
     public boolean isLdap() {
         return ldap;
     }
 
     public User setLdap(boolean ldap) {
         this.ldap = ldap;
+        return this;
+    }
+
+    public long getCredentialEpoch() {
+        return credentialEpoch;
+    }
+
+    public User setCredentialEpoch(long credentialEpoch) {
+        this.credentialEpoch = credentialEpoch;
         return this;
     }
 

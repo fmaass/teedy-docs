@@ -1,0 +1,4 @@
+#
+#Thu Jul 16 04:11:27 CEST 2026
+no\ classes\ that\ reside\ in\ a\ package\ 'com.sismics.docs.rest.resource..'\ should\ depend\ on\ classes\ that\ reside\ in\ a\ package\ 'com.sismics.docs.core.dao'=0f5c3c92-fde4-44ce-9747-6ce8d806fbc6
+no\ classes\ that\ reside\ in\ a\ package\ 'com.sismics.docs.rest.resource..'\ should\ depend\ on\ classes\ that\ reside\ in\ a\ package\ 'com.sismics.util.context..'=75ef7071-492d-4526-9486-06fa26c60dc2

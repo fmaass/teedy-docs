@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
@@ -197,5 +197,64 @@ describe('DocumentGallery — cards', () => {
     const [event, emittedDoc] = (emitted as unknown[][])[0]
     expect(event).toBeInstanceOf(Event)
     expect(emittedDoc).toMatchObject({ id: 'rc' })
+  })
+
+  // #80: a TRANSIENT thumbnail load error (server raster still settling under load) must NOT
+  // permanently hide the thumbnail. The card retries with a cache-busted src a couple of times
+  // before giving up — so a hiccup recovers on the next attempt instead of forcing a page reload.
+  describe('thumbnail transient-error recovery (#80)', () => {
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('retries with a cache-busted src on error instead of hiding the thumbnail', async () => {
+      const wrapper = await mountGallery([makeDoc({ id: 'a', file_id: 'file-r' })])
+      const img = wrapper.find('.card-thumb img')
+      expect(img.attributes('src')).toBe('/file/file-r/thumb') // first attempt: unmodified
+
+      // A transient error schedules a retry; the img is still in the DOM (not hidden).
+      await img.trigger('error')
+      vi.advanceTimersByTime(500)
+      await wrapper.vm.$nextTick()
+
+      const retried = wrapper.find('.card-thumb img')
+      expect(retried.exists()).toBe(true) // still present — NOT permanently hidden
+      // The src changed (cache-busting token) so the browser actually re-fetches.
+      expect(retried.attributes('src')).toContain('_thumbretry=1')
+      // A successful (re)load leaves the thumbnail visible: no icon fallback.
+      expect(wrapper.find('.card-thumb i.pi-file').exists()).toBe(false)
+    })
+
+    it('falls back to the file icon only after the retries are exhausted', async () => {
+      const wrapper = await mountGallery([makeDoc({ id: 'a', file_id: 'file-dead' })])
+
+      // Error → retry (attempt 1), error → retry (attempt 2), error → give up (MAX_THUMB_RETRIES=2).
+      for (let i = 0; i < 3; i++) {
+        const img = wrapper.find('.card-thumb img')
+        expect(img.exists()).toBe(true) // still retrying up to the bound
+        await img.trigger('error')
+        vi.advanceTimersByTime(500)
+        await wrapper.vm.$nextTick()
+      }
+
+      // Retries exhausted: the img is removed and the file-icon fallback renders.
+      expect(wrapper.find('.card-thumb img').exists()).toBe(false)
+      expect(wrapper.find('.card-thumb i.pi-file').exists()).toBe(true)
+    })
+
+    // BLOCKING-3 regression: a pending retry timer must be cancelled on unmount so its callback
+    // never fires after teardown and mutates stale reactive state (leaked-timer hazard).
+    it('cancels a pending retry timer on unmount (no fire-after-teardown)', async () => {
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout')
+      const wrapper = await mountGallery([makeDoc({ id: 'a', file_id: 'file-u' })])
+
+      // Trigger an error → schedules a retry timer, then unmount before it fires.
+      await wrapper.find('.card-thumb img').trigger('error')
+      wrapper.unmount()
+      expect(clearSpy).toHaveBeenCalled() // the pending timer was cancelled during teardown
+
+      // Advancing past the delay must not throw (the guarded callback was cleared).
+      expect(() => vi.advanceTimersByTime(500)).not.toThrow()
+      clearSpy.mockRestore()
+    })
   })
 })

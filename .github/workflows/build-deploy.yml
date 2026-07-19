@@ -8,6 +8,16 @@ on:
     branches: [main, "release/**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Serialize runs for the same ref. The final tag step also checks that the
+# checked-out commit is still the ref tip, because GitHub does not guarantee
+# concurrency queue ordering.
+concurrency:
+  group: build-publish-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -32,8 +42,21 @@ jobs:
       - name: Check db.version covers latest migration
         run: bash scripts/check-db-version.sh
 
+      # Determinism of the previously observation-timing-fragile tests is restored by the AppContext
+      # per-test lifecycle fix (one deterministic AppContext per test, no late teardown/recreation) —
+      # see #101/#102. No quarantine tag or retry is needed; the full suite gates cleanly on H2.
       - name: Run tests
-        run: ./mvnw --batch-mode test
+        run: ./mvnw --batch-mode verify
+
+      - name: Upload aggregate JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: jacoco-aggregate
+          path: |
+            docs-web/target/site/jacoco-aggregate
+            .github/baselines/jacoco.json
+          if-no-files-found: error
 
   test-postgres:
     # Run the docs-core suite (DbOpenHelper migration bootstrap + DAO/native-query tests)
@@ -223,14 +246,264 @@ jobs:
           name: docs-web.war
           path: docs-web/target/docs*.war
 
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          java-version: "25"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+        with:
+          languages: java, javascript-typescript
+
+      - name: Compile Java for CodeQL
+        run: ./mvnw --batch-mode -DskipTests compile
+
+      - name: Analyze and upload SARIF
+        uses: github/codeql-action/analyze@cdefb33c0f6224e58673d9004f47f7cb3e328b89 # v4.31.10
+        with:
+          output: ${{ runner.temp }}/codeql-sarif
+          upload: true
+          wait-for-processing: true
+
+      - name: Gate new high-severity CodeQL findings
+        run: python3 scripts/codeql-gate.py "${{ runner.temp }}/codeql-sarif"
+
+  trivy-fs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Validate and materialize Trivy exceptions
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-fs.ignore
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy fs exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
+          PY
+
+      - name: Scan repository dependencies
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace:ro" \
+            -v "${{ runner.temp }}/trivy-fs.ignore:/scan/trivy-fs.ignore:ro" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            fs --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /scan/trivy-fs.ignore /workspace
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+  candidate-image:
+    runs-on: ubuntu-latest
+    needs: [build]
+    outputs:
+      digest: ${{ steps.candidate.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Download war artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: docs-web.war
+          path: docs-web/target
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build candidate once (amd64 OCI archive)
+        id: candidate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          outputs: type=oci,dest=${{ runner.temp }}/candidate-image.oci.tar
+          tags: teedy-candidate:local
+
+      - name: Record candidate digest
+        env:
+          CANDIDATE_DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          test -n "${CANDIDATE_DIGEST}"
+          echo "${CANDIDATE_DIGEST}" > "${{ runner.temp }}/candidate-image.digest"
+          echo "Candidate amd64 digest: ${CANDIDATE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate OCI archive
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: candidate-image-oci
+          path: |
+            ${{ runner.temp }}/candidate-image.oci.tar
+            ${{ runner.temp }}/candidate-image.digest
+          if-no-files-found: error
+
+  trivy-image:
+    runs-on: ubuntu-latest
+    needs: [candidate-image]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Validate and materialize Trivy exceptions
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-image.ignore
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-image-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy image exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
+          PY
+
+      - name: Extract candidate OCI layout
+        run: |
+          mkdir "${{ runner.temp }}/candidate-image-oci"
+          tar -xf "${{ runner.temp }}/candidate-image.oci.tar" \
+            -C "${{ runner.temp }}/candidate-image-oci"
+          test -s "${{ runner.temp }}/candidate-image-oci/index.json"
+
+      - name: Scan candidate image
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan:ro" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/candidate-image-oci --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /scan/trivy-image.ignore
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+  sbom:
+    runs-on: ubuntu-latest
+    needs: [candidate-image]
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Extract candidate OCI layout
+        run: |
+          mkdir "${{ runner.temp }}/candidate-image-oci"
+          tar -xf "${{ runner.temp }}/candidate-image.oci.tar" \
+            -C "${{ runner.temp }}/candidate-image-oci"
+          test -s "${{ runner.temp }}/candidate-image-oci/index.json"
+
+      - name: Generate candidate CycloneDX SBOM
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/candidate-image-oci --format cyclonedx \
+            --output /scan/candidate-image.cdx.json --exit-code 0 --no-progress
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+      - name: Validate candidate CycloneDX SBOM
+        run: |
+          test -s "${{ runner.temp }}/candidate-image.cdx.json"
+          jq -e '.bomFormat == "CycloneDX"' "${{ runner.temp }}/candidate-image.cdx.json" > /dev/null
+
+      - name: Upload candidate SBOM
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: candidate-image-sbom
+          path: ${{ runner.temp }}/candidate-image.cdx.json
+          if-no-files-found: error
+
   e2e:
     # End-to-end tests against the REAL production Docker image (embedded H2,
     # default admin/admin) driven by Playwright/Chromium via Teedy's NATIVE form
     # login — NOT Authelia (Authelia only fronts production). Reuses the war
     # artifact produced by `build` so the image is not rebuilt from Maven; the
-    # image PUBLISH (docker job) gates on this passing.
+    # image PUBLISH (`publish` job) gates on this passing.
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -240,20 +513,18 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install e2e dependencies
         run: cd docs-web/src/main/webapp && npm ci
@@ -282,9 +553,9 @@ jobs:
     # the jammy container (scripts/e2e-run.sh E2E_VISUAL_ONLY=1) — the exact OS/font
     # environment the baselines match. A visual diff fails this job. It runs on every
     # event the `e2e` job does (a real default-on gate) and blocks image publish (the
-    # `docker` job needs it).
+    # `publish` job needs it).
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -294,20 +565,18 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install e2e dependencies
         run: cd docs-web/src/main/webapp && npm ci
@@ -340,14 +609,26 @@ jobs:
     # (overlap analysis: scripts/e2e-coverage-matrix.md, GitHub #76). No display is
     # needed: Chrome runs headless and the harness attaches over a websocket. A non-zero
     # harness exit fails this job. NOTE: this job is intentionally NON-GATING for now — it
-    # runs on every push but does NOT block image publish (the `docker` job does not depend
+    # runs on every push but does NOT block image publish (the `publish` job does not depend
     # on it yet). Once it has a track record of green runs on the real CI runner, promote it
-    # to a publish gate by adding `e2e-harness` to the `docker` job's `needs` (GitHub #76).
+    # to a publish gate by adding `e2e-harness` to the `publish` job's `needs` (GitHub #76).
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [candidate-image]
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      # Derive the harness version gate's expectation from the checked-out root pom.xml
+      # (same extraction idiom as scripts/check-version-consistency.sh) so the gate always
+      # matches whatever ref is building — never a hardcoded default (GitHub #76/#81).
+      - name: Derive expected app version from pom.xml
+        run: |
+          pom_version="$(grep -m1 -oE '<version>[^<]+</version>' pom.xml | sed -E 's/<\/?version>//g')"
+          if [ -z "${pom_version}" ]; then
+            echo "Could not read <version> from pom.xml" >&2
+            exit 1
+          fi
+          echo "E2E_EXPECT_VERSION=${pom_version}" >> "$GITHUB_ENV"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -357,20 +638,18 @@ jobs:
       - name: Install browser-harness
         run: python -m pip install --upgrade "browser-harness==0.1.4"
 
-      - name: Download war artifact
+      - name: Download candidate OCI archive
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
-          name: docs-web.war
-          path: docs-web/target
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
 
-      - name: Build e2e Docker image (amd64, load)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: teedy-e2e:local
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-e2e:local
+          echo "Loaded candidate ${{ needs.candidate-image.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
       # The runner's real Google Chrome (ubuntu-latest ships it preinstalled). Pinned via
       # setup-chrome for a stable, versioned binary — the harness attaches to it headless
@@ -395,119 +674,432 @@ jobs:
           path: e2e-artifacts/browser-harness
           retention-days: 7
 
-  docker:
+  smoke:
     runs-on: ubuntu-latest
-    # e2e-harness is intentionally NOT here yet — it runs non-gating until it has a
-    # green track record on the real CI runner, then gets promoted to a publish gate (#76).
+    # e2e-harness remains intentionally non-gating. Security jobs do not appear
+    # here, so release/** retains its independent build/e2e/runtime-smoke path.
     needs: [build, e2e, e2e-visual]
-    # Publish images only from publishable refs; never build/push on PRs or fix/** branches.
-    if: >-
-      github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/main' ||
-       startsWith(github.ref, 'refs/heads/release/') ||
-       startsWith(github.ref, 'refs/tags/v'))
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
-      # Publish policy (three-way branch/tag split):
-      #   - pre-release tag v*-* (name contains a hyphen: -rc.N / -beta.N / -alpha.N):
-      #                PUBLISH, single-arch amd64 ONLY, as a GitHub *pre-release*. Never moves
-      #                `latest`. Slow arm64 QEMU is skipped — RC checkpoints ship amd64 only.
-      #   - final tag v* (no hyphen): PUBLISH, multi-arch (amd64+arm64) — the distributable
-      #                release image. Does not move `latest` (matches prior behavior).
-      #   - main    : PUBLISH, multi-arch — the rolling `latest`.
-      #   - release/*, fix/*: smoke-boot ONLY (single-arch amd64), never published — RC images
-      #                are gated behind a version tag, and cross-arch emulation is skipped there.
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Load the exact candidate image
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/candidate-image.oci.tar docker-daemon:teedy-smoke-test:local
+          candidate_digest="$(cat "${{ runner.temp }}/candidate-image.digest")"
+          echo "Smoke candidate: ${candidate_digest}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke-test embedded-H2 real startup
+        run: bash scripts/docker-smoke-test.sh teedy-smoke-test:local
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [smoke, codeql, trivy-fs, trivy-image, sbom]
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      # This is the original three-way policy verbatim. The job-level condition
+      # means its non-publish branch is documented but release/**, fix/**, and PRs
+      # never enter a job possessing registry credentials.
       - name: Resolve publish policy
         id: cfg
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           if [[ "${GITHUB_REF}" == refs/tags/v* && "${tag}" == *-* ]]; then
             # Pre-release tag (vX.Y.Z-rc.N / -beta.N / -alpha.N): amd64-only, GitHub pre-release, no latest.
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "latest=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish=true"
+              echo "platforms=linux/amd64"
+              echo "prerelease=true"
+              echo "latest=false"
+            } >> "$GITHUB_OUTPUT"
           elif [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/heads/main ]]; then
             # Final release tag or main: multi-arch. `latest` only on main (unchanged).
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "platforms=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
-              echo "latest=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "latest=false" >> "$GITHUB_OUTPUT"
-            fi
+            {
+              echo "publish=true"
+              echo "platforms=linux/amd64,linux/arm64"
+              echo "prerelease=false"
+              if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+                echo "latest=true"
+              else
+                echo "latest=false"
+              fi
+            } >> "$GITHUB_OUTPUT"
           else
             # release/**, fix/**: smoke-boot only, never published.
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "platforms=linux/amd64" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "latest=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "publish=false"
+              echo "platforms=linux/amd64"
+              echo "prerelease=false"
+              echo "latest=false"
+            } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download war artifact
+      - name: Resolve immutable publication target
+        id: target
+        run: |
+          repository="${REGISTRY}/${IMAGE_NAME}"
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            tag="latest"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "repository=${repository}"
+            echo "tag=${tag}"
+            echo "ref=${repository}:${tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download candidate OCI archive
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-oci
+          path: ${{ runner.temp }}
+
+      - name: Download candidate SBOM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: candidate-image-sbom
+          path: ${{ runner.temp }}/sbom
+
+      - name: Download war artifact for the additional arm64 child
+        if: steps.cfg.outputs.prerelease == 'false'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: docs-web.war
           path: docs-web/target
 
       - name: Set up Docker Buildx
+        if: steps.cfg.outputs.prerelease == 'false'
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      # Runtime smoke test on EVERY publishable ref (incl. release/* RC pushes): build a
-      # single-arch amd64 image, load it, boot the container standalone (embedded H2 — no
-      # DATABASE_URL), and assert a real API route serves. Catches a green build that produces
-      # an image that cannot actually start (broken WAR, bad Jetty wiring, dangling
-      # ServiceLoader descriptor, missing runtime dep). No registry access needed.
-      - name: Build smoke-test image (amd64, load)
+      - name: Set up QEMU
+        if: steps.cfg.outputs.prerelease == 'false'
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Build additional arm64 child
+        if: steps.cfg.outputs.prerelease == 'false'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          platforms: linux/amd64
-          load: true
+          platforms: linux/arm64
           push: false
-          tags: teedy-smoke-test:local
+          provenance: false
+          outputs: type=oci,dest=${{ runner.temp }}/arm64-image.oci.tar
+          tags: teedy-arm64:local
 
-      - name: Smoke-test the container
-        run: bash scripts/docker-smoke-test.sh teedy-smoke-test:local
+      - name: Extract additional arm64 OCI layout
+        if: steps.cfg.outputs.prerelease == 'false'
+        run: |
+          mkdir "${{ runner.temp }}/arm64-image-oci"
+          tar -xf "${{ runner.temp }}/arm64-image.oci.tar" \
+            -C "${{ runner.temp }}/arm64-image-oci"
+          test -s "${{ runner.temp }}/arm64-image-oci/index.json"
 
-      # --- Publish (tags + main only) --------------------------------------------------
-      # QEMU/binfmt is only needed to cross-compile arm64, i.e. only when we publish.
-      - name: Set up QEMU
-        if: steps.cfg.outputs.publish == 'true'
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - name: Validate and materialize arm64 Trivy exceptions
+        if: steps.cfg.outputs.prerelease == 'false'
+        env:
+          TRIVY_IGNORE_FILE: ${{ runner.temp }}/trivy-image.ignore
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+
+          required = {
+              "id", "finding", "reason", "owner", "introduced", "expires",
+              "compensating_control", "removal_issue",
+          }
+          baseline = json.loads(Path(".github/baselines/trivy-image-exceptions.json").read_text())
+          if set(baseline.get("schema", {}).get("required", [])) != required:
+              raise SystemExit("Trivy exception file does not declare the required schema")
+          exceptions = baseline.get("exceptions")
+          if not isinstance(exceptions, list):
+              raise SystemExit("Trivy exceptions must be an array")
+          ids = []
+          for index, exception in enumerate(exceptions):
+              missing = required - set(exception)
+              if missing:
+                  raise SystemExit(f"exception {index} lacks fields: {sorted(missing)}")
+              if not exception["owner"] or not exception["expires"]:
+                  raise SystemExit(f"exception {exception['id']} lacks owner or expires")
+              try:
+                  expiry = datetime.date.fromisoformat(exception["expires"])
+              except ValueError as error:
+                  raise SystemExit(f"exception {exception['id']} has invalid expires date: {error}")
+              if expiry < datetime.date.today():
+                  raise SystemExit(f"exception {exception['id']} expired on {expiry}")
+              ids.append(exception["id"])
+          ignore_file = Path(os.environ["TRIVY_IGNORE_FILE"])
+          ignore_file.write_text("\n".join(ids) + ("\n" if ids else ""))
+          print(f"Materialized {len(ids)} governed Trivy arm64 exception(s) in {ignore_file}:")
+          print(ignore_file.read_text(), end="")
+          PY
+
+      - name: Scan additional arm64 child
+        if: steps.cfg.outputs.prerelease == 'false'
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan:ro" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/arm64-image-oci --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            --ignorefile /scan/trivy-image.ignore
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+      - name: Generate additional arm64 CycloneDX SBOM
+        if: steps.cfg.outputs.prerelease == 'false'
+        run: |
+          docker run --rm \
+            -v "${{ runner.temp }}:/scan" \
+            -v "trivy-cache:/root/.cache/trivy" \
+            aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --input /scan/arm64-image-oci --format cyclonedx \
+            --output /scan/arm64-image.cdx.json --exit-code 0 --no-progress
+          # aquasec/trivy 0.69.3, pinned by multi-platform image digest.
+
+      - name: Validate additional arm64 CycloneDX SBOM
+        if: steps.cfg.outputs.prerelease == 'false'
+        run: |
+          test -s "${{ runner.temp }}/arm64-image.cdx.json"
+          jq -e '.bomFormat == "CycloneDX"' "${{ runner.temp }}/arm64-image.cdx.json" > /dev/null
+
+      - name: Arm64 startup smoke on final tags
+        if: startsWith(github.ref, 'refs/tags/v') && steps.cfg.outputs.prerelease == 'false'
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          skopeo copy oci-archive:${{ runner.temp }}/arm64-image.oci.tar docker-daemon:teedy-arm64-smoke:local
+          bash scripts/docker-smoke-test.sh teedy-arm64-smoke:local
 
       - name: Log in to GHCR
-        if: steps.cfg.outputs.publish == 'true'
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: metadata
-        if: steps.cfg.outputs.publish == 'true'
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            latest=false
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ steps.cfg.outputs.latest == 'true' }}
+      - name: Install digest-preserving tools
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install skopeo
+          GOBIN="${RUNNER_TEMP}/bin" go install github.com/google/go-containerregistry/cmd/crane@v0.20.6
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
 
-      - name: Build and push (multi-arch)
-        if: steps.cfg.outputs.publish == 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: ${{ steps.cfg.outputs.platforms }}
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+      # Stage content under run-scoped, non-release refs. Signing and verification
+      # address repository digests; the human-facing tag is assigned only afterward.
+      - name: Stage exact archives and construct release digest
+        id: digests
+        env:
+          REPOSITORY: ${{ steps.target.outputs.repository }}
+          PRERELEASE: ${{ steps.cfg.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          candidate_digest="$(cat "${{ runner.temp }}/candidate-image.digest")"
+          stage_prefix="staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            amd_ref="${REPOSITORY}:${stage_prefix}-amd64"
+            skopeo copy --preserve-digests \
+              oci-archive:${{ runner.temp }}/candidate-image.oci.tar \
+              "docker://${amd_ref}"
+            amd64_digest="$(crane digest "${amd_ref}")"
+            test "${amd64_digest}" = "${candidate_digest}"
+            index_digest="${amd64_digest}"
+            arm64_digest=""
+          else
+            amd_ref="${REPOSITORY}:${stage_prefix}-amd64"
+            arm_ref="${REPOSITORY}:${stage_prefix}-arm64"
+            index_ref="${REPOSITORY}:${stage_prefix}-index"
+            skopeo copy --preserve-digests \
+              oci-archive:${{ runner.temp }}/candidate-image.oci.tar \
+              "docker://${amd_ref}"
+            skopeo copy --preserve-digests \
+              oci-archive:${{ runner.temp }}/arm64-image.oci.tar \
+              "docker://${arm_ref}"
+            amd64_digest="$(crane digest "${amd_ref}")"
+            arm64_digest="$(crane digest "${arm_ref}")"
+            test "${amd64_digest}" = "${candidate_digest}"
+            crane index append \
+              --manifest "${amd_ref}@${amd64_digest}" \
+              --manifest "${arm_ref}@${arm64_digest}" \
+              --tag "${index_ref}"
+            index_digest="$(crane digest "${index_ref}")"
+            staged_amd64="$(crane digest --platform linux/amd64 "${index_ref}")"
+            staged_arm64="$(crane digest --platform linux/arm64 "${index_ref}")"
+            test "${staged_amd64}" = "${candidate_digest}"
+            test "${staged_arm64}" = "${arm64_digest}"
+          fi
+          {
+            echo "index=${index_digest}"
+            echo "amd64=${amd64_digest}"
+            echo "arm64=${arm64_digest}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "Staged index/top-level digest: ${index_digest}"
+            echo "Staged amd64 child digest: ${amd64_digest}"
+            if [[ -n "${arm64_digest}" ]]; then
+              echo "Staged arm64 child digest: ${arm64_digest}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build provenance and index SBOM predicates
+        env:
+          INDEX_DIGEST: ${{ steps.digests.outputs.index }}
+          AMD64_DIGEST: ${{ steps.digests.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.digests.outputs.arm64 }}
+        run: |
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg revision "${GITHUB_SHA}" \
+            --arg workflow "${GITHUB_WORKFLOW_REF}" \
+            --arg index "${INDEX_DIGEST}" \
+            --arg amd64 "${AMD64_DIGEST}" \
+            --arg arm64 "${ARM64_DIGEST}" \
+            '{builder:{id:$workflow},buildType:"https://github.com/Attestations/GitHubActionsWorkflow@v1",invocation:{configSource:{uri:("git+https://github.com/"+$repository),digest:{sha1:$revision}}},metadata:{buildInvocationId:env.GITHUB_RUN_ID},materials:[],subjectDigests:{index:$index,amd64:$amd64,arm64:$arm64}}' \
+            > "${{ runner.temp }}/provenance.json"
+          if [[ -n "${ARM64_DIGEST}" ]]; then
+            jq -s '.[0] * {components: ((.[0].components // []) + (.[1].components // []) | unique_by(."bom-ref" // (.name + "@" + (.version // ""))))}' \
+              "${{ runner.temp }}/sbom/candidate-image.cdx.json" \
+              "${{ runner.temp }}/arm64-image.cdx.json" \
+              > "${{ runner.temp }}/index-image.cdx.json"
+          else
+            cp "${{ runner.temp }}/sbom/candidate-image.cdx.json" "${{ runner.temp }}/index-image.cdx.json"
+          fi
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Keyless sign and attest manifest and child digests
+        env:
+          REPOSITORY: ${{ steps.target.outputs.repository }}
+          INDEX_DIGEST: ${{ steps.digests.outputs.index }}
+          AMD64_DIGEST: ${{ steps.digests.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.digests.outputs.arm64 }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${REPOSITORY}@${INDEX_DIGEST}"
+          cosign attest --yes --type cyclonedx --predicate "${{ runner.temp }}/index-image.cdx.json" "${REPOSITORY}@${INDEX_DIGEST}"
+          cosign attest --yes --type slsaprovenance --predicate "${{ runner.temp }}/provenance.json" "${REPOSITORY}@${INDEX_DIGEST}"
+          if [[ "${AMD64_DIGEST}" != "${INDEX_DIGEST}" ]]; then
+            cosign sign --yes "${REPOSITORY}@${AMD64_DIGEST}"
+            cosign attest --yes --type cyclonedx --predicate "${{ runner.temp }}/sbom/candidate-image.cdx.json" "${REPOSITORY}@${AMD64_DIGEST}"
+            cosign attest --yes --type slsaprovenance --predicate "${{ runner.temp }}/provenance.json" "${REPOSITORY}@${AMD64_DIGEST}"
+          fi
+          if [[ -n "${ARM64_DIGEST}" ]]; then
+            cosign sign --yes "${REPOSITORY}@${ARM64_DIGEST}"
+            cosign attest --yes --type cyclonedx --predicate "${{ runner.temp }}/arm64-image.cdx.json" "${REPOSITORY}@${ARM64_DIGEST}"
+            cosign attest --yes --type slsaprovenance --predicate "${{ runner.temp }}/provenance.json" "${REPOSITORY}@${ARM64_DIGEST}"
+          fi
+
+      - name: Verify keyless signatures with identity constraints
+        env:
+          REPOSITORY: ${{ steps.target.outputs.repository }}
+          INDEX_DIGEST: ${{ steps.digests.outputs.index }}
+          AMD64_DIGEST: ${{ steps.digests.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.digests.outputs.arm64 }}
+        run: |
+          set -euo pipefail
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/build-deploy.yml@${GITHUB_REF}"
+          issuer="https://token.actions.githubusercontent.com"
+          cosign verify --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${INDEX_DIGEST}"
+          cosign verify-attestation --type cyclonedx --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${INDEX_DIGEST}"
+          cosign verify-attestation --type slsaprovenance --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${INDEX_DIGEST}"
+          if [[ "${AMD64_DIGEST}" != "${INDEX_DIGEST}" ]]; then
+            cosign verify --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${AMD64_DIGEST}"
+            cosign verify-attestation --type cyclonedx --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${AMD64_DIGEST}"
+            cosign verify-attestation --type slsaprovenance --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${AMD64_DIGEST}"
+          fi
+          if [[ -n "${ARM64_DIGEST}" ]]; then
+            cosign verify --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${ARM64_DIGEST}"
+            cosign verify-attestation --type cyclonedx --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${ARM64_DIGEST}"
+            cosign verify-attestation --type slsaprovenance --certificate-identity "${identity}" --certificate-oidc-issuer "${issuer}" "${REPOSITORY}@${ARM64_DIGEST}"
+          fi
+
+      # This is the first operation that exposes vX.Y.Z[-rc.N] or latest.
+      - name: Assign verified human-facing tag
+        env:
+          REPOSITORY: ${{ steps.target.outputs.repository }}
+          PUBLISH_TAG: ${{ steps.target.outputs.tag }}
+          TARGET: ${{ steps.target.outputs.ref }}
+          INDEX_DIGEST: ${{ steps.digests.outputs.index }}
+          AMD64_DIGEST: ${{ steps.digests.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.digests.outputs.arm64 }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin "${GITHUB_REF}"
+          built_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          current_ref_commit="$(git rev-parse "FETCH_HEAD^{commit}")"
+          test "${built_commit}" = "${current_ref_commit}"
+          crane tag "${REPOSITORY}@${INDEX_DIGEST}" "${PUBLISH_TAG}"
+          published_index="$(crane digest "${TARGET}")"
+          test "${published_index}" = "${INDEX_DIGEST}"
+          published_amd64="$(crane digest --platform linux/amd64 "${TARGET}")"
+          test "${published_amd64}" = "${AMD64_DIGEST}"
+          if [[ -n "${ARM64_DIGEST}" ]]; then
+            published_arm64="$(crane digest --platform linux/arm64 "${TARGET}")"
+            test "${published_arm64}" = "${ARM64_DIGEST}"
+          fi
+          {
+            echo "Published verified tag: ${TARGET}"
+            echo "Published index/top-level digest: ${published_index}"
+            echo "Published amd64 child digest: ${published_amd64}"
+            if [[ -n "${ARM64_DIGEST}" ]]; then
+              echo "Published arm64 child digest: ${published_arm64}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # OCI Distribution has no portable untag operation. Repoint every staging
+      # tag to one disposable empty manifest, then delete that manifest once; the
+      # verified release/index and child digests are never deleted.
+      - name: Always remove run-scoped staging tags
+        if: always()
+        env:
+          REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -u
+          stage_prefix="staging-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_ref="${REPOSITORY}:${stage_prefix}-cleanup"
+          cleanup_status=0
+          # Newer crane requires --new_layer even with --oci-empty-base; an empty
+          # tar keeps the manifest disposable and satisfies both crane generations.
+          empty_layer="$(mktemp)"
+          tar -cf "${empty_layer}" --files-from /dev/null
+          if ! crane append --oci-empty-base --new_layer "${empty_layer}" --new_tag "${cleanup_ref}"; then
+            echo "Could not create disposable cleanup manifest" >&2
+            exit 1
+          fi
+          for staging_tag in \
+            "${stage_prefix}-amd64" \
+            "${stage_prefix}-arm64" \
+            "${stage_prefix}-index"; do
+            if ! crane tag "${cleanup_ref}" "${staging_tag}"; then
+              echo "Could not repoint staging tag ${staging_tag}" >&2
+              cleanup_status=1
+            fi
+          done
+          # GHCR does not implement the OCI manifest DELETE operation (returns
+          # UNSUPPORTED), so removing the disposable manifest is best-effort: the
+          # repoint above already detached every staging tag from real digests,
+          # and what remains is one ~400-byte empty manifest per run.
+          if ! crane delete "${cleanup_ref}"; then
+            echo "::notice::Registry refused manifest deletion (expected on GHCR); run-scoped staging tags now point at an empty manifest."
+          fi
+          exit "${cleanup_status}"

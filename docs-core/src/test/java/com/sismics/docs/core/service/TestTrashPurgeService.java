@@ -38,10 +38,7 @@ public class TestTrashPurgeService extends BaseTransactionalTest {
         File file = createFile(owner, FILE_JPG_SIZE);
         file.setDocumentId(documentId);
         new FileDao().update(file);
-        UserDao userDao = new UserDao();
-        User seeded = userDao.getById(owner.getId());
-        seeded.setStorageCurrent(FILE_JPG_SIZE);
-        userDao.updateQuota(seeded);
+        seedStorageCurrent(owner.getId(), FILE_JPG_SIZE);
 
         // Trash the document and backdate its deletion far beyond any plausible retention window.
         // Trashing (DocumentDao.delete) soft-deletes the document AND its files at the same instant;

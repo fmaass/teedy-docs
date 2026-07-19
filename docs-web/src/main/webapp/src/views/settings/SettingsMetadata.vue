@@ -306,4 +306,14 @@ function confirmDelete(field: MetadataDefinition) {
 .w-full {
   width: 100%;
 }
+
+/* On a narrow viewport the heading + "Feld hinzufügen" button cannot share one row
+   without squeezing the button (its label wraps and clips at the right edge, crowding
+   the heading). Stack them so the button drops below the heading at its natural size. */
+@media (max-width: 640px) {
+  .section-header {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
 </style>

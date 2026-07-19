@@ -79,8 +79,66 @@ public class PasswordRecoveryDao {
     }
     
     /**
+     * Atomically consumes a single-use recovery key: marks it deleted only if it is still active (not yet
+     * consumed and inside the expiry window), and returns the username it belonged to only when THIS call
+     * won the consume.
+     *
+     * <p>The guard is a single conditional bulk update ({@code set deleteDate where id = :id and deleteDate
+     * is null and createDate > :cutoff}). Its affected-row count is the gate: exactly one row means this
+     * transaction consumed the key; zero means it was already consumed, expired, or never existed. Because
+     * the update takes a row lock, two concurrent password resets presenting the same key serialize — the
+     * first commits {@code deleteDate}, and the second re-evaluates the predicate against the committed row,
+     * matches nothing, and gets zero. No managed entity is loaded or mutated, so there is no pending change
+     * a later flush could smuggle through when the guard reports zero.</p>
+     *
+     * @param id Recovery key
+     * @return the username when the key was consumed by this call, otherwise null
+     */
+    public String consume(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Date cutoff = Date.from(Instant.now().minus(Constants.PASSWORD_RECOVERY_EXPIRATION_HOUR, ChronoUnit.HOURS));
+
+        // Read the owning username while the key is still active. A concurrent consumer may still win the
+        // guarded update below; the row count remains the sole authority.
+        String username;
+        try {
+            Query select = em.createQuery(
+                    "select r.username from PasswordRecovery r where r.id = :id and r.createDate > :cutoff and r.deleteDate is null");
+            select.setParameter("id", id);
+            select.setParameter("cutoff", cutoff);
+            username = (String) select.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+
+        Query update = em.createQuery(
+                "update PasswordRecovery r set r.deleteDate = :now where r.id = :id and r.deleteDate is null and r.createDate > :cutoff");
+        update.setParameter("now", new Date());
+        update.setParameter("id", id);
+        update.setParameter("cutoff", cutoff);
+        int affected = update.executeUpdate();
+        return affected == 1 ? username : null;
+    }
+
+    /**
+     * Performs the side-effect-free work equivalent of the {@link #create(PasswordRecovery)} round-trip, for
+     * the nonexistent-account lane of password recovery. It draws one recovery token (the same bounded
+     * {@link SecureRandom} work {@code create} does) and issues ONE read-only lookup that matches nothing.
+     *
+     * <p>This spends a comparable, BOUNDED database round-trip for a username that does not exist WITHOUT
+     * persisting a recovery row or soft-deleting anything. It replaces the former state-mutating dummy (a
+     * soft-delete UPDATE by username): that dummy amplified writes on an unauthenticated endpoint and could
+     * interleave a dummy delete with a concurrent real recovery-key creation. The work is constant per call
+     * (one token draw + one indexed lookup), so it cannot be driven into unbounded CPU by attacker input, and
+     * the caller's response is observably unchanged.</p>
+     */
+    public void equalizeNonexistentRecovery() {
+        getActiveById(generateToken());
+    }
+
+    /**
      * Deletes active password recovery by username.
-     * 
+     *
      * @param username Username
      */
     public void deleteActiveByLogin(String username) {

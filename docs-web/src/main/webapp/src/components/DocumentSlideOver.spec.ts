@@ -80,8 +80,6 @@ describe('DocumentSlideOver — long-title header layout (#68)', () => {
     // fixed, clickable target next to the ellipsised title.
     expect(closeBtn).not.toBeNull()
     expect(header?.contains(closeBtn as Node)).toBe(false)
-
-    document.body.innerHTML = ''
   })
 
   it('title is nested inside the shrinkable header slot, close button is outside it', async () => {
@@ -103,8 +101,6 @@ describe('DocumentSlideOver — long-title header layout (#68)', () => {
     // Close button is a direct sibling of the header slot, not nested inside it.
     expect(header.contains(closeBtn as Node)).toBe(false)
     expect(closeBtn?.parentElement).toBe(drawerHeader)
-
-    document.body.innerHTML = ''
   })
 })
 
@@ -131,8 +127,6 @@ describe('DocumentSlideOver — drag-resizable width (#68)', () => {
     expect(drawer.style.width).toBe('500px')
     expect(handle.style.right).toBe('500px')
     expect(handle.getAttribute('aria-valuenow')).toBe('500')
-
-    document.body.innerHTML = ''
   })
 
   it('keyboard resize widens the drawer (ArrowLeft on the inverted left-edge handle)', async () => {
@@ -148,8 +142,6 @@ describe('DocumentSlideOver — drag-resizable width (#68)', () => {
     await flushPromises()
     expect(drawer.style.width).toBe('516px')
     expect(handle.style.right).toBe('516px')
-
-    document.body.innerHTML = ''
   })
 
   it('persists the chosen width under the slide-over storage key', async () => {
@@ -159,6 +151,5 @@ describe('DocumentSlideOver — drag-resizable width (#68)', () => {
     handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
     await flushPromises()
     expect(localStorage.getItem('teedy_slide_over_width')).toBe('516')
-    document.body.innerHTML = ''
   })
 })

@@ -53,15 +53,23 @@ export interface FileListItem {
  * `onProgress` receives an integer 0..100 as the browser streams the body up,
  * so callers can render a real per-file progress bar. The percentage is derived
  * from axios's native onUploadProgress (loaded/total), not simulated.
+ *
+ * When `previousFileId` is the id of the document's current latest file, the
+ * backend supersedes that file and this upload becomes v(n+1) of the same version
+ * chain (FileResource.add). Omit it for a plain new-file upload. A stale base (the
+ * file was already replaced) comes back as HTTP 409, which the caller surfaces as
+ * "the file changed, reload".
  */
 export function uploadFile(
   documentId: string,
   file: File,
   onProgress?: (percent: number) => void,
+  previousFileId?: string,
 ) {
   const formData = new FormData()
   formData.append('id', documentId)
   formData.append('file', file)
+  if (previousFileId) formData.append('previousFileId', previousFileId)
   return api.put('/file', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: onProgress
@@ -101,6 +109,55 @@ export function setRotation(fileId: string, degrees: number) {
   const params = new URLSearchParams()
   params.set('rotation', String(degrees))
   return api.post(`/file/${fileId}/rotation`, params)
+}
+
+/**
+ * Persist a new file order for a document via POST /file/reorder (form-encoded).
+ * `orderedIds` is the FULL list of the document's file IDs in the desired order;
+ * the backend rewrites each file's `order` from its position in the list and
+ * requires WRITE permission on the document (a read-only viewer is rejected).
+ */
+export function reorderFiles(documentId: string, orderedIds: string[]) {
+  const params = new URLSearchParams()
+  params.set('id', documentId)
+  for (const id of orderedIds) params.append('order', id)
+  return api.post('/file/reorder', params)
+}
+
+/**
+ * One page in a page-operation manifest. `source` is the 0-based index of a page in the
+ * CURRENT PDF; the array order is the new page order and omitting a source deletes that
+ * page. `rotate` (optional) is the ABSOLUTE clockwise orientation in degrees, a multiple
+ * of 90 — omit it (or 0) to keep the page's current orientation.
+ */
+export interface PageOperation {
+  source: number
+  rotate?: number
+}
+
+/**
+ * The v1 page-operation manifest posted to POST /file/:id/pages. `baseVersion` is the
+ * expected version of the file being operated on (optimistic concurrency): the backend
+ * rejects a stale base so two editors cannot silently clobber each other.
+ */
+export interface PageManifest {
+  version: 1
+  baseVersion: number
+  pages: PageOperation[]
+}
+
+/**
+ * Apply a v1 page-operation manifest (reorder / delete / per-page rotate) to a PDF file,
+ * saving the result as a NEW version via POST /file/:id/pages (form-encoded, like the
+ * rotation/reorder endpoints). `fileId` is the current (latest) file id; the original is
+ * preserved as a prior version. The backend rejects a stale base (409), an over-ceiling /
+ * signed / encrypted / empty-output result (typed 4xx), or a saturated concurrency limit
+ * (429) — each surfaced to the caller via the error `type`/status.
+ */
+export function applyPageOperations(fileId: string, manifest: PageManifest) {
+  const params = new URLSearchParams()
+  params.set('manifest', JSON.stringify(manifest))
+  return api.post(`/file/${fileId}/pages`, params)
 }
 
 export function deleteFile(fileId: string) {
@@ -144,4 +201,26 @@ export async function getFileContent(fileId: string): Promise<string> {
     transformResponse: [(data: string) => data],
   })
   return res.data
+}
+
+/**
+ * Build the GET URL for a document's whole-file ZIP (server-side zip of every file of the
+ * document, GET /file/zip?id=<docId>). Used by the per-document Download affordance when a
+ * document has more than one file; a single-file document links straight to the file instead.
+ */
+export function getDocumentZipUrl(documentId: string): string {
+  return `api/file/zip?id=${encodeURIComponent(documentId)}`
+}
+
+/**
+ * POST an explicit list of file IDs to /file/zip and resolve the ZIP as a Blob. The backend
+ * zips exactly these files (it does not scope by document), so the caller assembles the id
+ * list — e.g. the union of several documents' files for a bulk download. Sent form-encoded
+ * (repeated `files` params) to match the existing @FormParam("files") endpoint.
+ */
+export async function zipFilesBlob(fileIds: string[]): Promise<Blob> {
+  const params = new URLSearchParams()
+  for (const id of fileIds) params.append('files', id)
+  const res = await api.post('/file/zip', params, { responseType: 'blob' })
+  return res.data as Blob
 }

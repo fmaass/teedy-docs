@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getCurrentUser, login as apiLogin, logout as apiLogout, type UserInfo } from '../api/user'
+import { setLocale } from '../i18n'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null)
@@ -18,13 +19,32 @@ export const useAuthStore = defineStore('auth', () => {
   )
 
   async function fetchCurrentUser() {
+    let fetched: UserInfo | null = null
     try {
       const { data } = await getCurrentUser()
       user.value = data
+      fetched = data
     } catch {
       user.value = null
     }
     initialized.value = true
+
+    // #82: seed the UI locale from the server-side preference ONLY when there is no explicit
+    // on-device choice. An explicit local choice (localStorage 'teedy-locale', written when the
+    // user picks a language) always wins and is never overwritten; the server value only seeds a
+    // fresh device / new login. Runs at initial routing and after login (both call this).
+    //
+    // DELIBERATELY outside the auth try/catch above: setLocale lazy-loads a translation chunk and
+    // can reject (network hiccup, missing chunk). That failure must NEVER clear the already-loaded
+    // user or flip the session to anonymous — an i18n load error is not an auth error. Its own
+    // try/catch swallows-and-logs and touches no auth state.
+    if (fetched?.locale && !localStorage.getItem('teedy-locale')) {
+      try {
+        await setLocale(fetched.locale)
+      } catch (e) {
+        console.warn('Failed to seed UI locale from the server preference; keeping the current locale', e)
+      }
+    }
   }
 
   // `code` is the optional TOTP 2FA validation code, forwarded to the API when the

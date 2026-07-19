@@ -127,9 +127,14 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request 
 
   // The documents list: rows carry tag chips; the left panel shows the filter tree.
   await page.goto('/#/document')
-  await expect(page.getByText('ACME invoice 2026-0042', { exact: true })).toBeVisible()
+  // These are readiness barriers before the shot, not uniqueness checks. This spec
+  // seeds fixed, realistic titles by design, and CI reruns the whole serial file on a
+  // retry — which re-seeds the same titles on top of the first attempt's, so the list
+  // legitimately holds several "ACME invoice 2026-0042" rows / "invoice" facet nodes.
+  // Match the first so a duplicate from a retry can't trip strict mode.
+  await expect(page.getByText('ACME invoice 2026-0042', { exact: true }).first()).toBeVisible()
   // Ensure the tag filter panel has rendered its tags before shooting.
-  await expect(page.locator('.left-panel').getByRole('button', { name: /invoice/ })).toBeVisible()
+  await expect(page.locator('.left-panel').getByRole('button', { name: /invoice/ }).first()).toBeVisible()
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'document-list-facets')
 
@@ -218,7 +223,10 @@ test('document list bulk-select bar and the trash view', async ({ page, request 
   await apiCreateDocument(request, { title: 'Bulk demo — payslip May' })
 
   await page.goto('/#/document')
-  await expect(page.getByText('Bulk demo — payslip March', { exact: true })).toBeVisible()
+  // Readiness barrier, not a uniqueness check: a serial-file retry / --repeat-each run
+  // re-seeds these fixed titles on the same H2, so the list legitimately holds several
+  // matching rows. Match the first so a duplicate can't trip strict mode (cf. :135).
+  await expect(page.getByText('Bulk demo — payslip March', { exact: true }).first()).toBeVisible()
 
   // Enter multi-select: tick two row checkboxes; the bulk-action bar appears.
   const rowA = page.getByRole('row', { name: /Bulk demo — payslip March/ })
@@ -236,8 +244,10 @@ test('document list bulk-select bar and the trash view', async ({ page, request 
   expect(delRes.ok()).toBeTruthy()
   await page.goto('/#/document/trash')
   await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible()
-  await expect(page.getByText('Bulk demo — payslip March', { exact: true })).toBeVisible()
-  await expect(page.getByRole('row', { name: /Bulk demo — payslip March/ }).locator('.p-tag')).toBeVisible()
+  // A retry / --repeat-each re-seed soft-deletes another "…payslip March", so trash can
+  // hold several matching rows — scope to the first row + its status tag to avoid strict mode.
+  await expect(page.getByText('Bulk demo — payslip March', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('row', { name: /Bulk demo — payslip March/ }).first().locator('.p-tag').first()).toBeVisible()
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'trash')
   void idB
@@ -252,7 +262,9 @@ test('saved-filters dropdown in the search bar', async ({ page, request }) => {
   await apiCreateDocument(request, { title: 'Saved-filter demo doc', tagIds: [tagId] })
 
   await page.goto('/#/document')
-  await expect(page.getByText('Saved-filter demo doc', { exact: true })).toBeVisible()
+  // Readiness barrier: a retry / --repeat-each re-seed adds more "Saved-filter demo doc"
+  // rows on the same H2, so match the first to stay clear of strict mode (cf. :135).
+  await expect(page.getByText('Saved-filter demo doc', { exact: true }).first()).toBeVisible()
 
   // Build a filter (include the tag) then save it by name.
   const tagNode = page.locator('.left-panel').getByRole('button', { name: new RegExp(tag) })
@@ -264,7 +276,17 @@ test('saved-filters dropdown in the search bar', async ({ page, request }) => {
   await page.getByRole('button', { name: 'Save filter' }).click()
   await page.locator('#saved-filter-name').fill('Unpaid invoices')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.getByText('Filter saved')).toBeVisible()
+  // DURABLE-STATE instead of the transient "Filter saved" toast: on a retry / --repeat-each
+  // re-seed the client-side name-exists guard (SavedFilters.vue doSave) blocks the duplicate
+  // save and leaves the dialog OPEN with no toast, so asserting the toast would flake. The
+  // durable end-state is identical either way — an "Unpaid invoices" saved filter exists.
+  // Close the save dialog (auto-closed on a fresh save, still open after a blocked one) so
+  // the modal can't cover the dropdown, then assert the persisted filter via the dropdown.
+  const saveFilterDialog = page.getByRole('dialog', { name: 'Save filter' })
+  if (await saveFilterDialog.isVisible()) {
+    await saveFilterDialog.getByRole('button', { name: 'Cancel', exact: true }).click().catch(() => {})
+  }
+  await expect(saveFilterDialog).toBeHidden()
 
   // Open the Saved-filters dropdown so both it and the "Save filter" button show.
   await page.getByRole('button', { name: 'Saved filters' }).click()
@@ -309,7 +331,12 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
   await shootViewport(page, 'workflow-editor')
 
   await dialog.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByText('Workflow saved')).toBeVisible()
+  // DURABLE-STATE instead of the transient "Workflow saved" toast: the editor dialog closes
+  // and the saved model appears as a row in the Workflows table. A retry / --repeat-each
+  // re-seed can persist several models named "Invoice Approval" (the editor allows duplicate
+  // names), so match the first to stay clear of strict mode.
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('row', { name: modelName }).first()).toBeVisible()
 
   // Start the route on a document and capture the mid-flight pending step.
   const docId = await apiCreateDocument(request, { title: 'ACME invoice 2026-0042 (approval)' })
@@ -317,11 +344,14 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Start a workflow' })).toBeVisible()
   await page.locator('.wf-start-select').click()
-  await page.getByRole('option', { name: modelName, exact: true }).click()
+  // A retry re-seed can leave several models named "Invoice Approval"; any is a valid
+  // one to start, so pick the first rather than tripping strict mode on the duplicate.
+  await page.getByRole('option', { name: modelName, exact: true }).first().click()
   await page.getByRole('button', { name: 'Start', exact: true }).click()
-  await expect(page.getByText('Workflow started')).toBeVisible()
-
-  // Mid-flight: the first (Accounting check / VALIDATE) step is the current step.
+  // DURABLE-STATE instead of the transient "Workflow started" toast: the route now renders
+  // the Current-step panel with the first (Accounting check / VALIDATE) step as the current
+  // step. This is a single document's workflow view (one current step), so no strict-mode
+  // concern here.
   await expect(page.getByRole('heading', { name: 'Current step' })).toBeVisible()
   await expect(page.locator('.wf-step-name')).toHaveText('Accounting check')
   await page.waitForLoadState('networkidle')
@@ -348,7 +378,14 @@ async function configureStep(
   await card.locator('.step-field').nth(1).locator('.p-select').click()
   await page.getByRole('option', { name: 'Group', exact: true }).click()
   const targetInput = card.locator('.step-field-target input')
-  await targetInput.fill(opts.groupName)
+  // The target is a PrimeVue AutoComplete that searches as you type
+  // (/api/acl/target/search, debounced). fill() sets the value in one shot and can
+  // race the controlled re-render, so the debounced search fires with an empty query
+  // (completeTargetSearch bails on an empty query) and no option ever renders — the
+  // option click then times out under CI load. Type key by key so the
+  // search-as-you-type listener fires deterministically for the full query.
+  await targetInput.click()
+  await targetInput.pressSequentially(opts.groupName)
   await page.getByRole('option', { name: opts.groupName, exact: true }).click()
   await expect(targetInput).toHaveValue(opts.groupName)
 }
@@ -369,9 +406,11 @@ test('settings vocabulary with doc-type entries', async ({ page, request }) => {
   // Select the seeded namespace.
   await page.locator('#vocabulary-name').click()
   await page.getByRole('option', { name: ns, exact: true }).click()
-  await expect(page.getByRole('cell', { name: 'Invoice', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'Contract', exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'Report', exact: true })).toBeVisible()
+  // A retry / --repeat-each re-seed appends duplicate entries (VocabularyResource does not
+  // dedupe), so each value can render several cells — match the first to avoid strict mode.
+  await expect(page.getByRole('cell', { name: 'Invoice', exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Contract', exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Report', exact: true }).first()).toBeVisible()
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'vocabulary')
 })
@@ -390,7 +429,9 @@ test('settings tag rules with a content-regex rule', async ({ page, request }) =
 
   await page.goto('/#/settings/tag-rules')
   await expect(page.getByRole('heading', { name: /Auto-tagging rules/i })).toBeVisible()
-  await expect(page.getByRole('row', { name: /invoice/ })).toBeVisible()
+  // A retry / --repeat-each re-seed adds another rule with the same "invoice" pattern, so
+  // several rows match — assert the first to stay clear of strict mode.
+  await expect(page.getByRole('row', { name: /invoice/ }).first()).toBeVisible()
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'tag-rules')
 })

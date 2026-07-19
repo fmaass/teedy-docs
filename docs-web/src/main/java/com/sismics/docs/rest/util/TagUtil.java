@@ -48,14 +48,18 @@ public class TagUtil {
         }
         boolean exactMode = isExactMatchMode();
         List<TagDto> tagDtoList = new ArrayList<>();
+        List<TagDto> exactTagDtoList = new ArrayList<>();
         String lowerName = name.toLowerCase();
         for (TagDto tagDto : allTagDtoList) {
             String tagName = tagDto.getName().toLowerCase();
             if (exactMode ? tagName.equals(lowerName) : tagName.startsWith(lowerName)) {
                 tagDtoList.add(tagDto);
             }
+            if (!exactMode && tagName.equals(lowerName)) {
+                exactTagDtoList.add(tagDto);
+            }
         }
-        return tagDtoList;
+        return exactTagDtoList.isEmpty() ? tagDtoList : exactTagDtoList;
     }
 
     private static boolean isExactMatchMode() {

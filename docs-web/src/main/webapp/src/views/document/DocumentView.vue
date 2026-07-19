@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
-import { getFileUrl } from '../../api/file'
+import { getFileUrl, getDocumentZipUrl } from '../../api/file'
 import { languageLabel } from '../../constants/languages'
 import Button from 'primevue/button'
 import Tabs from 'primevue/tabs'
@@ -44,6 +44,16 @@ const { data: doc, isLoading: loading, error } = useQuery({
 })
 
 provide(DocumentKey, doc)
+
+// Header Download target: a multi-file document downloads a ZIP of ALL its files
+// (GET /file/zip); a single-file document keeps the direct file download; a document with
+// no file offers nothing.
+const downloadHref = computed(() => {
+  const d = doc.value
+  if (!d) return undefined
+  if (d.file_count > 1) return getDocumentZipUrl(d.id)
+  return d.file_id ? getFileUrl(d.file_id) : undefined
+})
 
 watch(error, (err) => {
   if (err) {
@@ -142,9 +152,9 @@ function handleDelete() {
         <div class="doc-header-actions">
           <FavoriteStar :document-id="doc.id" :favorite="!!doc.favorite" large />
           <Button
-            v-if="doc.file_id"
+            v-if="downloadHref"
             :as="'a'"
-            :href="getFileUrl(doc.file_id)"
+            :href="downloadHref"
             target="_blank"
             icon="pi pi-download"
             :label="t('download')"

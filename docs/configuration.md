@@ -14,7 +14,7 @@ external URLs correctly, always set `DOCS_BASE_URL`.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DOCS_BASE_URL` | Public base URL; generated URLs use this as their base | — |
-| `DOCS_GLOBAL_QUOTA` | Default storage quota applied to all users | — |
+| `DOCS_GLOBAL_QUOTA` | Cluster-wide cap on total storage across all users; the running total counts physical bytes on disk, including files retained for soft-deleted (ghost) users after a reassign-delete. Also seeds the default per-user quota for auto-provisioned (OIDC) accounts | — |
 | `DOCS_MAX_UPLOAD_SIZE` | Maximum accepted upload size, in bytes | `524288000` (500 MB) |
 | `DOCS_BCRYPT_WORK` | Bcrypt work factor for password hashing (`4`–`31`); applied to new users and password changes. High values slow login/user creation | `10` |
 | `DOCS_SESSION_LIFETIME_DAYS` | Days before login sessions expire. Missing/malformed/non-positive values fall back to the default | `90` |

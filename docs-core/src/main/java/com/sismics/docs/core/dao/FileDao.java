@@ -9,11 +9,14 @@ import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -86,8 +89,28 @@ public class FileDao {
     }
     
     /**
+     * Returns the subset of the given file IDs whose row still PHYSICALLY exists in T_FILE, regardless
+     * of soft-delete state (no {@code deleteDate} filter). Only a committed hard-delete removes the row.
+     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimQuotaForDeletedDocumentFiles} to re-read,
+     * under the global quota lock, which of a purge's snapshotted files a concurrent purge has not already
+     * hard-deleted — so their quota is reclaimed exactly once.
+     *
+     * @param ids File IDs to test
+     * @return the subset of {@code ids} that still have a row
+     */
+    public Set<String> getExistingIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptySet();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<String> q = em.createQuery("select f.id from File f where f.id in :ids", String.class);
+        q.setParameter("ids", ids);
+        return new HashSet<>(q.getResultList());
+    }
+
+    /**
      * Returns an active file or null.
-     * 
+     *
      * @param id File ID
      * @return File
      */
@@ -120,27 +143,155 @@ public class FileDao {
     }
     
     /**
-     * Deletes a file.
-     * 
+     * Soft-deletes a file and, when it was the current latest version of a chain, promotes its
+     * immediately-prior active version to latest — under the same affected-row compare-and-swap the
+     * new-version path uses — so the chain never ends up with zero (or two) latest rows. Deleting a latest
+     * row alone would strip the file from {@link #getByDocumentId}, hiding it even though older versions
+     * remain; folding the repair into delete makes that invariant intrinsic to file deletion.
+     *
+     * <p>The gate is a conditional {@code UPDATE ... where latestVersion = true and deleteDate is null}: its
+     * affected-row count decides ownership of the promotion. A returned 1 means THIS delete observed the row
+     * as the current active latest (it wins the race against a concurrent new-version create demoting the
+     * same row); a returned 0 means the row was already not the current latest (a concurrent create demoted
+     * it, or a concurrent delete handled it), so there is nothing to promote and the row is simply
+     * soft-deleted. The target chain is re-read AFTER the gate — the caller's originally-fetched entity may
+     * be stale, since every DAO access flushes and clears the persistence context.</p>
+     *
      * @param id File ID
      * @param userId User ID
      */
     public void delete(String id, String userId) {
+        // CAS gate: clear the latest flag iff this row is still the current active latest. The bulk update
+        // acquires a row write lock, serializing this delete against a concurrent new-version create.
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-            
+        int wonLatest = em.createQuery("update File f set f.latestVersion = false" +
+                        " where f.id = :id and f.latestVersion = true and f.deleteDate is null")
+                .setParameter("id", id)
+                .executeUpdate();
+
+        // Soft-delete the row (+ audit). It is still active (the gate only cleared the latest flag), so this
+        // re-fetches it fresh and stamps the delete date.
+        softDelete(id, userId);
+
+        if (wonLatest == 0) {
+            // The row was not the current active latest, so the chain's latest lives elsewhere: nothing to
+            // promote.
+            return;
+        }
+
+        // This delete removed the current latest: promote the immediately-prior active version so the file
+        // stays visible with its remaining history.
+        promotePriorVersion(id);
+    }
+
+    /**
+     * Soft-deletes an active file row (stamp its delete date) and records the delete audit log. The raw
+     * primitive behind {@link #delete(String, String)}; kept private so file deletion always goes through
+     * the version-aware path.
+     *
+     * @param id File ID
+     * @param userId User ID
+     */
+    private void softDelete(String id, String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
         // Get the file
         TypedQuery<File> q = em.createQuery("select f from File f where f.id = :id and f.deleteDate is null", File.class);
         q.setParameter("id", id);
         File fileDb = q.getSingleResult();
-        
+
         // Delete the file
         Date dateNow = new Date();
         fileDb.setDeleteDate(dateNow);
-        
+
         // Create audit log
         AuditLogUtil.create(fileDb, AuditLogType.DELETE, userId);
     }
-    
+
+    /**
+     * Atomically demote the expected current-latest version of a chain as a compare-and-swap: clears the
+     * latest flag on the row IFF it is still the current active latest, and stamps the resolved version-chain
+     * id in the same statement (idempotent when already set). The affected-row count is the stale-base
+     * signal: a returned 0 means the named base is no longer the current latest (a concurrent writer already
+     * replaced or deleted it), and the caller must NOT insert a successor. The single {@code executeUpdate}
+     * takes a row write lock, so two concurrent replacements of the same base serialize and exactly one
+     * observes 1.
+     *
+     * @param expectedLatestId ID of the predecessor the caller believes is the current latest version
+     * @param versionId Resolved version-chain id to stamp on the predecessor (and share with the successor)
+     * @return the number of rows updated: 1 when the swap succeeded, 0 when the base was stale
+     */
+    public int demoteCurrentLatestVersion(String expectedLatestId, String versionId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f set f.latestVersion = false, f.versionId = :versionId" +
+                " where f.id = :id and f.latestVersion = true and f.deleteDate is null");
+        q.setParameter("versionId", versionId);
+        q.setParameter("id", expectedLatestId);
+        return q.executeUpdate();
+    }
+
+    /**
+     * Promote the immediately-prior active version of a just-deleted current-latest row to latest, retrying
+     * across predecessors a concurrent delete removes underneath us.
+     *
+     * <p>Deleting the current latest of {@code v0 -> v1 -> v2} promotes {@code v1}. But a concurrent
+     * {@code delete(v1)} (v1 is non-latest, so ITS side does not promote) may commit between this method
+     * selecting {@code v1} as the candidate and its promotion UPDATE — the UPDATE then affects 0 rows. Giving
+     * up there would leave the chain with ZERO latest rows. Instead, on a 0-affected promotion, re-select the
+     * next active version below the deleted one and retry. The active-version set only shrinks (each failed
+     * candidate is now committed-deleted), so this terminates; when no active version remains the chain is
+     * legitimately empty (the file was fully deleted) and there is nothing to promote.</p>
+     *
+     * @param deletedId ID of the row that was the current latest and has just been soft-deleted
+     */
+    private void promotePriorVersion(String deletedId) {
+        File deleted = ThreadLocalContext.get().getEntityManager()
+                .createQuery("select f from File f where f.id = :id", File.class)
+                .setParameter("id", deletedId)
+                .getSingleResult();
+        String versionId = deleted.getVersionId();
+        if (versionId == null) {
+            // Single-version file (no chain): nothing to promote.
+            return;
+        }
+        Integer deletedVersion = deleted.getVersion();
+        while (true) {
+            File candidate = getHighestActiveVersionBelow(versionId, deletedVersion);
+            if (candidate == null) {
+                // No active version remains: the chain is legitimately empty.
+                return;
+            }
+            int promoted = ThreadLocalContext.get().getEntityManager().createQuery(
+                            "update File f set f.latestVersion = true where f.id = :id and f.deleteDate is null")
+                    .setParameter("id", candidate.getId())
+                    .executeUpdate();
+            if (promoted > 0) {
+                return;
+            }
+            // The candidate was concurrently deleted between selection and promotion; re-select the
+            // next-lower active version and retry.
+        }
+    }
+
+    /**
+     * Find the highest-versioned still-active version below {@code version} within a chain, or null when
+     * none remains.
+     *
+     * @param versionId Version-chain id
+     * @param version Exclusive upper bound (the deleted row's version)
+     * @return the highest active version below {@code version}, or null
+     */
+    private File getHighestActiveVersionBelow(String versionId, Integer version) {
+        List<File> prior = ThreadLocalContext.get().getEntityManager().createQuery(
+                        "select f from File f where f.versionId = :versionId" +
+                        " and f.deleteDate is null and f.version < :version order by f.version desc", File.class)
+                .setParameter("versionId", versionId)
+                .setParameter("version", version)
+                .setMaxResults(1)
+                .getResultList();
+        return prior.isEmpty() ? null : prior.get(0);
+    }
+
     /**
      * Update a file.
      * 
@@ -155,14 +306,16 @@ public class FileDao {
         q.setParameter("id", file.getId());
         File fileDb = q.getSingleResult();
 
-        // Update the file
+        // Update the file. The version-chain identity columns (FIL_IDVERSION_C, FIL_LATESTVERSION_B) are
+        // deliberately NOT copied here: they may change ONLY through the compare-and-swap paths
+        // (new-version create and current-version delete). Copying them from a caller's possibly-stale
+        // entity would let a rename/processing update that loaded a row as latest, then paused across a
+        // concurrent version-create that demoted it, resurrect latestVersion=true and yield two latest rows.
         fileDb.setDocumentId(file.getDocumentId());
         fileDb.setName(file.getName());
         fileDb.setContent(file.getContent());
         fileDb.setOrder(file.getOrder());
         fileDb.setMimeType(file.getMimeType());
-        fileDb.setVersionId(file.getVersionId());
-        fileDb.setLatestVersion(file.isLatestVersion());
         fileDb.setSize(file.getSize());
         fileDb.setRotation(file.getRotation());
 
@@ -184,6 +337,87 @@ public class FileDao {
         } catch (NoResultException e) {
             return null;
         }
+    }
+
+    /**
+     * Locks and re-reads a single ACTIVE file row FOR UPDATE (PESSIMISTIC_WRITE) — the non-mutating
+     * re-validation hop of the #119 content-dedup no-op. The lock is on ONLY this one predecessor row and
+     * NO quota lock is ever taken on the no-op path, so it cannot invert the canonical GLOBAL->user->T_FILE
+     * order. Returns {@code null} when the row does not exist or was concurrently soft-deleted (its active
+     * filter matched nothing, so nothing is locked), letting the caller treat a superseded base as a
+     * version conflict rather than a spurious success.
+     *
+     * @param id File ID
+     * @return the locked, freshly re-read active file, or {@code null} if absent/soft-deleted
+     */
+    public File getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.id = :id and f.deleteDate is null", File.class);
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Read-only lookup of another ACTIVE latest file in the same document carrying an identical content MAC
+     * (#119) — the source of the advisory "identical to an existing file" upload hint. Returns the
+     * oldest-created match so the hint is stable, or {@code null} when no other current file matches. Never
+     * mutates and never locks; the returned id is advisory only (no server-side reparent/replace in v1).
+     *
+     * @param documentId Owning document id
+     * @param contentMac Lowercase-hex content MAC to match
+     * @param excludeFileId File id to exclude (the just-created file itself)
+     * @return an existing active latest file with the same content, or {@code null}
+     */
+    public File findActiveByDocumentIdAndMac(String documentId, String contentMac, String excludeFileId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.documentId = :documentId" +
+                " and f.contentMac = :contentMac and f.id <> :excludeFileId" +
+                " and f.latestVersion = true and f.deleteDate is null order by f.createDate asc", File.class);
+        q.setParameter("documentId", documentId);
+        q.setParameter("contentMac", contentMac);
+        q.setParameter("excludeFileId", excludeFileId);
+        q.setMaxResults(1);
+        List<File> result = q.getResultList();
+        return result.isEmpty() ? null : result.get(0);
+    }
+
+    /**
+     * A batch of ACTIVE, document-attached files whose content MAC is still null — the #119 backfill work
+     * set. Excludes orphans (no document to key a MAC on) and rows already stamped (a real MAC or a terminal
+     * skip marker), so the scan drains and never re-selects a processed row forever.
+     *
+     * @param limit Batch size
+     * @return up to {@code limit} null-MAC active document-attached files
+     */
+    public List<File> getActiveFilesWithNullMac(int limit) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f where f.contentMac is null" +
+                " and f.documentId is not null and f.deleteDate is null order by f.createDate asc", File.class);
+        q.setMaxResults(limit);
+        return q.getResultList();
+    }
+
+    /**
+     * Conditionally set a file's content MAC only while it is still null (#119 backfill). The {@code where
+     * FIL_CONTENTMAC_C is null} guard makes the write idempotent across instances: a second backfiller that
+     * already lost the race updates zero rows instead of overwriting.
+     *
+     * @param id File ID
+     * @param contentMac MAC (or terminal skip marker) to store
+     * @return number of rows updated (1 when it filled a null cell, 0 when already set)
+     */
+    public int setContentMacIfNull(String id, String contentMac) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f set f.contentMac = :contentMac" +
+                " where f.id = :id and f.contentMac is null");
+        q.setParameter("contentMac", contentMac);
+        q.setParameter("id", id);
+        return q.executeUpdate();
     }
     
     /**

@@ -11,7 +11,8 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { importEml, buildRelationsParams } from './document'
+import { importEml, buildRelationsParams, getDocument } from './document'
+import type { DocumentDetail } from './document'
 
 describe('importEml', () => {
   beforeEach(() => mock.put.mockClear())
@@ -30,6 +31,36 @@ describe('importEml', () => {
       'multipart/form-data',
     )
     expect(res.data.id).toBe('doc-9')
+  })
+})
+
+describe('getDocument file list typing', () => {
+  beforeEach(() => mock.get.mockClear())
+
+  it('surfaces each file\'s version, create_date and creator through the typed response', async () => {
+    // The additive fields the enriched file view reads. Typed as DocumentDetail so the field access
+    // below is only valid if the interface actually carries them.
+    const detail: Partial<DocumentDetail> = {
+      files: [
+        {
+          id: 'f1',
+          name: 'scan.pdf',
+          mimetype: 'application/pdf',
+          size: 1024,
+          rotation: 0,
+          version: 2,
+          create_date: 1_700_000_000_000,
+          creator: 'alice',
+        },
+      ],
+    }
+    mock.get.mockResolvedValueOnce({ data: detail })
+
+    const res = await getDocument('doc-1')
+    const file = (res.data.files ?? [])[0]
+    expect(file.version).toBe(2)
+    expect(file.create_date).toBe(1_700_000_000_000)
+    expect(file.creator).toBe('alice')
   })
 })
 

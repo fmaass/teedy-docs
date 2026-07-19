@@ -27,6 +27,8 @@ import DocumentGallery from '../../components/DocumentGallery.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 import BulkActionBar from '../../components/BulkActionBar.vue'
 import { updateDocument, deleteDocument } from '../../api/document'
+import { getFileList, zipFilesBlob } from '../../api/file'
+import { triggerBlobDownload } from '../../utils/download'
 import {
   runBulk,
   buildAddTagParams,
@@ -404,6 +406,7 @@ onBeforeUnmount(() => {
 
 const selectedDocs = ref<DocumentListItem[]>([])
 const bulkProgress = ref<[number, number] | null>(null)
+const bulkDownloading = ref(false)
 
 // Documents dropping out of the current page (paging, refetch) must not linger in
 // the selection — reconcile against what is actually rendered.
@@ -482,6 +485,30 @@ function bulkDelete() {
     header: t('ui.bulk.delete'),
     accept: () => runBulkOp((doc) => deleteDocument(doc.id)),
   })
+}
+
+// Bulk ZIP download (#89b). No by-document ZIP endpoint exists, so we CLIENT-SIDE UNION:
+// fetch each selected document's file list (one /file/list call per selected document) and
+// POST the union of every file ID to the existing POST /file/zip. This zips EVERY file of
+// every selected document, not just each document's main file.
+async function bulkDownload() {
+  const docs = [...selectedDocs.value]
+  if (!docs.length || bulkDownloading.value || bulkProgress.value) return
+  bulkDownloading.value = true
+  try {
+    const lists = await Promise.all(docs.map((doc) => getFileList(doc.id)))
+    const fileIds = [...new Set(lists.flat().map((f) => f.id))]
+    if (!fileIds.length) {
+      toast.add({ severity: 'warn', summary: t('ui.bulk.download_empty'), life: 3000 })
+      return
+    }
+    const blob = await zipFilesBlob(fileIds)
+    triggerBlobDownload(blob, 'documents.zip')
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.bulk.download_failed'), life: 4000 })
+  } finally {
+    bulkDownloading.value = false
+  }
 }
 </script>
 
@@ -562,8 +589,10 @@ function bulkDelete() {
         :count="selectedDocs.length"
         :tags="tf.allTags"
         :progress="bulkProgress"
+        :downloading="bulkDownloading"
         @add-tag="bulkAddTag"
         @set-language="bulkSetLanguage"
+        @download="bulkDownload"
         @delete="bulkDelete"
         @clear="clearSelection"
       />

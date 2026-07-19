@@ -44,6 +44,23 @@ public abstract class BaseTransactionalTest extends BaseTest {
         ThreadLocalContext.get().getEntityManager().getTransaction().rollback();
     }
 
+    /**
+     * Seeds a user's current storage usage DIRECTLY (a single-column native UPDATE), for test setup.
+     * Production code mutates storageCurrent only through the locked reserve/reclaim paths; the absolute
+     * setters were removed because a caller-supplied absolute value is unsafe under concurrency, so tests
+     * establish an initial value by writing the column directly rather than through a production API.
+     *
+     * @param userId User ID
+     * @param value New storage_current value
+     */
+    protected void seedStorageCurrent(String userId, long value) {
+        ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_USER set USE_STORAGECURRENT_N = :v where USE_ID_C = :id")
+                .setParameter("v", value)
+                .setParameter("id", userId)
+                .executeUpdate();
+    }
+
     protected User createUser(String userName) throws Exception {
         UserDao userDao = new UserDao();
         User user = new User();

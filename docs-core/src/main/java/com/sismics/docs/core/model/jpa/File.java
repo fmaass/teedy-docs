@@ -106,6 +106,16 @@ public class File implements Loggable {
     private Long size;
 
     /**
+     * Per-document keyed content MAC (#119): lowercase-hex HMAC-SHA-256 of the file's plaintext under a key
+     * derived from a deploy-time master secret and this file's document id. Nullable: it stays null for
+     * orphan uploads (no document to key on) and whenever content-hash duplicate detection is disabled (no
+     * master secret), so an old installation is completely unaffected. Never a raw hash — it is a keyed MAC,
+     * hence the {@code MAC} column name rather than {@code SHA256}.
+     */
+    @Column(name = "FIL_CONTENTMAC_C", length = 64)
+    private String contentMac;
+
+    /**
      * Private key to decrypt the file.
      * Not saved to database, of course.
      */
@@ -241,6 +251,15 @@ public class File implements Loggable {
 
     public File setSize(Long size) {
         this.size = size;
+        return this;
+    }
+
+    public String getContentMac() {
+        return contentMac;
+    }
+
+    public File setContentMac(String contentMac) {
+        this.contentMac = contentMac;
         return this;
     }
 

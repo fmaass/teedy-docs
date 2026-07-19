@@ -4,6 +4,8 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -23,9 +25,11 @@ import com.sismics.docs.core.dao.criteria.UserCriteria;
 import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
+import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.jpa.QueryParam;
 import com.sismics.docs.core.util.jpa.QueryUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
@@ -48,13 +52,40 @@ public class UserDao {
     private static final Logger log = LoggerFactory.getLogger(UserDao.class);
 
     /**
+     * A precomputed bcrypt hash of a value no submitted password can equal, used to spend an equivalent
+     * amount of hashing work when the username does not exist. Without it, a missing user returns before any
+     * bcrypt verify runs, and the response-time difference against a wrong-password (which does verify) leaks
+     * whether an account exists. It MUST be generated at the same work factor as real password hashing
+     * ({@link #resolveBcryptWork()}, default {@link Constants#DEFAULT_BCRYPT_WORK}) — a mismatched cost makes
+     * the unknown-account verify faster or slower than a real one and reopens the very timing oracle it
+     * exists to close.
+     */
+    private static final String DUMMY_PASSWORD_HASH =
+            BCrypt.withDefaults().hashToString(resolveBcryptWork(), "docs-nonexistent-account-timing-equalizer".toCharArray());
+
+    /**
+     * A non-empty probe verified against the dummy hash when the submitted password is missing/blank, so that
+     * an omitted password spends the same bcrypt work regardless of whether the account exists.
+     */
+    private static final char[] EMPTY_PASSWORD_PROBE = "docs-omitted-password-timing-equalizer".toCharArray();
+
+    /**
      * Authenticates an user.
-     * 
+     *
      * @param username User login
      * @param password User password
      * @return The authenticated user or null
      */
     public User authenticate(String username, String password) {
+        // A missing or blank password can never authenticate. Handle it uniformly BEFORE the user lookup, so
+        // an existing and a nonexistent account are indistinguishable for an omitted password: both spend one
+        // bcrypt verify against the dummy hash and return null. Previously a real username dereferenced the
+        // null password and 500'd while an unknown username 403'd — an enumeration oracle by response shape.
+        if (Strings.isNullOrEmpty(password)) {
+            BCrypt.verifyer().verify(EMPTY_PASSWORD_PROBE, DUMMY_PASSWORD_HASH);
+            return null;
+        }
+
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         Query q = em.createQuery("select u from User u where u.username = :username and u.deleteDate is null");
         q.setParameter("username", username);
@@ -66,10 +97,13 @@ public class UserDao {
             }
             return user;
         } catch (NoResultException e) {
+            // Spend comparable hashing work for a nonexistent account so timing does not reveal whether the
+            // username exists (constant-time-ish authentication). Password is guaranteed non-blank here.
+            BCrypt.verifyer().verify(password.toCharArray(), DUMMY_PASSWORD_HASH);
             return null;
         }
     }
-    
+
     /**
      * Creates a new user.
      * 
@@ -155,12 +189,27 @@ public class UserDao {
         q.setParameter("id", user.getId());
         User userDb = (User) q.getSingleResult();
 
-        // Update the user (except password)
+        // Update the user (except password). storageCurrent is DELIBERATELY not written here: it is
+        // running quota accounting owned solely by the locked reserve/reclaim paths
+        // (FileUtil.reserveStorage / reclaimUserQuota). Binding a stale caller-supplied storageCurrent
+        // from a generic profile/admin/TOTP/OIDC update would clobber a concurrent upload's reservation
+        // (combined with @DynamicUpdate on User, which keeps the untouched column out of the UPDATE).
         userDb.setEmail(user.getEmail());
         userDb.setStorageQuota(user.getStorageQuota());
-        userDb.setStorageCurrent(user.getStorageCurrent());
         userDb.setTotpKey(user.getTotpKey());
-        userDb.setDisableDate(user.getDisableDate());
+        // disableDate is DELIBERATELY not written here (same exclusion rationale as password/storageCurrent
+        // above): the account's enabled/disabled state is owned solely by the admin disable/enable transition,
+        // which decides and applies it under a FOR UPDATE row lock on the target
+        // (UserResource.update -> CredentialLifecycleUtil.lockActiveUser). A generic profile/self/TOTP/OIDC
+        // update carries a pre-read, possibly stale disableDate; writing it back here would let a racing
+        // self-update re-enable an account an admin just disabled, so this copy is removed and disableDate is
+        // never touched off the locked transition.
+        // #82 preferred UI locale. Every caller loads the User from the DB before mutating it, so a
+        // caller that does not touch the locale passes through the stored value unchanged; only the
+        // self-service POST /user sets a new one. Included in this explicit copy list because
+        // @DynamicUpdate keeps an unmodified column out of the UPDATE otherwise (same reason the
+        // other fields are copied here rather than relying on the managed entity).
+        userDb.setLocale(user.getLocale());
 
         // Create audit log
         AuditLogUtil.create(userDb, AuditLogType.UPDATE, userId);
@@ -169,44 +218,30 @@ public class UserDao {
     }
     
     /**
-     * Updates a user's quota.
-     * 
-     * @param user User to update
-     */
-    public void updateQuota(User user) {
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
-
-        // Get the user
-        Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
-        q.setParameter("id", user.getId());
-        User userDb = (User) q.getSingleResult();
-
-        // Update the user
-        userDb.setStorageCurrent(user.getStorageCurrent());
-    }
-
-    /**
-     * Sets a user's current storage usage by ID, REGARDLESS of the user's active state, and is a no-op
-     * if the user row does not exist. Unlike {@link #updateQuota(User)} — which filters on
-     * {@code deleteDate is null} and throws {@code NoResultException} for a soft-deleted user — this is
-     * safe to call for a RETAINED soft-deleted uploader (the #55 ghost key-holder, kept because a
-     * document was reassigned away from it). A storage-quota reclaim on such a uploader must never throw
-     * after destructive work; it credits the (still-present) row or skips cleanly if the row is gone.
-     * Used by {@link com.sismics.docs.core.util.FileUtil#reclaimUserQuota} so BOTH clean_storage and the
-     * retention purge are safe against a ghost uploader.
+     * Locks a user's row FOR UPDATE regardless of its delete state (dialect-portable
+     * {@code PESSIMISTIC_WRITE}), returning the freshly re-read managed instance so a caller can mutate
+     * running storage accounting on a value that reflects every committed reservation/reclaim — never a
+     * stale pre-lock copy. Unlike {@link #getActiveByIdForUpdate(String)} this does NOT filter on
+     * {@code deleteDate is null}, so it also locks a RETAINED soft-deleted uploader (the #55 ghost
+     * key-holder, kept because a document was reassigned away from it). Returns {@code null} if the row
+     * does not exist, so a reclaim after destructive work never throws — it credits the still-present
+     * row or skips cleanly. The canonical quota lock order is GLOBAL sentinel first, then this row.
      *
-     * @param userId User ID (any delete state)
-     * @param storageCurrent New storage_current value
+     * @param id User ID (any delete state)
+     * @return the locked, freshly re-read user, or {@code null} if the row is absent
      */
-    public void updateQuotaById(String userId, long storageCurrent) {
+    public User getByIdForUpdate(String id) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        User userDb = em.find(User.class, userId);
-        if (userDb == null) {
-            return;
+        Query q = em.createQuery("select u from User u where u.id = :id");
+        q.setParameter("id", id);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
         }
-        userDb.setStorageCurrent(storageCurrent);
     }
-    
+
     /**
      * Update the user password.
      * 
@@ -232,6 +267,60 @@ public class UserDao {
     }
 
     /**
+     * Changes a user's OWN password under a pessimistic row lock, conditional on the credential epoch
+     * observed when the current password was verified. The password hash and the epoch are read from the
+     * SAME {@code SELECT ... FOR UPDATE} row version, so verification and update cannot straddle a
+     * concurrent bump: if the locked epoch no longer equals {@code verifiedEpoch} a credential-invalidating
+     * event (e.g. a completed recovery reset) landed in between and MUST win — the change is abandoned and
+     * this returns {@code -1} without touching the password. On success it hashes and stores the new
+     * password, advances the epoch (the single atomic in-place increment, which kills every existing
+     * session AND API key of this user), and returns the authoritative post-bump epoch read back from the
+     * row with a SCALAR NATIVE query — never the managed entity, whose cached epoch the native bump does
+     * not refresh — so the caller can stamp the rotated replacement session with the just-bumped value.
+     *
+     * @param userId User ID
+     * @param clearPassword New clear-text password to hash and store
+     * @param verifiedEpoch The credential epoch observed when the current password was verified
+     * @param actingUserId Acting user ID (for the update audit log)
+     * @return the new (post-bump) credential epoch on success, or {@code -1} when a concurrent credential
+     *         change moved the epoch off the verified value (the update is abandoned, the other change wins)
+     */
+    public long changeOwnPassword(String userId, String clearPassword, long verifiedEpoch, String actingUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u from User u where u.id = :id and u.deleteDate is null");
+        q.setParameter("id", userId);
+        q.setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        User userDb;
+        try {
+            userDb = (User) q.getSingleResult();
+        } catch (NoResultException e) {
+            return -1L;
+        }
+        // Fail closed on exact inequality: a locked epoch below OR above the verified value both mean the
+        // verification-time snapshot is stale, so the change is abandoned rather than allowed to overwrite
+        // the newer credential state.
+        if (userDb.getCredentialEpoch() != verifiedEpoch) {
+            return -1L;
+        }
+        userDb.setPassword(hashPassword(clearPassword));
+        // Flush the password change before the native bump/re-read so the row already carries it and the
+        // scalar re-read below reflects the whole in-transaction state.
+        em.flush();
+        int updated = bumpCredentialEpoch(userId);
+        if (updated != 1) {
+            return -1L;
+        }
+        Query reread = em.createNativeQuery(
+                "select USE_CREDENTIALEPOCH_N from T_USER where USE_ID_C = :id and USE_DELETEDATE_D is null");
+        reread.setParameter("id", userId);
+        long newEpoch = ((Number) reread.getSingleResult()).longValue();
+
+        AuditLogUtil.create(userDb, AuditLogType.UPDATE, actingUserId);
+
+        return newEpoch;
+    }
+
+    /**
      * Update the hashed password silently.
      *
      * @param user User to update
@@ -247,6 +336,13 @@ public class UserDao {
 
         // Update the user
         userDb.setPassword(user.getPassword());
+
+        // The startup admin-password-init path mutates an EXISTING account's credential, so it bumps the
+        // epoch under the uniform rule: any session or API key stamped at the pre-init epoch is invalidated
+        // once the configured password takes effect. Flush the password first so it and the native bump
+        // both land before commit.
+        em.flush();
+        bumpCredentialEpoch(userDb.getId());
 
         return user;
     }
@@ -284,6 +380,30 @@ public class UserDao {
         } catch (NoResultException e) {
             return null;
         }
+    }
+
+    /**
+     * Resolves usernames for a set of user IDs in a single query. Deliberately unfiltered on delete
+     * date so a since-deleted user still resolves, mirroring the document-creator join in
+     * {@link DocumentDao#getDocument} (a file's creator stays displayable after its uploader is
+     * removed). Callers batch the distinct IDs of a file list here to avoid a per-file lookup.
+     *
+     * @param ids User IDs to resolve (may be empty)
+     * @return Map of user ID to username; an ID with no matching user row is absent from the map
+     */
+    public Map<String, String> getUsernamesByIds(Collection<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select u.id, u.username from User u where u.id in :ids");
+        q.setParameter("ids", ids);
+        Map<String, String> usernamesById = new HashMap<>();
+        for (Object result : q.getResultList()) {
+            Object[] row = (Object[]) result;
+            usernamesById.put((String) row[0], (String) row[1]);
+        }
+        return usernamesById;
     }
     
     /**
@@ -358,17 +478,28 @@ public class UserDao {
      * Gets an active user by its email.
      *
      * @param email User's email
-     * @return User
+     * @return The user when exactly one active user matches; null when no active user matches or the email is ambiguous
      */
     public User getByEmail(String email) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        try {
-            Query q = em.createQuery("select u from User u where u.email = :email and u.deleteDate is null");
-            q.setParameter("email", email);
-            return (User) q.getSingleResult();
-        } catch (NoResultException e) {
-            return null;
-        }
+        Query q = em.createQuery("select u from User u where u.email = :email and u.deleteDate is null");
+        q.setParameter("email", email);
+        @SuppressWarnings("unchecked")
+        List<User> users = q.getResultList();
+        return users.size() == 1 ? users.get(0) : null;
+    }
+
+    /**
+     * Returns whether an email belongs to multiple active users.
+     *
+     * @param email User's email
+     * @return True if multiple active users match
+     */
+    public boolean hasMultipleActiveUsersByEmail(String email) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select count(u) from User u where u.email = :email and u.deleteDate is null");
+        q.setParameter("email", email);
+        return (Long) q.getSingleResult() > 1;
     }
 
     /**
@@ -391,24 +522,31 @@ public class UserDao {
     }
 
     /**
-     * Stores the OIDC issuer and subject on a user for stable identity binding.
+     * Atomically advances a user's credential epoch by one, in a single in-place SQL statement
+     * ({@code set USE_CREDENTIALEPOCH_N = USE_CREDENTIALEPOCH_N + 1}) — never a read-modify-write. This is
+     * the SOLE writer of the epoch after insert: doing the increment in the database means two concurrent
+     * bumps compose to +2 (the row lock the UPDATE takes serializes them) and an unrelated
+     * {@link #update(User, String)} — which does not carry the epoch in its copy list — cannot overwrite or
+     * lower a just-bumped value. Scoped to an active (non-deleted) user; a deleted user already dead-ends
+     * every credential via the eligibility predicate, so bumping it would be a no-op with no rows matched.
+     * Portable across H2 and PostgreSQL (a plain arithmetic UPDATE).
      *
      * @param userId User ID
-     * @param issuer OIDC issuer URL
-     * @param subject OIDC subject identifier
+     * @return the number of rows updated (1 for an active user, 0 if absent or soft-deleted)
      */
-    public void updateOidcBinding(String userId, String issuer, String subject) {
+    public int bumpCredentialEpoch(String userId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery("update T_USER set USE_OIDC_ISSUER_C = :issuer, USE_OIDC_SUBJECT_C = :subject where USE_ID_C = :userId");
-        q.setParameter("issuer", issuer);
-        q.setParameter("subject", subject);
+        Query q = em.createNativeQuery(
+                "update T_USER set USE_CREDENTIALEPOCH_N = USE_CREDENTIALEPOCH_N + 1"
+                        + " where USE_ID_C = :userId and USE_DELETEDATE_D is null");
         q.setParameter("userId", userId);
-        q.executeUpdate();
+        return q.executeUpdate();
     }
 
     /**
-     * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves the
-     * departing user's tags that are linked to those documents to the target so no tag link is lost.
+     * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves ALL of the
+     * departing user's active tags to the target so no tag is left with a soft-deleted owner and no surviving
+     * document is left carrying a tag that would be orphaned by the deletion (#122, broadened by #134).
      *
      * <p>Only {@code DOC_IDUSER_C} (document ownership) is reassigned — NEVER a file's
      * {@code FIL_IDUSER_C}. Each file is encrypted with its uploader's key and is never re-encrypted,
@@ -436,24 +574,44 @@ public class UserDao {
         Query q = em.createQuery("select d.id from Document d where d.userId = :departingUserId and d.deleteDate is null");
         q.setParameter("departingUserId", departingUserId);
         List<String> reassignedDocumentIds = q.getResultList();
-        if (reassignedDocumentIds.isEmpty()) {
-            return reassignedDocumentIds;
-        }
+        // NOTE: no early return on an empty document set — the #122 tag handling below must still run, because
+        // a tag the departing user solely owns can be applied to ANOTHER user's document even when the
+        // departing user owns no documents of their own (that tag would otherwise be orphaned by the delete).
 
-        // Capture the departing user's tags that are linked (via a live document-tag row) to the
-        // snapshotted documents, BEFORE moving ownership (once moved they are indistinguishable from the
-        // target's own tags). These are moved to the target so clean_storage's orphan-tag purge — keyed
-        // on the tag owner being soft-deleted — does not soft- then hard-delete them and cascade the loss
-        // of the surviving reassigned document's tag links (the #54-class FK / tag-loss failure). Only
+        // #122/#134: capture EVERY active tag OWNED by the departing user BEFORE moving ownership (once moved
+        // they are indistinguishable from the target's own tags). These are moved to the target so
+        // clean_storage's orphan-tag purge — keyed on the tag owner being soft-deleted — does not soft- then
+        // hard-delete them and cascade the loss of a surviving document's tag links (the #54-class tag-loss
+        // failure). #134 broadens the snapshot from "owned tags currently linked to a surviving document" to
+        // ALL active owned tags: reassignment no longer depends on link state, so a tag the departing user
+        // owns but that is NOT currently linked to any surviving document (unlinked, or linked only to a
+        // foreign document) is no longer missed and left with a soft-deleted owner and no editor — the admin
+        // reassign path now preserves it exactly as the self-delete refusal guard would have required. Only
         // tags OWNED by the departing user are moved; a shared tag owned by someone else is untouched.
-        Query tagSel = em.createQuery("select distinct t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null and t.id in ("
-                + " select dt.tagId from DocumentTag dt where dt.documentId in :docIds and dt.deleteDate is null)");
+        //
+        // RESIDUAL (not closed here): a tag CREATED by the departing user AFTER this snapshot but before the
+        // delete commits is still missed — same root cause as the deferred #133 concurrent-link case. Closing
+        // it would require serializing against the hot tag-create/tag-link path (a tag-creation lock), which is
+        // out of scope for this change.
+        Query tagSel = em.createQuery("select t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null");
         tagSel.setParameter("departingUserId", departingUserId);
-        tagSel.setParameter("docIds", reassignedDocumentIds);
         List<String> reassignedTagIds = tagSel.getResultList();
 
         // Move those tags' ownership to the target.
         if (!reassignedTagIds.isEmpty()) {
+            // #121 canonical lock order: lock each affected tag row FOR UPDATE in a stable ascending id
+            // order BEFORE mutating, so this reassignment serializes against any concurrent grant/revoke on
+            // the same tag (which take the same tag-row lock) and two multi-tag lockers cannot deadlock. The
+            // departing+target user rows are already locked by the caller (users sort before tags in the
+            // canonical type order), so the full acquisition order across this delete is user -> tag ->
+            // document (the document rows are locked later, in UserDao.delete).
+            List<String> tagLockOrder = new ArrayList<>(reassignedTagIds);
+            Collections.sort(tagLockOrder);
+            TagDao tagDao = new TagDao();
+            for (String tagId : tagLockOrder) {
+                tagDao.getByIdForUpdate(tagId);
+            }
+
             Query tagUpd = em.createQuery("update Tag t set t.userId = :targetUserId where t.id in :tagIds and t.deleteDate is null");
             tagUpd.setParameter("targetUserId", targetUserId);
             tagUpd.setParameter("tagIds", reassignedTagIds);
@@ -479,11 +637,14 @@ public class UserDao {
             }
         }
 
-        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot.
-        Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
-        docUpd.setParameter("targetUserId", targetUserId);
-        docUpd.setParameter("docIds", reassignedDocumentIds);
-        docUpd.executeUpdate();
+        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot. Guarded on a
+        // non-empty set: an `in :docIds` bind with an empty list is both pointless and unsafe on some dialects.
+        if (!reassignedDocumentIds.isEmpty()) {
+            Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
+            docUpd.setParameter("targetUserId", targetUserId);
+            docUpd.setParameter("docIds", reassignedDocumentIds);
+            docUpd.executeUpdate();
+        }
 
         return reassignedDocumentIds;
     }
@@ -614,6 +775,18 @@ public class UserDao {
      * @return Hashed password
      */
     private String hashPassword(String password) {
+        return BCrypt.withDefaults().hashToString(resolveBcryptWork(), password.toCharArray());
+    }
+
+    /**
+     * Resolves the bcrypt work factor to use for password hashing: {@link Constants#DEFAULT_BCRYPT_WORK}
+     * unless overridden by the {@link Constants#BCRYPT_WORK_ENV} environment variable (validated to the
+     * bcrypt-legal 4..31 range). Shared by real password hashing and the dummy timing-equalizer hash so both
+     * spend the same amount of work.
+     *
+     * @return the bcrypt work factor
+     */
+    private static int resolveBcryptWork() {
         int bcryptWork = Constants.DEFAULT_BCRYPT_WORK;
         String envBcryptWork = System.getenv(Constants.BCRYPT_WORK_ENV);
         if (!Strings.isNullOrEmpty(envBcryptWork)) {
@@ -628,7 +801,7 @@ public class UserDao {
                 log.warn(Constants.BCRYPT_WORK_ENV + " needs to be a number in range 4...31. Falling back to " + Constants.DEFAULT_BCRYPT_WORK + ".");
             }
         }
-        return BCrypt.withDefaults().hashToString(bcryptWork, password.toCharArray());
+        return bcryptWork;
     }
     
     /**
@@ -698,14 +871,75 @@ public class UserDao {
     }
 
     /**
-     * Returns the global storage used by all users.
+     * Returns the global storage physically occupied across the whole installation, in bytes — the value
+     * the {@code DOCS_GLOBAL_QUOTA} cross-user cap is compared against.
      *
-     * @return Current global storage
+     * <p>This is NOT simply the sum of the active users' {@code USE_STORAGECURRENT_N} counters. A
+     * reassign-delete (#55) retains the departing user's files that back documents reassigned to a
+     * surviving user: those files stay live (with {@code FIL_IDUSER_C} = the departing, now soft-deleted
+     * "ghost" key holder) so the target can still decrypt them. The ghost's counter is deliberately NOT
+     * kept in step by the delete ({@code FileDeletedAsyncListener} never touches quota; the stale counter
+     * is only corrected by a later {@code clean_storage} purge), and the ghost is soft-deleted, so its
+     * counter is both stale AND excluded from an active-user sum — the retained bytes would go uncounted
+     * (#99) and the global cap would silently under-count. So ghost usage is taken from the FILES that
+     * survive, not from the ghost's counter: global storage = the active-user counter sum PLUS the
+     * non-negative {@code FIL_SIZE_N} of every live file owned by a soft-deleted user.</p>
+     *
+     * <p>All the database work is ONE statement, so the counter sum and the ghost-retained file rows come
+     * from a single statement-level snapshot. This is load-bearing: a reassign-delete
+     * ({@code UserResource}) runs OUTSIDE the {@code GLOBAL_QUOTA_LOCK}, so if the counter sum and the
+     * ghost-file scan were separate reads a commit landing between them could exclude the ghost's counter
+     * AND miss its now-retained file — a quota-bypass window. The three UNION-ALL arms carry a discriminator
+     * ({@code rowkind}): arm 0 is the active-user counter sum, arm 1 is the known-size ghost-retained bytes,
+     * and arm 2 emits one row per ghost-retained file whose stored size is {@link File#UNKNOWN_SIZE}
+     * ({@code FIL_SIZE_N = -1}, a legacy value from dbupdate-029) so Java can resolve those — and only
+     * those — from the still-present on-disk encrypted content via the same {@link FileUtil#getFileSize}
+     * pattern the quota-reclaim paths use (an unresolvable file contributes 0, never a negative).</p>
+     *
+     * @return Current global storage in bytes
      */
     public long getGlobalStorageCurrent() {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query query = em.createNativeQuery("select sum(u.USE_STORAGECURRENT_N) from T_USER u where u.USE_DELETEDATE_D is null");
-        return ((Number) query.getSingleResult()).longValue();
+        Query query = em.createNativeQuery(
+                "select 0 as rowkind, cast(coalesce(sum(u.USE_STORAGECURRENT_N), 0) as bigint) as amount,"
+                        + " cast(null as varchar(36)) as file_id, cast(null as varchar(36)) as owner_id"
+                        + " from T_USER u where u.USE_DELETEDATE_D is null"
+                        + " union all"
+                        + " select 1 as rowkind, cast(coalesce(sum(f.FIL_SIZE_N), 0) as bigint) as amount,"
+                        + " cast(null as varchar(36)) as file_id, cast(null as varchar(36)) as owner_id"
+                        + " from T_FILE f join T_USER fu on fu.USE_ID_C = f.FIL_IDUSER_C"
+                        + " where f.FIL_DELETEDATE_D is null and fu.USE_DELETEDATE_D is not null and f.FIL_SIZE_N >= 0"
+                        + " union all"
+                        + " select 2 as rowkind, cast(null as bigint) as amount,"
+                        + " f.FIL_ID_C as file_id, f.FIL_IDUSER_C as owner_id"
+                        + " from T_FILE f join T_USER fu on fu.USE_ID_C = f.FIL_IDUSER_C"
+                        + " where f.FIL_DELETEDATE_D is null and fu.USE_DELETEDATE_D is not null and f.FIL_SIZE_N = -1");
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+
+        long total = 0L;
+        // (fileId, ownerId) of each ghost-retained file whose stored size is unknown and must be sized on disk.
+        List<String[]> unknownSizeFiles = new ArrayList<>();
+        for (Object[] row : rows) {
+            int rowKind = ((Number) row[0]).intValue();
+            if (rowKind == 2) {
+                unknownSizeFiles.add(new String[] { (String) row[2], (String) row[3] });
+            } else if (row[1] != null) {
+                total += ((Number) row[1]).longValue();
+            }
+        }
+
+        // Resolve the unknown-size ghost files from disk (owner private key needed to decrypt-and-count).
+        // Cache owners: several retained files can share one ghost key holder.
+        Map<String, User> ownerCache = new HashMap<>();
+        for (String[] unknown : unknownSizeFiles) {
+            String fileId = unknown[0];
+            String ownerId = unknown[1];
+            User owner = ownerCache.computeIfAbsent(ownerId, this::getById);
+            total += FileUtil.resolveReclaimableSize(fileId, File.UNKNOWN_SIZE, owner);
+        }
+        return total;
     }
 
     /**

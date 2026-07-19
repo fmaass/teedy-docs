@@ -3,6 +3,7 @@ import { ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getFileContent, getFileList, reprocessFile } from '../../api/file'
 import { shouldPoll } from '../../utils/fileProcessing'
+import { displayName } from '../../utils/fileName'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
 import EmptyState from '../../components/EmptyState.vue'
@@ -111,7 +112,9 @@ watch(() => doc.value?.files, (files) => {
   }
   fileTexts.value = files.map((f) => ({
     fileId: f.id,
-    fileName: f.name,
+    // A file name is serialized nullable; render the stable localized fallback so a null-name file
+    // shows a label (not a blank) in both the header and the reprocess toast.
+    fileName: displayName(f.name, t),
     mimetype: f.mimetype,
     content: null,
     loading: true,

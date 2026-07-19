@@ -1,5 +1,11 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.constant.AclType;
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.dao.AclDao;
+import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.Acl;
+import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -18,6 +24,101 @@ import java.util.Date;
  * @author bgamard
  */
 public class TestAuditLogResource extends BaseJerseyTest {
+    /**
+     * ACL audit rows capture the grantee name when each grant or revocation is written.
+     */
+    @Test
+    public void testAclAuditLogMessagesContainGrantee() {
+        String owner = "audit_acl_owner";
+        String targetUser = "audit_acl_user";
+        String targetGroup = "audit_acl_group";
+        String shareName = "Audit ACL share";
+        String rawTargetId = "00000000-0000-4000-8000-000000000113";
+        clientUtil.createUser(owner);
+        clientUtil.createUser(targetUser);
+        clientUtil.createGroup(targetGroup);
+        String ownerToken = clientUtil.login(owner);
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "ACL audit message document")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        String userId = grantAcl(documentId, "READ", targetUser, "USER", ownerToken);
+        grantAcl(documentId, "WRITE", targetUser, "USER", ownerToken);
+        String groupId = grantAcl(documentId, "READ", targetGroup, "GROUP", ownerToken);
+        grantAcl(documentId, "WRITE", targetGroup, "GROUP", ownerToken);
+
+        json = target().path("/share").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("id", documentId)
+                        .param("name", shareName)), JsonObject.class);
+        String shareId = json.getString("id");
+
+        json = target().path("/share").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form().param("id", documentId)), JsonObject.class);
+        String unnamedShareId = json.getString("id");
+
+        TransactionUtil.handle(() -> {
+            Acl acl = new Acl();
+            acl.setSourceId(documentId);
+            acl.setPerm(PermType.WRITE);
+            acl.setType(AclType.USER);
+            acl.setTargetId(shareId);
+            new AclDao().create(acl, new UserDao().getActiveByUsername(owner).getId());
+
+            acl = new Acl();
+            acl.setSourceId(documentId);
+            acl.setPerm(PermType.READ);
+            acl.setType(AclType.USER);
+            acl.setTargetId(rawTargetId);
+            new AclDao().create(acl, new UserDao().getActiveByUsername(owner).getId());
+        });
+
+        revokeAcl(documentId, "READ", userId, ownerToken);
+        revokeAcl(documentId, "WRITE", userId, ownerToken);
+        revokeAcl(documentId, "READ", groupId, ownerToken);
+        revokeAcl(documentId, "WRITE", groupId, ownerToken);
+        revokeAcl(documentId, "READ", shareId, ownerToken);
+        revokeAcl(documentId, "WRITE", shareId, ownerToken);
+        revokeAcl(documentId, "READ", unnamedShareId, ownerToken);
+        revokeAcl(documentId, "READ", rawTargetId, ownerToken);
+
+        json = target().path("/auditlog")
+                .queryParam("document", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .get(JsonObject.class);
+        JsonArray logs = json.getJsonArray("logs");
+        for (String perm : new String[] { "READ", "WRITE" }) {
+            assertAclLog(logs, "CREATE", perm + " granted to " + targetUser);
+            assertAclLog(logs, "DELETE", perm + " revoked from " + targetUser);
+            assertAclLog(logs, "CREATE", perm + " granted to " + targetGroup);
+            assertAclLog(logs, "DELETE", perm + " revoked from " + targetGroup);
+            assertAclLog(logs, "CREATE", perm + " granted to " + shareName);
+            assertAclLog(logs, "DELETE", perm + " revoked from " + shareName);
+        }
+        assertAclLog(logs, "CREATE", "READ granted to " + unnamedShareId);
+        assertAclLog(logs, "DELETE", "READ revoked from " + unnamedShareId);
+        assertAclLog(logs, "CREATE", "READ granted to " + rawTargetId);
+        assertAclLog(logs, "DELETE", "READ revoked from " + rawTargetId);
+
+        String adminToken = adminToken();
+        target().path("/user/" + owner)
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        target().path("/user/" + targetUser)
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
     /**
      * Test the audit log resource.
      *
@@ -200,5 +301,36 @@ public class TestAuditLogResource extends BaseJerseyTest {
             }
         }
         return count;
+    }
+
+    private String grantAcl(String sourceId, String perm, String targetName, String type, String token) {
+        JsonObject json = target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("source", sourceId)
+                        .param("perm", perm)
+                        .param("target", targetName)
+                        .param("type", type)), JsonObject.class);
+        return json.getString("id");
+    }
+
+    private void revokeAcl(String sourceId, String perm, String targetId, String token) {
+        JsonObject json = target().path("/acl/" + sourceId + "/" + perm + "/" + targetId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete(JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+    }
+
+    private void assertAclLog(JsonArray logs, String type, String message) {
+        int count = 0;
+        for (int i = 0; i < logs.size(); i++) {
+            JsonObject log = logs.getJsonObject(i);
+            if ("Acl".equals(log.getString("class"))
+                    && type.equals(log.getString("type"))
+                    && message.equals(log.getString("message"))) {
+                count++;
+            }
+        }
+        Assertions.assertEquals(1, count, type + " ACL audit message: " + message);
     }
 }

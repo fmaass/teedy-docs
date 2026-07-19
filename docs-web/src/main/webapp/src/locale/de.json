@@ -203,6 +203,7 @@
     "uploading": "Wird hochgeladen …",
     "upload_failed": "Hochladen fehlgeschlagen",
     "files_uploaded": "Dateien hochgeladen",
+    "duplicate_content_hint": "Diese Datei ist identisch mit \"{name}\" in diesem Dokument — Sie können sie stattdessen als neue Version hinzufügen.",
     "no_files": "Diesem Dokument sind keine Dateien angehängt",
     "versions": {
       "title": "Versionsverlauf",
@@ -215,7 +216,18 @@
       "view": "Diese Version öffnen",
       "empty": "Diese Datei hat keine früheren Versionen.",
       "load_failed": "Versionsverlauf konnte nicht geladen werden",
-      "loading": "Versionsverlauf wird geladen …"
+      "loading": "Versionsverlauf wird geladen …",
+      "upload_new": "Neue Version hochladen",
+      "uploaded_new": "Neue Version hochgeladen",
+      "upload_new_failed": "Neue Version konnte nicht hochgeladen werden",
+      "stale_base": "Die Datei wurde geändert – bitte Seite neu laden und erneut versuchen"
+    },
+    "conflict": {
+      "title": "Datei existiert bereits",
+      "message": "Eine Datei mit dem Namen „{name}“ existiert bereits in diesem Dokument. Was möchten Sie tun?",
+      "new_version": "Als neue Version hinzufügen",
+      "keep_both": "Beide behalten",
+      "apply_to_all": "Auf alle {count} betroffenen Dateien anwenden"
     },
     "relations": {
       "title": "Verknüpfte Dokumente",
@@ -227,6 +239,58 @@
       "remove": "Verknüpfung entfernen",
       "remove_confirm": "Verknüpfung zu „{title}“ entfernen?",
       "remove_from_source": "Verwiesen von „{title}“ – dort entfernen"
+    },
+    "file_view": {
+      "grid": "Raster",
+      "list": "Liste",
+      "toggle_label": "Dateiansicht",
+      "untitled": "Unbenannte Datei",
+      "open_file": "{name} öffnen",
+      "filter_placeholder": "Dateien filtern…",
+      "filter_aria": "Dateien nach Name oder Typ filtern",
+      "columns": "Spalten",
+      "col_name": "Name",
+      "col_created": "Erstellt",
+      "col_size": "Größe",
+      "col_uploader": "Hochgeladen von",
+      "order_custom": "Eigene Reihenfolge",
+      "order_custom_hint": "Zum Neuordnen den Griff ziehen; die Reihenfolge wird gespeichert.",
+      "order_sorted": "Sortiert · nicht gespeichert",
+      "order_sorted_hint": "Sortierung ist temporär – zum Speichern per Drag ziehen.",
+      "order_failed": "Reihenfolge nicht gespeichert",
+      "order_failed_hint": "Die neue Reihenfolge konnte nicht gespeichert werden und wurde zurückgesetzt. Bitte erneut versuchen.",
+      "no_matches": "Keine Dateien entsprechen dem Filter",
+      "reorder_saved": "Dateireihenfolge gespeichert",
+      "reorder_failed": "Dateireihenfolge konnte nicht gespeichert werden"
+    },
+    "pdf_organizer": {
+      "edit_pages": "Seiten bearbeiten",
+      "title": "Seiten bearbeiten",
+      "title_named": "Seiten bearbeiten — {name}",
+      "loading": "Seiten werden geladen…",
+      "load_failed": "Dieses PDF konnte nicht zum Bearbeiten geöffnet werden.",
+      "empty_hint": "Ein PDF muss mindestens eine Seite behalten — füge vor dem Speichern eine hinzu.",
+      "drag_hint": "Ziehe eine Seite oder nutze ihre Verschiebe-Schaltflächen, um die Reihenfolge zu ändern. Drehe oder entferne jede Seite mit ihren Bedienelementen.",
+      "page_label": "Seite {n}",
+      "move_backward": "Seite {n} nach vorne verschieben",
+      "move_forward": "Seite {n} nach hinten verschieben",
+      "rotate_left": "Seite {n} nach links drehen",
+      "rotate_right": "Seite {n} nach rechts drehen",
+      "delete_page": "Seite {n} entfernen",
+      "reset": "Änderungen zurücksetzen",
+      "save": "Als neue Version speichern",
+      "saving": "Wird gespeichert…",
+      "saved": "Seiten als neue Version gespeichert",
+      "error": {
+        "stale": "Diese Datei wurde geändert, seit du sie geöffnet hast. Lade das Dokument neu und versuche es erneut.",
+        "too_many_pages": "Das Ergebnis hat zu viele Seiten. Entferne einige Seiten und versuche es erneut.",
+        "too_large": "Dieses PDF ist zu groß zum Bearbeiten.",
+        "signed": "Dieses PDF ist digital signiert, daher können seine Seiten nicht geändert werden.",
+        "encrypted": "Dieses PDF ist passwortgeschützt, daher können seine Seiten nicht geändert werden.",
+        "empty": "Ein PDF muss mindestens eine Seite behalten.",
+        "busy": "Der Server ist gerade ausgelastet. Bitte versuche es gleich noch einmal.",
+        "generic": "Die Änderungen konnten nicht gespeichert werden. Bitte versuche es erneut."
+      }
     },
     "edit_to_add_files": "Dokument bearbeiten, um Dateien hinzuzufügen",
     "file_removed": "Datei entfernt",
@@ -350,6 +414,7 @@
       "password_updated": "Passwort aktualisiert",
       "failed_update_password": "Passwort konnte nicht aktualisiert werden",
       "language_updated": "Sprache aktualisiert",
+      "language_sync_failed": "Sprache auf diesem Gerät geändert, konnte aber nicht in Ihrem Konto gespeichert werden",
       "theme_switched": "Design geändert zu {name}",
       "sessions": {
         "title": "Aktive Sitzungen",
@@ -365,6 +430,13 @@
         "revoked": "Andere Sitzungen abgemeldet",
         "revoke_failed": "Andere Sitzungen konnten nicht abgemeldet werden",
         "load_failed": "Sitzungen konnten nicht geladen werden"
+      },
+      "export": {
+        "title": "Export",
+        "description": "Lade ein ZIP deiner Dokumente und ihrer Dateien herunter. Dies exportiert nur deine Inhalte — es enthält keine Freigabeberechtigungen, Schlagwörter, Kommentare, Beziehungen, Benutzer oder Einstellungen.",
+        "button": "Meine Dokumente exportieren",
+        "started": "Dein Export wird heruntergeladen",
+        "failed": "Export fehlgeschlagen"
       }
     },
     "default_password_banner": {
@@ -644,7 +716,15 @@
       "remove": "Berechtigung entfernen",
       "remove_confirm": "Berechtigung {perm} für {name} entfernen?",
       "failed_add": "Berechtigung konnte nicht hinzugefügt werden",
-      "failed_remove": "Berechtigung konnte nicht entfernt werden"
+      "failed_remove": "Berechtigung konnte nicht entfernt werden",
+      "owner_locked": "Eigentümer-Berechtigung (kann nicht entfernt werden)"
+    },
+    "tag_acl": {
+      "title": "Berechtigungen",
+      "description": "Benutzer und Gruppen, denen du Zugriff gewährst, sehen jedes Dokument mit diesem Tag.",
+      "disclose_header": "Lesezugriff gewähren?",
+      "disclose_message": "Mit dem Lesezugriff werden alle {count} Dokument(e), die dieses Tag derzeit tragen, sowie später hinzugefügte sichtbar. Fortfahren?",
+      "last_owner_locked": "Einziger Eigentümer – gewähre einem weiteren Eigentümer Zugriff, bevor du diesen entfernst"
     },
     "vocabulary": {
       "title": "Vokabulare",
@@ -923,6 +1003,15 @@
     "user": "Benutzer",
     "action": "Aktion",
     "no_activity": "Keine Aktivität aufgezeichnet",
+    "activity": {
+      "type": "Typ",
+      "filter_label": "Nach Ereignistyp filtern",
+      "filter_all_types": "Alle Ereignistypen",
+      "type_create": "Erstellt",
+      "type_update": "Aktualisiert",
+      "type_delete": "Gelöscht",
+      "type_authentication": "Authentifizierung"
+    },
     "text_extracted": "Text extrahiert",
     "no_text": "Kein Text",
     "reprocess": "Erneut verarbeiten",
@@ -978,6 +1067,9 @@
       "selected_count": "{count} ausgewählt",
       "add_tag": "Schlagwort hinzufügen",
       "set_language": "Sprache festlegen",
+      "download": "ZIP herunterladen",
+      "download_empty": "Die ausgewählten Dokumente haben keine Dateien zum Herunterladen",
+      "download_failed": "Die ausgewählten Dokumente konnten nicht heruntergeladen werden",
       "delete": "Löschen",
       "clear": "Auswahl aufheben",
       "choose_tag": "Schlagwort auswählen",

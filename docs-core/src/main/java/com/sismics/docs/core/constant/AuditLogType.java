@@ -19,5 +19,11 @@ public enum AuditLogType {
     /**
      * Delete.
      */
-    DELETE
+    DELETE,
+
+    /**
+     * Authentication-related security event (e.g. a rejected credential conflict). Written as an
+     * independent, durable audit row even when the triggering request is rolled back.
+     */
+    AUTHENTICATION
 }

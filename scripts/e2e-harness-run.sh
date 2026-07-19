@@ -31,13 +31,18 @@
 #   E2E_PORT      host port to expose 8080 on (default 8080)
 #   E2E_TIMEOUT   seconds to wait for /api/app readiness (default 180)
 #   CHROME_BIN    path to the Chrome/Chromium binary (default: autodetect)
-#   E2E_EXPECT_VERSION   passed through to the harness version gate (default 3.6.0 there)
+#   E2E_CDP_PORT  Chrome remote-debugging port (default 9222); set when 9222 is
+#                 already bound on the host (e.g. an ssh tunnel)
+#   E2E_EXPECT_VERSION   REQUIRED — passed through to the harness version gate, which
+#                        has no default and fails fast if it is unset (CI derives it
+#                        from the checked-out pom.xml; a local caller must export it)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 image="${E2E_IMAGE:-}"
 host_port="${E2E_PORT:-8080}"
+cdp_port="${E2E_CDP_PORT:-9222}"
 max_wait="${E2E_TIMEOUT:-180}"
 container="teedy-harness-$$"
 chrome_profile=""
@@ -47,7 +52,18 @@ chrome_log="$(mktemp)"
 cleanup() {
   # Stop the browser-harness daemon so it does not linger holding the CDP socket.
   BU_NAME="harness-$$" browser-harness --reload >/dev/null 2>&1 || true
-  [ -n "${chrome_pid}" ] && kill "${chrome_pid}" >/dev/null 2>&1 || true
+  # Only kill the Chrome we launched. A captured PID can be recycled to an unrelated process
+  # once our Chrome exits, so confirm the PID is (a) still alive (kill -0) and (b) still a
+  # Chrome/Chromium process by its command name before signalling it. Never a pattern/pkill.
+  if [ -n "${chrome_pid}" ] && kill -0 "${chrome_pid}" 2>/dev/null; then
+    pid_comm="$(ps -p "${chrome_pid}" -o comm= 2>/dev/null || true)"
+    # Exact-match an allowlist of Chrome/Chromium process command names (comm truncates to 15 chars),
+    # never a substring/pattern — so e.g. an unrelated "chromatic" process is not mistaken for ours.
+    case "${pid_comm}" in
+      chrome|chromium|chromium-browse|google-chrome|headless_shell|chrome_crashpad)
+        kill "${chrome_pid}" >/dev/null 2>&1 || true ;;
+    esac
+  fi
   [ -n "${chrome_profile}" ] && rm -rf "${chrome_profile}" >/dev/null 2>&1 || true
   rm -f "${chrome_log}" >/dev/null 2>&1 || true
   echo "::group::container logs (${container})"
@@ -119,7 +135,7 @@ chrome_profile="$(mktemp -d)"
   --headless=new --no-first-run --no-default-browser-check --disable-gpu \
   --no-sandbox --disable-dev-shm-usage --window-size=1280,900 \
   --user-data-dir="${chrome_profile}" \
-  --remote-debugging-port=9222 --remote-allow-origins='*' \
+  --remote-debugging-port="${cdp_port}" --remote-allow-origins='*' \
   about:blank >"${chrome_log}" 2>&1 &
 chrome_pid=$!
 
@@ -141,7 +157,7 @@ if [ -z "${ws}" ]; then
   cat "${chrome_log}" >&2 || true
   exit 1
 fi
-# The log prints the IPv6 loopback form (ws://[::1]:9222/...); force IPv4 loopback,
+# The log prints the IPv6 loopback form (ws://[::1]:<port>/...); force IPv4 loopback,
 # which the daemon connects to reliably on CI.
 ws="${ws//\[::1\]/127.0.0.1}"
 echo "OK: Chrome DevTools at ${ws}"

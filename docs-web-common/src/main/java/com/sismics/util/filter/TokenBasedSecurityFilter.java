@@ -129,33 +129,44 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
     }
 
     @Override
-    protected User authenticate(HttpServletRequest request) {
+    protected String getMechanism() {
+        return MECHANISM_TOKEN_COOKIE;
+    }
+
+    @Override
+    protected AuthAttempt attempt(HttpServletRequest request) {
         // Get the value of the client authentication token
         String authTokenId = extractAuthToken(request.getCookies());
         if (authTokenId == null) {
-            return null;
+            return AuthAttempt.absent();
         }
 
-        // Get the corresponding server token
+        // Get the corresponding server token. An unknown or expired cookie is not a hard rejection: it
+        // falls through to anonymous (historical behaviour — a stale cookie must not 401 the request).
         AuthenticationTokenDao authTokenDao = new AuthenticationTokenDao();
         AuthenticationToken authToken = authTokenDao.get(authTokenId);
         if (authToken == null) {
-            return null;
+            return AuthAttempt.ignore();
         }
 
         if (isTokenExpired(authToken)) {
             handleExpiredToken(authTokenDao, authTokenId);
-            return null;
+            return AuthAttempt.ignore();
         }
 
-        // Load the user before any bookkeeping side effect. A disabled account (shared
-        // User.isDisabled() eligibility predicate) is rejected here so a disabled cookie
-        // request never rotates the token — the rotation below is a mutation the disabled
-        // user must not trigger. Access is separately denied downstream in
-        // SecurityFilter.injectUser, which also treats a disabled user as anonymous.
+        // Load the user before any bookkeeping side effect. A disabled/deleted account falls through to
+        // anonymous so a disabled cookie request never rotates the token — the rotation below is a
+        // mutation the disabled user must not trigger. Access is separately denied downstream.
         User user = new UserDao().getById(authToken.getUserId());
-        if (user == null || user.isDisabled()) {
-            return user;
+        if (!isEligible(user)) {
+            return AuthAttempt.ignore();
+        }
+
+        // Credential-epoch check: a token stamped at an epoch the user has since advanced past (a reset,
+        // admin change, disable, or self password-change) is dead. Checked BEFORE the rotation below so a
+        // revoked token never extends its own lifetime; falls through to anonymous like a stale cookie.
+        if (!epochMatches(authToken.getCredentialEpoch(), user.getCredentialEpoch())) {
+            return AuthAttempt.ignore();
         }
 
         // Token rotation: if < 30 days remaining on a long-lived token, extend by 90 days
@@ -170,6 +181,6 @@ public class TokenBasedSecurityFilter extends SecurityFilter {
             }
         }
 
-        return user;
+        return AuthAttempt.authenticated(user, authTokenId);
     }
 }

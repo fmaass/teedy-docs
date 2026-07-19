@@ -43,9 +43,22 @@ if (typeof window !== 'undefined') installStorage(window)
 // the Vue Test Utils global config so components using `v-tooltip` don't emit
 // "Failed to resolve directive: tooltip" warnings. A no-op is sufficient: no test asserts
 // tooltip behaviour, and specs that need the real directive still override it locally.
-import { config } from '@vue/test-utils'
+import { config, enableAutoUnmount } from '@vue/test-utils'
+import { afterEach } from 'vitest'
 
 config.global.directives = {
   ...config.global.directives,
   tooltip: {},
 }
+
+// Unmount every mounted wrapper after each test, inside the live jsdom environment. This lets
+// each component's beforeUnmount hooks run (and Vue null its template refs) BEFORE the environment
+// is torn down. Without it, specs that mount but never unmount (e.g. DocumentSlideOver.spec.ts,
+// which mounts the PrimeVue Tabs stack) leave the component alive at teardown; PrimeVue's
+// TabList schedules an ink-bar `setTimeout(updateInkBar, 150)` at mount and does NOT clear it on
+// unmount, so on a slow/rescheduled CI run that timer can fire AFTER teardown and reach
+// `getOuterWidth(activeTab)` -> `ReferenceError: HTMLElement is not defined` (an unhandled error
+// that fails the run even with every test green). Unmounting first nulls TabList's `inkbar` ref,
+// so the still-pending callback bails at its `if (!inkbar) return;` guard and never touches the
+// missing global. (Verified: TabList.vue beforeUnmount only unbinds its ResizeObserver.)
+enableAutoUnmount(afterEach)

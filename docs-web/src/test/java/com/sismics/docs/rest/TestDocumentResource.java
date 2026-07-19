@@ -391,6 +391,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
         Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        // The document-list files carry the current-version uploader (creator) additively.
+        Assertions.assertEquals("document1", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
 
         // Get document 1
         json = target().path("/document/" + document1Id).request()
@@ -427,6 +430,9 @@ public class TestDocumentResource extends BaseJerseyTest {
         Assertions.assertEquals(file1Id, files.getJsonObject(0).getString("id"));
         Assertions.assertEquals("Einstein-Roosevelt-letter.png", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals("image/png", files.getJsonObject(0).getString("mimetype"));
+        // The document-detail files carry the current-version uploader (creator) additively.
+        Assertions.assertEquals("document1", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
 
         // Get document 1 again (relations preserved by partial update)
         json = target().path("/document/" + document1Id).request()
@@ -604,14 +610,27 @@ public class TestDocumentResource extends BaseJerseyTest {
         // Add a PDF file
         String file1Id = clientUtil.addFileToDocument(FILE_WIKIPEDIA_PDF, documentPdfToken, document1Id);
 
-        // Search documents by query in full content
-        JsonObject json = target().path("/document/list")
-                .queryParam("search", "full:vrandecic")
-                .request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
-                .get(JsonObject.class);
-        Assertions.assertEquals(1, json.getJsonArray("documents").size());
-        
+        // Content extraction and indexing run on a worker after the upload response returns, so wait
+        // for processing to drain and poll the search until the extracted content is indexed rather
+        // than asserting once and racing the async work. Match THIS document's id in the results, not a
+        // bare count == 1: a shared fixture (or a straggler from another test) could satisfy a count of
+        // one while THIS document's PDF content was never extracted/indexed, passing the test vacuously.
+        awaitProcessingQuiescence();
+        awaitCondition("PDF full-content search did not return document " + document1Id + " (full:vrandecic)", () -> {
+            JsonArray documents = target().path("/document/list")
+                    .queryParam("search", "full:vrandecic")
+                    .request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentPdfToken)
+                    .get(JsonObject.class)
+                    .getJsonArray("documents");
+            for (int i = 0; i < documents.size(); i++) {
+                if (document1Id.equals(documents.getJsonObject(i).getString("id"))) {
+                    return true;
+                }
+            }
+            return false;
+        });
+
         // Get the file thumbnail data
         Response response = target().path("/file/" + file1Id + "/data")
                 .queryParam("size", "thumb")
@@ -867,8 +886,14 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_leak", 100000);
         String token = clientUtil.login("document_eml_leak");
 
-        java.util.Set<Path> before = snapshotSismicsTempFiles();
-
+        // Capture EXACTLY the temp files this import creates through the centralized FileService seam,
+        // rather than diffing a shared tmpdir. This closes the leak window the content-list scan missed:
+        // EmailUtil creates each attachment temp BEFORE recording it in the mail content list, so a temp
+        // orphaned in that gap is invisible to a content-list-based check but is seen here.
+        java.util.List<Path> created = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        int status;
+        String errorType;
+        com.sismics.docs.core.service.FileService.setTemporaryFileListener(created::add);
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
             StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("file", is, "test_mail.eml");
             try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
@@ -878,14 +903,28 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                         .put(Entity.entity(multiPart.bodyPart(streamDataBodyPart),
                                 MediaType.MULTIPART_FORM_DATA_TYPE));
-                // Import must fail on the quota breach
-                Assertions.assertNotEquals(Status.OK.getStatusCode(), response.getStatus());
+                status = response.getStatus();
+                errorType = response.readEntity(JsonObject.class).getString("type", null);
             }
+        } finally {
+            com.sismics.docs.core.service.FileService.setTemporaryFileListener(null);
         }
 
-        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
-        Assertions.assertTrue(leaked.isEmpty(),
-                "EML attachment temp file(s) leaked on failed import: " + leaked);
+        // The import fails with the SPECIFIC per-user quota breach (HTTP 400, type QuotaReached), not
+        // merely "not 200" — asserting the exact failure pins that the temps are cleaned on THIS path.
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), status, "EML import must fail on the quota breach");
+        Assertions.assertEquals("QuotaReached", errorType, "the failure must be the quota breach");
+
+        // It must have created exactly the EML temp + one temp per attachment (the EML has two). Asserting
+        // this cardinality means a disconnected seam that captured nothing cannot pass the "all gone"
+        // check vacuously.
+        Assertions.assertEquals(3, created.size(),
+                "the failed EML import must create exactly the EML temp + 2 attachment temps: " + created);
+
+        // Every temp it created must be gone.
+        for (Path p : created) {
+            Assertions.assertFalse(Files.exists(p), "EML import temp leaked on failed import: " + p);
+        }
     }
 
     /**
@@ -904,8 +943,13 @@ public class TestDocumentResource extends BaseJerseyTest {
         clientUtil.createUser("document_eml_temp", 100000);
         String token = clientUtil.login("document_eml_temp");
 
-        java.util.Set<Path> before = snapshotSismicsTempFiles();
-
+        // Capture every temp created by the import (EML temp + attachment temps) via the FileService
+        // seam, proving the ORIGINAL EML temp — created at the top of importEml — is deleted on failure
+        // alongside the attachment temps, not left behind.
+        java.util.List<Path> created = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        int status;
+        String errorType;
+        com.sismics.docs.core.service.FileService.setTemporaryFileListener(created::add);
         try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
             StreamDataBodyPart part = new StreamDataBodyPart("file", is, "test_mail.eml");
             try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
@@ -913,57 +957,26 @@ public class TestDocumentResource extends BaseJerseyTest {
                         .path("/document/eml").request()
                         .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                         .put(Entity.entity(multiPart.bodyPart(part), MediaType.MULTIPART_FORM_DATA_TYPE));
-                Assertions.assertNotEquals(Status.OK.getStatusCode(), response.getStatus(),
-                        "Import must fail on the quota breach");
+                status = response.getStatus();
+                errorType = response.readEntity(JsonObject.class).getString("type", null);
             }
+        } finally {
+            com.sismics.docs.core.service.FileService.setTemporaryFileListener(null);
         }
 
-        // No new temp may survive: EML temp + both attachment temps all deleted.
-        java.util.Set<Path> leaked = leakedSismicsTempFiles(before);
-        Assertions.assertTrue(leaked.isEmpty(),
-                "EML/attachment temp(s) leaked on failed import: " + leaked);
-    }
+        // The import fails with the SPECIFIC per-user quota breach (HTTP 400, type QuotaReached).
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), status, "Import must fail on the quota breach");
+        Assertions.assertEquals("QuotaReached", errorType, "the failure must be the quota breach");
 
-    /**
-     * Snapshots the {@code sismics_docs*} temp files currently present in the shared system
-     * tmpdir. The leak assertions work on the DELTA between two snapshots ({@link
-     * #leakedSismicsTempFiles(java.util.Set)}), never on a raw count: a raw count races with
-     * concurrent JVMs (parallel worktree suites) and with straggler async file-processing
-     * from earlier tests in this class (e.g. testEmlImport's attachment OCR), whose temps
-     * inflate the number mid-window. Every file that pre-exists this test appears in BOTH
-     * snapshots and cancels out. The guarantee is asymmetric: a FALSE PASS is impossible (a
-     * file this test leaks always lands in the delta), but a concurrent writer CAN still
-     * inject a matching file between the snapshots, producing a spurious FAILURE — a loud,
-     * investigable outcome, never a silently missed leak. (Same mechanism as
-     * TestFileResource.)
-     */
-    private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
-        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
-        try (java.util.stream.Stream<Path> f = Files.list(tmpDir)) {
-            return f.filter(p -> p.getFileName().toString().startsWith("sismics_docs"))
-                    .collect(java.util.stream.Collectors.toSet());
+        // Exactly the EML temp + one per attachment were created (a disconnected seam capturing nothing
+        // could not satisfy this, so the subsequent "all gone" check cannot pass vacuously).
+        Assertions.assertEquals(3, created.size(),
+                "the failed EML import must create exactly the EML temp + 2 attachment temps: " + created);
+
+        // No temp the import created may survive: the EML temp AND both attachment temps are all deleted.
+        for (Path p : created) {
+            Assertions.assertFalse(Files.exists(p), "EML/attachment temp leaked on failed import: " + p);
         }
-    }
-
-    /**
-     * The {@code sismics_docs*} temp files that appeared AFTER {@code before} and REMAIN
-     * present. Transient temps from straggler async processing (queued by earlier tests in
-     * this class) are deleted when their task completes, so the check polls briefly until
-     * the delta drains; a GENUINE leak has no deleter and survives the full window, failing
-     * loudly. Polling narrows the spurious-failure window without weakening detection.
-     */
-    private java.util.Set<Path> leakedSismicsTempFiles(java.util.Set<Path> before) throws Exception {
-        java.util.Set<Path> leaked;
-        long deadline = System.currentTimeMillis() + 15000;
-        do {
-            leaked = new java.util.HashSet<>(snapshotSismicsTempFiles());
-            leaked.removeAll(before);
-            if (leaked.isEmpty()) {
-                return leaked;
-            }
-            Thread.sleep(250);
-        } while (System.currentTimeMillis() < deadline);
-        return leaked;
     }
 
     /**

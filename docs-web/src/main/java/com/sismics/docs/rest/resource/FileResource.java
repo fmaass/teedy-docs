@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.text.MessageFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -31,14 +32,24 @@ import com.sismics.docs.core.event.FileUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
+import com.sismics.docs.core.util.FileCreatedResult;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.PreviousVersionMismatchException;
 import com.sismics.docs.core.util.RasterGenerationUtil;
+import com.sismics.docs.core.util.VersionConcurrencyException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationBusyException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationException;
+import com.sismics.docs.core.util.pdf.PdfPageOperationService;
 import com.sismics.rest.exception.ClientException;
+import com.sismics.rest.exception.ConflictException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
-import com.sismics.rest.util.RestUtil;
+import com.sismics.rest.exception.TooManyRequestsException;
+import com.sismics.docs.rest.util.DocumentResourceHelper;
+import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.HttpUtil;
@@ -134,9 +145,14 @@ public class FileResource extends BaseResource {
             }
         }
         
-        // Keep unencrypted data temporary on disk
-        String name = fileBodyPart.getContentDisposition() != null ?
-                URLDecoder.decode(fileBodyPart.getContentDisposition().getFileName(), StandardCharsets.UTF_8) : null;
+        // Keep unencrypted data temporary on disk. Treat an absent filename — no content disposition, or a
+        // content disposition with no filename= parameter (a "file" part sent without a filename) — as a null
+        // name, which the whole file stack already tolerates (createTemporaryFile/createFile, and the nullable
+        // name on the wire). Only a present filename is URL-decoded; decoding a null would NPE -> 500 (#136).
+        String encodedFileName = fileBodyPart.getContentDisposition() == null ? null
+                : fileBodyPart.getContentDisposition().getFileName();
+        String name = encodedFileName == null ? null
+                : URLDecoder.decode(encodedFileName, StandardCharsets.UTF_8);
         long maxUploadSize = resolveMaxUploadSize();
 
         // The plaintext temp is created and populated here and its ownership is handed to
@@ -148,8 +164,13 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             long fileSize;
+            // #119: compute the content MAC in the SAME pass that writes the plaintext temp — no separate
+            // read. The sink is null when duplicate detection is off or the upload has no document (orphan),
+            // leaving the MAC null and every path unchanged.
+            String contentMac;
             try {
                 unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile(name);
+                ContentMacUtil.MacSink macSink = ContentMacUtil.newSink(documentId);
                 try (InputStream in = fileBodyPart.getValueAs(InputStream.class);
                      java.io.OutputStream out = Files.newOutputStream(unencryptedFile)) {
                     long totalRead = 0;
@@ -162,25 +183,44 @@ public class FileResource extends BaseResource {
                                     "File exceeds maximum upload size of " + (maxUploadSize / (1024 * 1024)) + " MB");
                         }
                         out.write(buf, 0, n);
+                        if (macSink != null) {
+                            macSink.update(buf, 0, n);
+                        }
                     }
                 }
                 fileSize = Files.size(unencryptedFile);
+                contentMac = macSink == null ? null : macSink.finish();
             } catch (IOException e) {
                 throw new ServerException("StreamError", "Error reading the input file", e);
             }
 
-            String fileId = FileUtil.createFile(name, previousFileId, unencryptedFile, fileSize, documentDto == null ?
-                    null : documentDto.getLanguage(), principal.getId(), documentId);
-            ownershipTransferred = true;
+            FileCreatedResult result = FileUtil.createFile(name, previousFileId, unencryptedFile, fileSize,
+                    documentDto == null ? null : documentDto.getLanguage(), principal.getId(), documentId, contentMac);
+            // Key temp cleanup off the ACTUAL resource the call accepted: a real create hands the plaintext
+            // temp to the async pipeline (tempAccepted=true, request must not delete it); a #119 no-op takes
+            // nothing (tempAccepted=false), so the finally below deletes the temp — no leak.
+            ownershipTransferred = result.isTempAccepted();
 
-            // Always return OK
+            // Always return OK. For a no-op the id is the existing current version the upload collapsed onto.
             JsonObjectBuilder response = Json.createObjectBuilder()
                     .add("status", "ok")
-                    .add("id", fileId)
+                    .add("id", result.getFileId())
                     .add("size", fileSize);
+            if (result.getDuplicateKind() != null) {
+                response.add("duplicateKind", result.getDuplicateKind());
+                if (result.getDuplicateOfId() != null) {
+                    response.add("duplicateOfId", result.getDuplicateOfId());
+                }
+            }
             return Response.ok().entity(response.build()).build();
         } catch (ClientException | ServerException e) {
             throw e;
+        } catch (PreviousVersionMismatchException e) {
+            // Unknown / cross-document previous version: a client error (400), never a 500.
+            throw new ClientException("PreviousVersionMismatch", e.getMessage());
+        } catch (VersionConcurrencyException e) {
+            // Lost the single-writer race on the version chain: a retryable conflict (409).
+            throw new ConflictException("VersionConflict", e.getMessage());
         } catch (IOException e) {
             throw new ClientException(e.getMessage(), e.getMessage(), e);
         } catch (Exception e) {
@@ -256,7 +296,7 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
-            FileUtil.startProcessingFile(id);
+            FileUtil.markProcessingWithRollbackCleanup(id, unencryptedFile);
             FileUpdatedAsyncEvent fileUpdatedAsyncEvent = new FileUpdatedAsyncEvent();
             fileUpdatedAsyncEvent.setUserId(principal.getId());
             fileUpdatedAsyncEvent.setLanguage(documentDto.getLanguage());
@@ -311,6 +351,9 @@ public class FileResource extends BaseResource {
 
         // Validate input data
         name = ValidationUtil.validateLength(name, "name", 1, 200, false);
+        // Reject path separators / control chars in the new name (shared validator) so a rename can
+        // never store a name that would later escape a ZIP/export extraction directory.
+        ValidationUtil.validateFileName(name, "name");
 
         // Update the file
         FileDao fileDao = new FileDao();
@@ -426,6 +469,65 @@ public class FileResource extends BaseResource {
     }
 
     /**
+     * Apply a v1 page-operation manifest (reorder / delete / per-page rotate) to a PDF file, saving the
+     * result as a new version. The heavy lifting (concurrency ceilings, decrypt, PDFBox rewrite,
+     * validation, versioned create) lives in {@link PdfPageOperationService}; this method only
+     * authenticates, enforces WRITE on the parent document, and maps the typed outcomes to HTTP.
+     *
+     * @param id File ID (the expected latest base — the compare-and-swap rejects a stale base with 409)
+     * @param manifest The v1 page-operation manifest, as a JSON string
+     * @return Response with the new file version ID
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/pages")
+    public Response pages(@PathParam("id") String id,
+                          @FormParam("manifest") String manifest) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        // WRITE on the parent document — a READ-only or share user must be rejected.
+        File file = findFile(id, null, PermType.WRITE);
+        ValidationUtil.validateRequired(manifest, "manifest");
+
+        try {
+            String newFileId = PdfPageOperationService.applyPageOperations(file, manifest, principal.getId());
+            JsonObjectBuilder pagesResponse = Json.createObjectBuilder()
+                    .add("status", "ok")
+                    .add("id", newFileId);
+            return Response.ok().entity(pagesResponse.build()).build();
+        } catch (ClientException | ServerException e) {
+            throw e;
+        } catch (PdfPageOperationBusyException e) {
+            // A saturated concurrency ceiling is transient — the request was refused, not queued. Surface a
+            // real 429 (retry shortly), distinct from the 400s below. Must precede the generic catch since
+            // it is a PdfPageOperationException subtype.
+            throw new TooManyRequestsException(e.getType(), e.getMessage());
+        } catch (PdfPageOperationException e) {
+            // A client-attributable page-operation failure (bad manifest, non-PDF, over-ceiling, signed,
+            // encrypted, unprocessable PDF): a typed 400, never a 500 or a hang.
+            throw new ClientException(e.getType(), e.getMessage());
+        } catch (PreviousVersionMismatchException e) {
+            // Unknown / cross-document previous version: a client error (400), never a 500.
+            throw new ClientException("PreviousVersionMismatch", e.getMessage());
+        } catch (VersionConcurrencyException e) {
+            // Lost the single-writer race on the version chain: a retryable conflict (409).
+            throw new ConflictException("VersionConflict", e.getMessage());
+        } catch (IOException e) {
+            // #129: createFile signals an exceeded per-user/global quota with IOException("QuotaReached");
+            // the SPA maps that type to a quota message, so surface ONLY it as a typed 400. Every OTHER
+            // IOException (e.g. the setup/open failure #126 hoists out of the PDF parse) is a server fault:
+            // rethrow it as a 500 rather than mislabeling it a client error the way add()'s broad catch does.
+            if ("QuotaReached".equals(e.getMessage())) {
+                throw new ClientException("QuotaReached", e.getMessage());
+            }
+            throw new ServerException("FileError", "Error applying page operations", e);
+        } catch (Exception e) {
+            throw new ServerException("FileError", "Error applying page operations", e);
+        }
+    }
+
+    /**
      * Process a file manually.
      *
      * @api {post} /file/:id/process Process a file manually
@@ -471,7 +573,7 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
-            FileUtil.startProcessingFile(id);
+            FileUtil.markProcessingWithRollbackCleanup(id, unencryptedFile);
             FileUpdatedAsyncEvent event = new FileUpdatedAsyncEvent();
             event.setUserId(principal.getId());
             event.setLanguage(documentDto.getLanguage());
@@ -599,6 +701,7 @@ public class FileResource extends BaseResource {
      * @apiSuccess {String} files.mimetype MIME type
      * @apiSuccess {String} files.document_id Document ID
      * @apiSuccess {String} files.create_date Create date (timestamp)
+     * @apiSuccess {String} files.creator Username of the current version's uploader
      * @apiSuccess {Number} files.rotation Baked clockwise rotation of the file's raster
      * @apiSuccess {String} files.size File size (in bytes)
      * @apiError (client) ForbiddenError Access denied
@@ -629,12 +732,12 @@ public class FileResource extends BaseResource {
         }
 
         FileDao fileDao = new FileDao();
-        JsonArrayBuilder files = Json.createArrayBuilder();
-        for (File fileDb : fileDao.getByDocumentId(principal.getId(), documentId)) {
-            files.add(RestUtil.fileToJsonObjectBuilder(fileDb));
-        }
+        List<File> fileList = fileDao.getByDocumentId(principal.getId(), documentId);
+        // Resolve every file's current-version uploader (creator) in one batched lookup so the
+        // serialization stays free of a per-file query.
+        Map<String, String> creatorsByUserId = DocumentResourceHelper.resolveFileCreators(fileList);
         JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("files", files);
+                .add("files", DocumentResourceHelper.buildFileArray(fileList, creatorsByUserId));
 
         return Response.ok().entity(response.build()).build();
     }
@@ -717,18 +820,23 @@ public class FileResource extends BaseResource {
         // Get the file
         File file = findFile(id, null, PermType.WRITE);
 
-        // Delete the file
+        // Reclaim the owner's storage quota synchronously, atomically with the delete, and EXACTLY once
+        // even under two concurrent deletes of the same file. reclaimSingleFileOnDelete takes the GLOBAL
+        // sentinel lock, re-reads the file ACTIVE under it, and reclaims only if THIS delete is still the
+        // one seeing it active (a concurrent delete that already soft-deleted it reclaims nothing). It runs
+        // BEFORE the fileDao.delete so the quota locks (GLOBAL then the owner's row) are taken before the
+        // T_FILE row is dirtied — the canonical lock order, no deadlock inversion — and while the file
+        // still exists on disk (needed to size a legacy UNKNOWN_SIZE row). Doing it in the delete
+        // transaction, not the async FileDeletedAsyncEvent listener, also stops a retried event from
+        // double-subtracting.
+        FileUtil.reclaimSingleFileOnDelete(file.getId());
+
+        // Delete the file. When it is the current latest version of a chain, FileDao.delete promotes the
+        // immediately-prior active version to latest under an affected-row compare-and-swap, so deleting the
+        // current version never leaves the chain with zero (or two) latest rows — the file stays visible
+        // with its history.
         FileDao fileDao = new FileDao();
         fileDao.delete(file.getId(), principal.getId());
-
-        // Reclaim the owner's storage quota synchronously, atomically with the delete: the file row
-        // and its size are known here and the file still exists on disk (needed to size legacy
-        // UNKNOWN_SIZE rows). Doing it in the delete transaction — instead of in the async
-        // FileDeletedAsyncEvent listener — means it commits or rolls back with the delete and a
-        // retried async event can never double-subtract.
-        User fileOwner = new UserDao().getById(file.getUserId());
-        long reclaimed = FileUtil.resolveReclaimableSize(file.getId(), file.getSize(), fileOwner);
-        FileUtil.reclaimUserQuota(file.getUserId(), reclaimed);
 
         // Raise a new file deleted event (index + storage cleanup only; quota already reclaimed above)
         FileDeletedAsyncEvent fileDeletedAsyncEvent = new FileDeletedAsyncEvent();
@@ -823,27 +931,32 @@ public class FileResource extends BaseResource {
         // A file is always encrypted by the creator of it
         User user = userDao.getById(file.getUserId());
         
-        // Write the decrypted file to the output
-        try {
-            InputStream fileInputStream = Files.newInputStream(storedFile);
-            final InputStream responseInputStream = decrypt ?
-                    EncryptionUtil.decryptInputStream(fileInputStream, user.getPrivateKey()) : fileInputStream;
-                    
-            stream = outputStream -> {
+        // Open the source stream INSIDE the StreamingOutput lambda: opening it eagerly here would leak
+        // the file descriptor whenever the response entity is never consumed (client disconnect, an
+        // error building the response). Nested try-with-resources opens the raw stream first and the
+        // decrypted wrapper second, so Java closes the raw stream if decrypt initialization throws (a
+        // double-close of the raw stream, when decrypt is disabled and both aliases refer to it, is
+        // tolerated).
+        final java.nio.file.Path sourceFile = storedFile;
+        final boolean decryptSource = decrypt;
+        stream = outputStream -> {
+            try (InputStream rawInputStream = Files.newInputStream(sourceFile);
+                 InputStream responseInputStream = decryptSource
+                         ? EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())
+                         : rawInputStream) {
+                ByteStreams.copy(responseInputStream, outputStream);
+            } catch (IOException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new WebApplicationException(Response.status(Status.SERVICE_UNAVAILABLE).build());
+            } finally {
                 try {
-                    ByteStreams.copy(responseInputStream, outputStream);
-                } finally {
-                    try {
-                        responseInputStream.close();
-                        outputStream.close();
-                    } catch (IOException e) {
-                        // Ignore
-                    }
+                    outputStream.close();
+                } catch (IOException e) {
+                    // Ignore
                 }
-            };
-        } catch (Exception e) {
-            return Response.status(Status.SERVICE_UNAVAILABLE).build();
-        }
+            }
+        };
 
         // User-uploaded original content (size == null) carries a user-controlled MIME type and can be an
         // active document (HTML, SVG). Force it to download as an attachment and lock it down with a
@@ -958,13 +1071,22 @@ public class FileResource extends BaseResource {
                 int index = 0;
                 for (File file : fileList) {
                     java.nio.file.Path storedfile = DirectoryUtil.getStorageDirectory().resolve(file.getId());
-                    InputStream fileInputStream = Files.newInputStream(storedfile);
 
-                    // Add the decrypted file to the ZIP stream
                     // Files are encrypted by the creator of them
                     User user = userDao.getById(file.getUserId());
-                    try (InputStream decryptedStream = EncryptionUtil.decryptInputStream(fileInputStream, user.getPrivateKey())) {
-                        ZipEntry zipEntry = new ZipEntry(index + "-" + file.getFullName(Integer.toString(index)));
+
+                    // Nested try-with-resources: open the raw stream FIRST and the decrypted wrapper
+                    // second, so the raw stream is always closed even if decrypt initialization throws.
+                    // Previously the raw stream was opened outside the try and leaked on a decrypt-setup
+                    // failure (one descriptor per file in the ZIP).
+                    try (InputStream rawInputStream = Files.newInputStream(storedfile);
+                         InputStream decryptedStream = EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())) {
+                        // Sanitize the stored file name to a single safe path segment (a persisted or
+                        // imported name may contain '/', '\' or traversal), preventing a zip-slip entry
+                        // that escapes the extraction directory. The unique index prefix de-collides two
+                        // names that sanitize to the same basename.
+                        ZipEntry zipEntry = new ZipEntry(index + "-"
+                                + ExportUtil.sanitizeFileName(file.getFullName(Integer.toString(index))));
                         zipOutputStream.putNextEntry(zipEntry);
                         ByteStreams.copy(decryptedStream, zipOutputStream);
                         zipOutputStream.closeEntry();

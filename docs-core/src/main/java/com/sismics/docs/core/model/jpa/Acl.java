@@ -53,6 +53,9 @@ public class Acl implements Loggable {
      */
     @Column(name = "ACL_DELETEDATE_D")
     private Date deleteDate;
+
+    @Transient
+    private String auditMessage;
     
     public String getId() {
         return id;
@@ -104,6 +107,10 @@ public class Acl implements Loggable {
         this.deleteDate = deleteDate;
     }
 
+    public void setAuditMessage(String auditMessage) {
+        this.auditMessage = auditMessage;
+    }
+
     @Override
     public String toString() {
         return MoreObjects.toStringHelper(this)
@@ -117,6 +124,6 @@ public class Acl implements Loggable {
 
     @Override
     public String toMessage() {
-        return perm.name();
+        return auditMessage != null ? auditMessage : perm.name();
     }
 }

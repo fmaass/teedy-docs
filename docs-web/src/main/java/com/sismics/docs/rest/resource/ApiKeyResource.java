@@ -2,9 +2,11 @@ package com.sismics.docs.rest.resource;
 
 import com.sismics.docs.core.dao.ApiKeyDao;
 import com.sismics.docs.core.model.jpa.ApiKey;
+import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.util.filter.ApiKeyBasedSecurityFilter;
+import com.sismics.util.filter.SecurityFilter;
 
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
@@ -63,7 +65,18 @@ public class ApiKeyResource extends BaseResource {
      */
     @PUT
     public Response create(@FormParam("name") String name) {
-        if (!authenticate()) {
+        // A guest must not mint a durable bearer credential (mirrors the self-update guard at
+        // UserResource.update): the guest is a shared anonymous-login identity, not an account owner.
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        // An external-origin account (OIDC/LDAP provisioned) must not mint a durable LOCAL bearer
+        // credential: it would be a standing key that authenticates outside the identity provider,
+        // bypassing the provider's disable/revocation control. Refuse BEFORE any secret is generated,
+        // hashed, or persisted, so a refused request leaves no key row or other side effect. The 403
+        // is non-disclosive (identical to the guest refusal above).
+        if (AuthenticationUtil.isExternalOrigin(principal.getId())) {
             throw new ForbiddenClientException();
         }
 
@@ -80,6 +93,10 @@ public class ApiKeyResource extends BaseResource {
         apiKey.setName(name.trim());
         apiKey.setKeyHash(hash);
         apiKey.setPrefix(prefix);
+        // Proof-time stamp: the authorizedEpoch the winning credential's filter carried on this request,
+        // NOT a fresh "current" read — a reset racing this mint bumps the user's epoch and leaves this key
+        // stamped at the now-stale epoch, so it is dead the moment the reset commits.
+        apiKey.setCredentialEpoch((Long) request.getAttribute(SecurityFilter.AUTHORIZED_EPOCH_ATTRIBUTE));
 
         ApiKeyDao apiKeyDao = new ApiKeyDao();
         String id = apiKeyDao.create(apiKey);

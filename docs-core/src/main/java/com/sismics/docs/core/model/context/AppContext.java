@@ -4,15 +4,18 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.EventBus;
+import com.google.common.util.concurrent.Service;
 import com.sismics.docs.core.constant.Constants;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.listener.async.*;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.service.ContentMacBackfillService;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
 import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
+import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
@@ -61,9 +64,25 @@ public class AppContext {
     static final int DEFAULT_ASYNC_RETRY_BACKOFF_MS = 200;
 
     /**
-     * Singleton instance.
+     * Singleton instance. Volatile so the double-checked-locking read in {@link #getInstance()} and the
+     * clear in {@link #shutDown()} publish safely across threads.
      */
-    private static AppContext instance;
+    private static volatile AppContext instance;
+
+    /**
+     * The instance currently being constructed, held ONLY while the AppContext.class monitor is held (no
+     * volatile needed). {@code startUp()} itself calls {@link #getInstance()} on the SAME thread — the
+     * Lucene recovery path posts a rebuild-index event — and Java monitors are reentrant, so that
+     * re-entrant call must return THIS in-progress context instead of building a second one (which would
+     * leak its services/executors once the outer construction overwrote {@code instance}).
+     */
+    private static AppContext constructing;
+
+    /**
+     * Test-only hook run once during {@link #startUp()} to exercise the same-thread re-entrancy path.
+     * Always null in production.
+     */
+    static Runnable duringStartUp;
 
     /**
      * Generic asynchronous event bus.
@@ -96,6 +115,11 @@ public class AppContext {
     private FileSizeService fileSizeService;
 
     /**
+     * Content MAC backfill service (#119).
+     */
+    private ContentMacBackfillService contentMacBackfillService;
+
+    /**
      * Trash purge service.
      */
     private TrashPurgeService trashPurgeService;
@@ -120,6 +144,12 @@ public class AppContext {
      */
     private void startUp() {
         resetEventBus();
+
+        // Test-only seam mirroring the Lucene recovery path, which calls AppContext.getInstance() on this
+        // same thread during startUp (after the event bus exists). Inert in production (hook is null).
+        if (duringStartUp != null) {
+            duringStartUp.run();
+        }
 
         // Start indexing handler
         try {
@@ -147,10 +177,46 @@ public class AppContext {
         inboxService.startAsync();
         inboxService.awaitRunning();
 
-        // Start file size service
+        // Start file size service. Unlike the other services it SELF-COMPLETES: it schedules its first
+        // iteration with zero initial delay and calls stopAsync() as soon as there is nothing left to size
+        // (an empty or already-sized corpus). On a small dataset it can therefore leave the RUNNING state
+        // before awaitRunning() observes it, which makes awaitRunning() throw IllegalStateException.
+        //
+        // Tolerating this is safe because TERMINATED is reachable ONLY by that legitimate self-completion:
+        // FileSizeService.startUp()/shutDown() only log (never throw) and runOneIteration() catches every
+        // Throwable, so the service can never enter FAILED on its own — its lone stopAsync() call fires
+        // when the work is exhausted. So only the benign self-stop sequence RUNNING -> STOPPING ->
+        // TERMINATED is accepted; a genuine startup failure would surface as FAILED (or any other state)
+        // and still propagates, never masked (#102).
         fileSizeService = new FileSizeService();
         fileSizeService.startAsync();
-        fileSizeService.awaitRunning();
+        try {
+            fileSizeService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = fileSizeService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
+
+        // Resolve the content-hash duplicate detection master secret ONCE (#119) and log ON/OFF.
+        ContentMacUtil.init();
+
+        // Start the content MAC backfill service. Like FileSizeService it SELF-COMPLETES (it stops as soon
+        // as the null-MAC work set drains — and immediately, on its first iteration, when the feature is off
+        // for lack of a master secret), so it can reach TERMINATED before awaitRunning() observes RUNNING.
+        // Tolerate exactly that benign self-stop (TERMINATED/STOPPING) while still propagating a genuine
+        // startup failure — runOneIteration() catches every Throwable, so it can never enter FAILED on its own.
+        contentMacBackfillService = new ContentMacBackfillService();
+        contentMacBackfillService.startAsync();
+        try {
+            contentMacBackfillService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = contentMacBackfillService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
 
         // Start trash purge service
         trashPurgeService = new TrashPurgeService();
@@ -217,11 +283,50 @@ public class AppContext {
      * @return Application context
      */
     public static AppContext getInstance() {
-        if (instance == null) {
-            instance = new AppContext();
-            instance.startUp();
+        // Double-checked locking: the hot path (already initialized) is a single volatile read; only the
+        // first initialization takes the lock. Serializing initialization is required because a
+        // concurrent burst of first-requests (e.g. after a transient warm-up failure left instance null)
+        // would otherwise let several threads each construct + startUp() a context and leak all but the
+        // one that wins the publish — leaking their started services / event executors.
+        AppContext result = instance;
+        if (result == null) {
+            synchronized (AppContext.class) {
+                result = instance;
+                if (result == null) {
+                    // Same-thread re-entrancy during construction (startUp() -> Lucene recovery ->
+                    // getInstance()): the monitor is reentrant, so we re-enter here while instance is
+                    // still unpublished. Return the ONE in-construction context rather than building a
+                    // second one that would leak.
+                    if (constructing != null) {
+                        return constructing;
+                    }
+                    constructing = new AppContext();
+                    try {
+                        constructing.startUp();
+                        // Publish the singleton only AFTER a successful startUp(): a half-initialized
+                        // context must never be cached (the field being non-null would stop any retry).
+                        instance = constructing;
+                        result = constructing;
+                    } catch (RuntimeException | Error e) {
+                        // startUp() starts services sequentially; if a later step fails, the already-
+                        // started services / executors of THIS local context must be shut down before it
+                        // is abandoned, so a retry does not accumulate leaked thread pools. Best-effort:
+                        // a shutDown failure must not mask the original startUp failure.
+                        try {
+                            constructing.shutDown();
+                        } catch (Exception shutdownFailure) {
+                            log.error("Failed to shut down a partially-started application context after a startUp failure", shutdownFailure);
+                        }
+                        throw e;
+                    } finally {
+                        // Construction is over (success or failure): the in-progress handle is cleared so
+                        // a later retry after a failure builds afresh.
+                        constructing = null;
+                    }
+                }
+            }
         }
-        return instance;
+        return result;
     }
 
     /**
@@ -290,9 +395,24 @@ public class AppContext {
      *
      * @return Number of queued tasks
      */
-    public int getQueuedTaskCount() {
-        int queueSize = 0;
-        for (ThreadPoolExecutor executor : asyncExecutorList) {
+    public long getQueuedTaskCount() {
+        return computeQueuedTaskCount(asyncExecutorList);
+    }
+
+    /**
+     * Sum the queued (submitted but not yet completed) tasks across the given executors.
+     *
+     * <p>Package-private and static so the accumulation arithmetic can be exercised directly by a
+     * unit test with executor task counts beyond the {@code int} range —
+     * {@link ThreadPoolExecutor#getTaskCount()} returns {@code long}, and a long-lived instance can
+     * legitimately pass 2^31 processed tasks.
+     *
+     * @param executors Executors to sum over
+     * @return Number of queued tasks
+     */
+    static long computeQueuedTaskCount(List<ThreadPoolExecutor> executors) {
+        long queueSize = 0;
+        for (ThreadPoolExecutor executor : executors) {
             queueSize += executor.getTaskCount() - executor.getCompletedTaskCount();
         }
         return queueSize;
@@ -359,6 +479,10 @@ public class AppContext {
 
         if (fileSizeService != null) {
             fileSizeService.stopAsync();
+        }
+
+        if (contentMacBackfillService != null) {
+            contentMacBackfillService.stopAsync();
         }
 
         if (trashPurgeService != null) {

@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { DocumentKey } from './documentKey'
 import type { DocumentDetail } from '../../api/document'
+
+// The view now derives its per-user file-view-mode key from the auth store, so every
+// mount needs an active pinia (no user → anonymous username → grid default).
+beforeEach(() => setActivePinia(createPinia()))
 
 // #36: the "Related documents" section is the unit under test — direction grouping,
 // full-surviving-list mutation composition, per-direction controls, and cross-document
@@ -19,6 +24,7 @@ vi.mock('../../api/document', async (importOriginal) => ({
   updateDocument: (...a: unknown[]) => updateDocumentMock(...a),
 }))
 const setRotationMock = vi.fn(() => Promise.resolve({ data: { status: 'ok', rotation: 0 } }))
+const renameFileMock = vi.fn(() => Promise.resolve({ data: {} }))
 vi.mock('../../api/file', () => ({
   // Reflect the size + rotation cache-bust so tests can assert the served URL varies by rotation
   // (the real getFileUrl behaviour). The original file (no size) never carries a cache-bust key.
@@ -31,15 +37,19 @@ vi.mock('../../api/file', () => ({
   },
   setRotation: (...a: unknown[]) => setRotationMock(...a),
   deleteFile: vi.fn(),
-  renameFile: vi.fn(),
+  renameFile: (...a: unknown[]) => renameFileMock(...a),
   uploadFile: vi.fn(),
+  reorderFiles: vi.fn(() => Promise.resolve({ data: { status: 'ok' } })),
 }))
 // pdfjs-dist (imported at module level by PdfViewer) needs DOMMatrix, which jsdom
 // lacks — replace the whole module; the viewer is irrelevant to the relations unit.
 vi.mock('../../components/PdfViewer.vue', () => ({
   default: { name: 'PdfViewer', template: '<div />' },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({ t: (k: string) => k }),
+}))
 vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: vi.fn() }) }))
 // The danger-confirm dialog is a dependency; accepting immediately exercises the REAL
 // accept callback (the id-list composition under test) without driving PrimeVue overlays.
@@ -69,13 +79,15 @@ function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
   } as unknown as DocumentDetail
 }
 
-function mountView(doc: DocumentDetail) {
+function mountView(doc: DocumentDetail, slots: Record<string, string> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+  const docRef = ref(doc)
   const wrapper = mount(DocumentViewContent, {
+    slots,
     global: {
       plugins: [PrimeVue, [VueQueryPlugin, { queryClient }]],
-      provide: { [DocumentKey as symbol]: ref(doc) },
+      provide: { [DocumentKey as symbol]: docRef },
       stubs: {
         FileUpload: true,
         CameraCaptureButton: true,
@@ -88,7 +100,7 @@ function mountView(doc: DocumentDetail) {
       directives: { tooltip: {} },
     },
   })
-  return { wrapper, invalidateSpy }
+  return { wrapper, invalidateSpy, docRef }
 }
 
 type ViewVm = {
@@ -268,5 +280,102 @@ describe('DocumentViewContent — persisted image rotation', () => {
       } as unknown as Partial<DocumentDetail>),
     )
     expect(wrapper.find('.image-preview-controls').exists()).toBe(false)
+  })
+})
+
+// #58 — the shared per-file action slot (#file-extra). A per-file action
+// defined ONCE at the view level must light up in BOTH the grid tiles and the list rows
+// (this is the mount point #73 "Edit pages" / #117 "Upload new version" use) and inherit
+// FileActionMenu's writable gate. Proven by injecting slot content through the view.
+describe('DocumentViewContent — #file-extra per-file action slot (#73/#117 mount point)', () => {
+  beforeEach(() => localStorage.clear())
+
+  function fileDoc(writable = true): DocumentDetail {
+    return makeDoc({
+      relations: [],
+      writable,
+      files: [
+        { id: 'f1', name: 'a.jpg', mimetype: 'image/jpeg', size: 1, version: 0, create_date: 0, creator: 'admin' },
+      ],
+    } as unknown as Partial<DocumentDetail>)
+  }
+  const slot = { 'file-extra': '<button class="phase-action">edit</button>' }
+
+  it('renders the injected per-file action in the GRID tiles when writable (grid is default)', () => {
+    const { wrapper } = mountView(fileDoc(true), slot)
+    expect(wrapper.find('.file-preview-grid').exists()).toBe(true)
+    expect(wrapper.findAll('.phase-action').length).toBeGreaterThan(0)
+  })
+
+  it('renders the injected per-file action in the LIST rows when writable', () => {
+    // Anonymous username in tests → the per-user key has an empty suffix.
+    localStorage.setItem('teedy_file_view_mode:', 'list')
+    const { wrapper } = mountView(fileDoc(true), slot)
+    expect(wrapper.find('.file-data-table').exists()).toBe(true)
+    expect(wrapper.findAll('.phase-action').length).toBeGreaterThan(0)
+  })
+
+  it('does NOT render the per-file action in either view when the document is read-only', () => {
+    const { wrapper: grid } = mountView(fileDoc(false), slot)
+    expect(grid.find('.file-preview-grid').exists()).toBe(true)
+    expect(grid.findAll('.phase-action').length).toBe(0)
+
+    localStorage.setItem('teedy_file_view_mode:', 'list')
+    const { wrapper: list } = mountView(fileDoc(false), slot)
+    expect(list.find('.file-data-table').exists()).toBe(true)
+    expect(list.findAll('.phase-action').length).toBe(0)
+  })
+})
+
+// The grid tiles gained the shared action menu. Its rename control must be
+// live (a compact per-card editor), not a dead button.
+describe('DocumentViewContent — grid tile actions', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    renameFileMock.mockClear()
+  })
+
+  function imageDoc(writable = true): DocumentDetail {
+    return makeDoc({
+      relations: [],
+      writable,
+      files: [
+        { id: 'f1', name: 'a.jpg', mimetype: 'image/jpeg', size: 1, version: 0, create_date: 0, creator: 'admin' },
+      ],
+    } as unknown as Partial<DocumentDetail>)
+  }
+
+  it('the grid Rename control opens a per-tile inline editor (writable)', async () => {
+    const { wrapper } = mountView(imageDoc(true)) // grid is default
+    const rename = wrapper.findAll('.file-card-actions button').find((b) => b.attributes('aria-label') === 'rename')!
+    expect(rename).toBeTruthy()
+    await rename.trigger('click')
+    expect(wrapper.find('input.grid-rename-input').exists()).toBe(true)
+  })
+
+  it('read-only grid tiles expose no rename/delete, only version history', () => {
+    const { wrapper } = mountView(imageDoc(false))
+    const labels = wrapper.findAll('.file-card-actions button').map((b) => b.attributes('aria-label'))
+    expect(labels).toContain('ui.versions.title')
+    expect(labels).not.toContain('rename')
+    expect(labels).not.toContain('ui.remove_file')
+  })
+
+  it('a mid-edit permission flip to read-only blocks the grid rename commit (no write fires)', async () => {
+    const { wrapper, docRef } = mountView(imageDoc(true))
+    // Open the editor while writable.
+    await wrapper.findAll('.file-card-actions button').find((b) => b.attributes('aria-label') === 'rename')!.trigger('click')
+    const input = wrapper.find('input.grid-rename-input')
+    expect(input.exists()).toBe(true)
+    await input.setValue('renamed.jpg')
+
+    // Permissions refetch to read-only WHILE the editor is open.
+    docRef.value = { ...docRef.value, writable: false }
+    await wrapper.vm.$nextTick()
+
+    // Enter must NOT issue the rename write.
+    await input.trigger('keyup.enter')
+    await flushPromises()
+    expect(renameFileMock).not.toHaveBeenCalled()
   })
 })

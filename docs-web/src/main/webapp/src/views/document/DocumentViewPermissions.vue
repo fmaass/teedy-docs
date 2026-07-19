@@ -144,7 +144,7 @@ async function copyShareUrl(url: string) {
   }
 }
 
-function confirmRevokeShare(share: { id: string; name: string }) {
+function confirmRevokeShare(share: { id: string; name: string | null }) {
   confirmDanger({
     message: t('ui.share.revoke_confirm', { name: share.name || t('ui.share.unnamed') }),
     header: t('ui.share.revoke'),

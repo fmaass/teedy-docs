@@ -48,7 +48,7 @@ Each rule has:
 |-------|-------------|
 | **Tag** | The tag to auto-apply when the rule matches (`tag_id`) |
 | **Rule type** | What text the pattern is tested against: `TITLE_REGEX`, `FILENAME_REGEX`, or `CONTENT_REGEX` |
-| **Pattern** | A regular expression (validated on save) |
+| **Pattern** | A regular expression in the standard Java dialect (validated on save, max 1000 chars; evaluated case-insensitively with a bounded per-rule evaluation time, so a pathological pattern is skipped rather than allowed to stall processing) |
 | **Order** | Execution order (default `0`) |
 | **Enabled** | Whether the rule is active (default on) |
 

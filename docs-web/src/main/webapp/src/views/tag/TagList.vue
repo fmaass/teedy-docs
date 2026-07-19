@@ -183,6 +183,17 @@ function selectTag(node: { key: string }) {
   align-items: center;
   gap: 0.5rem;
 }
+/* The submit button must hold its label width; the flex-1 Select beside it absorbs
+   the horizontal squeeze. Without this the button shrinks below its content on a
+   narrow row and clips its label (e.g. German "Erstellen" -> "Erste"). The Select
+   needs min-width:0 to shrink below its intrinsic content width (a flex item defaults
+   to min-width:auto) so the row itself never overflows the narrow viewport. */
+.create-row :deep(.p-button) {
+  flex-shrink: 0;
+}
+.create-row :deep(.p-select) {
+  min-width: 0;
+}
 
 .tag-tree :deep(.p-tree) {
   border: none;

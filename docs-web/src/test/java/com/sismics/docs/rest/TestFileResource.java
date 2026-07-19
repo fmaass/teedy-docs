@@ -106,6 +106,9 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertEquals("image/jpeg", files.getJsonObject(0).getString("mimetype"));
         Assertions.assertEquals(0, files.getJsonObject(0).getInt("version"));
         Assertions.assertEquals(FILE_PIA_00452_JPG_SIZE, files.getJsonObject(0).getJsonNumber("size").longValue());
+        // The current-version uploader (creator) and its create date are exposed additively.
+        Assertions.assertEquals("file_resources", files.getJsonObject(0).getString("creator"));
+        Assertions.assertTrue(files.getJsonObject(0).getJsonNumber("create_date").longValue() > 0);
         Assertions.assertEquals(file2Id, files.getJsonObject(1).getString("id"));
         Assertions.assertEquals("PIA00452.jpg", files.getJsonObject(1).getString("name"));
         Assertions.assertEquals(0, files.getJsonObject(1).getInt("version"));
@@ -708,7 +711,7 @@ public class TestFileResource extends BaseJerseyTest {
      * investigable outcome, never a silently missed leak.
      */
     private java.util.Set<Path> snapshotSismicsTempFiles() throws Exception {
-        Path tmpDir = Path.of(System.getProperty("java.io.tmpdir"));
+        Path tmpDir = com.sismics.docs.core.service.FileService.getTemporaryDirectory();
         try (java.util.stream.Stream<Path> files = Files.list(tmpDir)) {
             return files.filter(p -> p.getFileName().toString().startsWith("sismics_docs"))
                     .collect(java.util.stream.Collectors.toSet());
@@ -856,5 +859,62 @@ public class TestFileResource extends BaseJerseyTest {
                 "Original file download must use Content-Disposition: attachment, got: " + contentDisposition);
         Assertions.assertFalse(contentDisposition.toLowerCase().startsWith("inline"),
                 "Original file download must not be served inline, got: " + contentDisposition);
+    }
+
+    /**
+     * Regression test for #136: a multipart {@code file} part carrying NO filename attribute must be
+     * accepted with a null (absent) stored name — the whole stack tolerates a null name — instead of
+     * throwing {@code URLDecoder.decode(null, ...)} and returning HTTP 500.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testUploadFileWithoutFilename() throws Exception {
+        // Login and create a document to attach the file to
+        clientUtil.createUser("file_noname");
+        String token = clientUtil.login("file_noname");
+        String documentId = clientUtil.createDocument(token);
+
+        // A "file" part whose Content-Disposition carries NO filename= parameter, so the server sees
+        // getContentDisposition().getFileName() == null. StreamDataBodyPart cannot express this — it
+        // defaults the filename to the part name — so build the content disposition (name only) directly.
+        org.glassfish.jersey.media.multipart.FormDataContentDisposition noFilename =
+                org.glassfish.jersey.media.multipart.FormDataContentDisposition.name("file").build();
+        org.glassfish.jersey.media.multipart.FormDataBodyPart filePart =
+                new org.glassfish.jersey.media.multipart.FormDataBodyPart(noFilename,
+                        "content with no filename".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        MediaType.APPLICATION_OCTET_STREAM_TYPE);
+
+        String fileId;
+        try (org.glassfish.jersey.media.multipart.FormDataMultiPart multiPart =
+                     new org.glassfish.jersey.media.multipart.FormDataMultiPart()) {
+            org.glassfish.jersey.media.multipart.FormDataMultiPart form =
+                    (org.glassfish.jersey.media.multipart.FormDataMultiPart) multiPart.field("id", documentId);
+            Response response = target()
+                    .register(org.glassfish.jersey.media.multipart.MultiPartFeature.class)
+                    .path("/file").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .put(Entity.entity(form.bodyPart(filePart), MediaType.MULTIPART_FORM_DATA_TYPE));
+            // Pre-fix this was HTTP 500 (URLDecoder.decode(null) NPE).
+            Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                    "A filename-less file part must be accepted, not 500");
+            JsonObject json = response.readEntity(JsonObject.class);
+            Assertions.assertEquals("ok", json.getString("status"));
+            fileId = json.getString("id");
+            Assertions.assertNotNull(fileId);
+        }
+
+        // The stored file carries a null name, serialized as JSON null (rc.8 Phase G nullable-wire).
+        JsonObject list = target().path("/file/list")
+                .queryParam("id", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray files = list.getJsonArray("files");
+        Assertions.assertEquals(1, files.size());
+        JsonObject file = files.getJsonObject(0);
+        Assertions.assertEquals(fileId, file.getString("id"));
+        Assertions.assertTrue(file.isNull("name"),
+                "An absent filename must store a null name, got: " + file.get("name"));
     }
 }

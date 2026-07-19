@@ -1,6 +1,7 @@
 package com.sismics.docs.core.util.authentication;
 
 import com.google.common.collect.Lists;
+import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.ClasspathScanner;
 
@@ -41,5 +42,19 @@ public class AuthenticationUtil {
             }
         }
         return null;
+    }
+
+    /**
+     * Whether the account with the given id is external-origin — OIDC- or LDAP-provisioned — and therefore
+     * must not be issued a durable local credential. A missing account is treated as non-external (the
+     * caller's own existence checks apply). Centralizing the origin question in the authentication layer
+     * keeps the partition a single concern and keeps REST callers off a direct DAO dependency.
+     *
+     * @param userId User ID
+     * @return true if the account is OIDC- or LDAP-origin
+     */
+    public static boolean isExternalOrigin(String userId) {
+        User user = new UserDao().getById(userId);
+        return user != null && (user.isLdap() || user.getOidcIssuer() != null || user.getOidcSubject() != null);
     }
 }

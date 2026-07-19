@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { ref } from 'vue'
 import PrimeVue from 'primevue/config'
+import ToastService from 'primevue/toastservice'
+import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import Skeleton from 'primevue/skeleton'
+import { DocumentKey } from '../views/document/documentKey'
 
 // #32: the version-history load state must render CONTENT-SHAPED skeleton rows, not
 // a spinner. We hold the load open (a never-resolving getFileVersions) so
@@ -14,6 +18,9 @@ const getFileVersionsMock = vi.fn()
 vi.mock('../api/file', () => ({
   getFileVersions: (...args: unknown[]) => getFileVersionsMock(...args),
   getFileUrl: (id: string) => `/api/file/${id}/data`,
+  // uploadFile is pulled in transitively by the version-upload composable; it is
+  // never invoked in the loading-state test, but must exist as an export.
+  uploadFile: vi.fn(),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
 
@@ -23,7 +30,11 @@ function mountDialog() {
   return mount(FileVersionsDialog, {
     props: { fileId: 'file-1', visible: true },
     global: {
-      plugins: [PrimeVue],
+      // The version-upload composable (footer action) resolves toast, query client
+      // and the injected document at setup, so provide all three even though the
+      // loading-state branch under test never renders the upload button.
+      plugins: [PrimeVue, ToastService, [VueQueryPlugin, { queryClient: new QueryClient() }]],
+      provide: { [DocumentKey as symbol]: ref({ id: 'doc-1' }) },
       stubs: {
         // Dialog teleports to <body>; render its default slot inline so the test
         // can query the loading region without chasing the teleport target.

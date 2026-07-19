@@ -218,8 +218,16 @@ public class EmailUtil {
                     FileContent fileContent = new FileContent();
                     fileContent.name = subPart.getFileName();
                     fileContent.file = AppContext.getInstance().getFileService().createTemporaryFile();
-                    Files.copy(subPart.getInputStream(), fileContent.file, StandardCopyOption.REPLACE_EXISTING);
-                    fileContent.size = Files.size(fileContent.file);
+                    try {
+                        Files.copy(subPart.getInputStream(), fileContent.file, StandardCopyOption.REPLACE_EXISTING);
+                        fileContent.size = Files.size(fileContent.file);
+                    } catch (IOException | RuntimeException e) {
+                        // The temp is created before it is recorded in the content list, so a copy/size
+                        // failure would leak it (the importer's cleanup only reaches listed temps). Delete
+                        // it, then rethrow.
+                        Files.deleteIfExists(fileContent.file);
+                        throw e;
+                    }
                     mailContent.fileContentList.add(fileContent);
                 } else {
                     parseMailContent(subPart, mailContent);
@@ -241,8 +249,15 @@ public class EmailUtil {
         } else if (content instanceof InputStream) {
             FileContent fileContent = new FileContent();
             fileContent.file = AppContext.getInstance().getFileService().createTemporaryFile();
-            Files.copy((InputStream) content, fileContent.file, StandardCopyOption.REPLACE_EXISTING);
-            fileContent.size = Files.size(fileContent.file);
+            try {
+                Files.copy((InputStream) content, fileContent.file, StandardCopyOption.REPLACE_EXISTING);
+                fileContent.size = Files.size(fileContent.file);
+            } catch (IOException | RuntimeException e) {
+                // The temp is created before it is recorded in the content list, so a copy/size failure
+                // would leak it (the importer's cleanup only reaches listed temps). Delete it, then rethrow.
+                Files.deleteIfExists(fileContent.file);
+                throw e;
+            }
             mailContent.fileContentList.add(fileContent);
         }
     }

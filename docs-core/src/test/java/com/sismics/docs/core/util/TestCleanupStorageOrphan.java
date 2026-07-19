@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import jakarta.persistence.EntityManager;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -131,6 +133,114 @@ public class TestCleanupStorageOrphan extends BaseTransactionalTest {
             Files.deleteIfExists(oldOriginal);
             Files.deleteIfExists(oldWeb);
             Files.deleteIfExists(freshOriginal);
+        }
+    }
+
+    /**
+     * #79 byte accounting: {@link CleanupStorageUtil#deleteAndMeasure} counts ONLY the bytes THIS run's
+     * own delete actually freed. The in-process sweep lock serializes concurrent clean_storage runs, but a
+     * non-clean_storage deleter ({@code FileDeletedAsyncListener}) can still remove a variant OUTSIDE the
+     * sweep, so this per-variant accounting must exclude bytes it did not free. Here a concurrent deleter
+     * removes {@code _web} mid-reclaim (via the base-delete seam); the reported footprint must be base +
+     * {@code _thumb} only, not the {@code _web} bytes another actor freed.
+     */
+    @Test
+    public void bytesFreedCountsOnlyVariantsThisRunActuallyDeleted() throws Exception {
+        Path dir = DirectoryUtil.getStorageDirectory();
+        String id = UUID.randomUUID().toString();
+        Files.write(dir.resolve(id), new byte[]{1, 2, 3, 4});     // base: 4 bytes
+        Path web = dir.resolve(id + "_web");
+        Files.write(web, new byte[]{5, 6, 7});                    // _web: 3 bytes (freed by the OTHER deleter)
+        Files.write(dir.resolve(id + "_thumb"), new byte[]{8});   // _thumb: 1 byte
+
+        try {
+            CleanupStorageUtil.ReclaimResult r = CleanupStorageUtil.deleteAndMeasure(dir, id, claimedId -> {
+                // A concurrent NON-clean_storage deleter removes the _web variant AFTER this run deleted
+                // the base but before this run reaches _web.
+                try {
+                    Files.deleteIfExists(web);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            Assertions.assertTrue(r.isReclaimed(), "this run reclaimed at least one variant it deleted");
+            Assertions.assertEquals(5L, r.getBytesFreed(),
+                    "bytes freed count ONLY the variants THIS run deleted (base 4 + _thumb 1), never the "
+                            + "concurrently-removed _web (3)");
+            Assertions.assertFalse(Files.exists(dir.resolve(id)), "base is gone");
+            Assertions.assertFalse(Files.exists(dir.resolve(id + "_thumb")), "_thumb is gone");
+        } finally {
+            Files.deleteIfExists(dir.resolve(id));
+            Files.deleteIfExists(dir.resolve(id + "_web"));
+            Files.deleteIfExists(dir.resolve(id + "_thumb"));
+        }
+    }
+
+    /**
+     * #79 single-run reclaim: {@link CleanupStorageUtil#deleteAndMeasure} removes all three variants of a
+     * logical file and reports their summed footprint (counted once). An already-gone id reclaims nothing.
+     */
+    @Test
+    public void deleteAndMeasureRemovesAllVariantsAndSumsFootprintOnce() throws Exception {
+        Path dir = DirectoryUtil.getStorageDirectory();
+        String id = UUID.randomUUID().toString();
+        Files.write(dir.resolve(id), new byte[]{1, 2, 3, 4});     // 4
+        Files.write(dir.resolve(id + "_web"), new byte[]{5, 6});  // 2
+        Files.write(dir.resolve(id + "_thumb"), new byte[]{7});   // 1 → footprint 7
+
+        try {
+            CleanupStorageUtil.ReclaimResult r = CleanupStorageUtil.deleteAndMeasure(dir, id, null);
+            Assertions.assertTrue(r.isReclaimed(), "a present logical file is reclaimed");
+            Assertions.assertEquals(7L, r.getBytesFreed(), "footprint sums all variants (4 + 2 + 1)");
+            Assertions.assertFalse(Files.exists(dir.resolve(id)), "base is gone");
+            Assertions.assertFalse(Files.exists(dir.resolve(id + "_web")), "_web is gone");
+            Assertions.assertFalse(Files.exists(dir.resolve(id + "_thumb")), "_thumb is gone");
+
+            // Re-running on the now-gone id reclaims nothing (no double count).
+            CleanupStorageUtil.ReclaimResult again = CleanupStorageUtil.deleteAndMeasure(dir, id, null);
+            Assertions.assertFalse(again.isReclaimed(), "an already-gone id reclaims nothing");
+            Assertions.assertEquals(0L, again.getBytesFreed(), "an already-gone id frees no bytes");
+        } finally {
+            Files.deleteIfExists(dir.resolve(id));
+            Files.deleteIfExists(dir.resolve(id + "_web"));
+            Files.deleteIfExists(dir.resolve(id + "_thumb"));
+        }
+    }
+
+    /**
+     * #79 partial-failure accounting: if a LATER variant's delete throws {@link IOException}, the
+     * bytes/count for variants THIS run already removed must NOT be discarded. Here base and {@code _web}
+     * are regular files (deleted successfully) and {@code _thumb} is a NON-EMPTY DIRECTORY, so its
+     * {@code deleteIfExists} throws {@code DirectoryNotEmptyException} (an {@link IOException}). The result
+     * must report base + {@code _web} bytes (not zero), stay reclaimed, and carry the failure — the
+     * un-deletable variant is left in place for a later sweep.
+     */
+    @Test
+    public void bytesFreedSurviveALaterVariantDeleteFailure() throws Exception {
+        Path dir = DirectoryUtil.getStorageDirectory();
+        String id = UUID.randomUUID().toString();
+        Files.write(dir.resolve(id), new byte[]{1, 2, 3, 4});      // base: 4 bytes (freed)
+        Files.write(dir.resolve(id + "_web"), new byte[]{5, 6, 7}); // _web: 3 bytes (freed)
+        // _thumb is a NON-EMPTY directory → its deleteIfExists throws DirectoryNotEmptyException.
+        Path thumbDir = dir.resolve(id + "_thumb");
+        Files.createDirectory(thumbDir);
+        Path blocker = thumbDir.resolve("blocker");
+        Files.write(blocker, new byte[]{9});
+
+        try {
+            CleanupStorageUtil.ReclaimResult r = CleanupStorageUtil.deleteAndMeasure(dir, id, null);
+            Assertions.assertTrue(r.isReclaimed(), "base + _web were removed by this run");
+            Assertions.assertEquals(7L, r.getBytesFreed(),
+                    "bytes already freed (base 4 + _web 3) must SURVIVE the _thumb delete failure, not reset to 0");
+            Assertions.assertNotNull(r.getFailure(), "the _thumb delete failure is reported to the caller");
+            Assertions.assertFalse(Files.exists(dir.resolve(id)), "base was removed");
+            Assertions.assertFalse(Files.exists(dir.resolve(id + "_web")), "_web was removed");
+            Assertions.assertTrue(Files.exists(thumbDir), "the un-deletable _thumb is left for a later sweep");
+        } finally {
+            Files.deleteIfExists(dir.resolve(id));
+            Files.deleteIfExists(dir.resolve(id + "_web"));
+            Files.deleteIfExists(blocker);
+            Files.deleteIfExists(thumbDir);
         }
     }
 }

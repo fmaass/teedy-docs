@@ -24,9 +24,8 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
     public void reclaimKnownSizeDecrementsOnce() throws Exception {
         User user = createUser("reclaimKnown");
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         long size = FileUtil.resolveReclaimableSize("no-such-file", FILE_JPG_SIZE, user);
         Assertions.assertEquals(FILE_JPG_SIZE.longValue(), size,
@@ -43,9 +42,8 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
         // createFile writes the encrypted content to storage, so an UNKNOWN_SIZE row can be sized from disk.
         File file = createFile(user, File.UNKNOWN_SIZE);
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         long size = FileUtil.resolveReclaimableSize(file.getId(), File.UNKNOWN_SIZE, userDao.getById(user.getId()));
         Assertions.assertTrue(size > 0L, "an UNKNOWN_SIZE file must be sized from its on-disk content");
@@ -59,9 +57,8 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
     public void reclaimSumsMultipleFilesOnce() throws Exception {
         User user = createUser("reclaimSum");
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 10_000L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
 
         // Simulate a multi-file document delete: sum the reclaimable sizes, decrement once.
         long total = FileUtil.resolveReclaimableSize("f1", 100L, user)
@@ -78,9 +75,8 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
     public void reclaimClampsAtZeroAndIgnoresNonPositive() throws Exception {
         User user = createUser("reclaimClamp");
         UserDao userDao = new UserDao();
+        seedStorageCurrent(user.getId(), 100L);
         user = userDao.getById(user.getId());
-        user.setStorageCurrent(100L);
-        userDao.updateQuota(user);
 
         // Over-reclaim must clamp at zero, not go negative.
         FileUtil.reclaimUserQuota(user.getId(), 500L);
@@ -96,42 +92,42 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
      * and reclaims ONLY files whose deleteDate matches the document's (cascade-trashed), skipping a
      * file individually deleted earlier (different deleteDate = already reclaimed).
      */
+    /**
+     * Persists a real T_FILE row owned by {@code userId} with the given size, then stamps the in-memory
+     * deleteDate that the reclaim's cascade/already-reclaimed discriminator reads. The row must exist for
+     * the reclaim's under-lock existence re-read to consider it.
+     */
+    private File persistFile(String userId, long size, Date deleteDate) {
+        File file = new File();
+        file.setUserId(userId);
+        file.setVersion(0);
+        file.setLatestVersion(true);
+        file.setMimeType(MimeType.IMAGE_JPEG);
+        file.setSize(size);
+        new FileDao().create(file, userId);
+        file.setDeleteDate(deleteDate);
+        return file;
+    }
+
     @Test
     public void reclaimGroupsByOwnerAndSkipsAlreadyDeleted() throws Exception {
         User owner = createUser("reclaimOwnerA");
         User collab = createUser("reclaimOwnerB");
         UserDao userDao = new UserDao();
 
-        User o = userDao.getById(owner.getId());
-        o.setStorageCurrent(1_000L);
-        userDao.updateQuota(o);
-        User c = userDao.getById(collab.getId());
-        c.setStorageCurrent(1_000L);
-        userDao.updateQuota(c);
+        seedStorageCurrent(owner.getId(), 1_000L);
+        seedStorageCurrent(collab.getId(), 1_000L);
 
         Date trashInstant = new Date();
         Date earlierInstant = new Date(trashInstant.getTime() - 60_000L);
 
-        // Cascade-trashed file owned by the doc owner (deleteDate == document deleteDate).
-        File ownerFile = new File();
-        ownerFile.setId("owner-file");
-        ownerFile.setUserId(owner.getId());
-        ownerFile.setSize(100L);
-        ownerFile.setDeleteDate(trashInstant);
-
-        // Cascade-trashed file owned by a collaborator (uploaded to the same document).
-        File collabFile = new File();
-        collabFile.setId("collab-file");
-        collabFile.setUserId(collab.getId());
-        collabFile.setSize(250L);
-        collabFile.setDeleteDate(trashInstant);
-
+        // The files must be REAL rows: reclaimQuotaForDeletedDocumentFiles re-reads (under the global
+        // lock) which of them still physically exist, so a concurrent purge cannot double-reclaim. Persist
+        // each, then stamp the in-memory deleteDate that drives the cascade/already-reclaimed skip logic.
+        File ownerFile = persistFile(owner.getId(), 100L, trashInstant); // cascade-trashed with the doc
+        File collabFile = persistFile(collab.getId(), 250L, trashInstant); // collaborator upload, same doc
         // A file individually deleted earlier (different deleteDate) -> already reclaimed, must be skipped.
-        File alreadyDeleted = new File();
-        alreadyDeleted.setId("already-deleted-file");
-        alreadyDeleted.setUserId(owner.getId());
-        alreadyDeleted.setSize(400L);
-        alreadyDeleted.setDeleteDate(earlierInstant);
+        File alreadyDeleted = persistFile(owner.getId(), 400L, earlierInstant);
 
         FileUtil.reclaimQuotaForDeletedDocumentFiles(
                 java.util.List.of(ownerFile, collabFile, alreadyDeleted), trashInstant);
@@ -165,9 +161,7 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
 
         // The collaborator's quota reflects their single upload; assert it returns to 0 after reclaim.
         long collabFileSize = 250L;
-        User c = userDao.getById(collab.getId());
-        c.setStorageCurrent(collabFileSize);
-        userDao.updateQuota(c);
+        seedStorageCurrent(collab.getId(), collabFileSize);
 
         // A document owned by A.
         Document document = new Document();
@@ -209,19 +203,18 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
     }
 
     /**
-     * #74 blocker 3 — {@link FileUtil#reclaimUserQuota} (via {@link UserDao#updateQuotaById}) must credit
-     * a RETAINED SOFT-DELETED uploader's quota WITHOUT throwing. {@code UserDao.updateQuota} filters on
-     * {@code deleteDate is null} and throws {@code NoResultException} for such a user; the ghost-tolerant
-     * path must not. This is the shared fix that also protects the retention-purge path.
+     * #74 blocker 3 — {@link FileUtil#reclaimUserQuota} (via {@link UserDao#getByIdForUpdate}) must
+     * credit a RETAINED SOFT-DELETED uploader's quota WITHOUT throwing. {@code getByIdForUpdate} does not
+     * filter on {@code deleteDate is null}, so it finds and locks such a ghost key-holder; the
+     * active-only lock would throw {@code NoResultException}. This is the shared fix that also protects
+     * the retention-purge path.
      */
     @Test
     public void reclaimUserQuotaToleratesSoftDeletedUploader() throws Exception {
         User user = createUser("reclaimGhost");
         UserDao userDao = new UserDao();
         String userId = user.getId();
-        user = userDao.getById(userId);
-        user.setStorageCurrent(10_000L);
-        userDao.updateQuota(user);
+        seedStorageCurrent(userId, 10_000L);
         // Soft-delete the user (retained ghost key-holder state).
         User toDelete = userDao.getById(userId);
         toDelete.setDeleteDate(new Date());
@@ -234,11 +227,12 @@ public class TestFileUtilQuota extends BaseTransactionalTest {
     }
 
     /**
-     * {@link UserDao#updateQuotaById} is a no-op (no throw) when the user row does not exist.
+     * {@link FileUtil#reclaimUserQuota} is a no-op (no throw) when the user row does not exist — the
+     * lock+refresh returns null and the subtract is skipped, preserving the ghost-holder semantics.
      */
     @Test
-    public void updateQuotaByIdIsNoOpForMissingUser() {
-        Assertions.assertDoesNotThrow(() -> new UserDao().updateQuotaById("no-such-user-id", 123L),
-                "updateQuotaById on a missing user must be a graceful no-op");
+    public void reclaimUserQuotaIsNoOpForMissingUser() {
+        Assertions.assertDoesNotThrow(() -> FileUtil.reclaimUserQuota("no-such-user-id", 123L),
+                "reclaiming quota for a missing user must be a graceful no-op");
     }
 }

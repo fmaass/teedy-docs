@@ -11,9 +11,11 @@ import com.sismics.docs.core.dao.dto.GroupDto;
 import com.sismics.docs.core.dao.dto.UserDto;
 import com.sismics.docs.core.event.AclCreatedAsyncEvent;
 import com.sismics.docs.core.event.AclDeletedAsyncEvent;
+import com.sismics.docs.core.exception.TagWriteLockoutException;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.Tag;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.rest.exception.ClientException;
@@ -88,7 +90,19 @@ public class AclResource extends BaseResource {
         if (!aclDao.checkPermission(sourceId, PermType.WRITE, getTargetIdList(null))) {
             throw new ForbiddenClientException();
         }
-        
+
+        // #121: serialize concurrent identical grants by locking the ACL SOURCE row FOR UPDATE before the
+        // duplicate-check below. A DOCUMENT source keeps the #111 owner-row lock (the same lock a self-delete
+        // of the owner takes, so a grant cannot attach to a document being concurrently trashed nor ride a
+        // stale owner past a reassignment); a TAG source locks the tag row; a ROUTE-MODEL source locks the
+        // route-model row. Two racing identical grants thus serialize on the source row: the second blocks,
+        // then re-reads the now-present grant under READ_COMMITTED and skips the insert (exactly one row).
+        // A false result means a DOCUMENT source's owner could not be locked active (deleted / reassigned
+        // away) — abort with the same not-found contract as before.
+        if (!CredentialLifecycleUtil.lockAclSourceForGrant(sourceId)) {
+            throw new NotFoundException();
+        }
+
         // Create the ACL
         Acl acl = new Acl();
         acl.setSourceId(sourceId);
@@ -176,8 +190,15 @@ public class AclResource extends BaseResource {
             throw new ClientException("AclError", "Cannot delete base ACL on a tag");
         }
 
-        // Delete the ACL
-        aclDao.delete(sourceId, perm, targetId, principal.getId(), AclType.USER);
+        // Delete the ACL. #88: AclDao.delete enforces the last-WRITE lockout under the tag row lock
+        // (a tag must keep at least one WRITE owner); surface its signal as a client error here.
+        // Mapping the exception is NOT a rest.resource -> core.dao dependency, so the frozen layering
+        // web is unchanged — the guard's DAO calls live in the DAO, off the ratcheted edge.
+        try {
+            aclDao.delete(sourceId, perm, targetId, principal.getId(), AclType.USER);
+        } catch (TagWriteLockoutException e) {
+            throw new ClientException("AclError", "Cannot remove the last write permission on a tag");
+        }
 
         // Raise an ACL deleted event
         AclDeletedAsyncEvent event = new AclDeletedAsyncEvent();

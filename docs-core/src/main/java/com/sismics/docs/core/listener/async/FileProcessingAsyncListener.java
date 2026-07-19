@@ -17,21 +17,22 @@ import com.sismics.docs.core.model.jpa.TagMatchRule;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.RasterGenerationUtil;
+import com.sismics.docs.core.util.RegexRulePolicy;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.format.FormatHandler;
 import com.sismics.docs.core.util.format.FormatHandlerUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.text.MessageFormat;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 
 /**
  * Listener on file processing.
@@ -52,11 +53,7 @@ public class FileProcessingAsyncListener {
     @Subscribe
     @AllowConcurrentEvents
     public void on(final FileCreatedAsyncEvent event) {
-        if (log.isInfoEnabled()) {
-            log.info("File created event: " + event.toString());
-        }
-
-        processFile(event, true);
+        processEvent(event, true);
     }
 
     /**
@@ -67,9 +64,51 @@ public class FileProcessingAsyncListener {
     @Subscribe
     @AllowConcurrentEvents
     public void on(final FileUpdatedAsyncEvent event) {
-        log.info("File updated event: " + event.toString());
+        processEvent(event, false);
+    }
 
-        processFile(event, false);
+    /**
+     * Process a file event, guaranteeing the in-memory processing marker is ALWAYS released and the
+     * plaintext temp file deleted, whatever the outcome — including an {@link Error}, and including a
+     * failure in the subscriber-entry logging (which is why the logging lives inside the protected body,
+     * not before it). Without this guarantee a processing throw would strand the file's processing marker
+     * until the JVM restarts, blocking any later rotation or reprocessing of that file.
+     *
+     * <p>The two releases are NESTED so a temp-delete failure cannot skip the marker release. On the
+     * durable-commit path this listener is the sole owner of the release; on a producer rollback the
+     * event is discarded and never delivered here, and the producer's registered rollback compensation
+     * ({@link FileUtil#markProcessingWithRollbackCleanup}) owns the release instead — the two paths are
+     * mutually exclusive, so the marker is released exactly once.</p>
+     *
+     * <p><b>Known limitation:</b> on the commit path the release depends on this listener actually
+     * running. The async event bus is backed by a {@code ThreadPoolExecutor} with a
+     * {@code CallerRunsPolicy}, so a full queue applies backpressure rather than rejecting; a transient
+     * rejection under a running JVM does not occur (rejection only happens once the executor is shut
+     * down at JVM stop). If delivery is nonetheless lost at shutdown, the in-memory marker lingers — this
+     * is acceptable because it is process-local and cleared on the next JVM start.</p>
+     *
+     * @param event File event
+     * @param isFileCreated True if the file was just created
+     */
+    private void processEvent(FileEvent event, boolean isFileCreated) {
+        try {
+            if (log.isInfoEnabled()) {
+                log.info((isFileCreated ? "File created event: " : "File updated event: ") + event.toString());
+            }
+            processFile(event, isFileCreated);
+        } finally {
+            // Deterministically delete the plaintext temp file this event carried, then release the
+            // processing marker. All producers (upload, attach, manual re-process, EML import) hand
+            // ownership of the decrypted/unencrypted file to this event; this is the single point where
+            // its lifetime ends on the commit path. The releases are nested so a temp-delete failure
+            // cannot skip the marker release. The PhantomReference sweep in FileService remains only as a
+            // backstop.
+            try {
+                deleteUnencryptedFile(event);
+            } finally {
+                FileUtil.endProcessingFile(event.getFileId());
+            }
+        }
     }
 
     /**
@@ -80,87 +119,69 @@ public class FileProcessingAsyncListener {
      * @param event File event
      * @param isFileCreated True if the file was just created
      */
-    private void processFile(FileEvent event, boolean isFileCreated) {
-        try {
-            AtomicReference<File> file = new AtomicReference<>();
-            AtomicReference<User> user = new AtomicReference<>();
+    protected void processFile(FileEvent event, boolean isFileCreated) {
+        AtomicReference<File> file = new AtomicReference<>();
+        AtomicReference<User> user = new AtomicReference<>();
 
-            // Open a first transaction to get what we need to start the processing
-            TransactionUtil.handle(() -> {
-                // Generate thumbnail, extract content
-                file.set(new FileDao().getActiveById(event.getFileId()));
-                if (file.get() == null) {
-                    // The file has been deleted since
-                    return;
-                }
-
-                // Get the creating user from the database for its private key
-                UserDao userDao = new UserDao();
-                user.set(userDao.getById(file.get().getUserId()));
-            });
-
-            // Process the file outside of a transaction
-            if (user.get() == null || file.get() == null) {
-                // The user or file has been deleted
-                FileUtil.endProcessingFile(event.getFileId());
+        // Open a first transaction to get what we need to start the processing
+        TransactionUtil.handle(() -> {
+            // Generate thumbnail, extract content
+            file.set(new FileDao().getActiveById(event.getFileId()));
+            if (file.get() == null) {
+                // The file has been deleted since
                 return;
             }
-            String content = extractContent(event, user.get(), file.get());
 
-            // Open a new transaction to save the file content
-            AtomicReference<String> documentId = new AtomicReference<>();
-            AtomicReference<String> fileName = new AtomicReference<>();
-            TransactionUtil.handle(() -> {
-                FileDao fileDao = new FileDao();
-                File freshFile = fileDao.getActiveById(event.getFileId());
-                if (freshFile == null) {
-                    return;
-                }
+            // Get the creating user from the database for its private key
+            UserDao userDao = new UserDao();
+            user.set(userDao.getById(file.get().getUserId()));
+        });
 
-                freshFile.setContent(content);
-                fileDao.update(freshFile);
+        // Process the file outside of a transaction
+        if (user.get() == null || file.get() == null) {
+            // The user or file has been deleted; the marker release + temp cleanup run in processEvent.
+            return;
+        }
+        String content = extractContent(event, user.get(), file.get());
 
-                if (isFileCreated) {
-                    AppContext.getInstance().getIndexingHandler().createFile(freshFile);
-                } else {
-                    AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
-                }
-
-                documentId.set(freshFile.getDocumentId());
-                fileName.set(freshFile.getName());
-            });
-
-            // Apply auto-tagging rules
-            if (documentId.get() != null) {
-                applyAutoTagRules(documentId.get(), fileName.get(), content);
+        // Open a new transaction to save the file content
+        AtomicReference<String> documentId = new AtomicReference<>();
+        AtomicReference<String> fileName = new AtomicReference<>();
+        TransactionUtil.handle(() -> {
+            FileDao fileDao = new FileDao();
+            File freshFile = fileDao.getActiveById(event.getFileId());
+            if (freshFile == null) {
+                return;
             }
 
-            FileUtil.endProcessingFile(event.getFileId());
-        } finally {
-            // Deterministically delete the plaintext temp file this event carried. All
-            // producers (upload, attach, manual re-process, EML import) hand ownership
-            // of the decrypted/unencrypted file to this event; this is the single point
-            // where its lifetime ends. The PhantomReference sweep in FileService remains
-            // only as a backstop.
-            deleteUnencryptedFile(event);
+            freshFile.setContent(content);
+            fileDao.update(freshFile);
+
+            if (isFileCreated) {
+                AppContext.getInstance().getIndexingHandler().createFile(freshFile);
+            } else {
+                AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
+            }
+
+            documentId.set(freshFile.getDocumentId());
+            fileName.set(freshFile.getName());
+        });
+
+        // Apply auto-tagging rules
+        if (documentId.get() != null) {
+            applyAutoTagRules(documentId.get(), fileName.get(), content);
         }
     }
 
     /**
-     * Delete the plaintext temporary file carried by a file event, if any.
+     * Delete the plaintext temporary file carried by a file event, if any. Routes through the shared
+     * guarded delete so the stored-file alias (a null-private-key decrypt, in unit-test mode) is never
+     * deleted — the same guard the producers' rollback compensation uses.
      *
      * @param event File event
      */
     void deleteUnencryptedFile(FileEvent event) {
-        Path unencryptedFile = event.getUnencryptedFile();
-        if (unencryptedFile == null) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(unencryptedFile);
-        } catch (Exception e) {
-            log.warn("Unable to delete temporary file: " + unencryptedFile, e);
-        }
+        FileUtil.deleteTempGuarded(event.getFileId(), event.getUnencryptedFile());
     }
 
     /**
@@ -267,12 +288,8 @@ public class FileProcessingAsyncListener {
                 if (target == null) {
                     continue;
                 }
-                try {
-                    if (Pattern.compile(rule.getPattern(), Pattern.CASE_INSENSITIVE).matcher(target).find()) {
-                        newTagIds.add(rule.getTagId());
-                    }
-                } catch (Exception e) {
-                    log.warn("Invalid regex in tag match rule {}: {}", rule.getId(), rule.getPattern());
+                if (ruleMatches(rule, target)) {
+                    newTagIds.add(rule.getTagId());
                 }
             }
 
@@ -301,5 +318,69 @@ public class FileProcessingAsyncListener {
                 }
             }
         });
+    }
+
+    /**
+     * Evaluate one persisted rule against a target text under {@link RegexRulePolicy}.
+     *
+     * <p>FAIL SAFE by construction: an invalid persisted pattern (a legacy or directly-inserted
+     * DB row that never went through REST validation) or an evaluation that exceeds the policy's
+     * wall-clock deadline skips the rule with a bounded warning — a pathological rule cannot
+     * stall file processing, and sibling rules are unaffected.
+     *
+     * <p>Package-private and static so rule evaluation can be exercised directly against
+     * DAO-level rule objects in unit tests.
+     *
+     * @param rule Persisted tag match rule
+     * @param target Target text
+     * @return True when the rule pattern occurs in the target
+     */
+    static boolean ruleMatches(TagMatchRule rule, String target) {
+        if (quarantinedRules.get(quarantineKey(rule.getId(), rule.getPattern())) != null) {
+            return false;
+        }
+        try {
+            return RegexRulePolicy.find(rule.getPattern(), target);
+        } catch (Exception e) {
+            if (shouldWarnSkip(rule.getId(), rule.getPattern())) {
+                log.warn("Tag match rule {} skipped (pattern invalid or evaluation aborted): {}",
+                        rule.getId(), rule.getPattern());
+            }
+            return false;
+        }
+    }
+
+    /**
+     * QUARANTINE for rule id + pattern combinations whose evaluation failed (invalid pattern,
+     * deadline timeout, matcher stack exhaustion). Rule evaluation runs once per rule per
+     * PROCESSED FILE, so without the quarantine every upload re-pays the full evaluation cost of
+     * a bad rule (up to the 2 s deadline each) and re-logs the warning — any uploader can amplify
+     * one bad persisted rule into unbounded work and log growth. Entries key on id + pattern, so
+     * editing the rule's pattern releases it. Bounded LRU so a rotating pattern population cannot
+     * grow it without limit; access-ordered so live entries survive.
+     */
+    private static final int QUARANTINE_CACHE_CAPACITY = 1024;
+    private static final Map<String, Boolean> quarantinedRules =
+            Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
+                    return size() > QUARANTINE_CACHE_CAPACITY;
+                }
+            });
+
+    private static String quarantineKey(String ruleId, String pattern) {
+        return ruleId + ' ' + pattern;
+    }
+
+    /**
+     * Quarantine a failed rule and decide whether its skip warning should be emitted: once per
+     * rule id + pattern, re-warning (and re-evaluating) only when the rule's pattern changes.
+     *
+     * @param ruleId Rule id
+     * @param pattern Rule pattern
+     * @return True when the warning should be logged
+     */
+    static boolean shouldWarnSkip(String ruleId, String pattern) {
+        return quarantinedRules.put(quarantineKey(ruleId, pattern), Boolean.TRUE) == null;
     }
 }

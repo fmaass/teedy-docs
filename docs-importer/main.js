@@ -10,26 +10,14 @@ const argv = require('minimist')(process.argv);
 const _ = require('underscore');
 const qs = require('querystring');
 
-// Minimal cookie jar: captures Set-Cookie from responses (e.g. the auth_token
-// session cookie returned by /api/user/login) and replays them on later
-// requests, replacing the previous behaviour of request.defaults({ jar: true }).
-const cookies = {};
-const storeCookies = (response) => {
-  // Node's fetch exposes multiple Set-Cookie headers via getSetCookie().
-  const setCookies = typeof response.headers.getSetCookie === 'function'
-    ? response.headers.getSetCookie()
-    : (response.headers.get('set-cookie') ? [response.headers.get('set-cookie')] : []);
-  for (const raw of setCookies) {
-    const pair = raw.split(';')[0];
-    const eq = pair.indexOf('=');
-    if (eq > 0) {
-      cookies[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
-    }
-  }
-};
-const cookieHeader = () => Object.keys(cookies)
-  .map(name => name + '=' + cookies[name])
-  .join('; ');
+// Minimal cookie jar (extracted to ./cookies for unit testing): captures Set-Cookie from responses
+// (e.g. the auth_token session cookie and the csrf_token cookie returned by /api/user/login) and
+// replays them on later requests, replacing the previous behaviour of request.defaults({ jar: true }).
+const { createCookieJar } = require('./cookies');
+const jar = createCookieJar();
+const cookies = jar.cookies;
+const storeCookies = jar.storeCookies;
+const cookieHeader = jar.cookieHeader;
 
 // Perform an HTTP request against the Teedy API using Node's built-in fetch,
 // preserving the callback signature (error, response, body) used throughout
@@ -46,6 +34,10 @@ const request = (options, callback) => {
   if (cookie) {
     headers['Cookie'] = cookie;
   }
+
+  // Mirror the captured CSRF cookies into their request headers so the importer keeps working once CSRF
+  // enforcement is enabled (session token, plus the trusted-header proxy token if it applies).
+  Object.assign(headers, jar.csrfHeaders());
 
   let body;
   if (opts.form !== undefined) {

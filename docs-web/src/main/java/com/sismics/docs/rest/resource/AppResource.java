@@ -22,6 +22,7 @@ import com.sismics.docs.core.util.CleanupStorageUtil;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.FileUtil;
+import com.sismics.docs.core.util.TransactionBoundary;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.core.util.StatsBucketUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -34,6 +35,7 @@ import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.EnvironmentUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.jpa.EMF;
 import com.sismics.util.log4j.LogCriteria;
 import com.sismics.util.log4j.LogEntry;
 import com.sismics.util.log4j.MemoryAppender;
@@ -54,7 +56,6 @@ import org.apache.log4j.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.io.StringReader;
 import java.text.MessageFormat;
 import java.util.*;
@@ -89,6 +90,39 @@ public class AppResource extends BaseResource {
      * sweep skips any candidate that is no longer gone from the DB and never deletes a live file's bytes.
      */
     static volatile Runnable cleanStorageBeforeSweepHook = null;
+
+    /**
+     * Test seam (#79 concurrent sweep): a per-file hook fired inside the post-commit filesystem sweep
+     * AFTER a run deletes a logical file's BASE variant but BEFORE its derivatives, WHILE the run holds
+     * {@link #STORAGE_SWEEP_LOCK}. Invoked ONLY when {@link EnvironmentUtil#isUnitTest()} is true (a
+     * genuine no-op in the running webapp regardless of this field). A test uses it to hold one run inside
+     * the sweep lock and prove a concurrent run's sweep BLOCKS on the lock (serialization), so each
+     * physically-removed logical file is counted EXACTLY once across both runs.
+     */
+    static volatile java.util.function.Consumer<String> cleanStorageDuringReclaimHook = null;
+
+    /**
+     * In-process lock (#79) serializing the ENTIRE post-commit filesystem sweep of {@code clean_storage}.
+     * Concurrent runs are REST requests handled by threads in this single JVM, which owns the storage
+     * directory, so an in-process lock is the correct race-free serialization — no filesystem markers, no
+     * TOCTOU. It is acquired AFTER the checkpoint commit releases the DB locks, so it never holds a
+     * database transaction across the (potentially long) filesystem I/O. Assumes ONE application instance
+     * owns the storage directory (the supported single-container deployment); a future multi-instance
+     * deployment sharing storage would need a distributed sweep lock instead.
+     */
+    private static final java.util.concurrent.locks.ReentrantLock STORAGE_SWEEP_LOCK =
+            new java.util.concurrent.locks.ReentrantLock();
+
+    /**
+     * Test-only probe: true when at least one thread is blocked waiting to acquire {@link #STORAGE_SWEEP_LOCK}.
+     * Lets the serialization test deterministically prove a second run's sweep is BLOCKED behind a first
+     * run that holds the lock, with no wall-clock timeout deciding the outcome.
+     *
+     * @return whether a thread is queued on the sweep lock
+     */
+    static boolean sweepLockHasQueuedThreads() {
+        return STORAGE_SWEEP_LOCK.hasQueuedThreads();
+    }
 
     /**
      * Returns information about the application.
@@ -656,6 +690,16 @@ public class AppResource extends BaseResource {
             configDao.update(ConfigType.INBOX_TAG, tag);
         }
 
+        // Clear the persisted UIDVALIDITY baseline: saving the inbox configuration is the explicit
+        // operator action that accepts the current mailbox and lifts a persistent UIDVALIDITY-reset
+        // block. The next sync re-establishes the baseline from the folder's current UIDVALIDITY and
+        // RESUMES import — which MAY re-import messages still present in the folder. Messages already
+        // imported are not re-imported (they were expunged in delete-mode, or marked \Seen so the
+        // UNSEEN search skips them); only a message that committed but was not yet acked before the
+        // reset could produce a duplicate (never a loss). This is the operator explicitly accepting
+        // re-import on resume — there is no automatic safe reconciliation across a UIDVALIDITY epoch.
+        configDao.update(ConfigType.INBOX_UIDVALIDITY, "");
+
         return Response.ok().build();
     }
 
@@ -1012,6 +1056,16 @@ public class AppResource extends BaseResource {
                     "The clean_storage single-run lock is unavailable (missing CLEAN_STORAGE_LOCK row — is the database migrated?)");
         }
 
+        // Acquire the GLOBAL storage-quota lock next — the canonical quota lock order is GLOBAL sentinel
+        // first, then a user row. This run reclaims quota (per-owner, locking user rows) during its DB
+        // mutation phase below; taking the global lock HERE, before any application-row mutation,
+        // guarantees that order is respected against concurrent uploads/deletes and cannot deadlock.
+        // FAIL CLOSED like the CLEAN lock: a missing sentinel means an un-migrated database, so refuse.
+        if (!new ConfigDao().lockForUpdate(ConfigType.GLOBAL_QUOTA_LOCK)) {
+            throw new ServerException("CleanStorageError",
+                    "The global storage-quota lock is unavailable (missing GLOBAL_QUOTA_LOCK row — is the database migrated?)");
+        }
+
         // Capture the eligibility SNAPSHOT before mutating anything — the same side-effect-free
         // computation the dry-run preview uses (so the dry-run estimate matches this state). The file
         // ids here are the CANDIDATES this run intends to hard-delete; the physical sweep below narrows
@@ -1340,53 +1394,92 @@ public class AppResource extends BaseResource {
             }
         }
 
-        java.nio.file.Path storageDir = DirectoryUtil.getStorageDirectory();
-        long actualCount = 0L;
-        long actualBytes = 0L;
-        for (String confirmedId : confirmedDeleted) {
-            // Count a reclaim ONLY when THIS run actually saw the bytes present. FileUtil.delete is
-            // exists-guarded (no throw on a missing file), so without this guard two concurrent
-            // clean_storage runs would BOTH count the same already-gone file (its footprint is 0, so
-            // bytes stay correct, but the file COUNT would over-report). Gating on presence makes the
-            // count reflect what THIS run truly freed. (Quota was already reclaimed in the committed DB
-            // phase above, keyed on the document's deleteDate — not here.)
-            boolean present = CleanupStorageUtil.physicalFileExists(storageDir, confirmedId);
-            long footprint = present ? CleanupStorageUtil.onDiskSizeForFile(storageDir, confirmedId) : 0L;
-            try {
-                FileUtil.delete(confirmedId);
-                if (present) {
-                    actualCount++;
-                    actualBytes += footprint;
-                }
-            } catch (IOException e) {
-                // Do NOT abort the run or over-count: this row is already committed-gone, so a failed
-                // unlink is harmless residue reclaimed by a later run's age-thresholded orphan sweep (#72).
-                log.error("Failed to unlink physical file {} during clean_storage; left for a later orphan sweep", confirmedId, e);
-            }
+        // #103: END the read-only continuation transaction BEFORE the (potentially long) filesystem
+        // sweep. The confirmation read above was the LAST database access of the base request frame; the
+        // sweep below runs entirely off-database. Leaving this transaction open across the sweep is the
+        // bug: under a PostgreSQL idle_in_transaction_session_timeout the idle session is aborted mid-
+        // sweep, and the T_CLEANUP_RUN insert then 500s AFTER the bytes are already gone (a long sweep
+        // makes an internal failure out of a completed reclaim). The continuation only ever RAN reads
+        // (the checkpoint commit fired and reset the frame's events/callbacks), so there is nothing to
+        // commit — roll it back. We deliberately do NOT complete/rotate/close the base frame: it stays
+        // installed with an inactive transaction, which RequestContextFilter.commitAndFinalize tolerates
+        // (it initializes ROLLED_BACK, skips the active-transaction block, and completes the frame at
+        // end-of-request). If the rollback ITSELF is IN_DOUBT, mark the frame terminal and propagate.
+        EntityManager requestEm = ThreadLocalContext.get().peekEntityManager();
+        TransactionBoundary.ClassifiedOutcome ended = TransactionBoundary.tryRollback(requestEm);
+        if (ended.getState() == TransactionBoundary.DurableState.IN_DOUBT) {
+            ThreadLocalContext.get().markCurrentFrameInDoubt();
+            TransactionBoundary.propagate(ended.getFailure());
         }
 
-        // #72 AGE-THRESHOLDED FILESYSTEM-ORPHAN RECLAIM: also unlink genuine orphans — on-disk base ids
-        // with NO T_FILE row (any state) whose variants are all OLDER than the age threshold. This is
-        // enumerated against the COMMITTED post-transaction state (a fresh EM read after commit) with a
-        // fresh clock, so a base id that gained a row concurrently, or a file still fresh (a possible
-        // in-flight upload whose row has not committed), is skipped — the age gate is what makes this
-        // safe. Success-only accounting, consistent with the confirmed-deleted files above.
-        EntityManager sweepEm = ThreadLocalContext.get().getEntityManager();
-        long nowMs = System.currentTimeMillis();
-        for (CleanupStorageUtil.OrphanCandidate orphan : CleanupStorageUtil.findAgeEligibleOrphans(sweepEm, storageDir, nowMs)) {
-            // Same concurrent-run guard as above: count only if the bytes are still present at unlink
-            // time (a parallel run may have removed this orphan between enumeration and here).
-            boolean present = CleanupStorageUtil.physicalFileExists(storageDir, orphan.baseId);
-            long footprint = present ? CleanupStorageUtil.onDiskSizeForFile(storageDir, orphan.baseId) : 0L;
-            try {
-                FileUtil.delete(orphan.baseId);
-                if (present) {
+        java.nio.file.Path storageDir = DirectoryUtil.getStorageDirectory();
+        java.util.function.Consumer<String> duringReclaimHook =
+                EnvironmentUtil.isUnitTest() ? cleanStorageDuringReclaimHook : null;
+
+        // #79: SERIALIZE the entire post-commit filesystem sweep with an IN-PROCESS lock. Concurrent
+        // clean_storage runs are REST requests handled by threads in the SAME JVM — Teedy runs as a single
+        // application instance that OWNS the storage directory, so an in-process lock is the correct, race-
+        // free serialization (no filesystem markers, no TOCTOU). The checkpoint commit above already
+        // released CLEAN_STORAGE_LOCK + GLOBAL_QUOTA_LOCK, so this JVM lock holds NO database transaction
+        // during the (potentially long) filesystem I/O — a second run's DB phase is unaffected; only the
+        // physical sweeps serialize. The second run, once it acquires the lock, recomputes its orphan set
+        // against the CURRENT filesystem and deletes/counts only what still remains, so no file is ever
+        // double-counted. NOTE: this assumes ONE application instance owns the storage directory (the
+        // supported single-container deployment); a future multi-instance deployment sharing storage would
+        // need a DISTRIBUTED sweep lock — do not rely on this in-process lock across instances.
+        long actualCount = 0L;
+        long actualBytes = 0L;
+        STORAGE_SWEEP_LOCK.lock();
+        try {
+            for (String confirmedId : confirmedDeleted) {
+                // Accounting is keyed on THIS run's own deleteIfExists results (count only when a variant
+                // was actually removed by this run; sum only bytes this run freed) — belt-and-suspenders
+                // under the sweep lock, and correct against the async FileDeletedAsyncListener that deletes
+                // storage bytes outside the sweep. deleteAndMeasure never discards bytes already freed even
+                // if a later variant's delete throws — it returns the partial accounting plus the failure.
+                // (Quota was already reclaimed in the committed DB phase above, keyed on the document's
+                // deleteDate — not here.)
+                CleanupStorageUtil.ReclaimResult reclaim =
+                        CleanupStorageUtil.deleteAndMeasure(storageDir, confirmedId, duringReclaimHook);
+                if (reclaim.isReclaimed()) {
                     actualCount++;
-                    actualBytes += footprint;
+                    actualBytes += reclaim.getBytesFreed();
                 }
-            } catch (IOException e) {
-                log.error("Failed to unlink orphan file {} during clean_storage; left for a later orphan sweep", orphan.baseId, e);
+                if (reclaim.getFailure() != null) {
+                    // Do NOT abort the run: this row is already committed-gone, so a failed unlink is
+                    // harmless residue reclaimed by a later run's age-thresholded orphan sweep (#72).
+                    log.error("Failed to unlink physical file {} during clean_storage; left for a later orphan sweep", confirmedId, reclaim.getFailure());
+                }
             }
+
+            // #72 AGE-THRESHOLDED FILESYSTEM-ORPHAN RECLAIM: also unlink genuine orphans — on-disk base ids
+            // with NO T_FILE row (any state) whose variants are all OLDER than the age threshold. Enumerated
+            // HERE, under the sweep lock, against the CURRENT filesystem + committed post-transaction DB
+            // state with a fresh clock — so a serialized second run sees the orphans a first run already
+            // reclaimed as gone, and a base id that gained a row concurrently, or a file still fresh (a
+            // possible in-flight upload whose row has not committed), is skipped.
+            //
+            // #103: the DB half (the all-file-ids snapshot) runs in its OWN short owned transaction —
+            // fully committed and closed here — while the actual filesystem enumeration + unlink runs
+            // off-database. The base request transaction was already ended above, so nothing holds an open
+            // request transaction across the sweep. The snapshot's brief owned frame reads the committed
+            // post-transaction DB state, exactly as the old inline read did.
+            Set<String> knownFileIds = TransactionBoundary.finalizeOwnedInNewFrame(
+                    EMF.get().createEntityManager(), requestEm, CleanupStorageUtil::snapshotAllFileIds);
+            long nowMs = System.currentTimeMillis();
+            for (CleanupStorageUtil.OrphanCandidate orphan : CleanupStorageUtil.enumerateFilesystemOrphans(storageDir, knownFileIds, nowMs)) {
+                CleanupStorageUtil.ReclaimResult reclaim =
+                        CleanupStorageUtil.deleteAndMeasure(storageDir, orphan.baseId, duringReclaimHook);
+                if (reclaim.isReclaimed()) {
+                    actualCount++;
+                    actualBytes += reclaim.getBytesFreed();
+                }
+                if (reclaim.getFailure() != null) {
+                    log.error("Failed to unlink orphan file {} during clean_storage; left for a later orphan sweep", orphan.baseId, reclaim.getFailure());
+                }
+            }
+        } finally {
+            STORAGE_SWEEP_LOCK.unlock();
         }
         log.info("clean_storage unlinked {} files total ({} bytes freed)", actualCount, actualBytes);
 
@@ -1398,13 +1491,22 @@ public class AppResource extends BaseResource {
         // pre-sweep estimate. This table is NEVER swept by clean_storage (unlike an audit-log entry,
         // whose orphan-audit-log delete would purge it), so the next cleanup preserves it. The acting
         // admin is stored as a plain value snapshot, not an FK, so the record survives that admin's
-        // later deletion. It commits with the request's end-of-request transaction.
-        new CleanupRunDao().create(new CleanupRun()
-                .setFileCount(actualCount)
-                .setBytes(actualBytes)
-                .setUserId(principal.getId())
-                .setUsername(principal.getName())
-                .setCreateDate(new Date()));
+        // later deletion.
+        //
+        // #103: the base request transaction was ended before the sweep, so this row is written in its
+        // OWN short owned transaction (a fresh entity manager, committed and closed) rather than riding
+        // the end-of-request commit — which no longer exists on a durable transaction here.
+        final long recordedCount = actualCount;
+        final long recordedBytes = actualBytes;
+        TransactionBoundary.finalizeOwnedInNewFrame(EMF.get().createEntityManager(), requestEm, frameEm -> {
+            new CleanupRunDao().create(new CleanupRun()
+                    .setFileCount(recordedCount)
+                    .setBytes(recordedBytes)
+                    .setUserId(principal.getId())
+                    .setUsername(principal.getName())
+                    .setCreateDate(new Date()));
+            return null;
+        });
         log.info("Recorded clean_storage protocol: {} files, {} bytes reclaimed", actualCount, actualBytes);
 
         // Always return OK
@@ -1448,27 +1550,51 @@ public class AppResource extends BaseResource {
         Config enabled = configDao.getById(ConfigType.LDAP_ENABLED);
 
         JsonObjectBuilder response = Json.createObjectBuilder();
-        if (enabled != null && Boolean.parseBoolean(enabled.getValue())) {
-            // LDAP enabled
-            Config adminPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
-            boolean adminPasswordSet = adminPassword != null && !Strings.isNullOrEmpty(adminPassword.getValue());
-            response.add("enabled", true)
-                    .add("host", ConfigUtil.getConfigStringValue(ConfigType.LDAP_HOST))
-                    .add("port", ConfigUtil.getConfigIntegerValue(ConfigType.LDAP_PORT))
-                    .add("usessl", ConfigUtil.getConfigBooleanValue(ConfigType.LDAP_USESSL))
-                    .add("admin_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_ADMIN_DN))
-                    // The admin bind password is write-only: it is NEVER echoed back (BL-028).
-                    // Only a boolean "is a password stored?" flag is exposed, so the UI shows a
-                    // "leave blank to keep" affordance instead of the secret. The POST keeps the
-                    // stored value when admin_password is absent/empty.
-                    .add("admin_password_set", adminPasswordSet)
-                    .add("base_dn", ConfigUtil.getConfigStringValue(ConfigType.LDAP_BASE_DN))
-                    .add("filter", ConfigUtil.getConfigStringValue(ConfigType.LDAP_FILTER))
-                    .add("default_email", ConfigUtil.getConfigStringValue(ConfigType.LDAP_DEFAULT_EMAIL))
-                    .add("default_storage", ConfigUtil.getConfigLongValue(ConfigType.LDAP_DEFAULT_STORAGE));
-        } else {
-            // LDAP disabled
-            response.add("enabled", false);
+        response.add("enabled", enabled != null && Boolean.parseBoolean(enabled.getValue()));
+
+        // #83: every NON-secret field is returned whenever its config row EXISTS, regardless of
+        // whether LDAP is currently enabled. Disabling LDAP only flips LDAP_ENABLED to false —
+        // the connection settings persist in T_CONFIG — so the admin UI must repopulate them on a
+        // disable/re-enable cycle. Each field is read directly from its row (not via ConfigUtil,
+        // which throws on a missing row) and emitted only when present, so the never-configured
+        // state (no rows) simply omits them instead of failing.
+        Config host = configDao.getById(ConfigType.LDAP_HOST);
+        if (host != null) {
+            response.add("host", host.getValue());
+        }
+        Config port = configDao.getById(ConfigType.LDAP_PORT);
+        if (port != null) {
+            response.add("port", Integer.parseInt(port.getValue()));
+        }
+        Config usessl = configDao.getById(ConfigType.LDAP_USESSL);
+        if (usessl != null) {
+            response.add("usessl", Boolean.parseBoolean(usessl.getValue()));
+        }
+        Config adminDn = configDao.getById(ConfigType.LDAP_ADMIN_DN);
+        if (adminDn != null) {
+            response.add("admin_dn", adminDn.getValue());
+        }
+        // The admin bind password is write-only: it is NEVER echoed back (BL-028). Only a boolean
+        // "is a password stored?" flag is exposed, so the UI shows a "leave blank to keep"
+        // affordance instead of the secret. The POST keeps the stored value when admin_password is
+        // absent/empty. This flag is always present (false when unset).
+        Config adminPassword = configDao.getById(ConfigType.LDAP_ADMIN_PASSWORD);
+        response.add("admin_password_set", adminPassword != null && !Strings.isNullOrEmpty(adminPassword.getValue()));
+        Config baseDn = configDao.getById(ConfigType.LDAP_BASE_DN);
+        if (baseDn != null) {
+            response.add("base_dn", baseDn.getValue());
+        }
+        Config filter = configDao.getById(ConfigType.LDAP_FILTER);
+        if (filter != null) {
+            response.add("filter", filter.getValue());
+        }
+        Config defaultEmail = configDao.getById(ConfigType.LDAP_DEFAULT_EMAIL);
+        if (defaultEmail != null) {
+            response.add("default_email", defaultEmail.getValue());
+        }
+        Config defaultStorage = configDao.getById(ConfigType.LDAP_DEFAULT_STORAGE);
+        if (defaultStorage != null) {
+            response.add("default_storage", Long.parseLong(defaultStorage.getValue()));
         }
 
         return Response.ok().entity(response.build()).build();

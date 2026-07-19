@@ -17,11 +17,15 @@ import com.sismics.docs.core.event.PasswordLostEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.*;
 import com.sismics.docs.core.util.ConfigUtil;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
+import com.sismics.docs.core.util.PasswordRecoveryUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.docs.rest.util.LoginThrottleStore;
 import com.sismics.docs.rest.util.UserUpdateUtil;
+import com.sismics.util.net.ClientAddressResolver;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -29,6 +33,7 @@ import com.sismics.rest.util.ValidationUtil;
 import com.sismics.security.UserPrincipal;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.csrf.CsrfTokenUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.totp.GoogleAuthenticator;
 import com.sismics.util.totp.GoogleAuthenticatorKey;
@@ -54,6 +59,14 @@ import java.util.stream.Collectors;
  */
 @Path("/user")
 public class UserResource extends BaseResource {
+    /**
+     * Supported UI locale codes, mirrored from the SPA's set (the bundled English plus every lazy-loaded
+     * locale in docs-web/src/main/webapp/src/i18n.ts). A per-user locale (#82) is validated against this
+     * set on write so an unknown code is rejected rather than persisted. Keep in sync with the SPA.
+     */
+    private static final Set<String> SUPPORTED_LOCALES = Set.of(
+            "en", "de", "es", "fr", "it", "pt", "pl", "el", "ru", "zh_CN", "zh_TW", "sq_AL");
+
     /**
      * Creates a new user.
      *
@@ -96,6 +109,7 @@ public class UserResource extends BaseResource {
         ValidationUtil.validatePasswordStrength(password, username);
         email = ValidationUtil.validateLength(email, "email", 1, 100);
         Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
+        ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
         ValidationUtil.validateEmail(email, "email");
         
         // Create the user
@@ -133,6 +147,7 @@ public class UserResource extends BaseResource {
      * @apiGroup User
      * @apiParam {String{8..50}} password Password
      * @apiParam {String{1..100}} email E-mail
+     * @apiParam {String} locale Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or connected as guest
      * @apiError (client) ValidationError Validation error
@@ -141,45 +156,141 @@ public class UserResource extends BaseResource {
      *
      * @param password Password
      * @param email E-Mail
+     * @param locale Preferred UI locale code
      * @return Response
      */
     @POST
     public Response update(
         @FormParam("password") String password,
         @FormParam("current_password") String currentPassword,
-        @FormParam("email") String email) {
+        @FormParam("email") String email,
+        @FormParam("locale") String locale) {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
-        
+
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
         email = ValidationUtil.validateLength(email, "email", 1, 100, true);
+        // #82: optional preferred UI locale. Absent/blank leaves the stored value unchanged; a
+        // provided value must be one of the SPA-supported locale codes or the request is rejected.
+        locale = ValidationUtil.validateLength(locale, "locale", 1, 10, true);
+        if (locale != null && !SUPPORTED_LOCALES.contains(locale)) {
+            throw new ClientException("ValidationError", "'locale' is not a supported locale");
+        }
 
-        // If changing password, verify the current password first
+        // If changing password, verify the current password first and capture the credential epoch the
+        // verification observed. That epoch gates the conditional update below so a self-change that
+        // verified the old password then paused cannot overwrite a recovery reset that landed in between.
+        User verifiedUser = null;
         if (StringUtils.isNotBlank(password)) {
             if (StringUtils.isBlank(currentPassword)) {
                 throw new ClientException("CurrentPasswordRequired", "Current password is required to change password");
             }
-            if (AuthenticationUtil.authenticate(principal.getName(), currentPassword) == null) {
+            verifiedUser = AuthenticationUtil.authenticate(principal.getName(), currentPassword);
+            if (verifiedUser == null) {
                 throw new ForbiddenClientException();
             }
             ValidationUtil.validatePasswordStrength(password, principal.getName());
         }
-        
+
         // Update the user
+        boolean passwordChanged = StringUtils.isNotBlank(password);
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
         UserUpdateUtil.applyEmailUpdate(user, email);
+        if (locale != null) {
+            user.setLocale(locale);
+        }
         user = userDao.update(user, principal.getId());
 
-        // Change the password
-        UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
+        // Change the password conditionally on the verification-time epoch, advancing the credential epoch
+        // (which kills EVERY existing session AND API key of this user). The returned authoritative
+        // post-bump epoch stamps the rotated replacement session. A concurrent recovery reset that already
+        // bumped the epoch wins: the conditional update abandons the self-change and returns a negative
+        // value, so the reset's password stands.
+        if (passwordChanged) {
+            long rotatedEpoch = CredentialLifecycleUtil.changeOwnPassword(
+                    user.getId(), password, verifiedUser.getCredentialEpoch(), principal.getId());
+            if (rotatedEpoch < 0) {
+                throw new ClientException("ConcurrentCredentialChange",
+                        "The password was changed by another operation; please retry");
+            }
+        }
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
-        return Response.ok().entity(response.build()).build();
+        Response.ResponseBuilder responseBuilder = Response.ok().entity(response.build());
+
+        // On a self-service password change, ROTATE the session: revoke every existing token (so a cloned or
+        // stolen cookie stops working, including the one that just made this request) and mint a fresh token
+        // for the current browser, returned as a new cookie. Runs in this request transaction.
+        if (passwordChanged) {
+            NewCookie[] rotatedCookies = rotateSession(user);
+            if (rotatedCookies != null) {
+                responseBuilder.cookie(rotatedCookies);
+            }
+        }
+        return responseBuilder.build();
+    }
+
+    /**
+     * Rotates the current browser's session after a self-service password change: revokes ALL of the user's
+     * authentication tokens (including the current one) and, when the request was made over one of this
+     * user's own valid session cookies, mints a fresh token carrying over its long-lasted flag and returns it
+     * as a replacement cookie.
+     *
+     * @param user the user whose sessions are rotated
+     * @return the replacement session cookie and its additive CSRF companion cookie (as a two-element
+     *         array), or null when the request did not present a valid current session token for this
+     *         user (e.g. a header/API-key-authenticated request, or a junk/foreign cookie), in which case
+     *         all of the user's tokens are still revoked but no session is minted
+     */
+    private NewCookie[] rotateSession(User user) {
+        AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+
+        // Resolve the presented cookie to a session token and confirm it is a VALID CURRENT session for THIS
+        // user. A mere non-null cookie string is not enough: a header- or API-key-authenticated request
+        // carrying a junk (or another user's) auth_token cookie must NOT be handed a freshly-minted, durable
+        // bearer session. Only rotate when the cookie genuinely resolves to one of this user's own sessions.
+        String currentToken = getAuthToken();
+        AuthenticationToken existing = currentToken == null ? null : authenticationTokenDao.get(currentToken);
+        boolean validCurrentSession = existing != null && user.getId().equals(existing.getUserId());
+        boolean longLasted = validCurrentSession && existing.isLongLasted();
+
+        // Revoke ALL sessions, including the current token (a cloned cookie must not survive).
+        authenticationTokenDao.deleteAllByUserId(user.getId());
+
+        if (!validCurrentSession) {
+            // No valid session token of this user's own to rotate — mint nothing.
+            return null;
+        }
+
+        // Mint a fresh token for the current browser.
+        String ip = ClientAddressResolver.getInstance().resolve(request);
+        AuthenticationToken newToken = new AuthenticationToken()
+                .setUserId(user.getId())
+                .setLongLasted(longLasted)
+                .setIp(StringUtils.abbreviate(ip, 45))
+                .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
+                // Stamp the AUTHORITATIVE post-bump epoch, read fresh from the row (scalar) in this same
+                // transaction. The self password-change bumped the epoch just before this rotation; the
+                // native bump does not refresh the in-memory user entity, so stamping its cached (pre-bump)
+                // epoch would leave the replacement session dead on arrival.
+                .setCredentialEpoch(CredentialLifecycleUtil.currentEpoch(user.getId()));
+        String tokenValue = authenticationTokenDao.create(newToken);
+
+        int maxAge = longLasted ? TokenBasedSecurityFilter.TOKEN_LONG_LIFETIME : -1;
+        NewCookie authCookie = new NewCookie.Builder(TokenBasedSecurityFilter.COOKIE_NAME)
+                .value(tokenValue)
+                .path("/")
+                .maxAge(maxAge)
+                .secure(true)
+                .httpOnly(true)
+                .sameSite(NewCookie.SameSite.LAX)
+                .build();
+        return new NewCookie[] { authCookie, CsrfTokenUtil.buildSessionCookie(tokenValue) };
     }
 
     /**
@@ -238,8 +349,12 @@ public class UserResource extends BaseResource {
         UserUpdateUtil.applyEmailUpdate(user, email);
         if (StringUtils.isNotBlank(storageQuotaStr)) {
             Long storageQuota = ValidationUtil.validateLong(storageQuotaStr, "storage_quota");
+            ValidationUtil.validateNonNegative(storageQuota, "storage_quota");
             user.setStorageQuota(storageQuota);
         }
+        user = userDao.update(user, principal.getId());
+
+        boolean disableTransition = false;
         if (disabled != null) {
             // Cannot disable the admin user or the guest user
             RoleBaseFunctionDao userBaseFuction = new RoleBaseFunctionDao();
@@ -248,18 +363,45 @@ public class UserResource extends BaseResource {
                 disabled = false;
             }
 
-            if (disabled && user.getDisableDate() == null) {
+            // Decide and apply the disable/enable transition under a FOR UPDATE lock on the target row, held
+            // for the rest of this request transaction. The transition MUST be computed from the row's CURRENT
+            // disableDate read under the lock, never the pre-lock value loaded above: a concurrent admin (or the
+            // target's own self-update) may have changed the state in between. Locking closes two races the
+            // pre-lock decision left open — (a) a racing self-update re-enabling a just-disabled account, and
+            // (b) a stale duplicate request flipping the state without the credential bump. disableDate is not
+            // in userDao.update's copy list, so this locked read-modify-write is its sole writer.
+            User lockedUser = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            if (lockedUser == null) {
+                // The target was soft-deleted concurrently: fail with the endpoint's existing not-found semantics.
+                throw new ClientException("UserNotFound", "The user does not exist");
+            }
+            boolean currentlyDisabled = lockedUser.getDisableDate() != null;
+            if (disabled && !currentlyDisabled) {
                 // Recording the disabled date
-                user.setDisableDate(new Date());
-            } else if (!disabled && user.getDisableDate() != null) {
-                // Emptying the disabled date
-                user.setDisableDate(null);
+                disableTransition = true;
+                lockedUser.setDisableDate(new Date());
+            } else if (!disabled && currentlyDisabled) {
+                // Emptying the disabled date (a re-enable does NOT bump, per #110)
+                lockedUser.setDisableDate(null);
             }
         }
-        user = userDao.update(user, principal.getId());
 
         // Change the password
+        boolean passwordChanged = StringUtils.isNotBlank(password);
         UserUpdateUtil.applyPasswordUpdate(userDao, user, password, principal.getId());
+
+        // An admin-initiated password reset revokes ALL of the target user's sessions (the account may be
+        // compromised). Committed atomically with the password change in this request transaction.
+        if (passwordChanged) {
+            new AuthenticationTokenDao().deleteAllByUserId(user.getId());
+        }
+
+        // Uniform rule: an admin password change OR a transition to disabled advances the credential epoch,
+        // invalidating EVERY existing session and API key of the target (closes #108, and #110 so a
+        // re-enable — which does NOT bump — cannot resurrect credentials stamped before the disable).
+        if (passwordChanged || disableTransition) {
+            CredentialLifecycleUtil.bumpEpoch(user.getId());
+        }
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -302,18 +444,33 @@ public class UserResource extends BaseResource {
         username = StringUtils.strip(username);
         password = StringUtils.strip(password);
 
-        // Rate limiting: check if IP or username is blocked
-        String clientIp = request.getHeader("x-forwarded-for");
-        if (Strings.isNullOrEmpty(clientIp)) {
-            clientIp = request.getRemoteAddr();
-        }
-        com.sismics.docs.rest.util.LoginRateLimiter rateLimiter = com.sismics.docs.rest.util.LoginRateLimiter.getInstance();
-        long retryAfterIp = rateLimiter.getRetryAfterSeconds(clientIp);
-        long retryAfterUser = username != null ? rateLimiter.getRetryAfterSeconds("user:" + username) : 0;
-        long retryAfter = Math.max(retryAfterIp, retryAfterUser);
-        if (retryAfter > 0) {
+        // Resolve the client address from the X-Forwarded-For chain (rightmost-untrusted traversal): a
+        // spoofed leftmost entry cannot let an attacker rotate past the per-account / per-network limit.
+        String clientIp = ClientAddressResolver.getInstance().resolve(request);
+        LoginThrottleStore throttle = LoginThrottleStore.getInstance();
+
+        // Blocked check runs BEFORE authentication, so an existing and a nonexistent account get the identical
+        // 429 contract (no user enumeration). The Retry-After is bounded and identical either way.
+        LoginThrottleStore.ThrottleDecision decision = throttle.checkLoginBlocked(username, clientIp);
+        if (decision.isBlocked()) {
             return Response.status(429)
-                    .header("Retry-After", retryAfter)
+                    .header("Retry-After", decision.getRetryAfterSeconds())
+                    .entity(Json.createObjectBuilder().add("type", "RateLimited")
+                            .add("message", "Too many login attempts. Try again later.").build())
+                    .build();
+        }
+
+        // Global bulkhead: cap the rate of expensive password-hash work admitted past the cheap per-source
+        // checks, so a distributed low-per-source attack cannot saturate CPU. Sheds with a bounded Retry-After
+        // and self-heals; never consulted by already-authenticated requests. This RESERVE happens BEFORE the
+        // expensive bcrypt verify below, which is what backstops the check-then-authenticate race: the blocked
+        // check (checkLoginBlocked) and the per-account failure bump (recordLoginFailure) are separate, so a
+        // burst of concurrent requests at the (threshold - 1) boundary can all pass the check; capping the
+        // rate of admitted expensive work here bounds how much of that burst actually runs bcrypt at once, and
+        // the per-account counter still locks the account after the bounded overshoot.
+        if (!throttle.tryAdmitLoginWork()) {
+            return Response.status(429)
+                    .header("Retry-After", throttle.loginWorkRetryAfterSeconds())
                     .entity(Json.createObjectBuilder().add("type", "RateLimited")
                             .add("message", "Too many login attempts. Try again later.").build())
                     .build();
@@ -332,8 +489,7 @@ public class UserResource extends BaseResource {
             user = AuthenticationUtil.authenticate(username, password);
         }
         if (user == null) {
-            rateLimiter.recordFailure(clientIp);
-            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throttle.recordLoginFailure(username, clientIp);
             throw new ForbiddenClientException();
         }
 
@@ -347,8 +503,7 @@ public class UserResource extends BaseResource {
         // indistinguishable from a bad password (do not leak "exists but disabled"): record
         // the same rate-limiter failure the bad-password path records.
         if (user.isDisabled()) {
-            rateLimiter.recordFailure(clientIp);
-            if (username != null) rateLimiter.recordFailure("user:" + username);
+            throttle.recordLoginFailure(username, clientIp);
             throw new ForbiddenClientException();
         }
 
@@ -370,29 +525,27 @@ public class UserResource extends BaseResource {
                 // A wrong TOTP code is a failed authentication attempt: record it against
                 // the same IP + user keys used for wrong passwords, so repeated wrong
                 // codes trigger lockout.
-                rateLimiter.recordFailure(clientIp);
-                if (username != null) rateLimiter.recordFailure("user:" + username);
+                throttle.recordLoginFailure(username, clientIp);
                 throw new ForbiddenClientException();
             }
         }
 
-        // Clear rate limiter on fully successful auth (password + TOTP, if enabled)
-        rateLimiter.recordSuccess(clientIp);
-        if (username != null) rateLimiter.recordSuccess("user:" + username);
+        // Clear the throttle state on fully successful auth (password + TOTP, if enabled)
+        throttle.recordLoginSuccess(username, clientIp);
 
-        // Get the remote IP
-        String ip = request.getHeader("x-forwarded-for");
-        if (Strings.isNullOrEmpty(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        
+        // The resolved client address is also the recorded session IP (telemetry).
+        String ip = clientIp;
+
         // Create a new session token
         AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
         AuthenticationToken authenticationToken = new AuthenticationToken()
             .setUserId(user.getId())
             .setLongLasted(longLasted)
             .setIp(StringUtils.abbreviate(ip, 45))
-            .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000));
+            .setUserAgent(StringUtils.abbreviate(request.getHeader("user-agent"), 1000))
+            // Proof-time stamp: the epoch of the user the authenticating transaction just validated (also
+            // covers the guest branch, which resolved the guest via getActiveByUsername into this same user).
+            .setCredentialEpoch(user.getCredentialEpoch());
         String token = authenticationTokenDao.create(authenticationToken);
         
         // Cleanup old session tokens
@@ -410,7 +563,10 @@ public class UserResource extends BaseResource {
                 .httpOnly(true)
                 .sameSite(NewCookie.SameSite.LAX)
                 .build();
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        // Additive CSRF companion cookie (non-HttpOnly, JS-readable) derived from this session's token id.
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildSessionCookie(token))
+                .build();
     }
 
     /**
@@ -480,7 +636,9 @@ public class UserResource extends BaseResource {
             response.add("logout_url", logoutUrl);
         }
 
-        return Response.ok().entity(response.build()).cookie(cookie).build();
+        return Response.ok().entity(response.build())
+                .cookie(cookie, CsrfTokenUtil.buildClearedSessionCookie())
+                .build();
     }
 
     /**
@@ -508,6 +666,33 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "This user cannot be deleted");
         }
 
+        // #111: lock the owner (self) row FOR UPDATE and guard under the lock, held to commit so it spans
+        // the owner-scoped trash below. A concurrent direct share/ACL grant on one of this account's
+        // documents takes the SAME owner-row lock, so the two serialize: a grant that commits first is seen
+        // by the guard (this delete is refused); a delete that commits first leaves the waiting grant to
+        // re-read the now-deleted owner/document and abort. BLOCK the delete when the account still owns
+        // documents directly shared with other principals — fail closed, non-disclosive.
+        User lockedSelf = CredentialLifecycleUtil.lockActiveUser(principal.getId());
+        if (lockedSelf == null) {
+            throw new ClientException("ForbiddenError", "This user cannot be deleted");
+        }
+        if (CredentialLifecycleUtil.hasSharedDocuments(principal.getId())) {
+            throw new ClientException("SharedDocumentsError",
+                    "This account owns documents shared with other users and cannot be deleted");
+        }
+
+        // #122 self-delete guard (evaluated under the self owner-row lock held above): refuse when this
+        // account is the SOLE WRITE holder of a tag that a SURVIVING document (owned by another user) still
+        // uses. Self-delete has no reassignment target, so silently deleting would orphan the tag (its owner
+        // soft-deleted) and clean_storage would later purge it, stripping the tag from the other owner's
+        // document — data loss. The only non-destructive answer is to refuse and direct the user to an admin
+        // reassign-delete (DELETE /user/:username?reassign_to_username=…), which reassigns such tags.
+        if (CredentialLifecycleUtil.hasSoleWriteTagLinkedToSurvivingDocument(principal.getId())) {
+            throw new ClientException("SoleTagWriteHolderError",
+                    "This account is the sole editor of a tag used on another user's document; an admin must "
+                    + "reassign your documents and tags before your account can be deleted");
+        }
+
         // Gracefully handle workflow references (never blocks): collect affected route models and
         // cancel active routes with an open step targeting this user.
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(principal.getId());
@@ -516,11 +701,11 @@ public class UserResource extends BaseResource {
         // Find linked data
         DocumentDao documentDao = new DocumentDao();
         List<Document> documentList = documentDao.findByUserId(principal.getId());
+        UserDao userDao = new UserDao();
         FileDao fileDao = new FileDao();
         List<File> fileList = fileDao.findByUserId(principal.getId());
 
         // Delete the user
-        UserDao userDao = new UserDao();
         userDao.delete(principal.getName(), principal.getId());
 
         sendDeletionEvents(documentList, fileList);
@@ -594,20 +779,39 @@ public class UserResource extends BaseResource {
             throw new ClientException("ValidationError", "Cannot reassign a user's documents to the user being deleted");
         }
 
-        // Gracefully handle workflow references (never blocks): collect affected route models and
-        // cancel active routes with an open step targeting this user.
+        // Collect affected route models for the response payload (a read; takes no lock). The actual route
+        // cancellation — which locks each route's DOCUMENT row FOR UPDATE — is DEFERRED until AFTER the
+        // user-row locks below, so this path acquires USER before DOCUMENT (see the ordering note there).
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
-        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
-        // Re-validate the target under a row lock held to commit, closing the TOCTOU between the
-        // active-check above and the reassignment below: a concurrent deletion of the target must not
-        // leave documents owned by a now-soft-deleted user (which clean_storage would later purge). If
-        // the target was concurrently deleted, this returns null and the delete fails cleanly with no
-        // reassignment performed.
-        User lockedTarget = userDao.getActiveByIdForUpdate(reassignTarget.getId());
-        if (lockedTarget == null) {
+        // Lock BOTH the departing and the target owner rows FOR UPDATE, in a deterministic id order so
+        // every multi-owner locker uses the same order (deadlock-safe). Each lock is eligibility-scoped, so
+        // a concurrently-deleted participant yields null and the delete fails cleanly with no reassignment
+        // (closes the TOCTOU between the active-check above and the reassignment below — documents must not
+        // land on a now-soft-deleted owner). Held to commit, these locks serialize the reassignment against
+        // any concurrent direct share/ACL grant on either owner's documents (which take the same owner-row
+        // lock), so a grant can never ride a stale owner past the transfer into the new owner's lifecycle.
+        User lockedDeparting;
+        User lockedTarget;
+        if (user.getId().compareTo(reassignTarget.getId()) <= 0) {
+            lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+        } else {
+            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+            lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+        }
+        if (lockedDeparting == null || lockedTarget == null) {
             throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
         }
+
+        // Cancel active routes with an open step targeting the departing user. This locks each affected
+        // route's DOCUMENT row FOR UPDATE, so it MUST run AFTER the user-row locks above: this path then
+        // acquires USER before DOCUMENT, the SAME order the self-delete path uses (lock self, then cancel
+        // routes). Running it BEFORE the user locks (as the code previously did) made the admin path lock
+        // DOCUMENT->USER while self-delete locks USER->DOCUMENT — a genuine cross-path deadlock cycle
+        // (PG 40P01) when a document's route targets a self-deleting user who is also this admin-delete's
+        // reassignment target. It still runs before the reassignment, the user soft-delete, and the events.
+        PrincipalDeletionUtil.cancelRoutesTargetingPrincipal(user.getId(), principal.getId());
 
         // Reassign the departing user's ACTIVE documents (and the departing user's tags linked to them)
         // to the target, then grant the target READ+WRITE access on each reassigned document. This must
@@ -749,9 +953,11 @@ public class UserResource extends BaseResource {
                 response.add("is_default_password", Constants.DEFAULT_ADMIN_PASSWORD.equals(adminUser.getPassword()));
             }
         } else {
-            // Update the last connection date (null when authenticated via header/proxy)
+            // Update the last connection date (null when authenticated via header/proxy). Skip the write on
+            // a HEAD: Jersey dispatches HEAD through this @GET method, and this write IS the short-session
+            // expiry clock — a cross-site HEAD must not keep a session alive.
             String authToken = getAuthToken();
-            if (authToken != null) {
+            if (authToken != null && "GET".equals(request.getMethod())) {
                 AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
                 authenticationTokenDao.updateLastConnectionDate(authToken);
             }
@@ -771,6 +977,12 @@ public class UserResource extends BaseResource {
                     .add("storage_current", user.getStorageCurrent())
                     .add("totp_enabled", user.getTotpKey() != null)
                     .add("onboarding", user.isOnboarding());
+
+            // #82 preferred UI locale — emitted only when the user has set one (never pass null to
+            // the string overload). The SPA seeds a fresh device's locale from this on login.
+            if (user.getLocale() != null) {
+                response.add("locale", user.getLocale());
+            }
 
             // Base functions
             JsonArrayBuilder baseFunctions = Json.createArrayBuilder();
@@ -1007,11 +1219,14 @@ public class UserResource extends BaseResource {
 
         // Get the value of the session token
         String authToken = getAuthToken();
-        
-        // Remove other tokens
-        AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
-        authenticationTokenDao.deleteByUserId(principal.getId(), authToken);
-        
+
+        // Remove all other sessions, keeping the current one. A header-authenticated user has no session
+        // token (nothing to keep) — there is no token-based session to prune, so this is a no-op for them.
+        if (authToken != null) {
+            AuthenticationTokenDao authenticationTokenDao = new AuthenticationTokenDao();
+            authenticationTokenDao.deleteAllExceptToken(principal.getId(), authToken);
+        }
+
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
@@ -1155,9 +1370,11 @@ public class UserResource extends BaseResource {
         // Validate the input data
         password = ValidationUtil.validateLength(password, "password", 1, 100, false);
 
-        // Check the password and get the user
+        // Check the password and get the user through the origin-aware handler chain (NOT the raw
+        // origin-blind UserDao.authenticate): the chain refuses an external-origin account, so a
+        // password planted on an OIDC/LDAP account through recovery cannot be used to disable TOTP.
         UserDao userDao = new UserDao();
-        User user = userDao.authenticate(principal.getName(), password);
+        User user = AuthenticationUtil.authenticate(principal.getName(), password);
         if (user == null) {
             throw new ForbiddenClientException();
         }
@@ -1193,18 +1410,42 @@ public class UserResource extends BaseResource {
     public Response passwordLost(@FormParam("username") String username) {
         authenticate();
 
-        // Validate input data
-        ValidationUtil.validateStringNotBlank("username", username);
-
-        // Prepare response
+        // This endpoint ALWAYS returns the same generic OK, whether or not the account exists and whether or
+        // not the recovery path is currently throttled, so it can never be used to enumerate users.
         Response response = Response.ok().entity(Json.createObjectBuilder()
                 .add("status", "ok")
                 .build()).build();
+
+        // A missing/blank username resolves to no user: return the generic OK without touching the database
+        // (the earlier code validated the wrong argument, so a blank username fell through to findByCriteria
+        // and returned the first user in the table).
+        if (StringUtils.isBlank(username)) {
+            return response;
+        }
+
+        // Rate-limit the recovery path per account / network. When limited, silently skip token creation and
+        // mail — never signal the limit through the response body, status, or a Retry-After header.
+        String clientIp = ClientAddressResolver.getInstance().resolve(request);
+        boolean recoveryAllowed = LoginThrottleStore.getInstance().tryRecovery(username, clientIp);
+        if (!recoveryAllowed) {
+            return response;
+        }
 
         // Check for user existence
         UserDao userDao = new UserDao();
         List<UserDto> userDtoList = userDao.findByCriteria(new UserCriteria().setUserName(username), null);
         if (userDtoList.isEmpty()) {
+            // Equalize the dominant work between the existing and nonexistent paths so response timing does
+            // not reveal whether the account exists. Both paths run the same lookup above; only an existing
+            // account additionally persists a recovery-key row (the extra DB round-trip). Spend a comparable,
+            // side-effect-FREE and bounded round-trip here (a token draw plus one read-only lookup that
+            // matches nothing) instead of a state-mutating UPDATE, so this unauthenticated endpoint neither
+            // amplifies writes nor lets a dummy delete interleave with a concurrent real key creation for the
+            // same username. The residual timing difference (a read vs. an INSERT) is small and, critically,
+            // bounded: the per-account and global recovery limiters (tryRecovery, above) cap how many probes
+            // an attacker can send against any one account before suppression, so too few samples are
+            // collectable to resolve it.
+            PasswordRecoveryUtil.equalizeNonexistentRecovery();
             return response;
         }
         UserDto user = userDtoList.get(0);
@@ -1215,11 +1456,15 @@ public class UserResource extends BaseResource {
         passwordRecovery.setUsername(user.getUsername());
         passwordRecoveryDao.create(passwordRecovery);
 
-        // Fire a password lost event
+        // Fire a password lost event AFTER the request transaction durably commits. Posting it before
+        // commit would email a working recovery link even if the request then rolled back (the
+        // PasswordRecovery row would not exist). The listener consumes only the already-populated
+        // recovery id, so the detached entity is safe.
         PasswordLostEvent passwordLostEvent = new PasswordLostEvent();
         passwordLostEvent.setUser(user);
         passwordLostEvent.setPasswordRecovery(passwordRecovery);
-        AppContext.getInstance().getMailEventBus().post(passwordLostEvent);
+        ThreadLocalContext.get().getCompletionRegistry().registerAfterCommit(
+                () -> AppContext.getInstance().getMailEventBus().post(passwordLostEvent));
 
         // Always return OK
         return response;
@@ -1255,25 +1500,42 @@ public class UserResource extends BaseResource {
         ValidationUtil.validateRequired("key", passwordResetKey);
         password = ValidationUtil.validateLength(password, "password", 8, 50, true);
 
-        // Load the password recovery key
+        // Read the key (without consuming it) to validate password strength against the target username
+        // FIRST, so a weak password is rejected without burning the single-use key.
         PasswordRecoveryDao passwordRecoveryDao = new PasswordRecoveryDao();
         PasswordRecovery passwordRecovery = passwordRecoveryDao.getActiveById(passwordResetKey);
         if (passwordRecovery != null && StringUtils.isNotBlank(password)) {
             ValidationUtil.validatePasswordStrength(password, passwordRecovery.getUsername());
         }
-        if (passwordRecovery == null) {
+
+        // Atomically consume the single-use key. The row-count gate inside consume() — not the read above —
+        // is the sole authority: a concurrent reset presenting the same key, or an already-consumed/expired
+        // key, gets null here and a KeyNotFound (the JPA context is never flushed with a managed change, so
+        // nothing leaks past the gate). All the mutations below run in this one request transaction and
+        // commit atomically.
+        String username = passwordRecoveryDao.consume(passwordResetKey);
+        if (username == null) {
             throw new ClientException("KeyNotFound", "Password recovery key not found");
         }
 
         UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(passwordRecovery.getUsername());
+        User user = userDao.getActiveByUsername(username);
 
         // Change the password
         user.setPassword(password);
         user = userDao.updatePassword(user, principal.getId());
 
-        // Deletes password recovery requests
+        // Advance the credential epoch so the reset invalidates EVERY existing session AND API key (closes
+        // the #96 race and #97): a credential minted at the old epoch is rejected on its next request. This
+        // is the authoritative writer even for a session the token-delete below might miss.
+        CredentialLifecycleUtil.bumpEpoch(user.getId());
+
+        // Invalidate every OTHER outstanding recovery key for this user (atomic with the consume above).
         passwordRecoveryDao.deleteActiveByLogin(user.getUsername());
+
+        // Revoke ALL of the user's sessions: a recovery reset must not leave a pre-existing session (which may
+        // belong to an attacker) alive. Committed atomically with the password change in this transaction.
+        new AuthenticationTokenDao().deleteAllByUserId(user.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

@@ -107,8 +107,21 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
 
     // Activating it opens the popover (teleported to <body>) with the 2 hidden tags,
     // and does NOT navigate the row (still on the list).
-    await overflow.click()
-    await expect(overflow).toHaveAttribute('aria-expanded', 'true')
+    //
+    // On the touch viewport the tap is occasionally swallowed under full-suite load: a
+    // list re-render (the document query keeps previous data and refetches) replaces the
+    // trigger between actionability and dispatch, so the toggle handler never runs and
+    // aria-expanded stays false (#118). The reveal is idempotent and
+    // the handler flips `open` synchronously, so aria-expanded is an EXACT post-tap signal:
+    // retry the tap until it flips, re-tapping ONLY while still collapsed (a tap on an
+    // already-open trigger would toggle it shut). Same dropped-click remedy as the
+    // Empty-trash gesture in trash.spec.ts. No arbitrary sleeps — the DOM signal gates it.
+    await expect(async () => {
+      if ((await overflow.getAttribute('aria-expanded')) !== 'true') {
+        await overflow.click()
+      }
+      await expect(overflow).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 })
+    }).toPass({ timeout: 15000 })
     await expect(page).toHaveURL(/#\/document$/)
     const panel = page.locator('.tag-overflow-panel')
     await expect(panel).toBeVisible()

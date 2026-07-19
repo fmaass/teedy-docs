@@ -1,0 +1,9 @@
+STATUS 400
+Content-Type: application/json
+Cache-Control: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+BODY {"message":"zzz is not a supported language","type":"ValidationError"}
+LABEL MAP

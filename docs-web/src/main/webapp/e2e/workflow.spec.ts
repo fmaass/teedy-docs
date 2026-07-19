@@ -69,9 +69,13 @@ async function configureStep(
   await card.locator('.step-field').nth(1).locator('.p-select').click()
   await page.getByRole('option', { name: 'Group', exact: true }).click()
 
-  // Assignee AutoComplete -> type the group name, pick the option.
+  // Assignee AutoComplete -> type the group name, pick the option. Type key by key:
+  // this is a search-as-you-type field (/api/acl/target/search, debounced), and a
+  // one-shot fill() can race the controlled re-render so the search runs with an empty
+  // query and no option renders — the pick then times out under load.
   const targetInput = card.locator('.step-field-target input')
-  await targetInput.fill(opts.groupName)
+  await targetInput.click()
+  await targetInput.pressSequentially(opts.groupName)
   await page.getByRole('option', { name: opts.groupName, exact: true }).click()
   await expect(targetInput).toHaveValue(opts.groupName)
 }
@@ -170,6 +174,53 @@ test('admin builds a workflow, runs it to DONE, and a second run halts on REJECT
         await confirmDanger(page)
       }
     }
+    await deleteModel(page, modelName)
+    await request.delete(`/api/group/${groupName}`).catch(() => {})
+  }
+})
+
+// #88 regression: the tag ACL editor extended the shared AclEditor (an immutable
+// predicate + a grant-confirmation hook), both OPTIONAL. This proves the SettingsWorkflow
+// consumer — which passes neither — still grants and revokes a route-model permission
+// unchanged, with NO grant-disclosure dialog (that hook is tag-only).
+test('SettingsWorkflow ACL editing still grants and revokes (AclEditor regression, #88)', async ({ page, request }) => {
+  const modelName = unique('wfacl')
+  const groupName = unique('wfaclgrp').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  try {
+    await createMemberGroup(request, groupName)
+    await createReviewModel(page, modelName, groupName)
+
+    // Re-open the model editor; the Sharing section (AclEditor) renders for an existing model.
+    await page.goto('/#/settings/workflow')
+    await page.getByRole('row', { name: new RegExp(modelName) })
+      .getByRole('button', { name: 'Edit workflow' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Edit workflow' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Sharing' })).toBeVisible()
+
+    // Grant the group READ via the AclEditor add form. The add lands DIRECTLY — no
+    // disclosure dialog appears, because the tag-only beforeAdd hook is not wired here.
+    const addForm = dialog.locator('.acl-add')
+    await addForm.locator('input').first().fill(groupName)
+    await page.getByRole('option', { name: new RegExp(groupName) }).click()
+    await addForm.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByText('Permission added')).toBeVisible()
+    await expect(page.getByRole('alertdialog')).toHaveCount(0)
+
+    const aclRow = dialog.locator('.acl-row', { hasText: groupName })
+    await expect(aclRow).toBeVisible()
+    await expect(aclRow.getByText('Can view')).toBeVisible()
+
+    // Revoke it: the danger confirm removes the grant from the list.
+    await aclRow.getByRole('button', { name: 'Remove permission' }).click()
+    await confirmDanger(page)
+    await expect(page.getByText('Permission removed')).toBeVisible()
+    await expect(dialog.locator('.acl-row', { hasText: groupName })).toHaveCount(0)
+
+    // Close the editor so its modal mask does not block the list actions in cleanup.
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+  } finally {
     await deleteModel(page, modelName)
     await request.delete(`/api/group/${groupName}`).catch(() => {})
   }

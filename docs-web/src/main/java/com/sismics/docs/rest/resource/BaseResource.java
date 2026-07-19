@@ -112,7 +112,7 @@ public abstract class BaseResource {
      * @param shareId Share ID (optional)
      * @return List of ACL target ID
      */
-    List<String> getTargetIdList(String shareId) {
+    protected List<String> getTargetIdList(String shareId) {
         List<String> targetIdList = Lists.newArrayList(principal.getGroupIdSet());
         if (principal.getId() != null) {
             targetIdList.add(principal.getId());
