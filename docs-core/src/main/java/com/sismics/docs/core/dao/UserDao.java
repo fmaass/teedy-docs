@@ -544,9 +544,9 @@ public class UserDao {
     }
 
     /**
-     * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves the
-     * departing user's tags that are linked to ANY surviving document to the target so no tag link is lost
-     * and no surviving document is left carrying a tag that would be orphaned by the deletion (#122).
+     * Reassigns the ownership of a departing user's ACTIVE documents to a target user, and moves ALL of the
+     * departing user's active tags to the target so no tag is left with a soft-deleted owner and no surviving
+     * document is left carrying a tag that would be orphaned by the deletion (#122, broadened by #134).
      *
      * <p>Only {@code DOC_IDUSER_C} (document ownership) is reassigned — NEVER a file's
      * {@code FIL_IDUSER_C}. Each file is encrypted with its uploader's key and is never re-encrypted,
@@ -578,20 +578,22 @@ public class UserDao {
         // a tag the departing user solely owns can be applied to ANOTHER user's document even when the
         // departing user owns no documents of their own (that tag would otherwise be orphaned by the delete).
 
-        // #122: capture the departing user's tags that are still linked (via a live document-tag row) to
-        // ANY active (surviving) document — NOT only the reassigned documents — BEFORE moving ownership (once
-        // moved they are indistinguishable from the target's own tags). These are moved to the target so
+        // #122/#134: capture EVERY active tag OWNED by the departing user BEFORE moving ownership (once moved
+        // they are indistinguishable from the target's own tags). These are moved to the target so
         // clean_storage's orphan-tag purge — keyed on the tag owner being soft-deleted — does not soft- then
         // hard-delete them and cascade the loss of a surviving document's tag links (the #54-class tag-loss
-        // failure). Broadening the scope from the reassigned documents to every surviving-document-linked
-        // owned tag closes the gap for a tag the departing user solely owns but applied to ANOTHER user's
-        // document (whose document survives this delete): the admin reassign path now preserves it exactly as
-        // the self-delete refusal guard would have required. Only tags OWNED by the departing user are moved;
-        // a shared tag owned by someone else is untouched. Tags linked to no surviving document are left to
-        // the orphan-tag purge (harmless — no document loses a link).
-        Query tagSel = em.createQuery("select distinct t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null and t.id in ("
-                + " select dt.tagId from DocumentTag dt join Document d on d.id = dt.documentId"
-                + " where dt.deleteDate is null and d.deleteDate is null)");
+        // failure). #134 broadens the snapshot from "owned tags currently linked to a surviving document" to
+        // ALL active owned tags: reassignment no longer depends on link state, so a tag the departing user
+        // owns but that is NOT currently linked to any surviving document (unlinked, or linked only to a
+        // foreign document) is no longer missed and left with a soft-deleted owner and no editor — the admin
+        // reassign path now preserves it exactly as the self-delete refusal guard would have required. Only
+        // tags OWNED by the departing user are moved; a shared tag owned by someone else is untouched.
+        //
+        // RESIDUAL (not closed here): a tag CREATED by the departing user AFTER this snapshot but before the
+        // delete commits is still missed — same root cause as the deferred #133 concurrent-link case. Closing
+        // it would require serializing against the hot tag-create/tag-link path (a tag-creation lock), which is
+        // out of scope for this change.
+        Query tagSel = em.createQuery("select t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null");
         tagSel.setParameter("departingUserId", departingUserId);
         List<String> reassignedTagIds = tagSel.getResultList();
 

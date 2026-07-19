@@ -229,4 +229,42 @@ public class TestUserDeleteTagWriteLifecycle extends BaseTransactionalTest {
                 .setParameter("tagId", tagId).setParameter("docId", foreignDoc).getSingleResult();
         Assertions.assertEquals(1L, links.longValue(), "the other owner's document keeps its tag link");
     }
+
+    /**
+     * #134: an admin reassign-delete of a user who owns a tag that is NOT currently linked to any surviving
+     * document must still move that tag to the target and grant the target READ+WRITE. Before the snapshot
+     * was broadened this tag was missed (its owner was soft-deleted with the user, leaving the tag with no
+     * live editor). Mutation proof: with the old "linked to a surviving document" filter the unlinked tag is
+     * NOT captured, so its owner stays the departing user and no target ACL is granted — the ownership and
+     * WRITE-grant assertions below fail.
+     */
+    @Test
+    public void adminReassignPreservesUnlinkedOwnedTag() throws Exception {
+        UserDao userDao = new UserDao();
+        User departing = createUser("tw_unlinked_departing");
+        User target = createUser("tw_unlinked_target");
+
+        // Departing owns a tag linked to NO document at all (not to a surviving one, not to its own).
+        String tagId = createTag(departing.getId());
+        grant(tagId, PermType.READ, departing.getId());
+        grant(tagId, PermType.WRITE, departing.getId());
+        flush();
+
+        // Admin reassign-delete: reassign the departing user's tags/documents to the target, then delete.
+        List<String> reassigned = userDao.reassignOwnedDocuments(departing.getId(), target.getId());
+        flush();
+        userDao.delete(departing.getUsername(), "admin", new HashSet<>(reassigned));
+        flush();
+
+        // The unlinked owned tag now belongs to the live target and the target holds READ+WRITE on it.
+        Tag movedTag = new TagDao().getById(tagId);
+        Assertions.assertNotNull(movedTag, "the tag still exists");
+        Assertions.assertNull(movedTag.getDeleteDate(), "the tag was not deleted");
+        Assertions.assertEquals(target.getId(), movedTag.getUserId(),
+                "the unlinked owned tag's ownership moved to the target");
+        Assertions.assertTrue(new AclDao().hasDirectUserAcl(tagId, PermType.WRITE, target.getId()),
+                "the target holds a direct WRITE grant on the reassigned unlinked tag");
+        Assertions.assertTrue(new AclDao().hasDirectUserAcl(tagId, PermType.READ, target.getId()),
+                "the target holds a direct READ grant on the reassigned unlinked tag");
+    }
 }
