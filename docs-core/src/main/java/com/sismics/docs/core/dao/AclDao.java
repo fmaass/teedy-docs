@@ -150,6 +150,15 @@ public class AclDao {
      * least one WRITE holder) — the count includes both user and group grants, since a group with
      * WRITE is as much an owner as a user, and counts each holder once even if duplicate rows exist.
      *
+     * <p>#135: a holder whose target is a SOFT-DELETED user account is an INERT orphan ACL (a grant that
+     * raced a concurrent user soft-delete). It is excluded here so it cannot inflate the holder count and
+     * mask a sole-active-owner condition. The exclusion keys on the ACTUAL orphan condition — the target
+     * being a soft-deleted {@code T_USER} row — NOT on the ACL type: a grant to a group is stored as a
+     * {@code USER}-type ACL whose target id is a {@code T_GROUP} id (see {@code AclResource}), so keying
+     * off {@code ACL_TYPE_C} would wrongly zero group WRITE holders. A group/share target has no
+     * {@code T_USER} row, and an active user's row is not soft-deleted, so both are counted unchanged;
+     * only a soft-deleted-user target is dropped.</p>
+     *
      * @param sourceId ACL source entity ID
      * @param perm Permission
      * @param type ACL type
@@ -161,7 +170,9 @@ public class AclDao {
         // (sourceId, perm, targetId), so a sole holder represented by duplicate rows (a raced
         // double-grant) is still exactly one owner — counting rows would let it defeat the guard.
         Query q = em.createQuery("select count(distinct a.targetId) from Acl a where a.sourceId = :sourceId"
-                + " and a.perm = :perm and a.type = :type and a.deleteDate is null");
+                + " and a.perm = :perm and a.type = :type and a.deleteDate is null"
+                + " and not exists ("
+                + "   select u.id from User u where u.id = a.targetId and u.deleteDate is not null)");
         q.setParameter("sourceId", sourceId);
         q.setParameter("perm", perm);
         q.setParameter("type", type);
@@ -177,6 +188,16 @@ public class AclDao {
      * document — a #54-class data loss the guard refuses rather than allows. Distinct holders are counted so
      * duplicate rows of the one holder (a raced double-grant) cannot pose as a second owner.
      *
+     * <p>#135: every WRITE-ACL reference additionally excludes a holder whose target is a SOFT-DELETED user
+     * (a {@code T_USER} row with a non-null delete date). A grant can race a concurrent user soft-delete and
+     * leave an inert orphan ACL targeting a now-deleted account; without this filter that orphan would
+     * inflate the distinct-holder count and let the guard wrongly conclude a co-holder survives, so it would
+     * NOT refuse a deletion that in fact strands the tag. The exclusion keys on the target being a
+     * soft-deleted {@code T_USER} row, NOT on {@code ACL_TYPE_C}: a group grant is a {@code USER}-type ACL
+     * whose target is a {@code T_GROUP} id, so a live group WRITE holder (not a {@code T_USER} row) is
+     * correctly still counted and keeps the tag from being seen as stranded. Strictly more protective and a
+     * no-op in normal operation.</p>
+     *
      * @param userId Departing user ID
      * @return true if the user solely holds WRITE on a tag a surviving foreign document uses
      */
@@ -187,10 +208,14 @@ public class AclDao {
                         + " where t.TAG_DELETEDATE_D is null"
                         + " and exists (select 1 from T_ACL a where a.ACL_SOURCEID_C = t.TAG_ID_C"
                         + "   and a.ACL_PERM_C = 'WRITE' and a.ACL_TYPE_C = 'USER'"
-                        + "   and a.ACL_TARGETID_C = :userId and a.ACL_DELETEDATE_D is null)"
+                        + "   and a.ACL_TARGETID_C = :userId and a.ACL_DELETEDATE_D is null"
+                        + "   and not exists (select 1 from T_USER u where u.USE_ID_C = a.ACL_TARGETID_C"
+                        + "     and u.USE_DELETEDATE_D is not null))"
                         + " and (select count(distinct a2.ACL_TARGETID_C) from T_ACL a2"
                         + "   where a2.ACL_SOURCEID_C = t.TAG_ID_C and a2.ACL_PERM_C = 'WRITE'"
-                        + "   and a2.ACL_TYPE_C = 'USER' and a2.ACL_DELETEDATE_D is null) <= 1"
+                        + "   and a2.ACL_TYPE_C = 'USER' and a2.ACL_DELETEDATE_D is null"
+                        + "   and not exists (select 1 from T_USER u2 where u2.USE_ID_C = a2.ACL_TARGETID_C"
+                        + "     and u2.USE_DELETEDATE_D is not null)) <= 1"
                         + " and exists (select 1 from T_DOCUMENT_TAG dt"
                         + "   join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C"
                         + "   where dt.DOT_IDTAG_C = t.TAG_ID_C and dt.DOT_DELETEDATE_D is null"

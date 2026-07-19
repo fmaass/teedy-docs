@@ -6,6 +6,7 @@ import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.model.jpa.Acl;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.DocumentTag;
+import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
@@ -73,6 +74,15 @@ public class TestUserDeleteTagWriteLifecycle extends BaseTransactionalTest {
         return new AclDao().hasSoleWriteTagLinkedToForeignDocument(userId);
     }
 
+    /** Soft-deletes a user by stamping its deletion date directly (test setup for orphan-ACL cases). */
+    private void softDeleteUser(String userId) {
+        ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_USER set USE_DELETEDATE_D = :now where USE_ID_C = :id")
+                .setParameter("now", new Date())
+                .setParameter("id", userId)
+                .executeUpdate();
+    }
+
     private void flush() {
         ThreadLocalContext.get().getEntityManager().flush();
     }
@@ -105,6 +115,50 @@ public class TestUserDeleteTagWriteLifecycle extends BaseTransactionalTest {
 
         Assertions.assertFalse(guard(departing.getId()),
                 "a tag used only on the departing user's OWN (to-be-trashed) document strands nothing");
+    }
+
+    @Test
+    public void secondWriteHolderIsSoftDeleted_guardRefuses() throws Exception {
+        // #135: the tag has TWO WRITE ACLs, but the co-holder's account is soft-deleted — an inert
+        // orphan ACL. The departing user is therefore the SOLE ACTIVE WRITE holder, and deleting them
+        // would strand the foreign-linked tag at zero active holders. The guard must refuse.
+        User departing = createUser("tw_orphan_departing");
+        User orphan = createUser("tw_orphan_gone");
+        User other = createUser("tw_orphan_other");
+        String tagId = createTag(departing.getId());
+        grant(tagId, PermType.WRITE, departing.getId());
+        grant(tagId, PermType.WRITE, orphan.getId());
+        softDeleteUser(orphan.getId());
+        String foreignDoc = createDocument(other.getId());
+        linkTag(foreignDoc, tagId);
+        flush();
+
+        Assertions.assertTrue(guard(departing.getId()),
+                "the only surviving co-holder is a soft-deleted (orphan) target — departing is the sole ACTIVE"
+                        + " WRITE holder, so deletion must be refused; without the active-user filter the orphan"
+                        + " inflates the count to 2 and the guard wrongly allows the deletion");
+    }
+
+    @Test
+    public void secondWriteHolderIsLiveGroup_guardAllows() throws Exception {
+        // #135: a LIVE GROUP co-holder (a USER-type ACL whose target is a T_GROUP id) survives the user's
+        // deletion, so the foreign-linked tag is NOT stranded. The orphan filter drops only soft-deleted
+        // USER targets and must not zero the group — otherwise the guard would wrongly refuse a safe delete.
+        User departing = createUser("tw_grp_departing");
+        User other = createUser("tw_grp_other");
+        String tagId = createTag(departing.getId());
+        grant(tagId, PermType.WRITE, departing.getId());
+        Group group = new Group();
+        group.setName("g" + UUID.randomUUID().toString().substring(0, 8));
+        String groupId = new GroupDao().create(group, departing.getId());
+        grant(tagId, PermType.WRITE, groupId);
+        String foreignDoc = createDocument(other.getId());
+        linkTag(foreignDoc, tagId);
+        flush();
+
+        Assertions.assertFalse(guard(departing.getId()),
+                "a live group is a surviving WRITE holder — deletion is safe; the orphan filter must not"
+                        + " zero the group target");
     }
 
     @Test
