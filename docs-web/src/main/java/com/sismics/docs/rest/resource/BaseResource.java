@@ -1,7 +1,7 @@
 package com.sismics.docs.rest.resource;
 
 import com.google.common.collect.Lists;
-import com.sismics.docs.core.dao.ShareDao;
+import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.security.IPrincipal;
@@ -124,7 +124,7 @@ public abstract class BaseResource {
         // a reserved ACL name that SecurityUtil.skipAclCheck honours, bypassing the ACL check entirely
         // (CVE-2026-50885 / CVE-2025-11853). Share IDs are server-generated random UUIDs, so no reserved
         // name or principal ID can ever collide with a real share.
-        if (shareId != null && new ShareDao().getActiveShare(shareId) != null) {
+        if (SecurityUtil.isActiveShare(shareId)) {
             targetIdList.add(shareId);
         }
         return targetIdList;

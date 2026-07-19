@@ -135,10 +135,13 @@ public class JpaDocumentRepository implements DocumentRepository {
             contributors.add(new ContributorView(contributorDto.getUsername(), contributorDto.getEmail()));
         }
 
-        // Outgoing/incoming relations.
+        // Outgoing/incoming relations — only those the caller may READ. A related document the caller
+        // cannot see must not leak its title through the relation list (#140).
         List<RelationView> relations = new ArrayList<>();
         for (RelationDto relationDto : new RelationDao().getByDocumentId(documentId)) {
-            relations.add(new RelationView(relationDto.getId(), relationDto.getTitle(), relationDto.isSource()));
+            if (aclDao.checkPermission(relationDto.getId(), PermType.READ, query.readTargetIds())) {
+                relations.add(new RelationView(relationDto.getId(), relationDto.getTitle(), relationDto.isSource()));
+            }
         }
 
         // Current route step: OMITTED unless one exists AND the caller is not anonymous.
