@@ -5,7 +5,7 @@
   <parent>
     <groupId>com.sismics.docs</groupId>
     <artifactId>docs-parent</artifactId>
-    <version>3.6.5</version>
+    <version>3.6.6</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   

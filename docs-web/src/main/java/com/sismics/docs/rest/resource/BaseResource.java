@@ -1,6 +1,7 @@
 package com.sismics.docs.rest.resource;
 
 import com.google.common.collect.Lists;
+import com.sismics.docs.core.dao.ShareDao;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.security.IPrincipal;
@@ -117,7 +118,13 @@ public abstract class BaseResource {
         if (principal.getId() != null) {
             targetIdList.add(principal.getId());
         }
-        if (shareId != null) {
+        // The share ID arrives as an untrusted request parameter (?share=). Only trust it as an ACL target
+        // if it resolves to a genuine, active share; a forged value (e.g. "admin"/"administrators", or
+        // another principal's ID) resolves to null and is dropped. Adding it blindly let ?share=admin inject
+        // a reserved ACL name that SecurityUtil.skipAclCheck honours, bypassing the ACL check entirely
+        // (CVE-2026-50885 / CVE-2025-11853). Share IDs are server-generated random UUIDs, so no reserved
+        // name or principal ID can ever collide with a real share.
+        if (shareId != null && new ShareDao().getActiveShare(shareId) != null) {
             targetIdList.add(shareId);
         }
         return targetIdList;
