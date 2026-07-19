@@ -21,7 +21,19 @@ public class AuditLogCriteria {
      * The search is done for an admin user.
      */
     private boolean isAdmin = false;
-    
+
+    /**
+     * Keyset cursor: create date (epoch millis) of the last row of the previous page.
+     * Paired with {@link #beforeId}; both null means "first page" (no cursor).
+     */
+    private Long beforeDate;
+
+    /**
+     * Keyset cursor: id (LOG_ID_C) of the last row of the previous page. Paired with
+     * {@link #beforeDate}; the tuple (create_date, id) makes the DESC order total.
+     */
+    private String beforeId;
+
     public String getDocumentId() {
         return documentId;
     }
@@ -45,5 +57,21 @@ public class AuditLogCriteria {
     public AuditLogCriteria setAdmin(boolean admin) {
         isAdmin = admin;
         return this;
+    }
+
+    public Long getBeforeDate() {
+        return beforeDate;
+    }
+
+    public void setBeforeDate(Long beforeDate) {
+        this.beforeDate = beforeDate;
+    }
+
+    public String getBeforeId() {
+        return beforeId;
+    }
+
+    public void setBeforeId(String beforeId) {
+        this.beforeId = beforeId;
     }
 }

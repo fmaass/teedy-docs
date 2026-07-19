@@ -1010,7 +1010,8 @@
       "type_create": "Erstellt",
       "type_update": "Aktualisiert",
       "type_delete": "Gelöscht",
-      "type_authentication": "Authentifizierung"
+      "type_authentication": "Authentifizierung",
+      "load_older": "Ältere Aktivitäten laden"
     },
     "text_extracted": "Text extrahiert",
     "no_text": "Kein Text",

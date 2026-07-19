@@ -49,3 +49,21 @@ export function reconcileSelection(selected: string | null, observed: string[]):
   if (selected == null) return null
   return observed.includes(selected) ? selected : null
 }
+
+// Append a newly-fetched older page to the accumulated audit rows (#139 "load older").
+// Rows already present by `id` are dropped — belt-and-suspenders against a boundary row
+// that two overlapping keyset pages could return twice, so the client stays correct even
+// if the server's cursor is imperfect. Order is preserved: existing rows first (newest →
+// oldest), then the not-yet-seen incoming rows in arrival order. Pure, so the append/dedupe
+// contract is unit-tested without mounting the view.
+export function mergeAuditRows<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
+  const seen = new Set(existing.map((row) => row.id))
+  const merged = existing.slice()
+  for (const row of incoming) {
+    if (row && row.id && !seen.has(row.id)) {
+      seen.add(row.id)
+      merged.push(row)
+    }
+  }
+  return merged
+}
