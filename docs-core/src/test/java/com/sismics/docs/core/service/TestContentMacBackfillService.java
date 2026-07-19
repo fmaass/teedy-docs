@@ -1,5 +1,6 @@
 package com.sismics.docs.core.service;
 
+import com.google.common.util.concurrent.Service;
 import com.sismics.BaseTest;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
@@ -211,6 +212,72 @@ public class TestContentMacBackfillService extends BaseTest {
             return null;
         });
         Assertions.assertEquals(first, macOf(fileId), "a second backfill must not overwrite the existing MAC");
+    }
+
+    // --- FIX 1: each file is backfilled in its OWN transaction (per-file commit boundary) --------------
+
+    /**
+     * The backfill must process each file in its own transaction so it never holds more than one T_FILE row
+     * lock at a time (a single-row lock can never be half of a deadlock cycle vs. a concurrent unordered
+     * user-deletion bulk update). This is observable as a per-file COMMIT boundary: a poison row placed LAST
+     * throws after the earlier rows have each already committed, so the earlier rows stay hashed and only the
+     * poison row is left null. Under the pre-fix single-transaction batch the poison throw would roll back the
+     * WHOLE batch, discarding the earlier rows' MACs — which is exactly the mutation this test detects.
+     */
+    @Test
+    public void backfill_commitsEachFilePerTransaction() throws Exception {
+        String userId = createUser();
+        String docId = createDocument(userId);
+        String good1 = createLegacyFile(userId, docId, "batch-one");
+        String good2 = createLegacyFile(userId, docId, "batch-two");
+        String poison = createLegacyFile(userId, docId, "batch-poison");
+        ContentMacUtil.setMasterKeyForTest(MASTER_KEY);
+
+        // A backfill whose processFile throws for exactly the poison row and delegates for the others.
+        ContentMacBackfillService service = new ContentMacBackfillService() {
+            @Override
+            void processFile(File file) {
+                if (poison.equals(file.getId())) {
+                    throw new RuntimeException("simulated per-file failure");
+                }
+                super.processFile(file);
+            }
+        };
+
+        // Poison LAST, so good1/good2 are processed (and, with the fix, committed) before the poison throws.
+        List<File> batch = inTx(() -> List.of(
+                new FileDao().getActiveById(good1),
+                new FileDao().getActiveById(good2),
+                new FileDao().getActiveById(poison)));
+        service.processBatch(batch);
+
+        Assertions.assertNotNull(macOf(good1),
+                "an earlier file must stay committed even though a later file in the batch threw");
+        Assertions.assertNotNull(macOf(good2),
+                "an earlier file must stay committed even though a later file in the batch threw");
+        Assertions.assertNull(macOf(poison),
+                "the poison file's own transaction rolled back, leaving its MAC null");
+    }
+
+    // --- self-stop: runOneIteration stops the service once the null-MAC scan drains -------------------
+
+    /**
+     * With the feature on, a short (here empty) batch means the null-MAC scan is exhausted, so runOneIteration
+     * must self-stop the service. The batch source is overridden to isolate the stop decision from shared-DB
+     * state (sibling tests may hold their own null-MAC rows on the shared PostgreSQL gate).
+     */
+    @Test
+    public void backfill_runOneIterationSelfStopsWhenBatchDrains() {
+        ContentMacUtil.setMasterKeyForTest(MASTER_KEY);
+        ContentMacBackfillService service = new ContentMacBackfillService() {
+            @Override
+            List<File> fetchNullMacBatch() {
+                return List.of();
+            }
+        };
+        service.runOneIteration();
+        Assertions.assertEquals(Service.State.TERMINATED, service.state(),
+                "runOneIteration must self-stop once the null-MAC scan drains (a short batch)");
     }
 
     // --- no-op when the feature is off: rows stay NULL, the service stops ------------------------------

@@ -154,8 +154,8 @@ public final class PdfPageOperationService {
                     ? null : new DocumentDao().getById(file.getDocumentId());
             String language = document == null ? null : document.getLanguage();
             long outputSize = Files.size(output);
-            String newFileId = FileUtil.createFile(file.getName(), file.getId(), output, outputSize,
-                    language, actingUserId, file.getDocumentId());
+            String newFileId = createNewVersion(file, output, outputSize, language, actingUserId,
+                    deadlineExceeded);
             ownershipTransferred = true;
             return newFileId;
         } finally {
@@ -169,6 +169,27 @@ public final class PdfPageOperationService {
                 deleteQuietly(output);
             }
         }
+    }
+
+    /**
+     * The final deadline gate immediately before version creation. {@link FileUtil#createFile} reads the
+     * WHOLE output once to compute its dedup content MAC (a full pass, added by #119) and then encrypts it
+     * (a second full pass) before committing a new version — the last deadline check on the path is inside
+     * {@link PdfPageOperationUtil#transform}, so without this gate an operation that is already over budget
+     * after transform would still run both expensive passes and commit a new version instead of timing out.
+     * This re-uses the exact page-operation timeout signal transform uses ({@link
+     * PdfPageOperationUtil#checkDeadline} → {@link PdfPageOperationTimeoutException}), capping the overshoot
+     * at the transform granularity. On the in-budget path the check is a no-op and createFile runs exactly
+     * as before.
+     *
+     * @return the new file version's ID
+     * @throws PdfPageOperationTimeoutException if the wall-clock budget is already exceeded at this point
+     */
+    static String createNewVersion(File file, Path output, long outputSize, String language,
+                                   String actingUserId, BooleanSupplier deadlineExceeded) throws Exception {
+        PdfPageOperationUtil.checkDeadline(deadlineExceeded);
+        return FileUtil.createFile(file.getName(), file.getId(), output, outputSize,
+                language, actingUserId, file.getDocumentId());
     }
 
     private static void deleteQuietly(Path path) {

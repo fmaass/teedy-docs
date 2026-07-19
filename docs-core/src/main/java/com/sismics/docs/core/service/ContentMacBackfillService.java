@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -60,19 +61,50 @@ public class ContentMacBackfillService extends AbstractScheduledService {
                 stopAsync();
                 return;
             }
-            TransactionUtil.handle(() -> {
-                FileDao fileDao = new FileDao();
-                List<File> files = fileDao.getActiveFilesWithNullMac(BATCH_SIZE);
-                for (File file : files) {
-                    processFile(file);
-                }
-                if (files.size() < BATCH_SIZE) {
-                    log.info("No more file to backfill with a content MAC, stopping the service");
-                    stopAsync();
-                }
-            });
+            // Fetch the batch (for drain detection) in its OWN short read transaction, then process each
+            // file in its OWN transaction below — the backfill therefore never holds more than a single
+            // T_FILE row lock at a time.
+            List<File> files = fetchNullMacBatch();
+            processBatch(files);
+            if (files.size() < BATCH_SIZE) {
+                log.info("No more file to backfill with a content MAC, stopping the service");
+                stopAsync();
+            }
         } catch (Throwable e) {
             log.error("Exception during content MAC backfill iteration", e);
+        }
+    }
+
+    /**
+     * Read one batch of null-MAC work in its own short transaction, closed before any per-file write — the
+     * fetch holds no row locks, and its size drives drain detection ({@code < BATCH_SIZE} means exhausted).
+     *
+     * @return up to {@link #BATCH_SIZE} null-MAC active document-attached files
+     */
+    List<File> fetchNullMacBatch() {
+        List<File> files = new ArrayList<>();
+        TransactionUtil.handle(() -> files.addAll(new FileDao().getActiveFilesWithNullMac(BATCH_SIZE)));
+        return files;
+    }
+
+    /**
+     * Backfill every file of the batch, each in its OWN transaction, so the service never holds more than a
+     * single {@code T_FILE} row lock at a time. A single-row lock can never be one half of a deadlock cycle,
+     * so this can no longer deadlock a concurrent (unordered) user-deletion bulk update that touches the same
+     * rows. A per-file failure is isolated — its transaction rolls back on its own and is logged — so one bad
+     * row neither rolls back nor blocks the rest of the batch. The conditional {@code where contentMac is
+     * null} write keeps each per-file commit restartable and multi-instance idempotent, and naturally absorbs
+     * a row that became ineligible (already stamped) between the fetch and its per-file transaction.
+     *
+     * @param files The batch of null-MAC files to backfill
+     */
+    void processBatch(List<File> files) {
+        for (File file : files) {
+            try {
+                TransactionUtil.handle(() -> processFile(file));
+            } catch (Throwable e) {
+                log.error("Content MAC backfill failed for file {}, skipping to the next", file.getId(), e);
+            }
         }
     }
 
