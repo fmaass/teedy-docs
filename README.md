@@ -81,7 +81,7 @@ A preconfigured Docker image (with OCR and media-conversion tools) listens on po
 `8080`. With no `DATABASE_URL`, Teedy uses an embedded H2 database — **for testing
 only**; use the PostgreSQL configuration in production.
 
-- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.6.0`
+- Latest stable version: `ghcr.io/fmaass/teedy-docs:v3.6.5`
 - Development (main branch, may be unstable): `ghcr.io/fmaass/teedy-docs:latest`
 
 The data directory is `/data` — mount a volume on it — and `DOCS_BASE_URL` must be
@@ -128,7 +128,7 @@ In the following examples some passwords are exposed in cleartext. This was done
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.6.0
+    image: ghcr.io/fmaass/teedy-docs:v3.6.5
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -187,7 +187,7 @@ networks:
 ```yaml
 services:
   teedy-server:
-    image: ghcr.io/fmaass/teedy-docs:v3.6.0
+    image: ghcr.io/fmaass/teedy-docs:v3.6.5
     restart: unless-stopped
     ports:
       - 8080:8080
@@ -223,7 +223,7 @@ during development.
 
 Releases are published as multi-arch (amd64 + arm64) Docker images on GHCR:
 [`ghcr.io/fmaass/teedy-docs`](https://github.com/fmaass/teedy-docs/pkgs/container/teedy-docs). Pin a
-version tag (e.g. `ghcr.io/fmaass/teedy-docs:v3.6.0`) as shown in the **Installation** compose examples.
+version tag (e.g. `ghcr.io/fmaass/teedy-docs:v3.6.5`) as shown in the **Installation** compose examples.
 **The default admin password is "admin". Don't forget to change it before going to production.**
 
 ## How to build Teedy from the sources
