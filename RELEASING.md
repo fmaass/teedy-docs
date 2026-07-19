@@ -48,11 +48,19 @@ before shipping.
 
 - Publish trigger: **tags `v*` only** publish the versioned multi-arch (amd64+arm64) image to
   `ghcr.io/fmaass/teedy-docs`; `main` publishes `latest`; `release/**` is smoke-boot only, no push.
-- Deploy repo: `~/projects/portainer-stacks`, pin file `stacks/teedy/docker-compose.yml`
-  (pins-to-main convention — needs per-push user authorization).
-- Host: Saturn (`ssh saturn.local`), service `teedy`, shared `postgres17` container.
-  Git as `fabian` without sudo; docker always `sudo /usr/local/bin/docker(-compose)`.
-  Roll: `git pull`, then `docker-compose pull teedy && docker-compose up -d teedy` (never `restart`).
+- **Host: jupiter (this machine, `192.168.1.65`)** — teedy prod migrated Saturn→jupiter on 2026-07-15
+  (ARCHIMEDES rausmitdir p2413). The old Saturn (`192.168.1.50`) teedy + the `~/projects/portainer-stacks`
+  pin are RETIRED — do not deploy there.
+- Deploy stack: `/opt/jupiter-stacks/stacks/teedy/docker-compose.yml` (repo `fmaass/jupiter-stacks`,
+  feature-branch + squash-merge convention). Docker is **local, no sudo**; roll with
+  `docker compose up -d teedy` in the stack dir (never `restart`).
+- Image: the compose pins `image: teedy-docs:local` (a local tag, not a ghcr pull). Deploy a new version
+  by retagging the published CI image: `docker pull ghcr.io/fmaass/teedy-docs:vX.Y.Z && docker tag
+  ghcr.io/fmaass/teedy-docs:vX.Y.Z teedy-docs:local`, then `up -d`.
+- Add `- DOCS_CSRF_ENFORCE=true` to the stack env (enabled since v3.6.6).
+- DB: teedy's `DATABASE_URL` still points at **Saturn's postgres17** (`192.168.1.50:5455`) — the DB was
+  NOT moved to jupiter. Traefik (jupiter, macvlan `192.168.1.100`) routes `teedy.discomarder.live` →
+  teedy on `apps_net`.
 
 ## Acceptance probes
 
@@ -62,6 +70,9 @@ before shipping.
 3. `docker exec postgres17 psql -U postgres -d teedy -tAc "select cfg_value_c from t_config where cfg_id_c='DB_VERSION'"` == expected level; document row count intact.
 4. Representative real route: `/apidoc/` 200 with correct title, plus one authenticated API read
    exercised in-container.
-5. Auth-touching releases (`/api`, `/oidc`, `/login`, Authelia): real browser login by the user —
-   the surface sits behind Authelia and is not agent-verifiable (in-container probe + DB read-back
-   is the agent-side acceptance).
+5. On jupiter, run the probes with local `docker` (no sudo). The **public URL `teedy.discomarder.live` IS
+   reachable via the browser-harness** — use it to verify the served `current_version` through the real
+   proxy path (this catches a deploy that landed on the wrong host/instance: v3.6.6 read 3.6.1 there until
+   deployed to jupiter). OIDC login itself needs the user's credentials/MFA, so the real-browser
+   login + a state-changing action (confirming CSRF enforcement) remains the user's acceptance step.
+   Note: deploying across the credential-epoch (migration 055) forces a one-time global re-login.
