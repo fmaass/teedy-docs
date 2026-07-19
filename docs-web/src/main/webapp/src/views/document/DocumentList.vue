@@ -253,13 +253,23 @@ function onSort(event: DataTableSortEvent) {
 // REMOVE. Replaces the former full-tag-tree ContextMenu, which overflowed and got
 // cut off. Add/remove reuse the shared useDocumentTags mutations.
 
-const contextMenuDoc = ref<DocumentListItem | null>(null)
+// Bind the quick-tag menu to the LIVE list item by id, never a snapshot captured at
+// right-click time (#142). The list is a reactive query that returns a NEW array of
+// NEW objects on every refetch (adding/removing a tag invalidates and refetches it),
+// so a captured object reference would keep rendering the tag set as it was when the
+// menu opened. Deriving the document from the current `documents` by id keeps the
+// menu's chips in sync with the refetched list.
+const contextMenuDocId = ref<string | null>(null)
 const contextMenu = ref()
+
+const contextMenuDoc = computed(
+  () => documents.value.find((d) => d.id === contextMenuDocId.value) ?? null,
+)
 
 function onDocContextMenu(event: Event, doc: DocumentListItem) {
   if (!(event instanceof MouseEvent)) return
   event.preventDefault()
-  contextMenuDoc.value = doc
+  contextMenuDocId.value = doc.id
   contextMenu.value?.show(event)
 }
 
@@ -408,12 +418,20 @@ const selectedDocs = ref<DocumentListItem[]>([])
 const bulkProgress = ref<[number, number] | null>(null)
 const bulkDownloading = ref(false)
 
-// Documents dropping out of the current page (paging, refetch) must not linger in
-// the selection — reconcile against what is actually rendered.
+// Documents dropping out of the current page (paging, refetch) must not linger in the
+// selection OR the quick-tag context menu — reconcile both against what is rendered.
 watch(documents, (docs) => {
-  if (!selectedDocs.value.length) return
   const visibleIds = new Set(docs.map((d) => d.id))
-  selectedDocs.value = selectedDocs.value.filter((d) => visibleIds.has(d.id))
+  // A right-clicked doc that leaves the refetched page (e.g. a tag toggle drops it out
+  // of an active tag filter) must not leave the context menu lingering on a now-
+  // unresolvable id — close it so it never shows a null/stale document (#142).
+  if (contextMenuDocId.value !== null && !visibleIds.has(contextMenuDocId.value)) {
+    contextMenu.value?.hide()
+    contextMenuDocId.value = null
+  }
+  if (selectedDocs.value.length) {
+    selectedDocs.value = selectedDocs.value.filter((d) => visibleIds.has(d.id))
+  }
 })
 
 function clearSelection() {
