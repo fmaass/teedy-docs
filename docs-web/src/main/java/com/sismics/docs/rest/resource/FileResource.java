@@ -145,9 +145,14 @@ public class FileResource extends BaseResource {
             }
         }
         
-        // Keep unencrypted data temporary on disk
-        String name = fileBodyPart.getContentDisposition() != null ?
-                URLDecoder.decode(fileBodyPart.getContentDisposition().getFileName(), StandardCharsets.UTF_8) : null;
+        // Keep unencrypted data temporary on disk. Treat an absent filename — no content disposition, or a
+        // content disposition with no filename= parameter (a "file" part sent without a filename) — as a null
+        // name, which the whole file stack already tolerates (createTemporaryFile/createFile, and the nullable
+        // name on the wire). Only a present filename is URL-decoded; decoding a null would NPE -> 500 (#136).
+        String encodedFileName = fileBodyPart.getContentDisposition() == null ? null
+                : fileBodyPart.getContentDisposition().getFileName();
+        String name = encodedFileName == null ? null
+                : URLDecoder.decode(encodedFileName, StandardCharsets.UTF_8);
         long maxUploadSize = resolveMaxUploadSize();
 
         // The plaintext temp is created and populated here and its ownership is handed to
