@@ -1024,4 +1024,58 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertEquals("a\"b.pdf",
                 com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("a\"b.pdf"));
     }
+
+    /**
+     * Regression test for #148: Jersey already decodes an RFC 5987 {@code filename*} parameter to Unicode
+     * and, per RFC 6266, prefers it over a plain {@code filename}. The #143 mojibake repair must therefore
+     * never be applied to a {@code filename*}-sourced name — re-decoding a name whose own characters happen
+     * to look like UTF-8 mojibake would corrupt it. These construct a real
+     * {@link org.glassfish.jersey.media.multipart.FormDataContentDisposition} from the raw header and assert
+     * the name the upload path resolves.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testResolveUploadFilenameFilenameStar() throws Exception {
+        // (a) A filename*-sourced name is kept verbatim, never routed through the repair. The real name here
+        //     is "KÃ¶rper.pdf" (its own bytes look like UTF-8 mojibake); an unconditional repair would
+        //     mis-decode it to "Körper.pdf". The resolved name must round-trip identical to getFileName().
+        org.glassfish.jersey.media.multipart.FormDataContentDisposition star =
+                new org.glassfish.jersey.media.multipart.FormDataContentDisposition(
+                        "form-data; name=\"file\"; filename*=UTF-8''K%C3%83%C2%B6rper.pdf");
+        Assertions.assertNotNull(star.getParameters().get("filename*"),
+                "Test premise: Jersey must expose the raw filename* parameter as the source discriminator");
+        Assertions.assertEquals(star.getFileName(),
+                com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(star),
+                "A filename*-sourced name must round-trip verbatim, not be repaired");
+
+        // (b) The mojibake specimen survives resolution unchanged (not corrupted to "Körper.pdf").
+        Assertions.assertEquals("KÃ¶rper.pdf",
+                com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(star));
+
+        // (c) A second filename* name the repair would corrupt ("cafÃ©.pdf" -> "café.pdf") is kept as sent.
+        org.glassfish.jersey.media.multipart.FormDataContentDisposition starCafe =
+                new org.glassfish.jersey.media.multipart.FormDataContentDisposition(
+                        "form-data; name=\"file\"; filename*=UTF-8''caf%C3%83%C2%A9.pdf");
+        Assertions.assertEquals("cafÃ©.pdf",
+                com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(starCafe));
+
+        // (d) RFC 6266 precedence: with both parameters present, filename* wins and is kept verbatim.
+        org.glassfish.jersey.media.multipart.FormDataContentDisposition both =
+                new org.glassfish.jersey.media.multipart.FormDataContentDisposition(
+                        "form-data; name=\"file\"; filename=\"fallback.pdf\"; filename*=UTF-8''K%C3%83%C2%B6rper.pdf");
+        Assertions.assertEquals("KÃ¶rper.pdf",
+                com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(both));
+
+        // (e) A plain filename= name is still repaired for header charset mojibake (#143 behavior preserved).
+        org.glassfish.jersey.media.multipart.FormDataContentDisposition plain =
+                new org.glassfish.jersey.media.multipart.FormDataContentDisposition(
+                        "form-data; name=\"file\"; filename=\"KÃ¶rper.pdf\"");
+        Assertions.assertNull(plain.getParameters().get("filename*"));
+        Assertions.assertEquals("Körper.pdf",
+                com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(plain));
+
+        // (f) An absent content disposition resolves to a null name (#136 no-filename contract).
+        Assertions.assertNull(com.sismics.docs.rest.resource.FileResource.resolveUploadFilename(null));
+    }
 }

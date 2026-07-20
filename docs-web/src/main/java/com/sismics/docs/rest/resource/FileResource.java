@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.glassfish.jersey.media.multipart.ContentDisposition;
 import org.glassfish.jersey.media.multipart.FormDataBodyPart;
 import org.glassfish.jersey.media.multipart.FormDataParam;
 
@@ -148,14 +149,8 @@ public class FileResource extends BaseResource {
             }
         }
         
-        // Keep unencrypted data temporary on disk. Treat an absent filename — no content disposition, or a
-        // content disposition with no filename= parameter (a "file" part sent without a filename) — as a null
-        // name, which the whole file stack already tolerates (createTemporaryFile/createFile, and the nullable
-        // name on the wire). A present filename is repaired for header charset mojibake; the absent case stays
-        // null through repairMultipartFilename, since decoding a null would NPE -> 500 (#136).
-        String headerFileName = fileBodyPart.getContentDisposition() == null ? null
-                : fileBodyPart.getContentDisposition().getFileName();
-        String name = repairMultipartFilename(headerFileName);
+        // Keep unencrypted data temporary on disk. The stored name is resolved from the content disposition.
+        String name = resolveUploadFilename(fileBodyPart.getContentDisposition());
         long maxUploadSize = resolveMaxUploadSize();
 
         // The plaintext temp is created and populated here and its ownership is handed to
@@ -1023,6 +1018,27 @@ public class FileResource extends BaseResource {
         } catch (CharacterCodingException e) {
             return name;
         }
+    }
+
+    /**
+     * Resolves the stored name for a multipart upload from its content disposition. A plain
+     * {@code filename} parameter reaches this resource as raw ISO-8859-1 header bytes, so it is passed
+     * through {@link #repairMultipartFilename(String)} to undo the charset mojibake (#143). An RFC 5987
+     * {@code filename*} parameter is already decoded to Unicode by Jersey — and wins over {@code filename}
+     * per RFC 6266 — so repairing it a second time would corrupt a name whose own characters look like
+     * mojibake (e.g. a file genuinely named {@code KÃ¶rper.pdf}); such a name is returned verbatim (#148).
+     * The presence of the raw {@code filename*} parameter is the discriminator for which source produced
+     * {@link ContentDisposition#getFileName()}. A null disposition or absent filename yields a null name,
+     * which the whole file stack tolerates (#136).
+     */
+    public static String resolveUploadFilename(ContentDisposition contentDisposition) {
+        if (contentDisposition == null) {
+            return null;
+        }
+        if (contentDisposition.getParameters().get("filename*") != null) {
+            return contentDisposition.getFileName();
+        }
+        return repairMultipartFilename(contentDisposition.getFileName());
     }
 
     /**
