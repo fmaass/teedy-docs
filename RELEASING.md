@@ -102,7 +102,7 @@ before shipping.
 6. **The browser-harness must never be pointed at a live deployment** — it requires default
    `admin/admin` credentials and seeds documents including a hostile XSS payload. Run it against a
    disposable instance built from the same published image, ideally behind the same proxy
-   configuration. See issue #151.
+   configuration. See issue #154.
 7. Authenticated login (OIDC/MFA) needs the operator's own credentials, so a real-browser login plus a
    state-changing action — confirming CSRF enforcement — remains the operator's acceptance step.
    Note: deploying across the credential-epoch (migration 055) forces a one-time global re-login.
