@@ -21,11 +21,18 @@ const props = withDefaults(
     // When true, the rotate controls emit a `rotate` event the parent persists. When false
     // (read-only/share), the controls are hidden.
     persistable?: boolean
+    // Whether to render this viewer's own Download control for the original file. The `src`
+    // is the original file URL, which the backend serves as an attachment — so this control
+    // is always labelled Download, never "open" (#144). A parent that provides its own
+    // explicit Download (e.g. the preview dialog) sets this false to avoid a duplicate.
+    downloadable?: boolean
   }>(),
-  { initialRotation: 0, persistable: false },
+  { initialRotation: 0, persistable: false, downloadable: true },
 )
 
-const emit = defineEmits<{ rotate: [degrees: number] }>()
+// `error` lets a parent degrade to its own fallback (e.g. the preview dialog's
+// "preview unavailable + Download" state) instead of showing this viewer's error UI.
+const emit = defineEmits<{ rotate: [degrees: number]; error: [] }>()
 
 const containerRef = ref<HTMLDivElement>()
 const currentPage = ref(1)
@@ -39,11 +46,15 @@ const rotation = ref(props.initialRotation)
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
 let renderTask: { cancel: () => void; promise: Promise<unknown> } | null = null
-// Monotonic render generation. Every renderPage bumps this and captures the
-// value; a stale getPage/render resolution (e.g. a rotation-triggered re-render
-// racing an in-flight page nav) checks its captured id and bails without
-// clobbering the newer render's canvas.
-let renderGeneration = 0
+// ONE monotonic generation for the whole viewer. Every async operation — a load AND every
+// render — claims it at entry and re-validates it after each await; a new load (src change),
+// a new render (page nav / rotation), or unmount bumps it. A superseded operation therefore
+// bails without touching state or the canvas, even when its await REJECTS because we
+// destroyed its document at supersession — the reject lands in a guarded catch that stays
+// silent. RenderingCancelledException is always silent; only the CURRENT generation's own
+// failure may set the error state or emit `error` (which would otherwise replace a valid
+// newer preview with the failure UI).
+let generation = 0
 
 interface PdfRenderError {
   name?: string
@@ -56,6 +67,7 @@ function normalizedRotation(pageRotate: number): number {
 }
 
 async function loadPdf() {
+  const gen = ++generation
   loading.value = true
   error.value = false
 
@@ -66,17 +78,28 @@ async function loadPdf() {
     }
 
     const loadingTask = pdfjsLib.getDocument(props.src)
-    pdfDoc = await loadingTask.promise
+    const doc = await loadingTask.promise
+    // A newer load started (src changed) or the viewer unmounted while getDocument was in
+    // flight: abandon this stale one — destroy its document and touch no state.
+    if (gen !== generation) {
+      doc.destroy()
+      return
+    }
+    pdfDoc = doc
     totalPages.value = pdfDoc.numPages
     currentPage.value = 1
     rotation.value = props.initialRotation
     loading.value = false
     await nextTick()
+    if (gen !== generation) return
     await renderPage(1)
   } catch (e) {
+    // A stale load's rejection must not report an error against the current src.
+    if (gen !== generation) return
     console.error('PDF load error:', e)
     error.value = true
     loading.value = false
+    emit('error')
   }
 }
 
@@ -88,13 +111,16 @@ async function renderPage(pageNum: number) {
     renderTask = null
   }
 
-  const generation = ++renderGeneration
+  // Claim the shared generation so this render supersedes any prior render AND is itself
+  // superseded by a later render, a new load, or unmount.
+  const gen = ++generation
 
   try {
     const page = await pdfDoc.getPage(pageNum)
-    // A newer renderPage started while getPage was in flight (page nav or a
-    // rotation re-render): abandon this stale one before it touches the canvas.
-    if (generation !== renderGeneration) return
+    // A newer render/load/unmount claimed the generation while getPage was in flight (page
+    // nav, rotation, a fresh src, or teardown — the last may have destroyed this document,
+    // rejecting the await): abandon this stale one before it touches the canvas.
+    if (gen !== generation) return
     const container = containerRef.value
     if (!container) return
 
@@ -122,12 +148,18 @@ async function renderPage(pageNum: number) {
     const ctx = canvas.getContext('2d')!
     renderTask = page.render({ canvasContext: ctx, viewport: scaledViewport, canvas })
     await renderTask.promise
-    if (generation !== renderGeneration) return
+    if (gen !== generation) return
     renderTask = null
   } catch (renderError: unknown) {
-    if ((renderError as PdfRenderError)?.name !== 'RenderingCancelledException') {
+    // Ignore a superseded render (a newer render/load/unmount claimed a later generation) and
+    // the benign cancellation of one — neither should surface an error against the current view.
+    if (
+      gen === generation &&
+      (renderError as PdfRenderError)?.name !== 'RenderingCancelledException'
+    ) {
       console.error('PDF render error:', renderError)
       error.value = true
+      emit('error')
     }
   }
 }
@@ -167,6 +199,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // Invalidate any in-flight load OR render so a late resolve/reject cannot land on a dead
+  // instance (write the canvas, flip error state, or emit).
+  generation++
   if (renderTask) renderTask.cancel()
   if (pdfDoc) pdfDoc.destroy()
 })
@@ -180,7 +215,9 @@ onUnmounted(() => {
     <div v-else-if="error" class="pdf-error">
       <i class="pi pi-exclamation-triangle" />
       <span>{{ t('ui.could_not_load_pdf') }}</span>
-      <a :href="src" target="_blank" rel="noopener" class="pdf-fallback-link">{{ t('ui.open_new_tab') }}</a>
+      <!-- `src` is the original attachment URL — offer it ONLY as a Download, never an
+           unlabelled "open" (which would download all the same, #144). -->
+      <a v-if="downloadable" :href="src" download rel="noopener" class="pdf-fallback-link" :aria-label="t('download')">{{ t('download') }}</a>
     </div>
     <template v-else>
       <div ref="containerRef" class="pdf-canvas-container" />
@@ -195,9 +232,9 @@ onUnmounted(() => {
           <Button icon="pi pi-replay" text size="small" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
           <Button icon="pi pi-refresh" text size="small" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
         </template>
-        <a :href="src" target="_blank" rel="noopener" class="pdf-open-btn" :title="t('ui.open_new_tab')">
-          <i class="pi pi-external-link" />
-          <span v-if="totalPages <= 1">{{ t('ui.open_new_tab') }}</span>
+        <a v-if="downloadable" :href="src" download rel="noopener" class="pdf-open-btn" :title="t('download')" :aria-label="t('download')">
+          <i class="pi pi-download" />
+          <span v-if="totalPages <= 1">{{ t('download') }}</span>
         </a>
       </div>
     </template>

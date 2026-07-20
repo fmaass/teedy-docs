@@ -67,14 +67,22 @@ test('anonymous share view renders files read-only and grid-only', async ({ page
     await expect(anon.getByRole('button', { name: 'Remove file' })).toHaveCount(0)
     await expect(anon.getByRole('button', { name: 'Edit' })).toHaveCount(0)
 
-    // Each card opens/downloads the file (a real link), the only affordance offered — and
-    // it carries the share credential (share=<id>), so an ANONYMOUS fetch actually
-    // succeeds (a broad /api/file/ match would pass even if the credential were dropped
-    // and the link 403'd). Assert both the token is present and the fetch is authorized.
-    const href = await anon.locator('.share-file-card').first().getAttribute('href')
+    // Each card is a button that opens the in-app preview — NOT a link to the original
+    // file URL, which the backend serves as an attachment (clicking a link would just
+    // download it, #144). So the card has no href.
+    expect(await anon.locator('.share-file-card').first().getAttribute('href')).toBeNull()
+
+    // Clicking the card opens the preview dialog; its Download control targets the original
+    // file and carries the share credential (share=<id>), so an ANONYMOUS fetch actually
+    // succeeds (a broad /api/file/ match would pass even if the credential were dropped and
+    // the link 403'd). Assert both the token is present and the fetch is authorized.
+    await anon.locator('.share-file-card').first().click()
+    const download = anon.locator('.file-preview-download').first()
+    await expect(download).toBeVisible()
+    const href = await download.getAttribute('href')
     expect(href).toMatch(/[?&]share=[^&]+/)
     const fileRes = await anonCtx.request.get(new URL(href!, anon.url()).toString())
-    expect(fileRes.ok(), 'anonymous share fetch must be authorized').toBeTruthy()
+    expect(fileRes.ok(), 'anonymous share download must be authorized').toBeTruthy()
 
     await anonCtx.close()
   } finally {

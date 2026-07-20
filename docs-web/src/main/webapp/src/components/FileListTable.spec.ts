@@ -237,6 +237,18 @@ describe('FileListTable', () => {
     expect(wrapper.emitted('open')?.[0]).toEqual([twoFiles[0]])
   })
 
+  it('the icon open control previews (emits open) and never links to the original /data URL (#144)', async () => {
+    const wrapper = mountTable(twoFiles)
+    // No affordance in the list may navigate to the raw attachment URL — "open" must
+    // route to an in-app preview, not a browser download.
+    const dataAnchors = wrapper.findAll('a').filter((a) => (a.attributes('href') ?? '').includes('/data'))
+    expect(dataAnchors.length).toBe(0)
+    const opener = wrapper.find('.file-open-link')
+    expect(opener.exists()).toBe(true)
+    await opener.trigger('click')
+    expect(wrapper.emitted('open')?.[0]).toEqual([twoFiles[0]])
+  })
+
   it('virtual-scrolls only above the ~100-file threshold', () => {
     const small = mountTable(twoFiles)
     expect((small.vm as unknown as { virtualize: boolean }).virtualize).toBe(false)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -9,6 +9,7 @@ import { formatFileSize } from '../utils/formatters'
 import { displayName } from '../utils/fileName'
 import Skeleton from 'primevue/skeleton'
 import ErrorState from '../components/ErrorState.vue'
+import FilePreviewDialog, { type PreviewFile } from '../components/FilePreviewDialog.vue'
 
 // Public, unauthenticated read-only view of a shared document. Reachable via the
 // share link built by buildShareUrl(): #/share/:documentId/:shareId. Every
@@ -29,6 +30,17 @@ const sanitizedDescription = computed(() =>
 
 function fileUrl(fileId: string, size?: 'web', rotation?: number) {
   return getFileUrl(fileId, size, props.shareId, rotation)
+}
+
+// Safe in-app preview (#144): clicking a card opens the file in the shared preview dialog
+// rather than navigating to the original file URL, which the backend serves as an
+// attachment (opening it would just trigger a download). The dialog threads the share
+// credential so an anonymous visitor's reads stay authorized.
+const previewVisible = ref(false)
+const previewFile = ref<PreviewFile | null>(null)
+function openPreview(file: PreviewFile) {
+  previewFile.value = { id: file.id, name: file.name, mimetype: file.mimetype, rotation: file.rotation }
+  previewVisible.value = true
 }
 
 function isImage(mime: string) {
@@ -68,16 +80,18 @@ function formatDate(ts: number) {
 
         <div v-if="sanitizedDescription" class="share-description" v-html="sanitizedDescription" />
 
-        <!-- Anonymous share is read-only and grid-only: every file is an open/download
-             link card (image preview or a type icon). No list toggle, no edit controls. -->
+        <!-- Anonymous share is read-only and grid-only: every file is a card that opens an
+             in-app preview (image raster or a type icon). No list toggle, no edit controls.
+             The card is a button, not a link to the original file URL — that URL downloads
+             (#144); Download lives inside the preview dialog. -->
         <div v-if="doc.files?.length" class="share-file-grid">
-          <a
+          <button
             v-for="file in doc.files"
             :key="file.id"
-            :href="fileUrl(file.id)"
-            target="_blank"
-            rel="noopener"
+            type="button"
             class="share-file-card"
+            :aria-label="t('ui.file_view.open_file', { name: displayName(file.name, t) })"
+            @click="openPreview(file)"
           >
             <div class="share-file-stage">
               <img
@@ -92,8 +106,10 @@ function formatDate(ts: number) {
               <span class="share-file-name">{{ displayName(file.name, t) }}</span>
               <span class="share-file-size">{{ formatFileSize(file.size) }}</span>
             </div>
-          </a>
+          </button>
         </div>
+
+        <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" :share-id="shareId" />
 
         <p class="share-footer">{{ t('ui.share.view.footer') }}</p>
       </template>
@@ -160,7 +176,12 @@ function formatDate(ts: number) {
   border: 1px solid var(--p-content-border-color);
   border-radius: var(--p-content-border-radius, 6px);
   text-decoration: none;
+  text-align: inherit;
   color: inherit;
+  background: var(--p-content-background);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 .share-file-card:hover {

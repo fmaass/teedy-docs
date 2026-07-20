@@ -29,6 +29,7 @@ import FileListTable from '../../components/FileListTable.vue'
 import FileActionMenu from '../../components/FileActionMenu.vue'
 import FileExtraActions from '../../components/FileExtraActions.vue'
 import FileConflictDialog from '../../components/FileConflictDialog.vue'
+import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { useAuthStore } from '../../stores/auth'
@@ -400,10 +401,16 @@ function fileIcon(mime: string) {
   return 'pi pi-file'
 }
 
-// Open the original file in a new tab (the list's "double-click elsewhere" action and
-// the grid card / icon open link both route here).
-function openFile(file: { id: string }) {
-  window.open(getFileUrl(file.id), '_blank', 'noopener')
+// The safe in-app preview (#144). The list's double-click / icon, and the grid's generic
+// card, all route here. They deliberately do NOT open the original file URL: the backend
+// serves it as an attachment under a locked-down CSP (a stored-XSS control), so opening
+// it only triggers a download. The dialog renders a derived, safe representation per type
+// and keeps the original URL behind a single explicit Download control.
+const previewVisible = ref(false)
+const previewFile = ref<PreviewFile | null>(null)
+function openPreview(file: PreviewFile) {
+  previewFile.value = { id: file.id, name: file.name, mimetype: file.mimetype, rotation: file.rotation }
+  previewVisible.value = true
 }
 
 // Commit an inline rename requested by the grid tile or the list. Both edit surfaces
@@ -712,21 +719,21 @@ function confirmDelete(file: { id: string; name: string | null }) {
             </div>
           </div>
           <div v-else class="file-preview-card file-preview-generic">
-            <!-- The icon stage AND the filename label are one open link (a genuine href,
-                 keyboard-focusable) so the whole tile body opens the file — the action
-                 buttons below are separate, non-navigating targets. -->
-            <a
+            <!-- The icon stage AND the filename label are one keyboard-focusable button
+                 that opens the in-app preview — NOT a link to the original file URL, which
+                 the backend serves as a download (#144). The action buttons below are
+                 separate, non-navigating targets. -->
+            <button
+              type="button"
               class="generic-open"
-              :href="getFileUrl(file.id)"
-              target="_blank"
-              rel="noopener"
               :aria-label="t('ui.file_view.open_file', { name: displayName(file.name, t) })"
+              @click="openPreview(file)"
             >
               <div class="generic-preview-stage">
                 <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
               </div>
               <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
-            </a>
+            </button>
             <div class="file-card-actions">
               <InputText
                 v-if="gridRenamingId === file.id"
@@ -763,7 +770,7 @@ function confirmDelete(file: { id: string; name: string | null }) {
         ref="fileListRef"
         :files="doc.files"
         :writable="doc.writable"
-        @open="openFile"
+        @open="openPreview"
         @rename="renameFileTo"
         @delete="confirmDelete"
         @versions="showVersions"
@@ -830,6 +837,9 @@ function confirmDelete(file: { id: string; name: string | null }) {
       :remaining="conflictRemaining"
       @decide="onConflictDecision"
     />
+
+    <!-- Safe in-app file preview (#144). -->
+    <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" />
   </div>
 </template>
 
@@ -1018,8 +1028,15 @@ function confirmDelete(file: { id: string; name: string | null }) {
 }
 .generic-open {
   display: block;
+  width: 100%;
+  text-align: inherit;
   text-decoration: none;
   color: inherit;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
 }
 .generic-preview-stage {
   height: 400px;

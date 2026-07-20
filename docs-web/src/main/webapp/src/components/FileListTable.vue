@@ -8,7 +8,6 @@ import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Popover from 'primevue/popover'
 import Checkbox from 'primevue/checkbox'
-import { getFileUrl } from '../api/file'
 import { formatDate, formatFileSize } from '../utils/formatters'
 import { displayName } from '../utils/fileName'
 import FileActionMenu from './FileActionMenu.vue'
@@ -303,16 +302,18 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 
       <Column headerStyle="width: 3rem">
         <template #body="{ data }">
-          <a
+          <!-- The icon opens the in-app preview (emits `open`), it does NOT link to the
+               original attachment URL — that URL is served as a download, so linking to
+               it here would trigger a browser download instead of showing the file (#144). -->
+          <button
+            type="button"
             class="file-open-link"
-            :href="getFileUrl(data.id)"
-            target="_blank"
-            rel="noopener"
             :aria-label="t('ui.file_view.open_file', { name: displayName(data.name, t) })"
+            @click="emit('open', data)"
             @dblclick.stop
           >
             <i :class="fileIcon(data.mimetype)" aria-hidden="true" />
-          </a>
+          </button>
         </template>
       </Column>
 
@@ -446,6 +447,12 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 .file-open-link {
   color: var(--p-text-muted-color);
   display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
 }
 .file-open-link:hover {
   color: var(--teedy-brand);

@@ -315,3 +315,186 @@ describe('PdfViewer rotation (#35)', () => {
     await settleRenders()
   })
 })
+
+// #144 — `src` is the ORIGINAL file URL, which the backend serves as an attachment. The
+// viewer must therefore expose it ONLY through a Download-labelled control (never an
+// unlabelled "open in new tab" that downloads all the same), and must let a parent that
+// owns its own Download opt the viewer's control out entirely (downloadable=false). t() is
+// stubbed to the key, so 'download' is the reference key, not translated copy.
+describe('PdfViewer — original-URL control is Download-only (#144)', () => {
+  const originalAnchors = (wrapper: ReturnType<typeof mountViewer>, src: string) =>
+    wrapper.findAll('a').filter((a) => a.attributes('href') === src)
+
+  it('exposes the original URL only as a Download control, never an "open in new tab" link', async () => {
+    const wrapper = mountViewer('blob:doc-1')
+    await flushPromises()
+    await settleRenders()
+    const anchors = originalAnchors(wrapper, 'blob:doc-1')
+    expect(anchors.length).toBeGreaterThan(0)
+    for (const a of anchors) {
+      expect(a.attributes('aria-label')).toBe('download')
+      expect(a.attributes()).toHaveProperty('download')
+    }
+    // The old, invariant-violating label must be gone everywhere.
+    expect(wrapper.html()).not.toContain('ui.open_new_tab')
+  })
+
+  it('downloadable=false renders NO original-URL anchor (the parent owns Download)', async () => {
+    const wrapper = mountViewer('blob:doc-1', { downloadable: false })
+    await flushPromises()
+    await settleRenders()
+    expect(originalAnchors(wrapper, 'blob:doc-1').length).toBe(0)
+  })
+
+  it('a load failure emits `error`; its fallback is a Download, never an unlabelled open link', async () => {
+    getDocumentMock.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) })
+    const wrapper = mountViewer('blob:doc-err')
+    await flushPromises()
+    expect(wrapper.emitted('error')).toBeTruthy()
+    for (const a of originalAnchors(wrapper, 'blob:doc-err')) {
+      expect(a.attributes('aria-label')).toBe('download')
+    }
+    expect(wrapper.html()).not.toContain('ui.open_new_tab')
+  })
+
+  it('a load failure with downloadable=false still emits `error` and exposes no original-URL anchor', async () => {
+    getDocumentMock.mockReturnValueOnce({ promise: Promise.reject(new Error('boom')) })
+    const wrapper = mountViewer('blob:doc-err2', { downloadable: false })
+    await flushPromises()
+    expect(wrapper.emitted('error')).toBeTruthy()
+    expect(originalAnchors(wrapper, 'blob:doc-err2').length).toBe(0)
+  })
+
+  it('a stale load rejection from a superseded src does not error the current preview (load race)', async () => {
+    // Open A (getDocument pending), switch to B (loads fine), THEN let A reject late. The
+    // stale rejection must not flip the reused viewer to its error state or emit `error`,
+    // which would replace B's valid preview with the failure UI.
+    let rejectA!: (e: unknown) => void
+    getDocumentMock
+      .mockReturnValueOnce({ promise: new Promise((_resolve, reject) => (rejectA = reject)) })
+      .mockReturnValueOnce({
+        promise: Promise.resolve({ numPages: 2, getPage: getPageMock, destroy: vi.fn() }),
+      })
+
+    const wrapper = mountViewer('blob:A')
+    await wrapper.setProps({ src: 'blob:B' })
+    await flushPromises()
+    await settleRenders()
+
+    rejectA(new Error('A aborted'))
+    await flushPromises()
+
+    expect(wrapper.emitted('error')).toBeFalsy()
+    expect(wrapper.find('.pdf-error').exists()).toBe(false)
+  })
+})
+
+// #144 — the render path shares the ONE generation token, so a stale render (its document
+// destroyed, its getPage resolving/rejecting late, or the viewer unmounted) can neither
+// error the current preview nor write the canvas out from under a newer render.
+describe('PdfViewer — one generation guards load AND render (#144)', () => {
+  // A document whose getPage stays pending until the test resolves/rejects it. `rejectOnDestroy`
+  // models pdf.js rejecting a still-pending getPage when the document is torn down; without it,
+  // destroy() leaves getPage pending so a LATE RESOLUTION can be exercised.
+  function controllableDoc(opts: { numPages?: number; rejectOnDestroy?: boolean } = {}) {
+    let settle: { resolve: (p: unknown) => void; reject: (e: unknown) => void } | null = null
+    const getPage = vi.fn(
+      () => new Promise((resolve, reject) => (settle = { resolve, reject })),
+    )
+    const destroy = vi.fn(() => {
+      if (opts.rejectOnDestroy) settle?.reject(new Error('document destroyed'))
+    })
+    return {
+      doc: { numPages: opts.numPages ?? 1, getPage, destroy },
+      getPage,
+      resolvePage: (p: unknown) => settle?.resolve(p),
+    }
+  }
+
+  it('a stale render whose getPage REJECTS on document destroy does not error the current preview', async () => {
+    // A is mid-render at getPage; loading B destroys A's document, rejecting that getPage.
+    const a = controllableDoc({ rejectOnDestroy: true })
+    const bDoc = { numPages: 2, getPage: getPageMock, destroy: vi.fn() }
+    getDocumentMock
+      .mockReturnValueOnce({ promise: Promise.resolve(a.doc) })
+      .mockReturnValueOnce({ promise: Promise.resolve(bDoc) })
+
+    const wrapper = mountViewer('blob:A')
+    await flushPromises()
+    expect(a.getPage).toHaveBeenCalled() // A is suspended in renderPage at getPage
+
+    await wrapper.setProps({ src: 'blob:B' })
+    await flushPromises()
+    await settleRenders()
+
+    // A's stale getPage rejection lands in a superseded-generation catch → silent.
+    expect(wrapper.emitted('error')).toBeFalsy()
+    expect(wrapper.find('.pdf-error').exists()).toBe(false)
+    expect(wrapper.find('.pdf-canvas-container').exists()).toBe(true) // B rendered
+  })
+
+  it('a late getPage RESOLUTION from a superseded render never touches the canvas', async () => {
+    // destroy() leaves A's getPage pending, so it can resolve AFTER B claimed the generation.
+    const a = controllableDoc()
+    const bDoc = { numPages: 2, getPage: getPageMock, destroy: vi.fn() }
+    getDocumentMock
+      .mockReturnValueOnce({ promise: Promise.resolve(a.doc) })
+      .mockReturnValueOnce({ promise: Promise.resolve(bDoc) })
+
+    const wrapper = mountViewer('blob:A')
+    await flushPromises() // A suspended at getPage
+    await wrapper.setProps({ src: 'blob:B' })
+    await flushPromises()
+    await settleRenders() // B fully rendered (viewer still mounted → container is non-null)
+    viewportCalls.length = 0
+
+    // A's getPage resolves LATE — the generation moved on, so A returns before sizing/writing
+    // the canvas (getViewport is the first canvas-touching step). The non-null container proves
+    // it is the generation check, not the unmount container-null guard, that stops A.
+    a.resolvePage(makePage())
+    await flushPromises()
+
+    expect(viewportCalls.length).toBe(0)
+    expect(wrapper.emitted('error')).toBeFalsy()
+  })
+
+  it('unmount during an in-flight render writes no canvas and emits nothing', async () => {
+    // Behavioural contract: a render in flight when the viewer unmounts must not write the
+    // canvas or emit. (Redundantly guarded — the shared generation bump AND the template ref
+    // going null on unmount both stop it — so this documents the behaviour rather than
+    // isolating one guard.)
+    const only = controllableDoc()
+    getDocumentMock.mockReturnValueOnce({ promise: Promise.resolve(only.doc) })
+
+    const wrapper = mountViewer('blob:only')
+    await flushPromises()
+    expect(only.getPage).toHaveBeenCalled()
+
+    wrapper.unmount()
+    viewportCalls.length = 0
+    only.resolvePage(makePage()) // getPage resolves after unmount
+    await flushPromises()
+
+    expect(viewportCalls.length).toBe(0)
+    expect(wrapper.emitted('error')).toBeFalsy()
+  })
+
+  it('unmount during an in-flight LOAD destroys the late-resolved document instead of leaking it', async () => {
+    // The observable proof that unmount bumps the shared generation: a getDocument that
+    // resolves AFTER unmount must have its document destroyed (it cannot be attached to a dead
+    // viewer, which would leak it), and must not emit.
+    const destroy = vi.fn()
+    let resolveDoc!: (d: unknown) => void
+    getDocumentMock.mockReturnValueOnce({ promise: new Promise((res) => (resolveDoc = res)) })
+
+    const wrapper = mountViewer('blob:only')
+    await flushPromises() // loadPdf suspended at getDocument
+
+    wrapper.unmount() // bumps the generation
+    resolveDoc({ numPages: 1, getPage: getPageMock, destroy })
+    await flushPromises()
+
+    expect(destroy).toHaveBeenCalled()
+    expect(wrapper.emitted('error')).toBeFalsy()
+  })
+})

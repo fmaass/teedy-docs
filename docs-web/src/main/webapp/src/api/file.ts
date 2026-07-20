@@ -194,9 +194,13 @@ export async function getFileVersions(fileId: string): Promise<FileVersion[]> {
   return (res.data?.files ?? []) as FileVersion[]
 }
 
-export async function getFileContent(fileId: string): Promise<string> {
+export async function getFileContent(fileId: string, shareId?: string): Promise<string> {
+  const params: Record<string, string> = { size: 'content' }
+  // An anonymous share reader must thread the share credential so the content read
+  // passes the document's SHARE ACL, exactly as the image/original reads do.
+  if (shareId) params.share = shareId
   const res = await api.get(`/file/${fileId}/data`, {
-    params: { size: 'content' },
+    params,
     responseType: 'text',
     transformResponse: [(data: string) => data],
   })

@@ -12,6 +12,7 @@ import { unique, confirmDanger, deleteUser, login, openFileList } from './helper
 const here = dirname(fileURLToPath(import.meta.url))
 const txt = resolve(here, 'fixtures/sample.txt')
 const png = resolve(here, 'fixtures/pixel.png')
+const pdf = resolve(here, 'fixtures/sample.pdf')
 
 async function seedDoc(
   request: APIRequestContext,
@@ -42,6 +43,14 @@ async function deleteDoc(page: Page, id: string) {
 
 function txtFile(name: string) {
   return { name, mimeType: 'text/plain', path: txt }
+}
+
+function pngFile(name: string) {
+  return { name, mimeType: 'image/png', path: png }
+}
+
+function pdfFile(name: string) {
+  return { name, mimeType: 'application/pdf', path: pdf }
 }
 
 test('grid is the default file view; the toggle switches to list and persists per user', async ({ page }) => {
@@ -107,8 +116,10 @@ test('rename a file inline via double-click, F2 and the pencil', async ({ page }
     await page.locator('input.rename-input').press('Escape')
     await expect(page.locator('input.rename-input')).toHaveCount(0)
 
-    // 3. The pencil in the action menu opens the editor.
-    await page.getByRole('button', { name: 'Rename' }).click()
+    // 3. The pencil in the action menu opens the editor. Match the Rename control exactly:
+    // the file icon is now an "Open {name}" preview button (#144), whose accessible name
+    // contains "rename" for a file named renamed.txt — a non-exact match would be ambiguous.
+    await page.getByRole('button', { name: 'Rename', exact: true }).click()
     await expect(page.locator('input.rename-input')).toBeVisible()
   } finally {
     await deleteDoc(page, id)
@@ -220,5 +231,74 @@ test('a read-only viewer sees files but no rename/delete/upload affordances', as
     await page.goto('/#/settings/users')
     const userRow = page.getByRole('row', { name: new RegExp(username) })
     if (await userRow.isVisible().catch(() => false)) await deleteUser(page, username)
+  }
+})
+
+// #144 — "open" must show the file in an in-app preview, never navigate to the original
+// file URL. The backend serves the original with Content-Disposition: attachment under a
+// locked-down CSP (a stored-XSS control), so any affordance pointing at it triggers a
+// browser download instead of showing the file. Every open affordance now routes to the
+// preview dialog; only a labelled Download control targets the original.
+test('opening a file previews it in-app; only Download targets the original (#144)', async ({ page }) => {
+  const id = await seedDoc(page.request, unique('preview'), [
+    pngFile('photo.png'),
+    txtFile('readme.txt'),
+    pdfFile('report.pdf'),
+  ])
+  try {
+    await page.goto(`/#/document/view/${id}/content`)
+    await expect(page.locator('.file-preview-grid')).toBeVisible()
+
+    // Images preview from the derived size=web raster (never the original attachment).
+    await expect(page.locator('.file-preview-card img').first()).toHaveAttribute('src', /size=web/)
+
+    // The generic (non-image/non-PDF) card is a BUTTON, not a link to the original /data URL.
+    const genericCard = page.locator('.file-preview-generic .generic-open')
+    await expect(genericCard).toBeVisible()
+    await expect(genericCard).toHaveJSProperty('tagName', 'BUTTON')
+
+    // Invariant: no affordance exposes the original URL as an unlabelled "open" — the only
+    // links to /data are Download-labelled (the grid PDF card offers a Download), and the
+    // old "Open in new tab" control is gone everywhere.
+    await expect(page.getByText('Open in new tab')).toHaveCount(0)
+    await expect(
+      page.locator('.file-preview-grid a[href*="/data"]:not([aria-label="Download"])'),
+    ).toHaveCount(0)
+
+    // Clicking the generic card opens the in-app preview dialog (it does NOT download).
+    await genericCard.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+
+    // The ONLY control that targets the original file is a labelled Download, pointing at the
+    // original (no size=… derived variant).
+    const download = page.locator('.file-preview-download').first()
+    await expect(download).toBeVisible()
+    let href = await download.getAttribute('href')
+    expect(href).toMatch(/\/file\/[^/]+\/data/)
+    expect(href).not.toContain('size=')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    // LIST mode: double-clicking the PDF row opens the in-app pdf.js preview (not a download).
+    // The dialog exposes no unlabelled original-URL control — the viewer's own Download is
+    // suppressed in favour of the dialog's explicit Download.
+    await openFileList(page)
+    await expect(page.locator('.file-data-table a[href*="/data"]')).toHaveCount(0)
+    await page.locator('.file-data-table tbody tr', { hasText: 'report.pdf' }).dblclick()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.locator('.pdf-viewer')).toBeVisible()
+    await expect(page.getByRole('dialog').getByText('Open in new tab')).toHaveCount(0)
+    const dialogDownload = page.locator('.file-preview-download').first()
+    await expect(dialogDownload).toBeVisible()
+    href = await dialogDownload.getAttribute('href')
+    expect(href).toMatch(/\/file\/[^/]+\/data/)
+    expect(href).not.toContain('size=')
+
+    // Close the preview so its modal mask does not intercept the teardown navigation.
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  } finally {
+    await deleteDoc(page, id)
   }
 })
