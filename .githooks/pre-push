@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# Pre-push guardrail: run the release mirror gates before anything leaves the machine.
+#
+# The mirror gates (openapi.json, locale key parity, db.version overlays, version literals)
+# only run in the CI build job. A unit-test run cannot catch drift in them, so without this
+# hook the first sign of a broken mirror is a failed build -- and if the push was a tag, a
+# failed release build on a public tag.
+#
+# When a tag ref is being pushed, the tag name is passed through so the version-consistency
+# gate runs too.
+#
+# Override deliberately with SKIP_RELEASE_MIRRORS=1 git push ...
+
+set -uo pipefail
+
+if [ -n "${SKIP_RELEASE_MIRRORS:-}" ]; then
+  printf 'pre-push: release mirror gates skipped (SKIP_RELEASE_MIRRORS set)\n'
+  exit 0
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
+
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" per ref on stdin.
+TAG=""
+while read -r local_ref _local_sha _remote_ref _remote_sha; do
+  case "$local_ref" in
+    refs/tags/v*) TAG="${local_ref#refs/tags/}" ;;
+  esac
+done
+
+# The gates read the working tree, not the commits being pushed. Those agree in the normal
+# case, but a dirty tree means the gate result may not describe what is actually going out.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  printf 'pre-push: WARNING -- working tree is dirty; the gates below describe the tree, not the pushed commits.\n' >&2
+fi
+
+printf 'pre-push: running release mirror gates%s...\n' "${TAG:+ for $TAG}"
+
+if [ -n "$TAG" ]; then
+  bash "$REPO_ROOT/scripts/check-release-mirrors.sh" "$TAG"
+else
+  bash "$REPO_ROOT/scripts/check-release-mirrors.sh"
+fi
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+pre-push BLOCKED: a release mirror gate failed (see above).
+
+These gates run in the CI build job, so this push would fail the build. On a tag push that
+means a failed release build on an already-public tag. Fix the drift and push again, or
+override with SKIP_RELEASE_MIRRORS=1 if you know why this is acceptable.
+MSG
+  exit 1
+fi
+
+exit 0

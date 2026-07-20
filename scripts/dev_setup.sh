@@ -34,6 +34,13 @@ echo "Dependencies installed."
 
 cd "$(dirname "$0")/.." || exit 1
 
+# The mirror gates (openapi.json, locale parity, db.version, version literals) only run in
+# the CI build job, where a failure on a tag push means a broken release build on a public
+# tag. The pre-push hook runs them locally first.
+echo "Enabling git hooks..."
+git config core.hooksPath .githooks
+chmod +x .githooks/* scripts/check-release-mirrors.sh
+
 echo "Installing frontend dependencies..."
 cd docs-web/src/main/webapp && npm ci && cd ../../../..
 

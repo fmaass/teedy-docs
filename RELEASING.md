@@ -22,11 +22,36 @@ Authoritative workflow: **`.github/workflows/build-deploy.yml`** ("Build and Pub
 Required jobs, each present and successful for the exact release SHA:
 `test`, `test-postgres`, `test-web-postgres`, `docs-importer`, `build`, `codeql`, `trivy-fs`,
 `candidate-image`, `trivy-image`, `sbom`, `e2e`, `e2e-visual`, `smoke`, and — on a publishing ref —
-`publish`. The `build` job runs the i18n parity gate (`npm run i18n:check`); `e2e`/`e2e-visual` run
+`publish`. The `build` job runs, in order: version consistency (`check-version-consistency.sh`),
+**OpenAPI spec parity** (`check-openapi-parity.mjs`), i18n key parity (`npm run i18n:check`),
+frontend lint, frontend unit tests, then the `-Pprod` Maven build; `e2e`/`e2e-visual` run
 Playwright against the single candidate image; `smoke` boots that image; `codeql`/`trivy-fs`/
 `trivy-image`/`sbom` are the security gates. The `publish` job (tag/main only) needs
 `smoke` + every security gate and promotes the exact signed+verified candidate digest to the release
 tag. `e2e-harness` runs but is **non-gating** (#76). Full pipeline runbook: **`docs/ci-pipeline.md`**.
+
+## Mirror gates and the pre-push guardrail
+
+Four gates compare a hand-maintained mirror against its source of truth. None of them can be
+failed by a unit test, and all four run only in the CI `build` job:
+
+| Mirror | Source of truth | Gate |
+|---|---|---|
+| `apidoc/openapi.json` | JAX-RS resource annotations | `scripts/check-openapi-parity.mjs` |
+| locale JSONs | `en.json` key set | `npm run i18n:check` |
+| `db.version` (3 overlays) | newest `dbupdate-NNN` migration | `scripts/check-db-version.sh` |
+| poms + `package.json` | the release tag | `scripts/check-version-consistency.sh vX.Y.Z` |
+
+Because they are push-only, drift stays invisible to local verification until the build fails —
+and on a tag push that is a failed release build on an already-public tag. v3.6.7 lost its first
+tag exactly this way: the #139 audit-log query params and the #147 `dark_mode` form param were
+added to the resources but never mirrored into `openapi.json`, so a fully green local run
+(backend suite, frontend unit, lint, i18n) still produced a red release build.
+
+Run all four at once with **`scripts/check-release-mirrors.sh [vX.Y.Z]`** (the tag argument adds
+the version-consistency gate). **`.githooks/pre-push`** runs it automatically on every push and
+passes the tag name when a `v*` tag is pushed. Enable the hook once per clone — `scripts/dev_setup.sh`
+does it, or `git config core.hooksPath .githooks`. Deliberate override: `SKIP_RELEASE_MIRRORS=1`.
 
 ## Pre-tag regression (standing rule)
 
