@@ -42,19 +42,21 @@
 //   --root          repo root that entry URIs resolve against and that git runs in
 //                   (default: current directory).
 //   --dry-run       report what would change; do not write.
-//   --interactive   for each entry that cannot auto-remap, read one answer from stdin:
-//                   a new start line (accepted only if byte-identical to the triaged
-//                   sink) or 's'/blank to skip.
+//   --interactive   for each entry that cannot auto-remap, print a prompt and read ONE
+//                   line from stdin: a new start line (accepted only if byte-identical
+//                   to the triaged sink) or 's'/blank to skip. Prompts appear one at a
+//                   time (a piped answer per prompt works too, e.g. printf '456\ns\n').
 //
 // Run from the repository root.
 //
 // Exit codes:
 //   0  everything is up to date or was remapped cleanly; nothing needs manual work.
-//   2  a structural failure (missing <old-rev>, unreadable/invalid baseline).
+//   2  a precondition/structural failure: missing or unresolvable <old-rev>, or an
+//      unreadable/invalid baseline. Distinct from the per-entry manual case below.
 //   3  one or more entries could not be auto-remapped and were skipped (or, under
 //      --interactive, left unresolved). Any clean remaps were still written.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 
@@ -87,6 +89,20 @@ function fileAtRev(root, rev, uri) {
 
 function currentFile(root, uri) {
   return readFileSync(join(root, uri)).toString('latin1');
+}
+
+// Whether <rev> resolves to a commit in the repo at <root>. Validated ONCE up front so
+// a typo'd or unavailable revision is a clear precondition error (exit 2) rather than
+// showing up as every entry "failing to read at <rev>" (which reads as manual, exit 3).
+function revExists(root, rev) {
+  try {
+    execFileSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${rev}^{commit}`], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Parse "<ruleId>@<uri>:<startLine>:<startColumn>". The ruleId may contain '/' but
@@ -170,23 +186,40 @@ function evaluateEntry(findings, index, root, oldRev) {
   return { kind: 'remap', index, oldId: entry.id, newId: `${ruleId}@${uri}:${newLine}:${col}`, uri, oldLine, newLine };
 }
 
-// One stdin answer per interactive prompt. Read once at start (works for piped input
-// and for a person who types answers followed by EOF); consume in prompt order.
-function makeAnswerQueue(interactive) {
-  if (!interactive) return () => null;
-  let lines = [];
-  try {
-    lines = readFileSync(0, 'utf8').split('\n');
-  } catch {
-    lines = [];
+// Sleep synchronously — used only to avoid a busy spin while a TTY has no input yet.
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Read ONE line from stdin synchronously so each interactive prompt is shown and
+// answered one at a time (rather than reading the whole stream up front, which looks
+// hung at a TTY). Returns the line without its newline, or null at end of input.
+function readLineSync() {
+  const buf = Buffer.alloc(1);
+  let line = '';
+  let sawByte = false;
+  for (;;) {
+    let n;
+    try {
+      n = readSync(0, buf, 0, 1, null);
+    } catch (err) {
+      if (err.code === 'EAGAIN') { sleepMs(20); continue; } // TTY not ready yet
+      if (err.code === 'EOF') break;
+      throw err;
+    }
+    if (n === 0) break; // end of input
+    sawByte = true;
+    const ch = buf[0];
+    if (ch === 0x0a) return line; // newline terminates the line
+    if (ch === 0x0d) continue;    // ignore CR in CRLF input
+    line += String.fromCharCode(ch);
   }
-  let i = 0;
-  return () => (i < lines.length ? lines[i++] : null);
+  return sawByte ? line : null; // trailing unterminated line, or null at EOF
 }
 
 // Try to resolve one manual entry interactively. Returns a remap descriptor if the
 // answer is a valid byte-identical line, else null (skip).
-function resolveInteractively(manual, nextAnswer) {
+function resolveInteractively(manual) {
   if (manual.sinkLine == null || !manual.newLines) {
     process.stderr.write(`  ? ${manual.id}: ${manual.why}\n    (no recoverable sink content — skipping)\n`);
     return null;
@@ -200,7 +233,7 @@ function resolveInteractively(manual, nextAnswer) {
     `    matching lines in current file: ${candidates.length ? candidates.join(', ') : '(none)'}\n` +
     `    enter new start line, or 's'/blank to skip: `,
   );
-  const answer = (nextAnswer() || '').trim();
+  const answer = (readLineSync() || '').trim();
   if (answer === '' || answer.toLowerCase() === 's') {
     process.stderr.write('    skipped.\n');
     return null;
@@ -224,6 +257,10 @@ function main() {
     process.exit(2);
   }
   const root = resolve(opts.root);
+  if (!revExists(root, opts.oldRev)) {
+    console.error(`old-rev "${opts.oldRev}" does not resolve to a commit in ${root}`);
+    process.exit(2);
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   let baseline;
@@ -251,12 +288,11 @@ function main() {
   }
 
   // Interactive resolution: give each manual entry one chance to be remapped by hand.
-  const nextAnswer = makeAnswerQueue(opts.interactive);
   const stillManual = [];
   if (opts.interactive && manuals.length > 0) {
     process.stderr.write(`Resolving ${manuals.length} entr${manuals.length === 1 ? 'y' : 'ies'} that could not auto-remap:\n`);
     for (const manual of manuals) {
-      const resolved = resolveInteractively(manual, nextAnswer);
+      const resolved = resolveInteractively(manual);
       if (resolved) remaps.push(resolved);
       else stillManual.push(manual);
     }

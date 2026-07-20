@@ -293,6 +293,16 @@ set -e
 expect_rc "interactive: operator-chosen line remaps the ambiguous entry (exit 0)" 0 "$rc_h"
 assert_id "interactive: entry remapped to the chosen line 6" "java/path-injection@src/Sink.java:6:5"
 
+# (i) UNRESOLVABLE OLD-REV: a revision that does not resolve to a commit is a precondition
+#     error (exit 2), distinct from the per-entry manual-follow-up case (exit 3).
+write_canonical_sink
+write_baseline
+set +e
+node "$tool" "does-not-exist-rev" --baseline "$repo/baseline.json" --root "$repo" >"$tmp_dir/out.log" 2>&1
+rc_i=$?
+set -e
+expect_rc "unresolvable old-rev -> precondition error (exit 2, not 3)" 2 "$rc_i"
+
 echo
 echo "Passed: $pass, Failed: $fail"
 [[ "$fail" -eq 0 ]]
