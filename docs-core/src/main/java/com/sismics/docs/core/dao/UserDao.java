@@ -210,6 +210,12 @@ public class UserDao {
         // @DynamicUpdate keeps an unmodified column out of the UPDATE otherwise (same reason the
         // other fields are copied here rather than relying on the managed entity).
         userDb.setLocale(user.getLocale());
+        // #147 preferred dark-mode flag. Same rationale as the locale copy above: every caller loads the
+        // User from the DB before mutating it, so a caller that does not touch dark mode passes the stored
+        // value through unchanged; only the self-service POST /user sets a new one. MANDATORY under
+        // @DynamicUpdate — an unmodified column is kept out of the UPDATE, so omitting this copy makes the
+        // server-side write silently no-op.
+        userDb.setDarkMode(user.getDarkMode());
 
         // Create audit log
         AuditLogUtil.create(userDb, AuditLogType.UPDATE, userId);
@@ -597,14 +603,30 @@ public class UserDao {
         tagSel.setParameter("departingUserId", departingUserId);
         List<String> reassignedTagIds = tagSel.getResultList();
 
+        // Reassign document ownership (DOC_IDUSER_C) FIRST — before the tag rows are locked and mutated
+        // below — so this path takes the DOCUMENT row lock before the TAG row lock (#137). That matches the
+        // canonical USER -> DOCUMENT -> TAG order the FK-forced hot tag-link path already imposes: inserting
+        // a T_DOCUMENT_TAG row checks its DOCUMENT foreign key before its TAG foreign key and so locks the
+        // parent document row before the parent tag row. A batch path that locked the tag first would invert
+        // that order and could deadlock against a concurrent tag-link. Scoped to the exact snapshot and
+        // guarded on a non-empty set: an `in :docIds` bind with an empty list is both pointless and unsafe on
+        // some dialects.
+        if (!reassignedDocumentIds.isEmpty()) {
+            Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
+            docUpd.setParameter("targetUserId", targetUserId);
+            docUpd.setParameter("docIds", reassignedDocumentIds);
+            docUpd.executeUpdate();
+        }
+
         // Move those tags' ownership to the target.
         if (!reassignedTagIds.isEmpty()) {
             // #121 canonical lock order: lock each affected tag row FOR UPDATE in a stable ascending id
             // order BEFORE mutating, so this reassignment serializes against any concurrent grant/revoke on
             // the same tag (which take the same tag-row lock) and two multi-tag lockers cannot deadlock. The
             // departing+target user rows are already locked by the caller (users sort before tags in the
-            // canonical type order), so the full acquisition order across this delete is user -> tag ->
-            // document (the document rows are locked later, in UserDao.delete).
+            // canonical type order) and the documents were reassigned just above, so the full acquisition
+            // order across this delete is user -> document -> tag — the same order the FK-forced hot
+            // tag-link path imposes (#137), so the two paths cannot deadlock.
             List<String> tagLockOrder = new ArrayList<>(reassignedTagIds);
             Collections.sort(tagLockOrder);
             TagDao tagDao = new TagDao();
@@ -635,15 +657,6 @@ public class UserDao {
                     }
                 }
             }
-        }
-
-        // Reassign document ownership (DOC_IDUSER_C) only, scoped to the exact snapshot. Guarded on a
-        // non-empty set: an `in :docIds` bind with an empty list is both pointless and unsafe on some dialects.
-        if (!reassignedDocumentIds.isEmpty()) {
-            Query docUpd = em.createQuery("update Document d set d.userId = :targetUserId where d.id in :docIds and d.deleteDate is null");
-            docUpd.setParameter("targetUserId", targetUserId);
-            docUpd.setParameter("docIds", reassignedDocumentIds);
-            docUpd.executeUpdate();
         }
 
         return reassignedDocumentIds;

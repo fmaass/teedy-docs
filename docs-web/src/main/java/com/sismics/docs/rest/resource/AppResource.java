@@ -1134,11 +1134,12 @@ public class AppResource extends BaseResource {
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan shares", q.executeUpdate());
 
-        // Soft delete orphan tags
-        q = em.createNativeQuery("update T_TAG set TAG_DELETEDATE_D = :dateNow where TAG_ID_C in (select t.TAG_ID_C from T_TAG t left join T_USER u on u.USE_ID_C = t.TAG_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
-        q.setParameter("dateNow", new Date());
-        log.info("Deleting {} orphan tags", q.executeUpdate());
-
+        // #137: soft-delete orphan DOCUMENTS before orphan TAGS (the orphan-tag pass now runs after the #74
+        // quota reclamation below). This makes the sweep acquire the DOCUMENT row before the TAG row — the
+        // canonical USER -> DOCUMENT -> TAG order the FK-forced hot tag-link path imposes, since inserting a
+        // T_DOCUMENT_TAG row checks (and locks) its parent document row before its parent tag row. A batch
+        // path that stamped the tag first would invert that order and could deadlock against a concurrent
+        // tag-link.
         // Soft delete orphan documents. Only stamp docs that are STILL LIVE (DOC_DELETEDATE_D is null):
         // an already-trashed document keeps its original trash timestamp, which its cascade-trashed files
         // share (file.deleteDate == doc.deleteDate) — re-stamping it would break that equality and defeat
@@ -1178,6 +1179,15 @@ public class AppResource extends BaseResource {
             quotaDocs++;
         }
         log.info("Reclaimed storage quota for files of {} soft deleted documents about to be hard-deleted", quotaDocs);
+
+        // Soft delete orphan tags. Deliberately runs AFTER the orphan-document soft-delete (moved here for
+        // #137): both are plain row updates, and keeping DOCUMENT before TAG matches the FK-forced hot
+        // tag-link path's parent-lock order (document row before tag row) so a concurrent tag-link cannot
+        // deadlock this sweep. The #74 quota reclamation above keeps its required "immediately after the
+        // orphan-document soft-delete" position; only the orphan-tag pass moved past it.
+        q = em.createNativeQuery("update T_TAG set TAG_DELETEDATE_D = :dateNow where TAG_ID_C in (select t.TAG_ID_C from T_TAG t left join T_USER u on u.USE_ID_C = t.TAG_IDUSER_C and u.USE_DELETEDATE_D is null where u.USE_ID_C is null)");
+        q.setParameter("dateNow", new Date());
+        log.info("Deleting {} orphan tags", q.executeUpdate());
 
         // Soft delete orphan files. A file is orphaned when its uploader is gone (soft-deleted or
         // absent) — EXCEPT a file that still backs a LIVE (non-deleted) document is NEVER an orphan,

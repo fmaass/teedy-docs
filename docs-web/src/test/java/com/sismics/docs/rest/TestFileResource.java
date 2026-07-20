@@ -917,4 +917,111 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertTrue(file.isNull("name"),
                 "An absent filename must store a null name, got: " + file.get("name"));
     }
+
+    /**
+     * Uploads a file with the given multipart filename through the real Jersey multipart boundary and
+     * returns the name the server persisted (read back via the file-list API).
+     *
+     * @param token Auth token
+     * @param documentId Document to attach to
+     * @param sentFileName Filename to send in the multipart part
+     * @return The persisted file name
+     * @throws Exception e
+     */
+    private String uploadAndGetName(String token, String documentId, String sentFileName) throws Exception {
+        String fileId;
+        try (InputStream is = Resources.getResource("file/document.txt").openStream()) {
+            StreamDataBodyPart part = new StreamDataBodyPart("file", is, sentFileName);
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                JsonObject json = target()
+                        .register(MultiPartFeature.class)
+                        .path("/file").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(multiPart.field("id", documentId).bodyPart(part),
+                                MediaType.MULTIPART_FORM_DATA_TYPE), JsonObject.class);
+                fileId = json.getString("id");
+            }
+        }
+        JsonObject list = target().path("/file/list")
+                .queryParam("id", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray files = list.getJsonArray("files");
+        for (int i = 0; i < files.size(); i++) {
+            JsonObject file = files.getJsonObject(i);
+            if (fileId.equals(file.getString("id"))) {
+                return file.isNull("name") ? null : file.getString("name");
+            }
+        }
+        throw new AssertionError("Uploaded file " + fileId + " not found in listing");
+    }
+
+    /**
+     * Regression test for #143: multipart upload filenames are decoded as UTF-8. Browsers transmit the
+     * Content-Disposition filename as UTF-8 bytes, but Jersey decodes the header as ISO-8859-1, so a name
+     * like {@code Körper.pdf} was persisted as the mojibake {@code KÃ¶rper.pdf}. The removed
+     * {@code URLDecoder.decode} also rewrote {@code +} to a space and returned HTTP 500 on a literal
+     * {@code %}. These upload through the real Jersey multipart boundary and assert the persisted name.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testUploadFilenameEncoding() throws Exception {
+        clientUtil.createUser("file_encoding");
+        String token = clientUtil.login("file_encoding");
+        String documentId = clientUtil.createDocument(token);
+
+        // (a) A UTF-8 umlaut name a browser sends is repaired instead of stored as mojibake.
+        Assertions.assertEquals("Körperschaftsteuererklärung.pdf",
+                uploadAndGetName(token, documentId, "Körperschaftsteuererklärung.pdf"));
+        // (b) A non-Latin (CJK) name survives the round-trip; a naive getBytes(ISO_8859_1) would corrupt it.
+        Assertions.assertEquals("文档.pdf", uploadAndGetName(token, documentId, "文档.pdf"));
+        // (c) Plain ASCII is untouched.
+        Assertions.assertEquals("report.pdf", uploadAndGetName(token, documentId, "report.pdf"));
+        // (d) A literal "+" must survive (proves the URLDecoder that rewrote it to a space is gone).
+        Assertions.assertEquals("a+b.pdf", uploadAndGetName(token, documentId, "a+b.pdf"));
+        // (e) A literal "%" must not throw HTTP 500 (URLDecoder rejected the invalid escape).
+        Assertions.assertEquals("50%.pdf", uploadAndGetName(token, documentId, "50%.pdf"));
+    }
+
+    /**
+     * Unit coverage for {@link com.sismics.docs.rest.resource.FileResource#repairMultipartFilename} on the
+     * two branches the multipart client cannot exercise: Jersey's client always UTF-8-encodes the filename
+     * and the server decodes it as ISO-8859-1, so the server never observes a code point above U+00FF, nor a
+     * sub-U+0100 string that is not valid UTF-8. Both are reachable in the wild (RFC 5987 {@code filename*};
+     * legacy Latin-1 clients) and must be pinned directly.
+     */
+    @Test
+    public void testRepairMultipartFilenameBranches() {
+        // Absent filename stays null (#136 no-filename regression contract).
+        Assertions.assertNull(com.sismics.docs.rest.resource.FileResource.repairMultipartFilename(null));
+
+        // A name already carrying a code point > U+00FF was decoded correctly and passes through untouched.
+        Assertions.assertEquals("文档.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("文档.pdf"));
+
+        // Single-byte mojibake is repaired; this also pins the documented normalization of a literal
+        // ISO-8859-1 name whose bytes happen to be valid UTF-8 (the accepted #143 trade-off).
+        Assertions.assertEquals("Körper.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("KÃ¶rper.pdf"));
+
+        // Multi-byte mojibake (what the server observes for a CJK name) is repaired.
+        String cjkMojibake = new String("文档.pdf".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.ISO_8859_1);
+        Assertions.assertEquals("文档.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename(cjkMojibake));
+
+        // A genuine Latin-1 name whose bytes are not valid UTF-8 is kept as-is (strict decoder rejects it).
+        Assertions.assertEquals("café.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("café.pdf"));
+
+        // ASCII names carrying "+", "%" or a quote are left byte-for-byte untouched (URLDecoder is gone).
+        Assertions.assertEquals("a+b.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("a+b.pdf"));
+        Assertions.assertEquals("50%.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("50%.pdf"));
+        Assertions.assertEquals("a\"b.pdf",
+                com.sismics.docs.rest.resource.FileResource.repairMultipartFilename("a\"b.pdf"));
+    }
 }

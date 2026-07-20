@@ -118,9 +118,11 @@ public final class CredentialLifecycleUtil {
      * UNSERIALIZED (and dangling) grant on an absent source.</p>
      *
      * <p>Only one source row is locked per grant, so within a single grant there is no lock-ordering
-     * concern; across paths the canonical acquisition order is user rows, then tag rows, then document rows
-     * (the {@code T_ACL} table carries no foreign keys, so an insert takes no implicit lock on the target
-     * user's row — the grant path is deadlock-free by construction).</p>
+     * concern; across paths the canonical acquisition order is user rows, then document rows, then tag rows
+     * (#137 — the order the FK-forced hot tag-link path imposes, since inserting a {@code T_DOCUMENT_TAG}
+     * row locks its parent document row before its parent tag row). The {@code T_ACL} table carries no
+     * foreign keys, so an insert takes no implicit lock on the target user's row — the grant path is
+     * deadlock-free by construction.</p>
      *
      * @param sourceId ACL source entity ID
      * @return {@code false} only when a DOCUMENT source's owner cannot be locked active (abort the grant);

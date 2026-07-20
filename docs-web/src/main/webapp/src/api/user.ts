@@ -13,6 +13,10 @@ export interface UserInfo {
   // #82 server-side preferred UI locale. Present only when the user has set one; the SPA seeds a
   // fresh device's locale from this at login/boot when no explicit on-device choice exists.
   locale?: string
+  // #147 server-side dark-mode preference. Present only when the user has set one, so an absent value
+  // (no preference) stays distinguishable from an explicit false. The SPA seeds a fresh device's dark
+  // mode from this at login when no explicit on-device choice exists (a local choice always wins).
+  dark_mode?: boolean
 }
 
 export interface UserListItem {

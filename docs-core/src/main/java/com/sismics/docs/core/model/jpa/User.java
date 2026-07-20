@@ -125,6 +125,14 @@ public class User implements Loggable {
     private String locale;
 
     /**
+     * Preferred dark-mode UI flag. Nullable: null means "no server-side preference", so a fresh device
+     * falls back to its own on-device default; true/false is the user's persisted choice. The on-device
+     * toggle always wins — the server value only seeds a device that has made no local choice (#147).
+     */
+    @Column(name = "USE_DARKMODE_B")
+    private Boolean darkMode;
+
+    /**
      * True if this account was provisioned by LDAP authentication. Used so the LDAP
      * handler never adopts a pre-existing INTERNAL account that happens to share a
      * username with an LDAP directory entry (account-hijack guard).
@@ -305,6 +313,15 @@ public class User implements Loggable {
 
     public User setLocale(String locale) {
         this.locale = locale;
+        return this;
+    }
+
+    public Boolean getDarkMode() {
+        return darkMode;
+    }
+
+    public User setDarkMode(Boolean darkMode) {
+        this.darkMode = darkMode;
         return this;
     }
 

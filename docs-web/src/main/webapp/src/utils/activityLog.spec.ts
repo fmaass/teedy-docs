@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   ACTIVITY_TYPE_LABEL_KEYS,
   activityTypeLabel,
+  mergeAuditRows,
   observedTypes,
   reconcileSelection,
 } from './activityLog'
@@ -68,5 +69,50 @@ describe('reconcileSelection (#113 stale-filter auto-clear)', () => {
 
   it('is a no-op when nothing is selected', () => {
     expect(reconcileSelection(null, ['CREATE', 'UPDATE'])).toBeNull()
+  })
+})
+
+describe('mergeAuditRows (#139 load-older append + dedupe)', () => {
+  const row = (id: string) => ({ id, type: 'CREATE' })
+
+  it('appends the incoming rows after the existing ones, order preserved', () => {
+    expect(mergeAuditRows([row('a'), row('b')], [row('c'), row('d')])).toEqual([
+      row('a'),
+      row('b'),
+      row('c'),
+      row('d'),
+    ])
+  })
+
+  it('drops an incoming row whose id is already present (boundary row returned twice)', () => {
+    // Keyset pages can overlap on the boundary row; the accumulated list must not duplicate it.
+    expect(mergeAuditRows([row('a'), row('b')], [row('b'), row('c')])).toEqual([
+      row('a'),
+      row('b'),
+      row('c'),
+    ])
+  })
+
+  it('dedupes within the incoming batch as well', () => {
+    expect(mergeAuditRows([row('a')], [row('b'), row('b'), row('c')])).toEqual([
+      row('a'),
+      row('b'),
+      row('c'),
+    ])
+  })
+
+  it('returns the existing rows unchanged for an empty incoming page (has_more=false tail)', () => {
+    expect(mergeAuditRows([row('a'), row('b')], [])).toEqual([row('a'), row('b')])
+  })
+
+  it('does not mutate the existing array', () => {
+    const existing = [row('a')]
+    mergeAuditRows(existing, [row('b')])
+    expect(existing).toEqual([row('a')])
+  })
+
+  it('ignores incoming rows with a missing id', () => {
+    const incoming = [{ id: '', type: 'CREATE' }, row('c')]
+    expect(mergeAuditRows([row('a')], incoming)).toEqual([row('a'), row('c')])
   })
 })

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h, computed, watch as vueWatch } from 'vue'
+import { defineComponent, h, computed, reactive, watch as vueWatch } from 'vue'
 
 // --- Router under mock: assert the dblclick navigation target + history state ---
 const routerPush = vi.hoisted(() => vi.fn())
@@ -81,6 +81,11 @@ function makeDoc(id: string) {
 }
 const doc = makeDoc('doc-42')
 const docB = makeDoc('doc-99')
+// Reactive holder for the list query's returned documents so a test can model a
+// REFETCH: TanStack Query yields a NEW array of NEW objects after an invalidation.
+// The #142 tests swap this to prove the quick-tag menu binds to the live list item
+// (by id) and not a stale snapshot captured at right-click time.
+const listResult = reactive({ docs: [doc, docB] as Array<ReturnType<typeof makeDoc>> })
 vi.mock('../../api/document', () => ({
   listDocuments: vi.fn(() => Promise.resolve({ data: { documents: [doc, docB], total: 2 } })),
   getDocument: vi.fn((id: string) => Promise.resolve({ data: makeDoc(id) })),
@@ -129,6 +134,9 @@ vi.mock('../../stores/tagFilter', async () => {
 // gallery right-click round-trips through the SAME add/remove-tag path the table uses.
 const addTagSpy = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
 const removeTagSpy = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
+// The parent calls contextMenu.value?.hide() to dismiss the quick-tag menu; the stub
+// exposes this spy as its hide() so the #142 close-on-leave test can assert the call.
+const menuHideSpy = vi.hoisted(() => vi.fn())
 vi.mock('../../composables/useDocumentTags', () => ({
   useDocumentTags: () => ({ addTag: addTagSpy, removeTag: removeTagSpy }),
 }))
@@ -175,8 +183,9 @@ vi.mock('@tanstack/vue-query', () => ({
     }
     return {
       // total is read from the holder so the #52 tests can raise it to render the
-      // Paginator; documents stay the two seeded docs the interaction tests use.
-      data: computed(() => ({ documents: [doc, docB], total: listTotalHolder.total })),
+      // Paginator; documents come from the reactive listResult so the #142 tests can
+      // model a refetch (new array of new objects) and prove the menu re-resolves.
+      data: computed(() => ({ documents: listResult.docs, total: listTotalHolder.total })),
       isLoading: { value: false },
       isError: { value: false },
       error: { value: null },
@@ -198,6 +207,9 @@ const DocumentTableStub = defineComponent({
         h('button', { class: 'single', onClick: () => emit('rowClick', props.documents[0]) }, 'single'),
         h('button', { class: 'single-b', onClick: () => emit('rowClick', props.documents[1]) }, 'single-b'),
         h('button', { class: 'double', onClick: () => emit('rowDblclick', props.documents[0]) }, 'double'),
+        // Right-click a table row → forward a real MouseEvent + doc so the view's
+        // onDocContextMenu guard (instanceof MouseEvent) accepts it (#142/#71).
+        h('button', { class: 'row-context', onClick: () => emit('rowContextMenu', new MouseEvent('contextmenu'), props.documents[0]) }, 'ctx'),
         // Drive a real multi-selection through the v-model:selection binding so the
         // parent's selectedDocs (and thus the bulk toolbar) reflects it — used by the
         // B2 gallery-clears-selection test.
@@ -245,7 +257,7 @@ const TagQuickMenuStub = defineComponent({
   props: ['document', 'allTags', 'tagCounts'],
   emits: ['addTag', 'removeTag'],
   setup(props, { expose, emit }) {
-    expose({ show: () => {}, hide: () => {} })
+    expose({ show: () => {}, hide: menuHideSpy })
     return () => {
       const assignedIds = new Set(
         ((props.document?.tags ?? []) as Array<{ id: string }>).map((tt) => tt.id),
@@ -254,7 +266,9 @@ const TagQuickMenuStub = defineComponent({
         (tt) => !assignedIds.has(tt.id),
       )
       const assigned = (props.document?.tags ?? []) as Array<{ id: string; name: string }>
-      return h('div', { class: 'tag-quick-menu-stub' }, [
+      // Surface the id of the CURRENTLY-BOUND document so a #142 test can assert the
+      // menu tracks the live list item (and is null/closed once it leaves the page).
+      return h('div', { class: 'tag-quick-menu-stub', 'data-doc-id': props.document?.id ?? '' }, [
         ...assignable.map((tt) =>
           h(
             'button',
@@ -992,5 +1006,96 @@ describe('DocumentList — right-click tags in gallery (#50)', () => {
     await removeItem.trigger('click')
     await flushPromises()
     expect(removeTagSpy).toHaveBeenCalledWith('doc-42', 'tag-on')
+  })
+})
+
+// --- #142: the quick-tag context menu must bind to the LIVE list item, not a
+//     snapshot captured at right-click time. Adding/removing a tag invalidates and
+//     refetches the list, which yields a NEW array of NEW objects — a captured object
+//     reference would render a STALE tag set until the menu was reopened. And a doc
+//     that leaves the refetched page (e.g. under an active tag filter) must close the
+//     menu rather than linger on a now-unresolvable document. ---
+describe('DocumentList — quick-tag menu binds to the live document (#142)', () => {
+  const urgentTag = { id: 'tag-ctx', name: 'urgent', color: '#cc0000' }
+
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    addTagSpy.mockClear()
+    removeTagSpy.mockClear()
+    menuHideSpy.mockClear()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    doc.tags = []
+    docB.tags = []
+    listResult.docs = [doc, docB]
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    doc.tags = []
+    listResult.docs = [doc, docB]
+  })
+
+  it('a tag added via the menu reflects the refetched (new-object) tag set, not the stale snapshot', async () => {
+    const wrapper = mountView()
+    // Right-click a row → the quick-tag menu binds to that live document (doc-42),
+    // which currently has no tags, so 'urgent' is offered on the ADD side.
+    await wrapper.find('.row-context').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.tag-quick-menu-stub').attributes('data-doc-id')).toBe('doc-42')
+    expect(wrapper.find('.tqm-add[data-label="urgent"]').exists()).toBe(true)
+    expect(wrapper.find('.tqm-remove[data-label="urgent"]').exists()).toBe(false)
+
+    // Add the tag. The real add invalidates + refetches the list; model that refetch
+    // exactly as TanStack Query does — a NEW array of NEW objects (same id, updated
+    // tags). We deliberately do NOT mutate the original `doc`: the new object is the
+    // ONLY carrier of the new tag, so a stale snapshot ref could not observe it.
+    await wrapper.find('.tqm-add[data-label="urgent"]').trigger('click')
+    expect(addTagSpy).toHaveBeenCalledWith('doc-42', 'tag-ctx')
+    listResult.docs = [{ ...makeDoc('doc-42'), tags: [urgentTag] }, docB]
+    await flushPromises()
+
+    // The menu now reflects the refetched document: 'urgent' moved ADD → REMOVE.
+    // Against the old snapshot ref it would stay on the ADD side (the failing case).
+    expect(wrapper.find('.tqm-remove[data-label="urgent"]').exists()).toBe(true)
+    expect(wrapper.find('.tqm-add[data-label="urgent"]').exists()).toBe(false)
+  })
+
+  it('a tag removed via the menu reflects the refetched tag set (chip disappears)', async () => {
+    doc.tags = [urgentTag]
+    const wrapper = mountView()
+    await wrapper.find('.row-context').trigger('click')
+    await flushPromises()
+    // The doc has 'urgent', so the menu offers it on the REMOVE side.
+    expect(wrapper.find('.tqm-remove[data-label="urgent"]').exists()).toBe(true)
+
+    await wrapper.find('.tqm-remove[data-label="urgent"]').trigger('click')
+    expect(removeTagSpy).toHaveBeenCalledWith('doc-42', 'tag-ctx')
+    // Refetch returns a NEW object for the same id, now WITHOUT the tag.
+    listResult.docs = [{ ...makeDoc('doc-42'), tags: [] }, docB]
+    await flushPromises()
+
+    // The chip is gone from REMOVE and 'urgent' is assignable again.
+    expect(wrapper.find('.tqm-remove[data-label="urgent"]').exists()).toBe(false)
+    expect(wrapper.find('.tqm-add[data-label="urgent"]').exists()).toBe(true)
+  })
+
+  it('closes the context menu when the right-clicked doc leaves the refetched list', async () => {
+    const wrapper = mountView()
+    await wrapper.find('.row-context').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.tag-quick-menu-stub').attributes('data-doc-id')).toBe('doc-42')
+
+    // A tag toggle under an active filter can drop the doc from the page: the refetch
+    // returns a list WITHOUT doc-42. The menu must close, not linger on a null doc.
+    listResult.docs = [docB]
+    await flushPromises()
+
+    expect(menuHideSpy).toHaveBeenCalled()
+    expect(wrapper.find('.tag-quick-menu-stub').attributes('data-doc-id')).toBe('')
   })
 })

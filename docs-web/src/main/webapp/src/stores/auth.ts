@@ -45,6 +45,17 @@ export const useAuthStore = defineStore('auth', () => {
         console.warn('Failed to seed UI locale from the server preference; keeping the current locale', e)
       }
     }
+
+    // #147: seed the dark-mode preference from the server-side value ONLY when there is no explicit
+    // on-device choice, and apply the `.dark-mode` class LIVE so a fresh device themes with no reload.
+    // Local-choice-always-wins: the header toggle persists 'true' OR 'false' to localStorage, and BOTH
+    // count as an explicit choice — so the guard is `=== null` (not a truthiness check), otherwise a
+    // device that explicitly chose light mode ('false') would be re-seeded to the server's dark value.
+    // Like the locale seed, the server value is NOT written to localStorage: localStorage stays the
+    // record of an explicit on-device choice only, and the server re-seeds the live class each login.
+    if (typeof fetched?.dark_mode === 'boolean' && localStorage.getItem('teedy-dark-mode') === null) {
+      document.documentElement.classList.toggle('dark-mode', fetched.dark_mode)
+    }
   }
 
   // `code` is the optional TOTP 2FA validation code, forwarded to the API when the

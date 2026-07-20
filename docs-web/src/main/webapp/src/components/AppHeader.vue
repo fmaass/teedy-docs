@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import api from '../api/client'
 import Button from 'primevue/button'
 import AboutDialog from './AboutDialog.vue'
 
@@ -15,9 +16,22 @@ const auth = useAuthStore()
 
 const aboutVisible = ref(false)
 
-function toggleDarkMode() {
+async function toggleDarkMode() {
   const isDark = document.documentElement.classList.toggle('dark-mode')
   localStorage.setItem('teedy-dark-mode', isDark ? 'true' : 'false')
+
+  // #147: persist the preference server-side so a fresh device / new login seeds it. Only for an
+  // AUTHENTICATED user — an anonymous session has no account to store it on, so it stays localStorage
+  // only. Best-effort, mirroring the locale write: form-encoded, and a server failure never blocks the
+  // local toggle (the class + localStorage already applied); we only warn. No coalescer / retry — a
+  // rapid-toggle stale server value only affects a fresh device's initial seed.
+  if (!auth.isAnonymous) {
+    try {
+      await api.post('/user', new URLSearchParams({ dark_mode: String(isDark) }))
+    } catch (e) {
+      console.warn('Failed to persist the dark-mode preference to your account', e)
+    }
+  }
 }
 
 async function handleLogout() {

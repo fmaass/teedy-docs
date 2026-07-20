@@ -3,7 +3,10 @@ package com.sismics.docs.rest.resource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URISyntaxException;
-import java.net.URLDecoder;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -148,11 +151,11 @@ public class FileResource extends BaseResource {
         // Keep unencrypted data temporary on disk. Treat an absent filename — no content disposition, or a
         // content disposition with no filename= parameter (a "file" part sent without a filename) — as a null
         // name, which the whole file stack already tolerates (createTemporaryFile/createFile, and the nullable
-        // name on the wire). Only a present filename is URL-decoded; decoding a null would NPE -> 500 (#136).
-        String encodedFileName = fileBodyPart.getContentDisposition() == null ? null
+        // name on the wire). A present filename is repaired for header charset mojibake; the absent case stays
+        // null through repairMultipartFilename, since decoding a null would NPE -> 500 (#136).
+        String headerFileName = fileBodyPart.getContentDisposition() == null ? null
                 : fileBodyPart.getContentDisposition().getFileName();
-        String name = encodedFileName == null ? null
-                : URLDecoder.decode(encodedFileName, StandardCharsets.UTF_8);
+        String name = repairMultipartFilename(headerFileName);
         long maxUploadSize = resolveMaxUploadSize();
 
         // The plaintext temp is created and populated here and its ownership is handed to
@@ -988,6 +991,36 @@ public class FileResource extends BaseResource {
             return java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20");
         } catch (java.io.UnsupportedEncodingException e) {
             e.printStackTrace();
+            return name;
+        }
+    }
+
+    /**
+     * Repairs a multipart upload filename mangled by header charset decoding. Browsers transmit the
+     * Content-Disposition filename as UTF-8 bytes, but Jersey decodes the header as ISO-8859-1, so a name
+     * like {@code Körper.pdf} reaches this resource as {@code KÃ¶rper.pdf}. A code point above U+00FF proves
+     * the name was already decoded to Unicode (e.g. an RFC 5987 {@code filename*}), so it is returned as-is:
+     * re-encoding it to a single byte per char would be lossy. Otherwise the ISO-8859-1 bytes are re-decoded
+     * as UTF-8 with a strict decoder; a clean decode yields the repaired name, while a malformed sequence
+     * means the bytes were never UTF-8 (a genuine Latin-1 name) and the original is kept. A literal Latin-1
+     * name whose bytes happen to be valid UTF-8 is indistinguishable from mojibake and is normalized to its
+     * UTF-8 reading — the accepted trade-off for this fix-forward.
+     */
+    public static String repairMultipartFilename(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            if (name.charAt(i) > 0xFF) {
+                return name;
+            }
+        }
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        try {
+            return decoder.decode(ByteBuffer.wrap(name.getBytes(StandardCharsets.ISO_8859_1))).toString();
+        } catch (CharacterCodingException e) {
             return name;
         }
     }

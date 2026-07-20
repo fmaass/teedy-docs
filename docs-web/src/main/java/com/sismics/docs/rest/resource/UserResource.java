@@ -148,6 +148,7 @@ public class UserResource extends BaseResource {
      * @apiParam {String{8..50}} password Password
      * @apiParam {String{1..100}} email E-mail
      * @apiParam {String} locale Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale
+     * @apiParam {String} dark_mode Preferred dark-mode flag; must be exactly "true" or "false"
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or connected as guest
      * @apiError (client) ValidationError Validation error
@@ -157,6 +158,7 @@ public class UserResource extends BaseResource {
      * @param password Password
      * @param email E-Mail
      * @param locale Preferred UI locale code
+     * @param darkMode Preferred dark-mode flag ("true"/"false")
      * @return Response
      */
     @POST
@@ -164,7 +166,8 @@ public class UserResource extends BaseResource {
         @FormParam("password") String password,
         @FormParam("current_password") String currentPassword,
         @FormParam("email") String email,
-        @FormParam("locale") String locale) {
+        @FormParam("locale") String locale,
+        @FormParam("dark_mode") String darkMode) {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
@@ -177,6 +180,13 @@ public class UserResource extends BaseResource {
         locale = ValidationUtil.validateLength(locale, "locale", 1, 10, true);
         if (locale != null && !SUPPORTED_LOCALES.contains(locale)) {
             throw new ClientException("ValidationError", "'locale' is not a supported locale");
+        }
+        // #147: optional preferred dark-mode flag. Absent leaves the stored value unchanged (null stays
+        // distinguishable from a stored false); a provided value must be exactly "true" or "false" — any
+        // other value is rejected 400 rather than silently coerced by Boolean.parseBoolean.
+        darkMode = ValidationUtil.validateLength(darkMode, "dark_mode", 1, 5, true);
+        if (darkMode != null && !"true".equals(darkMode) && !"false".equals(darkMode)) {
+            throw new ClientException("ValidationError", "'dark_mode' must be 'true' or 'false'");
         }
 
         // If changing password, verify the current password first and capture the credential epoch the
@@ -201,6 +211,9 @@ public class UserResource extends BaseResource {
         UserUpdateUtil.applyEmailUpdate(user, email);
         if (locale != null) {
             user.setLocale(locale);
+        }
+        if (darkMode != null) {
+            user.setDarkMode(Boolean.parseBoolean(darkMode));
         }
         user = userDao.update(user, principal.getId());
 
@@ -982,6 +995,13 @@ public class UserResource extends BaseResource {
             // the string overload). The SPA seeds a fresh device's locale from this on login.
             if (user.getLocale() != null) {
                 response.add("locale", user.getLocale());
+            }
+
+            // #147 preferred dark-mode flag — emitted only when the user has set one, so an absent
+            // preference (null) stays distinguishable from an explicit false. The SPA seeds a fresh
+            // device's dark mode from this on login (a local choice always wins).
+            if (user.getDarkMode() != null) {
+                response.add("dark_mode", user.getDarkMode());
             }
 
             // Base functions
