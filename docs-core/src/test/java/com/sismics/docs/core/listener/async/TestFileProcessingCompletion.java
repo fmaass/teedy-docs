@@ -33,7 +33,7 @@ public class TestFileProcessingCompletion extends BaseTransactionalTest {
         }
 
         @Override
-        protected boolean writeFileIndex(File file, boolean keyed) {
+        protected boolean writeFileIndex(File file) {
             return indexOk;
         }
     }
@@ -86,6 +86,73 @@ public class TestFileProcessingCompletion extends BaseTransactionalTest {
             Assertions.assertTrue(selectable, "the unmarked file is still selected by the reconciliation scan");
         } finally {
             Files.deleteIfExists(plaintext);
+        }
+    }
+
+    @Test
+    public void pdfExtractionFailureIsRetryableNotMarked() throws Exception {
+        User user = createUser("proc_pdf_" + UUID.randomUUID().toString().substring(0, 8));
+        File file = new File();
+        file.setUserId(user.getId());
+        file.setName("corrupt.pdf");
+        file.setMimeType("application/pdf");
+        file.setVersion(0);
+        file.setLatestVersion(true);
+        file.setSize(8L);
+        String fileId = new FileDao().create(file, user.getId());
+
+        // Garbage bytes for a PDF mime: PdfFormatHandler's loader throws, and (blocker 3) it now SURFACES
+        // that failure instead of swallowing it to null — so the pipeline classifies it retryable rather than
+        // indexing empty content and stamping the file complete.
+        Path notAPdf = Files.createTempFile("recon-badpdf-", ".pdf");
+        Files.write(notAPdf, "this is not a pdf".getBytes(StandardCharsets.UTF_8));
+        try {
+            FileProcessingOutcome outcome =
+                    new IndexResultListener(true).processFile(eventFor(fileId, notAPdf), true);
+
+            Assertions.assertEquals(FileProcessingOutcome.RETRYABLE_FAILURE, outcome,
+                    "a surfaced PDF extraction failure classifies retryable");
+            Assertions.assertNull(refetch(fileId).getProcessed(),
+                    "a PDF whose extraction failed must NOT be marked complete");
+        } finally {
+            Files.deleteIfExists(notAPdf);
+        }
+    }
+
+    @Test
+    public void staleClaimantCannotOverwriteCompletedContent() throws Exception {
+        User user = createUser("proc_stale_" + UUID.randomUUID().toString().substring(0, 8));
+        String fileId = createOrphanTextFile(user);
+        FileDao fileDao = new FileDao();
+
+        // Simulate a SUCCESSOR having completed: it reclaimed the row (a new token), wrote good content, and
+        // stamped the marker (clearing the token). The stale claimant below holds an OLD token.
+        Date now = fileDao.getDatabaseTime();
+        fileDao.claimForReprocess(fileId, "successor-token", now, new Date(now.getTime() - 60_000));
+        ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_FILE set FIL_CONTENT_C = 'good-content' where FIL_ID_C = :id")
+                .setParameter("id", fileId)
+                .executeUpdate();
+        fileDao.markProcessedIfClaimant(fileId, "successor-token", fileDao.getDatabaseTime());
+        ThreadLocalContext.get().getEntityManager().clear();
+
+        // The stale claimant (old token, extracting DIFFERENT content) replays. Its write must be fenced out
+        // so it cannot corrupt the successor's completed content/index.
+        Path evil = Files.createTempFile("recon-evil-", ".txt");
+        Files.write(evil, "evil-content".getBytes(StandardCharsets.UTF_8));
+        try {
+            FileCreatedAsyncEvent stale = eventFor(fileId, evil);
+            stale.setReprocess(true);
+            stale.setProcessingToken("stale-token");
+
+            FileProcessingOutcome outcome = new IndexResultListener(true).processFile(stale, true);
+
+            Assertions.assertEquals(FileProcessingOutcome.RETRYABLE_FAILURE, outcome,
+                    "a fenced-out stale claimant does nothing and reports retryable");
+            Assertions.assertEquals("good-content", refetch(fileId).getContent(),
+                    "the stale claimant must NOT overwrite the successor's completed content");
+        } finally {
+            Files.deleteIfExists(evil);
         }
     }
 

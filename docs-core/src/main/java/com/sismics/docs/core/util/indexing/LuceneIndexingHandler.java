@@ -249,6 +249,27 @@ public class LuceneIndexingHandler implements IndexingHandler {
         handle(indexWriter -> indexWriter.deleteDocuments(new Term("id", id)));
     }
 
+    /**
+     * Count the index entries carrying a given id. Test support (#159): a keyed {@link #updateFile} write
+     * leaves exactly one entry however many times it runs, whereas an append-only {@link #createFile} would
+     * accumulate one per call — this lets a test prove the processing pipeline's keyed write converges to a
+     * single doc rather than duplicating on a live-index / replay race.
+     *
+     * @param id File or document id
+     * @return the number of index entries with that id
+     */
+    int countIndexedDocuments(String id) {
+        DirectoryReader reader = getDirectoryReader();
+        if (reader == null) {
+            return 0;
+        }
+        try {
+            return new IndexSearcher(reader).count(new org.apache.lucene.search.TermQuery(new Term("id", id)));
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to count indexed documents for id " + id, e);
+        }
+    }
+
     @Override
     public void createAcl(String sourceId, PermType perm, String targetId) {
         // Lucene does not index ACLs

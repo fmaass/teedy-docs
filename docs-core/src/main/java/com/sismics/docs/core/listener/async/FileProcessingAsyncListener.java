@@ -97,7 +97,10 @@ public class FileProcessingAsyncListener {
             if (log.isInfoEnabled()) {
                 log.info((isFileCreated ? "File created event: " : "File updated event: ") + event.toString());
             }
-            processFile(event, isFileCreated);
+            FileProcessingOutcome outcome = processFile(event, isFileCreated);
+            if (log.isInfoEnabled()) {
+                log.info("File processing finished with outcome {} for file {}", outcome, event.getFileId());
+            }
         } finally {
             // Deterministically delete the plaintext temp file this event carried, then release the
             // processing marker. All producers (upload, attach, manual re-process, EML import) hand
@@ -160,29 +163,52 @@ public class FileProcessingAsyncListener {
         AtomicReference<String> documentId = new AtomicReference<>();
         AtomicReference<String> fileName = new AtomicReference<>();
         AtomicBoolean present = new AtomicBoolean(true);
+        AtomicBoolean fencedOut = new AtomicBoolean(false);
         AtomicBoolean indexOk = new AtomicBoolean(true);
         TransactionUtil.handle(() -> {
             FileDao fileDao = new FileDao();
-            File freshFile = fileDao.getActiveById(event.getFileId());
+            // Lock the row FOR UPDATE so the ownership check below is not a TOCTOU: a concurrent claim or
+            // completion (both row-locking bulk updates) serialize against this write.
+            File freshFile = fileDao.getActiveByIdForUpdate(event.getFileId());
             if (freshFile == null) {
                 present.set(false);
+                return;
+            }
+
+            // Fence the WRITES, not just the completion stamp: a stale reconciliation claimant past its lease
+            // (already reclaimed by a successor) or a live listener racing an active replay must NOT overwrite
+            // the current owner's content/index. Ownership is by the claim token, NOT by the processed marker:
+            //  - replay path: the row's token must still equal ours. A reclaim writes a NEW token and a
+            //    completion clears it to null, so a stale claimant's token no longer matches and is fenced out
+            //    — this alone covers "wrote after a successor completed", without a processed check.
+            //  - live path (no token): the row must be UNCLAIMED. This blocks racing an active reconciler
+            //    claim, yet still lets a legitimate live re-index (attach / manual reprocess of an
+            //    already-processed file) proceed — keying the fence on the processed marker would wrongly
+            //    block that, since the marker is one-shot while those obligations recur.
+            // The DB gate runs BEFORE the index write, so a fenced-out worker touches neither store.
+            String myToken = event.getProcessingToken();
+            boolean owns = myToken == null
+                    ? freshFile.getProcessingToken() == null
+                    : myToken.equals(freshFile.getProcessingToken());
+            if (!owns) {
+                fencedOut.set(true);
                 return;
             }
 
             freshFile.setContent(extraction.content());
             fileDao.update(freshFile);
 
-            // A reconciliation replay ALWAYS uses the keyed (upsert) index write: updateDocument deletes any
-            // existing doc for this id then adds, so a replay after a partial prior run cannot leave a
-            // duplicate Lucene doc. A first-time live create appends; a live update upserts.
-            boolean keyed = event.isReprocess() || !isFileCreated;
-            indexOk.set(writeFileIndex(freshFile, keyed));
+            // Keyed (upsert) index write on EVERY path: updateFile deletes any existing doc for this id then
+            // adds, so a live first-index and a reconciliation replay can never leave two docs for one file,
+            // and a crash-retry is idempotent. (The append-only createFile would duplicate the doc.)
+            indexOk.set(writeFileIndex(freshFile));
 
             documentId.set(freshFile.getDocumentId());
             fileName.set(freshFile.getName());
         });
-        if (!present.get()) {
-            // The file was deleted between the two transactions: do not record completion.
+        if (!present.get() || fencedOut.get()) {
+            // Deleted between the two transactions, or fenced out because another worker owns/completed the
+            // row: write nothing and do not record completion (the rightful owner handles it).
             return FileProcessingOutcome.RETRYABLE_FAILURE;
         }
 
@@ -213,20 +239,17 @@ public class FileProcessingAsyncListener {
     }
 
     /**
-     * Write a file into the search index and report whether the write durably committed. The keyed
-     * (upsert) form is idempotent on a crash-retry; the append form is used only for a first-time live
-     * create. Protected so a test can force an index-write failure and assert the pipeline records it as a
-     * retryable failure — the completion marker must NOT be written when the index write fails (#159).
+     * Write a file into the search index (keyed upsert) and report whether the write durably committed.
+     * The keyed form is used on EVERY path so a live first-index and a reconciliation replay converge to a
+     * single doc and a crash-retry is idempotent. Protected so a test can force an index-write failure and
+     * assert the pipeline records it as a retryable failure — the completion marker must NOT be written when
+     * the index write fails (#159).
      *
      * @param file File to index
-     * @param keyed True to use the keyed upsert write, false to append
      * @return true if the index write committed
      */
-    protected boolean writeFileIndex(File file, boolean keyed) {
-        if (keyed) {
-            return AppContext.getInstance().getIndexingHandler().updateFile(file);
-        }
-        return AppContext.getInstance().getIndexingHandler().createFile(file);
+    protected boolean writeFileIndex(File file) {
+        return AppContext.getInstance().getIndexingHandler().updateFile(file);
     }
 
     /**
