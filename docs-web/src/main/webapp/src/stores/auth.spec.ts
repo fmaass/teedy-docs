@@ -57,6 +57,8 @@ describe('auth store', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     localStorage.clear()
+    // The dark-mode seed toggles a class on <html> (global mutable state); reset it between tests.
+    document.documentElement.classList.remove('dark-mode')
   })
 
   describe('initial state and getters', () => {
@@ -139,6 +141,54 @@ describe('auth store', () => {
       expect(store.user?.username).toBe('erin') // still authenticated — NOT cleared
       expect(store.isAnonymous).toBe(false)
       expect(store.initialized).toBe(true)
+    })
+  })
+
+  // #147: the store seeds dark mode from the server-side preference, but ONLY when there is no explicit
+  // on-device choice, and applies the `.dark-mode` class LIVE (no reload). A local choice always wins.
+  describe('fetchCurrentUser dark-mode seeding', () => {
+    it('applies dark mode live on a fresh device when the server pref is true and no local choice exists', async () => {
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ dark_mode: true })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      // Applied WITHOUT a reload — the class is toggled during response hydration.
+      expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
+    })
+
+    it('does NOT overwrite an explicit local choice (local light beats server dark)', async () => {
+      localStorage.setItem('teedy-dark-mode', 'false')
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ dark_mode: true })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      // The explicit local 'false' wins: the server's dark pref is not applied.
+      expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
+    })
+
+    it('applies an explicit server false live, distinct from an absent preference', async () => {
+      // Simulate a device booted dark (e.g. main.ts read a prior class) with no local override.
+      document.documentElement.classList.add('dark-mode')
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ dark_mode: false })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      // A server-side false is a real preference and is applied live (the class is removed).
+      expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
+    })
+
+    it('does nothing when the server carries no dark-mode preference', async () => {
+      document.documentElement.classList.add('dark-mode')
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo()))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      // No server pref (undefined) leaves whatever the device already had untouched.
+      expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
     })
   })
 

@@ -210,6 +210,12 @@ public class UserDao {
         // @DynamicUpdate keeps an unmodified column out of the UPDATE otherwise (same reason the
         // other fields are copied here rather than relying on the managed entity).
         userDb.setLocale(user.getLocale());
+        // #147 preferred dark-mode flag. Same rationale as the locale copy above: every caller loads the
+        // User from the DB before mutating it, so a caller that does not touch dark mode passes the stored
+        // value through unchanged; only the self-service POST /user sets a new one. MANDATORY under
+        // @DynamicUpdate — an unmodified column is kept out of the UPDATE, so omitting this copy makes the
+        // server-side write silently no-op.
+        userDb.setDarkMode(user.getDarkMode());
 
         // Create audit log
         AuditLogUtil.create(userDb, AuditLogType.UPDATE, userId);

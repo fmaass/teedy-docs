@@ -1392,6 +1392,66 @@ public class TestUserResource extends BaseJerseyTest {
     }
 
     /**
+     * #147 server-side per-user dark-mode preference: POST /user accepts an optional 'dark_mode' that
+     * round-trips on GET /user, an absent value leaves the stored value unchanged (and is omitted from GET
+     * until set, so null stays distinguishable from false), and a malformed value is rejected (400).
+     */
+    @Test
+    public void testUserDarkMode() {
+        clientUtil.createUser("darkmode_user");
+        String token = clientUtil.login("darkmode_user");
+
+        // No preference set yet: GET omits the field (null is distinct from false).
+        JsonObject json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertFalse(json.containsKey("dark_mode"), "dark_mode omitted from GET until set");
+
+        // Set true — round-trips on GET.
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("dark_mode", "true")), JsonObject.class);
+        Assertions.assertEquals("ok", json.getString("status"));
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertTrue(json.getBoolean("dark_mode"), "stored dark_mode true round-trips");
+
+        // A follow-up update that omits dark_mode must NOT clear the stored value.
+        target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("email", "darkmode_user2@docs.com")), JsonObject.class);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertTrue(json.getBoolean("dark_mode"), "absent dark_mode leaves stored value unchanged");
+        Assertions.assertEquals("darkmode_user2@docs.com", json.getString("email"));
+
+        // Set false — an explicit false is a set preference: present in GET AND distinct from absent.
+        target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("dark_mode", "false")), JsonObject.class);
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertTrue(json.containsKey("dark_mode"), "an explicit false is still emitted");
+        Assertions.assertFalse(json.getBoolean("dark_mode"), "stored dark_mode false round-trips");
+
+        // A malformed value (passes the length check, fails the true/false check) is rejected 400, stored
+        // value unchanged.
+        Response bad = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("dark_mode", "maybe")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(bad.getStatus()));
+        json = bad.readEntity(JsonObject.class);
+        Assertions.assertEquals("ValidationError", json.getString("type"));
+        json = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertFalse(json.getBoolean("dark_mode"), "rejected dark_mode must not overwrite stored value");
+    }
+
+    /**
      * True if a JSON string array contains the given value.
      */
     static boolean containsString(JsonArray array, String value) {
