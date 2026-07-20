@@ -65,8 +65,10 @@ public interface IndexingHandler {
      * Index a new file.
      *
      * @param file File
+     * @return true if the write durably committed, false if it failed (so the caller can decline to record
+     *         the file's processing as complete — issue #159)
      */
-    void createFile(File file);
+    boolean createFile(File file);
 
     /**
      * Update an indexed document.
@@ -76,11 +78,13 @@ public interface IndexingHandler {
     void updateDocument(Document document);
 
     /**
-     * Update an indexed file.
+     * Update an indexed file (keyed upsert, idempotent on re-run).
      *
      * @param file File
+     * @return true if the write durably committed, false if it failed (so the caller can decline to record
+     *         the file's processing as complete — issue #159)
      */
-    void updateFile(File file);
+    boolean updateFile(File file);
 
     /**
      * Delete a file or a document.

@@ -26,12 +26,14 @@ import org.slf4j.LoggerFactory;
 
 import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -116,10 +118,18 @@ public class FileProcessingAsyncListener {
      * Generate thumbnails
      * Extract and save text content
      *
+     * <p>Returns an explicit {@link FileProcessingOutcome} so the durable per-file completion marker
+     * (issue #159) is recorded ONLY on a real terminal state — not merely because the method returned.
+     * Each swallowing step keeps its non-blocking live behaviour (a raster failure must never abort text
+     * extraction) but now also feeds the outcome, and the search-critical steps (content extraction, the
+     * index write, auto-tagging) gate completion. A reconciliation replay ({@link FileEvent#isReprocess()})
+     * always takes the KEYED index write so a crash-retry cannot duplicate the Lucene doc.</p>
+     *
      * @param event File event
      * @param isFileCreated True if the file was just created
+     * @return the terminal outcome of this run
      */
-    protected void processFile(FileEvent event, boolean isFileCreated) {
+    protected FileProcessingOutcome processFile(FileEvent event, boolean isFileCreated) {
         AtomicReference<File> file = new AtomicReference<>();
         AtomicReference<User> user = new AtomicReference<>();
 
@@ -139,38 +149,106 @@ public class FileProcessingAsyncListener {
 
         // Process the file outside of a transaction
         if (user.get() == null || file.get() == null) {
-            // The user or file has been deleted; the marker release + temp cleanup run in processEvent.
-            return;
+            // The user or file has been deleted/soft-deleted since; the marker release + temp cleanup run in
+            // processEvent. Nothing is recorded complete: a soft-deleted row is excluded from the
+            // reconciliation work-set, and an owner-less row the reconciler terminal-skips at decrypt time.
+            return FileProcessingOutcome.RETRYABLE_FAILURE;
         }
-        String content = extractContent(event, user.get(), file.get());
+        ExtractionResult extraction = extractContent(event, user.get(), file.get());
 
         // Open a new transaction to save the file content
         AtomicReference<String> documentId = new AtomicReference<>();
         AtomicReference<String> fileName = new AtomicReference<>();
+        AtomicBoolean present = new AtomicBoolean(true);
+        AtomicBoolean indexOk = new AtomicBoolean(true);
         TransactionUtil.handle(() -> {
             FileDao fileDao = new FileDao();
             File freshFile = fileDao.getActiveById(event.getFileId());
             if (freshFile == null) {
+                present.set(false);
                 return;
             }
 
-            freshFile.setContent(content);
+            freshFile.setContent(extraction.content());
             fileDao.update(freshFile);
 
-            if (isFileCreated) {
-                AppContext.getInstance().getIndexingHandler().createFile(freshFile);
-            } else {
-                AppContext.getInstance().getIndexingHandler().updateFile(freshFile);
-            }
+            // A reconciliation replay ALWAYS uses the keyed (upsert) index write: updateDocument deletes any
+            // existing doc for this id then adds, so a replay after a partial prior run cannot leave a
+            // duplicate Lucene doc. A first-time live create appends; a live update upserts.
+            boolean keyed = event.isReprocess() || !isFileCreated;
+            indexOk.set(writeFileIndex(freshFile, keyed));
 
             documentId.set(freshFile.getDocumentId());
             fileName.set(freshFile.getName());
         });
-
-        // Apply auto-tagging rules
-        if (documentId.get() != null) {
-            applyAutoTagRules(documentId.get(), fileName.get(), content);
+        if (!present.get()) {
+            // The file was deleted between the two transactions: do not record completion.
+            return FileProcessingOutcome.RETRYABLE_FAILURE;
         }
+
+        // Apply auto-tagging rules. A benign "no rules table yet" is a no-op success (handled inside); a real
+        // auto-tag transaction failure propagates here and downgrades the outcome to retryable.
+        boolean autoTagOk = true;
+        if (documentId.get() != null) {
+            try {
+                applyAutoTagRules(documentId.get(), fileName.get(), extraction.content());
+            } catch (Exception e) {
+                log.error("Auto-tagging failed for document " + documentId.get(), e);
+                autoTagOk = false;
+            }
+        }
+
+        // Completion-required = {content resolved, index write ok, auto-tag ok}. A raster/thumbnail failure
+        // is recorded and logged inside extractContent but does NOT block completion (a cosmetic,
+        // on-demand-regenerable filesystem artifact must not force infinite retry of a file whose text
+        // extracted). The residual — searchable+tagged but thumbnail-less after a persistent raster failure
+        // — is the pre-existing behaviour, documented in #159.
+        FileProcessingOutcome outcome = (extraction.handlerFailed() || !indexOk.get() || !autoTagOk)
+                ? FileProcessingOutcome.RETRYABLE_FAILURE
+                : FileProcessingOutcome.COMPLETE;
+        if (outcome == FileProcessingOutcome.COMPLETE) {
+            recordCompletion(event);
+        }
+        return outcome;
+    }
+
+    /**
+     * Write a file into the search index and report whether the write durably committed. The keyed
+     * (upsert) form is idempotent on a crash-retry; the append form is used only for a first-time live
+     * create. Protected so a test can force an index-write failure and assert the pipeline records it as a
+     * retryable failure — the completion marker must NOT be written when the index write fails (#159).
+     *
+     * @param file File to index
+     * @param keyed True to use the keyed upsert write, false to append
+     * @return true if the index write committed
+     */
+    protected boolean writeFileIndex(File file, boolean keyed) {
+        if (keyed) {
+            return AppContext.getInstance().getIndexingHandler().updateFile(file);
+        }
+        return AppContext.getInstance().getIndexingHandler().createFile(file);
+    }
+
+    /**
+     * Record the durable per-file completion marker (issue #159) via the fenced compare-and-swap. A
+     * reconciliation replay carries the claim's fencing token, so a claimant whose lease expired and was
+     * reclaimed by a later cycle cannot mark a successor's work complete; a live event carries no token and
+     * only stamps while the row is unclaimed (if a reconciler has claimed it, the live stamp is a no-op and
+     * the reconciler's replay owns completion). All time comes from the database clock, never a per-JVM one.
+     *
+     * @param event File event whose file reached a terminal COMPLETE state
+     */
+    private void recordCompletion(FileEvent event) {
+        TransactionUtil.handle(() -> {
+            FileDao fileDao = new FileDao();
+            Date dbNow = fileDao.getDatabaseTime();
+            String token = event.getProcessingToken();
+            if (token == null) {
+                fileDao.markProcessedIfUnclaimed(event.getFileId(), dbNow);
+            } else {
+                fileDao.markProcessedIfClaimant(event.getFileId(), token, dbNow);
+            }
+        });
     }
 
     /**
@@ -204,20 +282,32 @@ public class FileProcessingAsyncListener {
     }
 
     /**
+     * The outcome of content extraction: the extracted text (may be null) and whether a PRESENT format
+     * handler failed. A null content with {@code handlerFailed=false} is the legitimate no-handler /
+     * unsupported-format resting state (a terminal success), whereas {@code handlerFailed=true} is a
+     * retryable failure the swallowing catch would otherwise make indistinguishable from it (#159).
+     *
+     * @param content Extracted text content (may be null)
+     * @param handlerFailed True when a matched format handler threw while extracting
+     */
+    private record ExtractionResult(String content, boolean handlerFailed) {
+    }
+
+    /**
      * Extract text content from a file.
      * This is executed outside of a transaction.
      *
      * @param event File event
      * @param user User whom created the file
      * @param file Fresh file
-     * @return Text content
+     * @return the extracted content and whether a present handler failed
      */
-    private String extractContent(FileEvent event, User user, File file) {
+    private ExtractionResult extractContent(FileEvent event, User user, File file) {
         // Find a format handler
         FormatHandler formatHandler = FormatHandlerUtil.find(file.getMimeType());
         if (formatHandler == null) {
             log.info("Format unhandled: " + file.getMimeType());
-            return null;
+            return new ExtractionResult(null, false);
         }
 
         // Generate file variations through the single shared, rotation-aware raster helper so a
@@ -238,15 +328,17 @@ public class FileProcessingAsyncListener {
         // Extract text content from the file
         long startTime = System.currentTimeMillis();
         String content = null;
+        boolean handlerFailed = false;
         log.info("Start extracting content from: " + file);
         try {
             content = formatHandler.extractContent(event.getLanguage(), event.getUnencryptedFile());
         } catch (Throwable e) {
             log.error("Error extracting content from: " + file, e);
+            handlerFailed = true;
         }
         log.info(MessageFormat.format("File content extracted in {0}ms: " + file.getId(), System.currentTimeMillis() - startTime));
 
-        return content;
+        return new ExtractionResult(content, handlerFailed);
     }
 
     /**
@@ -270,8 +362,13 @@ public class FileProcessingAsyncListener {
                 return;
             }
 
+            // Lock the parent document row FOR UPDATE before the query-existing-then-insert-missing below.
+            // There is no unique (document, tag) constraint, so two files of one document processing at once
+            // — or a reconciliation replay racing the live process — could otherwise each observe the same
+            // missing link and both insert it. Serializing on the document row makes the read-then-insert
+            // race-free (#159). A trashed/deleted document returns null: nothing to tag.
             DocumentDao documentDao = new DocumentDao();
-            Document doc = documentDao.getById(docId);
+            Document doc = documentDao.getActiveByIdForUpdate(docId);
             if (doc == null) {
                 return;
             }
