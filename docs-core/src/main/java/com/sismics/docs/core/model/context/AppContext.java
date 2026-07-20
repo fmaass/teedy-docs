@@ -10,6 +10,7 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.listener.async.*;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.service.ContentMacBackfillService;
+import com.sismics.docs.core.service.FileReconciliationService;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
@@ -120,6 +121,11 @@ public class AppContext {
     private ContentMacBackfillService contentMacBackfillService;
 
     /**
+     * File reconciliation service (#159): replays lost post-upload processing on startup.
+     */
+    private FileReconciliationService fileReconciliationService;
+
+    /**
      * Trash purge service.
      */
     private TrashPurgeService trashPurgeService;
@@ -213,6 +219,24 @@ public class AppContext {
             contentMacBackfillService.awaitRunning();
         } catch (IllegalStateException e) {
             Service.State state = contentMacBackfillService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
+
+        // Start the file reconciliation service (#159). It is registered AFTER resetEventBus() (so the
+        // processing + webhook listeners exist) and AFTER the indexing handler started (its replays write
+        // the index). Like the backfill above it SELF-COMPLETES — it stops as soon as no active file remains
+        // unprocessed (immediately on a clean corpus where the migration stamped every legacy row) — so it
+        // can reach TERMINATED before awaitRunning() observes RUNNING. Tolerate exactly that benign self-stop
+        // (TERMINATED/STOPPING) while still propagating a genuine startup failure; runOneIteration() catches
+        // every Throwable, so it can never enter FAILED on its own.
+        fileReconciliationService = new FileReconciliationService();
+        fileReconciliationService.startAsync();
+        try {
+            fileReconciliationService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = fileReconciliationService.state();
             if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
                 throw e;
             }
@@ -454,6 +478,21 @@ public class AppContext {
     }
 
     public void shutDown() {
+        // Stop the file reconciliation service FIRST and AWAIT its termination, before the async executors
+        // and the index shut down (#159). It ENQUEUES replay events onto those executors and its replays
+        // write the index, so stopping it after them would risk a rejected enqueue onto a closing executor
+        // or a write to a closed index. This reverses the historical order, which shut the executors/index
+        // before the backfill services.
+        if (fileReconciliationService != null) {
+            fileReconciliationService.stopAsync();
+            try {
+                fileReconciliationService.awaitTerminated(1, TimeUnit.MINUTES);
+            } catch (Exception e) {
+                // Best-effort: a slow/failed stop must not block the rest of shutdown.
+                log.warn("The file reconciliation service did not terminate cleanly during shutdown", e);
+            }
+        }
+
         for (ExecutorService executor : asyncExecutorList) {
             // Shutdown executor, don't accept any more tasks (can cause error with nested events)
             try {

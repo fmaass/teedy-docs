@@ -34,4 +34,12 @@ public class ThirdPartyWebhookResource extends BaseResource {
     public static JsonObject getLastPayload() {
         return lastPayload;
     }
+
+    /**
+     * Clear the last received payload so a test can assert that NO webhook was delivered afterwards
+     * (used by the reconciliation replay suppression test, #159).
+     */
+    public static void reset() {
+        lastPayload = null;
+    }
 }

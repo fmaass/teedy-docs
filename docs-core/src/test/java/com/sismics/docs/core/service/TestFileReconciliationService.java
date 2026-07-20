@@ -1,0 +1,211 @@
+package com.sismics.docs.core.service;
+
+import com.google.common.util.concurrent.Service;
+import com.sismics.BaseTest;
+import com.sismics.docs.core.dao.FileDao;
+import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.event.FileEvent;
+import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.FileUtil;
+import com.sismics.util.context.ThreadLocalContext;
+import com.sismics.util.jpa.EMF;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityTransaction;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.util.Date;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * The reconciliation service (#159) self-completing / claim behaviour: it self-stops only when NO
+ * unprocessed active file remains (the live-lease-stranding fix — an empty work-set with work still in
+ * flight must NOT stop it), it terminal-skips a file that has exhausted its attempt cap, and a claimed
+ * file whose replay does not complete is left unmarked and re-selected on a later (expired-lease) cycle.
+ */
+public class TestFileReconciliationService extends BaseTest {
+
+    private interface TxWork<T> {
+        T run() throws Exception;
+    }
+
+    private static <T> T inTx(TxWork<T> work) throws Exception {
+        EntityManager em = EMF.get().createEntityManager();
+        ThreadLocalContext.get().setEntityManager(em);
+        EntityTransaction tx = em.getTransaction();
+        tx.begin();
+        try {
+            T result = work.run();
+            tx.commit();
+            return result;
+        } catch (Exception e) {
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw e;
+        } finally {
+            if (em.isOpen()) {
+                em.close();
+            }
+            ThreadLocalContext.cleanup();
+        }
+    }
+
+    private String createUserId() throws Exception {
+        String username = "recsvc_" + UUID.randomUUID().toString().substring(0, 10);
+        return inTx(() -> {
+            User user = new User();
+            user.setUsername(username);
+            user.setPassword("12345678");
+            user.setEmail(username + "@docs.com");
+            user.setRoleId("admin");
+            user.setStorageQuota(100_000_000L);
+            return new UserDao().create(user, username);
+        });
+    }
+
+    private String createFileRow(String userId) throws Exception {
+        return inTx(() -> {
+            File file = new File();
+            file.setUserId(userId);
+            file.setName("recon.txt");
+            file.setMimeType("text/plain");
+            file.setVersion(0);
+            file.setLatestVersion(true);
+            file.setSize(10L);
+            return new FileDao().create(file, userId);
+        });
+    }
+
+    private File readFile(String fileId) throws Exception {
+        return inTx(() -> new FileDao().getActiveById(fileId));
+    }
+
+    // --- self-stop ONLY when nothing unprocessed remains ----------------------------------------------
+
+    @Test
+    public void selfStopsWhenNoUnprocessedFileRemains() {
+        FileReconciliationService service = new FileReconciliationService() {
+            @Override
+            List<File> fetchReconcileBatch() {
+                return List.of();
+            }
+
+            @Override
+            long countUnprocessed() {
+                return 0;
+            }
+        };
+        service.runOneIteration();
+        Assertions.assertEquals(Service.State.TERMINATED, service.state(),
+                "the service self-stops once no unprocessed active file remains");
+    }
+
+    /**
+     * The live-lease-stranding fix (ADR BLOCKING-1): an EMPTY claimable work-set does NOT mean the service
+     * may stop — an in-flight replay keeps its row unprocessed, so while any unprocessed row remains the
+     * service must stay scheduled. Mutation proof: a self-stop keyed on the (empty) work-set instead of the
+     * unprocessed count would TERMINATE here and strand the in-flight file.
+     */
+    @Test
+    public void staysScheduledWhileUnprocessedRemainsEvenWithEmptyWorkSet() {
+        FileReconciliationService service = new FileReconciliationService() {
+            @Override
+            List<File> fetchReconcileBatch() {
+                return List.of();
+            }
+
+            @Override
+            long countUnprocessed() {
+                return 1; // an in-flight (live-leased) file, not claimable this cycle
+            }
+        };
+        service.runOneIteration();
+        Assertions.assertNotEquals(Service.State.TERMINATED, service.state(),
+                "an empty work-set with an unprocessed file still in flight must NOT stop the service");
+    }
+
+    // --- bounded retry: a file over the attempt cap is terminal-skipped, not re-enqueued ---------------
+
+    @Test
+    public void terminalSkipsAfterExceedingAttemptCap() throws Exception {
+        String userId = createUserId();
+        String fileId = createFileRow(userId);
+        // Pre-set the attempt counter AT the cap; the claim's own increment pushes it OVER, so this claim
+        // terminal-skips instead of enqueuing.
+        int cap = new FileReconciliationService().maxAttempts();
+        inTx(() -> ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_FILE set FIL_PROCATTEMPTS_N = :n where FIL_ID_C = :id")
+                .setParameter("n", cap)
+                .setParameter("id", fileId)
+                .executeUpdate());
+
+        int[] posts = {0};
+        FileReconciliationService service = new FileReconciliationService() {
+            @Override
+            void postReprocessEvent(FileEvent event) {
+                posts[0]++;
+            }
+        };
+        FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
+        service.reconcileFile(readFile(fileId), counters);
+
+        Assertions.assertEquals(0, posts[0], "a file over the attempt cap is NOT re-enqueued");
+        Assertions.assertEquals(1, counters.terminalSkipped, "it is counted as a terminal skip");
+        Assertions.assertNotNull(readFile(fileId).getProcessed(),
+                "it is terminal-skip-stamped so the scan stops re-selecting it");
+    }
+
+    // --- a claimed replay that does not complete leaves the file unmarked and is retried ---------------
+
+    /**
+     * When a claimed replay runs but ends RETRYABLE (e.g. an index write failure), the pipeline does NOT
+     * write the completion marker. This test simulates that by intercepting the enqueue with a replay that
+     * releases the in-memory marker/temp (as the real processing finally does) but records no completion.
+     * The file must stay unprocessed and, once its lease is treated as expired, be re-selected by the scan.
+     */
+    @Test
+    public void claimedButUncompletedReplayIsNotMarkedAndIsRetried() throws Exception {
+        String userId = createUserId();
+        String fileId = createFileRow(userId);
+        // A blob must exist for the reconciler to proceed to enqueue (else it terminal-skips a missing blob).
+        Files.write(DirectoryUtil.getStorageDirectory().resolve(fileId), new byte[]{1, 2, 3, 4});
+
+        try {
+            FileReconciliationService service = new FileReconciliationService() {
+                @Override
+                void postReprocessEvent(FileEvent event) {
+                    // Simulate a replay that ran but ended RETRYABLE (no completion recorded), releasing the
+                    // in-memory marker + temp exactly as the real processEvent finally would.
+                    FileUtil.endProcessingFile(event.getFileId());
+                    FileUtil.deleteTempGuarded(event.getFileId(), event.getUnencryptedFile());
+                }
+            };
+            FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
+            service.reconcileFile(readFile(fileId), counters);
+
+            Assertions.assertEquals(1, counters.enqueued, "the file was claimed and enqueued");
+            File afterClaim = readFile(fileId);
+            Assertions.assertNull(afterClaim.getProcessed(),
+                    "a replay that did not complete must NOT write the completion marker");
+            Assertions.assertNotNull(afterClaim.getProcessingToken(), "the claim lease is held");
+
+            // Retried: with the lease treated as expired (a cutoff after the stored lease time) the scan
+            // re-selects the still-unprocessed file.
+            boolean reselected = inTx(() -> {
+                FileDao fileDao = new FileDao();
+                Date futureCutoff = new Date(fileDao.getDatabaseTime().getTime() + 3_600_000);
+                return fileDao.getFilesToReconcile(futureCutoff, 1000).stream()
+                        .anyMatch(f -> fileId.equals(f.getId()));
+            });
+            Assertions.assertTrue(reselected, "the unmarked file is re-selected once its lease expires");
+        } finally {
+            Files.deleteIfExists(DirectoryUtil.getStorageDirectory().resolve(fileId));
+            FileUtil.endProcessingFile(fileId);
+        }
+    }
+}
