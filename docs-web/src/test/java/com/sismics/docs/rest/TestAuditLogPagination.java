@@ -76,6 +76,16 @@ public class TestAuditLogPagination extends BaseJerseyTest {
         Assertions.assertEquals(100, json.getJsonArray("logs").size(), "limit must clamp to 100");
         Assertions.assertTrue(json.getBoolean("has_more"), "more rows remain past the clamped page");
 
+        // A non-numeric or overflowing limit is a client mistake, not a missing resource: it must fall
+        // back to the default (20), never the framework's 404 for a failed Integer query-param conversion
+        // (limit is accepted as a String and parsed in the resource, mirroring before_date).
+        for (String badLimit : new String[] { "abc", "2147483648", "3.5", " " }) {
+            Response response = rawStringLimit(token, docId, badLimit);
+            Assertions.assertEquals(200, response.getStatus(), "a malformed limit '" + badLimit + "' must not 404/500");
+            Assertions.assertEquals(20, response.readEntity(JsonObject.class).getJsonArray("logs").size(),
+                    "a malformed limit '" + badLimit + "' falls back to the default of 20");
+        }
+
         deleteUser(user);
     }
 
@@ -346,6 +356,13 @@ public class TestAuditLogPagination extends BaseJerseyTest {
             webTarget = webTarget.queryParam("before_id", beforeId);
         }
         return webTarget.request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, token).get();
+    }
+
+    // A raw limit STRING (not an Integer) so a non-numeric/overflow value exercises the resource's own
+    // parse-and-default, not Jersey's Integer query-param conversion (which would 404 before list() runs).
+    private Response rawStringLimit(String token, String documentId, String limit) {
+        return target().path("/auditlog").queryParam("document", documentId).queryParam("limit", limit)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, token).get();
     }
 
     private void deleteUser(String username) {

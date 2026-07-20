@@ -66,4 +66,19 @@ describe('FileUpload Choose button is localized via t(ui.choose) (#146)', () => 
       expect(typeof choose).toBe('string')
     }
   })
+
+  it('both production upload widgets actually bind chooseLabel to t(ui.choose) (#146)', () => {
+    // Ties this spec to the real widgets: the reactive-switch test above uses a synthetic host, so
+    // without this a removal of the production bindings would go unnoticed.
+    const sources = import.meta.glob('./{DocumentViewContent,DocumentEdit}.vue', {
+      eager: true,
+      query: '?raw',
+      import: 'default',
+    }) as Record<string, string>
+    const entries = Object.entries(sources)
+    expect(entries.length).toBe(2)
+    for (const [path, src] of entries) {
+      expect(src, `${path} must bind :chooseLabel to t('ui.choose')`).toContain(`:chooseLabel="t('ui.choose')"`)
+    }
+  })
 })

@@ -83,18 +83,27 @@ public class AuditLogResource extends BaseResource {
     @GET
     public Response list(
             @QueryParam("document") String documentId,
-            @QueryParam("limit") Integer limit,
+            @QueryParam("limit") String limitParam,
             @QueryParam("before_date") String beforeDateParam,
             @QueryParam("before_id") String beforeId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
 
-        // Clamp the page size: default 20, floor of 1, ceiling of 100. A null/<=0 value is not an
-        // error (it just falls back to the default) so a bad limit never yields a 500.
+        // Clamp the page size: default 20, floor of 1, ceiling of 100. limit is accepted as a String
+        // and parsed here so a null/empty/non-numeric/out-of-range value falls back to the default
+        // rather than triggering the framework's 404 for a failed Integer query-param conversion (or a
+        // 500); a bad page size is never an error.
         int pageSize = DEFAULT_LIMIT;
-        if (limit != null && limit > 0) {
-            pageSize = Math.min(limit, MAX_LIMIT);
+        if (!Strings.isNullOrEmpty(limitParam)) {
+            try {
+                int parsed = Integer.parseInt(limitParam.trim());
+                if (parsed > 0) {
+                    pageSize = Math.min(parsed, MAX_LIMIT);
+                }
+            } catch (NumberFormatException e) {
+                // Malformed or overflowing page size — keep the default.
+            }
         }
 
         // Parse before_date ourselves (accepted as a String) so a non-numeric value is a clean 400
