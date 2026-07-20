@@ -1031,12 +1031,12 @@
       "whats_new_title": "Novità in {version}",
       "view_releases": "Visualizza tutte le versioni",
       "highlights": {
-        "fuzzy_search": "La ricerca dei documenti ora corrisponde alle parole parziali e tollera piccoli errori di battitura, così trovi comunque i documenti anche quando un termine è solo parzialmente corretto.",
-        "reassign_documents": "Quando elimini un utente, puoi affidare i suoi documenti a un altro utente invece di spostarli nel cestino.",
-        "settings_home": "Le impostazioni si aprono su una pagina iniziale con una navigazione raggruppata, invece di passare direttamente al tuo account.",
-        "oidc_verbatim_username": "Gli amministratori possono scegliere di usare il preferred_username OIDC così com'è come nome dell'account.",
-        "custom_branding": "Assegna a ogni istanza il proprio titolo dell'applicazione e favicon.",
-        "page_size_gallery_tags": "Scegli quanti documenti mostrare per pagina e modifica i tag di un documento direttamente da un menu contestuale nella galleria."
+        "dark_mode_account": "La tua scelta della modalità scura viene salvata nel tuo account, così un nuovo dispositivo adotta subito il tema che usi già.",
+        "activity_history": "Il registro attività di un documento non è più limitato alle voci più recenti: carica le attività precedenti per vedere la cronologia completa.",
+        "complete_translations": "Tutte le lingue incluse sono ora tradotte integralmente, quindi l'interfaccia non torna più all'inglese a metà schermata.",
+        "accented_filenames": "I nomi dei file caricati mantengono accenti, dieresi e segni più, invece di arrivare illeggibili.",
+        "csrf_and_sharing": "Protezione rafforzata contro il cross-site request forgery (CSRF), e i link di condivisione non rivelano più documenti oltre a quelli che concedono.",
+        "credential_revocation": "Cambiare una password o revocare una chiave API ora chiude subito le sessioni interessate."
       }
     },
     "sso_failed": "Single sign-on non riuscito. Puoi riprovare o accedere con un account locale.",

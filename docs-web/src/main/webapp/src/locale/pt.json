@@ -1031,12 +1031,12 @@
       "whats_new_title": "Novidades na {version}",
       "view_releases": "Ver todas as versões",
       "highlights": {
-        "fuzzy_search": "A pesquisa de documentos passa agora a corresponder a palavras parciais e tolera pequenos erros de escrita, por isso continua a encontrar documentos quando um termo está apenas parcialmente correto.",
-        "reassign_documents": "Quando elimina um utilizador, pode entregar os seus documentos a outro utilizador em vez de os mover para a reciclagem.",
-        "settings_home": "As definições abrem numa página inicial com uma navegação agrupada, em vez de saltar diretamente para a sua conta.",
-        "oidc_verbatim_username": "Os administradores podem optar por utilizar o preferred_username do OIDC tal como está como nome da conta.",
-        "custom_branding": "Atribua a cada instância o seu próprio título de aplicação e favicon.",
-        "page_size_gallery_tags": "Escolha quantos documentos são mostrados por página e edite as etiquetas de um documento diretamente a partir de um menu de clique direito na galeria."
+        "dark_mode_account": "A sua preferência de modo escuro fica guardada na sua conta, por isso um dispositivo novo assume logo o tema que já utiliza.",
+        "activity_history": "O registo de atividade de um documento já não está limitado às entradas mais recentes — carregue a atividade mais antiga para ver o histórico completo.",
+        "complete_translations": "Todos os idiomas incluídos estão agora totalmente traduzidos, pelo que a interface já não volta ao inglês a meio do ecrã.",
+        "accented_filenames": "Os nomes dos ficheiros carregados mantêm os acentos, tremas e sinais de mais, em vez de chegarem com carateres ilegíveis.",
+        "csrf_and_sharing": "Reforço contra a falsificação de pedidos entre sítios (CSRF), e as ligações de partilha já não revelam documentos além do que concedem.",
+        "credential_revocation": "Alterar uma palavra-passe ou revogar uma chave de API termina agora de imediato as sessões afetadas."
       }
     },
     "sso_failed": "O início de sessão único falhou. Pode tentar novamente ou iniciar sessão com uma conta local.",

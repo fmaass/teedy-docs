@@ -1031,12 +1031,12 @@
       "whats_new_title": "Nouveautés de {version}",
       "view_releases": "Voir toutes les versions",
       "highlights": {
-        "fuzzy_search": "La recherche de documents correspond désormais aux mots partiels et tolère les petites fautes de frappe, ce qui vous permet de retrouver des documents même lorsqu'un terme n'est que partiellement correct.",
-        "reassign_documents": "Lorsque vous supprimez un utilisateur, vous pouvez confier ses documents à un autre utilisateur au lieu de les mettre à la corbeille.",
-        "settings_home": "Les paramètres s'ouvrent sur une page d'accueil dotée d'une navigation groupée, au lieu de vous amener directement à votre compte.",
-        "oidc_verbatim_username": "Les administrateurs peuvent choisir d'utiliser le preferred_username OIDC tel quel comme nom de compte.",
-        "custom_branding": "Donnez à chaque instance son propre titre d'application et sa propre favicon.",
-        "page_size_gallery_tags": "Choisissez combien de documents s'affichent par page, et modifiez les tags d'un document directement depuis un menu contextuel dans la galerie."
+        "dark_mode_account": "Votre choix de mode sombre est enregistré dans votre compte, de sorte qu'un nouvel appareil reprend directement le thème que vous utilisez déjà.",
+        "activity_history": "Le journal d'activité d'un document n'est plus limité aux entrées les plus récentes : chargez les activités plus anciennes pour consulter tout son historique.",
+        "complete_translations": "Toutes les langues fournies sont désormais entièrement traduites, l'interface ne repasse donc plus à l'anglais au milieu d'un écran.",
+        "accented_filenames": "Les noms des fichiers envoyés conservent leurs accents, trémas et signes plus, au lieu d'arriver déformés.",
+        "csrf_and_sharing": "Renforcement contre la falsification de requête intersites (CSRF), et les liens de partage ne révèlent plus de documents au-delà de ce qu'ils autorisent.",
+        "credential_revocation": "Changer un mot de passe ou révoquer une clé API met désormais fin immédiatement aux sessions concernées."
       }
     },
     "sso_failed": "L'authentification unique a échoué. Vous pouvez réessayer ou vous connecter avec un compte local.",
