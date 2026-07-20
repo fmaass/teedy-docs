@@ -39,6 +39,25 @@ The built-in `admin` account authenticates against the **local database** and is
 never routed through OIDC, the proxy header, or LDAP. Use it on the login form.
 For a lost admin password, see [RECOVERY.md](../RECOVERY.md).
 
+### SSO is enabled (or broken) — how do I reach the local login form?
+
+When OIDC is enabled, the login page redirects directly to your provider, so the
+username/password form is not shown by default. To reach it:
+
+* Append **`?local=1`** to the login URL—for example,
+  `https://teedy.example.com/#/login?local=1`—to skip the redirect and show the
+  local form. This URL can serve as a break-glass bookmark.
+* Select the **Use a local account** link beneath the login card. This link
+  appears whenever OIDC is enabled.
+
+If SSO fails because the provider is unavailable or the callback is rejected,
+Teedy returns you to the local form with a "Single sign-on failed" notice instead
+of entering a redirect loop. The built-in `admin` account always authenticates
+locally, so a broken IdP cannot block local access.
+
+See [Authentication](authentication.md) for full details, including
+[reaching the local login form](authentication.md#reaching-the-local-login-form-local1).
+
 ## Email / SMTP
 
 ### Password-reset (or workflow) emails never arrive
