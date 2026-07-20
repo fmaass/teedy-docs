@@ -95,6 +95,46 @@ function placeholderCounts(value) {
   return counts
 }
 
+// HTML-TAG MULTISET of a message: each tag reduced to its name and role —
+// opening `<name>`, closing `</name>`, self-closing `<name/>` — with attributes
+// stripped, so `<a href="…">` counts as `<a>`. The sibling of placeholderCounts:
+// a translator who drops a `<strong>`/`<br/>`, adds a `<small>` the source lacks,
+// or leaves an unbalanced `</strong>` yields a tag multiset that differs from the
+// reference (e.g. de settings.security.message_2 once carried a stray trailing
+// `</strong>` and no opening tag). Names are lowercased so `<BR/>` == `<br/>`.
+function tagCounts(value) {
+  const counts = new Map()
+  if (typeof value !== 'string') return counts
+  const re = /<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?(\/?)\s*>/g
+  let m
+  while ((m = re.exec(value))) {
+    const name = m[2].toLowerCase()
+    const token = m[1] === '/' ? `</${name}>` : m[3] === '/' ? `<${name}/>` : `<${name}>`
+    counts.set(token, (counts.get(token) ?? 0) + 1)
+  }
+  return counts
+}
+
+// KNOWN_TAG_DEBT (tag-parity). Pre-existing markup loss in the native-review-pending
+// locales (the #146 follow-up above): each string below dropped en's markup together
+// with the *translated words it wrapped* — the "unread" word in `inbox.test_success`,
+// the whole "<strong>unread</strong> … <a>Gmail</a>/<a>Outlook.com</a>/<a>Yahoo</a>"
+// body in `inbox.message`. Restoring parity there needs the missing translation, not a
+// mechanical tag re-wrap, so it is deferred to native-speaker review rather than
+// fabricated here without the source translation. Listed per `${locale}::${key}` — NOT a
+// blanket skip — so the debt is enumerated in the output on every run (never silent) and
+// every other key/locale, German included, stays fully enforced. Prune an entry once
+// native review restores its markup.
+const KNOWN_TAG_DEBT = new Set([
+  'fr::settings.inbox.message',
+  'ru::settings.inbox.message',
+  'ru::settings.inbox.test_success',
+  'zh_CN::settings.inbox.message',
+  'zh_CN::settings.inbox.test_success',
+  'zh_TW::settings.inbox.message',
+  'zh_TW::settings.inbox.test_success',
+])
+
 const referenceFlat = loadFlat(REFERENCE)
 const referenceKeys = new Set(Object.keys(referenceFlat))
 const locales = readdirSync(localeDir)
@@ -146,6 +186,35 @@ for (const locale of locales) {
     }
   }
 
+  // HTML-tag-parity: for every key the locale shares with the reference, the balanced
+  // HTML tag multiset (open/close/self-close, attributes stripped) must equal the
+  // reference's. A dropped `<strong>`/`<br/>`, an unbalanced `</strong>`, or an added
+  // `<small>` the source lacks is a rendering/markup defect a placeholder check is
+  // blind to. Unlike placeholders, plural branches do not license a tag-count change:
+  // no reference string carries tags inside a `|` branch, so counts are compared
+  // unconditionally. Pairs in KNOWN_TAG_DEBT are enumerated separately (below) instead
+  // of failing, so the machine-translated locales' pre-existing markup loss stays
+  // visible without machine-fabricating the missing translation.
+  const tagIssues = []
+  const tagDebt = []
+  for (const k of keys) {
+    if (!referenceKeys.has(k)) continue
+    const refVal = referenceFlat[k]
+    const locVal = localeFlat[k]
+    if (typeof refVal !== 'string' || typeof locVal !== 'string') continue
+    const refT = tagCounts(refVal)
+    const locT = tagCounts(locVal)
+    const issuesForKey = []
+    for (const tag of new Set([...refT.keys(), ...locT.keys()])) {
+      const rc = refT.get(tag) ?? 0
+      const lc = locT.get(tag) ?? 0
+      if (rc !== lc) issuesForKey.push(`${k}: ${tag} appears ${lc}× vs ${rc}× in reference`)
+    }
+    if (!issuesForKey.length) continue
+    if (KNOWN_TAG_DEBT.has(`${locale}::${k}`)) tagDebt.push(...issuesForKey)
+    else tagIssues.push(...issuesForKey)
+  }
+
   if (stale.length) {
     hasError = true
     console.error(`✗ ${locale}: ${stale.length} STALE key(s) (remove these):`)
@@ -170,7 +239,22 @@ for (const locale of locales) {
       for (const issue of placeholderIssues) console.warn(`    ${issue}`)
     }
   }
-  if (!stale.length && !missing.length && !placeholderIssues.length) console.log(`✓ ${locale}: complete`)
+  if (tagIssues.length) {
+    if (strict) {
+      hasError = true
+      console.error(`✗ ${locale}: ${tagIssues.length} HTML-tag mismatch(es):`)
+      for (const issue of tagIssues) console.error(`    ${issue}`)
+    } else {
+      console.warn(`  ${locale}: ${tagIssues.length} HTML-tag mismatch(es) (best-effort locale):`)
+      for (const issue of tagIssues) console.warn(`    ${issue}`)
+    }
+  }
+  if (tagDebt.length) {
+    console.warn(`  ${locale}: ${tagDebt.length} known HTML-tag debt (KNOWN_TAG_DEBT, awaiting native review — not failing):`)
+    for (const issue of tagDebt) console.warn(`    ${issue}`)
+  }
+  if (!stale.length && !missing.length && !placeholderIssues.length && !tagIssues.length)
+    console.log(`✓ ${locale}: complete${tagDebt.length ? ` (with ${tagDebt.length} known tag-debt)` : ''}`)
 }
 
 // ── Unused-key report ────────────────────────────────────────────────────────
