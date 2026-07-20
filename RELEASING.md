@@ -73,19 +73,18 @@ before shipping.
 
 - Publish trigger: **tags `v*` only** publish the versioned multi-arch (amd64+arm64) image to
   `ghcr.io/fmaass/teedy-docs`; `main` publishes `latest`; `release/**` is smoke-boot only, no push.
-- **Host: jupiter (this machine, `192.168.1.65`)** — teedy prod migrated Saturn→jupiter on 2026-07-15
-  (ARCHIMEDES rausmitdir p2413). The old Saturn (`192.168.1.50`) teedy + the `~/projects/portainer-stacks`
-  pin are RETIRED — do not deploy there.
-- Deploy stack: `/opt/jupiter-stacks/stacks/teedy/docker-compose.yml` (repo `fmaass/jupiter-stacks`,
-  feature-branch + squash-merge convention). Docker is **local, no sudo**; roll with
-  `docker compose up -d teedy` in the stack dir (never `restart`).
-- Image: the compose pins `image: teedy-docs:local` (a local tag, not a ghcr pull). Deploy a new version
-  by retagging the published CI image: `docker pull ghcr.io/fmaass/teedy-docs:vX.Y.Z && docker tag
-  ghcr.io/fmaass/teedy-docs:vX.Y.Z teedy-docs:local`, then `up -d`.
-- Add `- DOCS_CSRF_ENFORCE=true` to the stack env (enabled since v3.6.6).
-- DB: teedy's `DATABASE_URL` still points at **Saturn's postgres17** (`192.168.1.50:5455`) — the DB was
-  NOT moved to jupiter. Traefik (jupiter, macvlan `192.168.1.100`) routes `teedy.discomarder.live` →
-  teedy on `apps_net`.
+- **Host, stack path, hostnames and addresses are deployment-specific and deliberately not recorded
+  here** — this file is public. Operators keep them in their own private notes; for this fork's
+  maintainer they live in the untracked project context file.
+- Deploy stack: a compose file in the operator's stack repo, rolled with `docker compose up -d <service>`
+  in the stack directory — **never `restart`**, which reuses the old image.
+- Image: the compose pins a local tag (`teedy-docs:local`) rather than pulling from ghcr directly.
+  Deploy a new version by retagging the published CI image:
+  `docker pull ghcr.io/fmaass/teedy-docs:vX.Y.Z && docker tag ghcr.io/fmaass/teedy-docs:vX.Y.Z teedy-docs:local`,
+  then `up -d --force-recreate`.
+- Set `DOCS_CSRF_ENFORCE=true` in the stack env (enabled since v3.6.6).
+- The database may live on a different host from the application; a release that ships a migration must
+  confirm which instance `DATABASE_URL` actually points at before taking the pre-deploy backup.
 
 ## Acceptance probes
 
@@ -95,9 +94,15 @@ before shipping.
 3. `docker exec postgres17 psql -U postgres -d teedy -tAc "select cfg_value_c from t_config where cfg_id_c='DB_VERSION'"` == expected level; document row count intact.
 4. Representative real route: `/apidoc/` 200 with correct title, plus one authenticated API read
    exercised in-container.
-5. On jupiter, run the probes with local `docker` (no sudo). The **public URL `teedy.discomarder.live` IS
-   reachable via the browser-harness** — use it to verify the served `current_version` through the real
-   proxy path (this catches a deploy that landed on the wrong host/instance: v3.6.6 read 3.6.1 there until
-   deployed to jupiter). OIDC login itself needs the user's credentials/MFA, so the real-browser
-   login + a state-changing action (confirming CSRF enforcement) remains the user's acceptance step.
+5. **Verify the served `current_version` through the real proxy, not just inside the container.** An
+   in-container probe passes even when the deploy landed on the wrong host or instance — exactly how a
+   release once reported a stale version at the public URL while looking correct locally. Where the
+   deployment host cannot reach its own proxy address (a common macvlan limitation), resolve the
+   hostname to the proxy's container-network address for the probe rather than skipping it.
+6. **The browser-harness must never be pointed at a live deployment** — it requires default
+   `admin/admin` credentials and seeds documents including a hostile XSS payload. Run it against a
+   disposable instance built from the same published image, ideally behind the same proxy
+   configuration. See issue #151.
+7. Authenticated login (OIDC/MFA) needs the operator's own credentials, so a real-browser login plus a
+   state-changing action — confirming CSRF enforcement — remains the operator's acceptance step.
    Note: deploying across the credential-epoch (migration 055) forces a one-time global re-login.
