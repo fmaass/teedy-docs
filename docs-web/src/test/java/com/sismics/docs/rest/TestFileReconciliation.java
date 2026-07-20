@@ -1,5 +1,6 @@
 package com.sismics.docs.rest;
 
+import com.sismics.docs.core.event.FileUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.service.FileReconciliationService;
 import com.sismics.docs.core.util.DirectoryUtil;
@@ -96,6 +97,34 @@ public class TestFileReconciliation extends BaseJerseyTest {
         // The replay (reprocess=true) must NOT emit a duplicate FILE_CREATED webhook.
         Assertions.assertNull(ThirdPartyWebhookResource.getLastPayload(),
                 "a reconciliation replay must NOT fire a duplicate FILE_CREATED webhook");
+    }
+
+    @Test
+    public void fileUpdatedWebhookFiresOnLiveEventButNotOnReplay() {
+        String adminToken = adminToken();
+        target().path("/webhook").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form()
+                        .param("event", "FILE_UPDATED")
+                        .param("url", "http://localhost:" + getPort() + "/docs/thirdpartywebhook")), JsonObject.class);
+
+        // A live FILE_UPDATED event (reprocess=false) fires the webhook.
+        ThirdPartyWebhookResource.reset();
+        FileUpdatedAsyncEvent live = new FileUpdatedAsyncEvent();
+        live.setFileId("live-updated-file");
+        AppContext.getInstance().getAsyncEventBus().post(live);
+        JsonObject fired = ThirdPartyWebhookResource.getLastPayload();
+        Assertions.assertNotNull(fired, "a live FILE_UPDATED event fires the webhook");
+        Assertions.assertEquals("FILE_UPDATED", fired.getString("event"), "the live event is FILE_UPDATED");
+
+        // A reconciliation replay (reprocess=true) is suppressed.
+        ThirdPartyWebhookResource.reset();
+        FileUpdatedAsyncEvent replay = new FileUpdatedAsyncEvent();
+        replay.setFileId("replay-updated-file");
+        replay.setReprocess(true);
+        AppContext.getInstance().getAsyncEventBus().post(replay);
+        Assertions.assertNull(ThirdPartyWebhookResource.getLastPayload(),
+                "a reconciliation replay must NOT fire a duplicate FILE_UPDATED webhook");
     }
 
     /** Exposes the scheduled one-shot iteration (protected on the service) for a synchronous test drive. */

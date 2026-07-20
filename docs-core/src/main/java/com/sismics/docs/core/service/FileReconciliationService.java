@@ -25,6 +25,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -75,9 +76,49 @@ public class FileReconciliationService extends AbstractScheduledService {
     static final String MAX_ATTEMPTS_ENV = "DOCS_RECONCILIATION_MAX_ATTEMPTS";
     static final int DEFAULT_MAX_ATTEMPTS = 10;
 
+    /**
+     * Set once shutdown has been requested. The running iteration checks it between steps and drops any
+     * pending enqueue, so a slow decrypt cannot resume and post into a closing executor or resurrect a
+     * torn-down {@link AppContext}. Volatile so the shutdown thread's write is seen by the iteration thread.
+     */
+    private volatile boolean stopping;
+
+    /**
+     * The thread currently running an iteration, captured so {@link #requestStop()} can interrupt a blocked
+     * decrypt/IO. Null when no iteration is running.
+     */
+    private volatile Thread iterationThread;
+
+    /**
+     * Count of reprocess enqueues dropped because shutdown was in progress (their leases simply expire and a
+     * later boot retries). Surfaced so a shutdown that raced live work is observable rather than silent.
+     */
+    private final AtomicInteger postsDroppedOnShutdown = new AtomicInteger();
+
     @Override
     protected void startUp() {
         log.info("File reconciliation service starting up");
+    }
+
+    /**
+     * Request an orderly stop: flag it so the running iteration cooperatively stops between steps and drops
+     * any pending enqueue, interrupt a thread blocked in a decrypt/IO, then stop scheduling further
+     * iterations. Called by {@link AppContext#shutDown()} BEFORE the async executors and index are torn down.
+     */
+    public void requestStop() {
+        stopping = true;
+        Thread thread = iterationThread;
+        if (thread != null) {
+            thread.interrupt();
+        }
+        stopAsync();
+    }
+
+    /**
+     * @return the number of reprocess enqueues dropped because shutdown was in progress
+     */
+    int getPostsDroppedOnShutdown() {
+        return postsDroppedOnShutdown.get();
     }
 
     @Override
@@ -87,12 +128,24 @@ public class FileReconciliationService extends AbstractScheduledService {
 
     @Override
     protected void runOneIteration() {
+        iterationThread = Thread.currentThread();
         try {
+            if (stopping) {
+                return;
+            }
             List<File> batch = fetchReconcileBatch();
             IterationCounters counters = new IterationCounters();
             counters.selected = batch.size();
             for (File file : batch) {
+                if (stopping) {
+                    // Stop promptly on shutdown rather than draining the whole batch; the unclaimed rows
+                    // stay reconcilable and any lease we already took expires and is retried next boot.
+                    break;
+                }
                 reconcileFile(file, counters);
+            }
+            if (stopping) {
+                return;
             }
 
             // Drain gauge: while ANY active file is still unprocessed the service MUST stay scheduled. Self-
@@ -111,6 +164,8 @@ public class FileReconciliationService extends AbstractScheduledService {
             }
         } catch (Throwable e) {
             log.error("Exception during file reconciliation iteration", e);
+        } finally {
+            iterationThread = null;
         }
     }
 
@@ -196,31 +251,60 @@ public class FileReconciliationService extends AbstractScheduledService {
             return;
         }
 
-        // Resolve the owner key + blob and decrypt. Any failure here is TERMINAL: the content can never be
-        // recovered, so terminal-skip it rather than re-select it forever.
-        Path unencryptedFile;
-        String language;
-        try {
-            User user = fetchUser(claim.userId);
-            Path storedFile = DirectoryUtil.getStorageDirectory().resolve(fileId);
-            if (user == null || !Files.exists(storedFile)) {
-                terminalSkip(fileId, token);
-                counters.terminalSkipped++;
-                log.warn("File {} cannot be reprocessed (owner or blob missing); marking it terminally skipped",
-                        fileId);
-                return;
-            }
-            unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
-            language = fetchLanguage(claim.documentId);
-        } catch (Exception e) {
-            terminalSkip(fileId, token);
-            counters.terminalSkipped++;
-            log.warn("File {} could not be decrypted for reprocessing; marking it terminally skipped", fileId, e);
+        // Stop-aware: do not begin the (possibly long) decrypt during shutdown. The claim lease expires and
+        // a later boot retries.
+        if (stopping) {
             return;
         }
 
-        // Enqueue the reprocess replay. A post failure is NOT terminal (the lease expires and a later cycle
-        // retries), so it must not terminal-skip; release the in-memory marker + temp we took ownership of.
+        // Resolve the owner + blob. ONLY three causes are TERMINAL — the content can never be recovered:
+        // the owner is gone, the blob is missing, or decryption fails. A transient LOOKUP/INFRASTRUCTURE
+        // failure (a DB hiccup in the owner or language read) must NOT terminal-stamp the row — that would be
+        // permanent data loss for a recoverable file — so it is left RETRYABLE (return; the lease expires and
+        // a later cycle retries, its attempt counter already bumped by the claim).
+        User user;
+        try {
+            user = fetchUser(claim.userId);
+        } catch (Exception e) {
+            log.warn("File {} owner lookup failed transiently; leaving it to a later cycle", fileId, e);
+            return;
+        }
+        if (user == null) {
+            terminalSkip(fileId, token);
+            counters.terminalSkipped++;
+            log.warn("File {} has no owner; marking it terminally skipped", fileId);
+            return;
+        }
+        Path storedFile = DirectoryUtil.getStorageDirectory().resolve(fileId);
+        if (!Files.exists(storedFile)) {
+            terminalSkip(fileId, token);
+            counters.terminalSkipped++;
+            log.warn("File {} blob is missing; marking it terminally skipped", fileId);
+            return;
+        }
+        Path unencryptedFile;
+        try {
+            unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
+        } catch (Exception e) {
+            terminalSkip(fileId, token);
+            counters.terminalSkipped++;
+            log.warn("File {} could not be decrypted; marking it terminally skipped", fileId, e);
+            return;
+        }
+
+        // Language lookup is a transient-failure-sensitive DB read; on failure clean up the decrypted temp
+        // (never leak plaintext) and retry later — it is NOT a terminal cause.
+        String language;
+        try {
+            language = fetchLanguage(claim.documentId);
+        } catch (Exception e) {
+            FileUtil.deleteTempGuarded(fileId, unencryptedFile);
+            log.warn("File {} language lookup failed transiently; leaving it to a later cycle", fileId, e);
+            return;
+        }
+
+        // Enqueue the reprocess replay. A post failure or a shutdown-drop is NOT terminal (the lease expires
+        // and a later cycle retries); release the in-memory marker + temp we took ownership of.
         FileUtil.startProcessingFile(fileId);
         FileCreatedAsyncEvent event = new FileCreatedAsyncEvent();
         event.setUserId(claim.userId);
@@ -229,25 +313,47 @@ public class FileReconciliationService extends AbstractScheduledService {
         event.setUnencryptedFile(unencryptedFile);
         event.setReprocess(true);
         event.setProcessingToken(token);
+        boolean posted;
         try {
-            postReprocessEvent(event);
-            counters.enqueued++;
+            posted = postReprocessEvent(event);
         } catch (Exception e) {
             log.error("Failed to enqueue the reprocess event for file {}; the lease will expire and retry", fileId, e);
+            FileUtil.endProcessingFile(fileId);
+            FileUtil.deleteTempGuarded(fileId, unencryptedFile);
+            return;
+        }
+        if (posted) {
+            counters.enqueued++;
+        } else {
+            // Dropped because shutdown began between the checks above and the post: clean up and let the
+            // lease expire.
             FileUtil.endProcessingFile(fileId);
             FileUtil.deleteTempGuarded(fileId, unencryptedFile);
         }
     }
 
     /**
-     * Post the reprocess event onto the async bus. Package-private so a test can intercept it. The event
-     * carries {@code reprocess=true}, so the processing listener takes the keyed index write and records
-     * completion fenced to the claim token, while the webhook listener skips the duplicate notification.
+     * Post the reprocess event onto the async bus, or drop it if shutdown has begun. The shutdown guard is
+     * the single choke point that touches {@link AppContext#getInstance()}: checking {@link #stopping} FIRST
+     * ensures a slow iteration resuming during shutdown never posts into a closing executor (which
+     * CallerRunsPolicy would silently discard while we counted it enqueued) and never calls
+     * {@code getInstance()} after the singleton was cleared, resurrecting a fresh context. Package-private so
+     * a test can intercept it. The event carries {@code reprocess=true}, so the processing listener takes the
+     * keyed index write and records completion fenced to the claim token, while the webhook listener skips
+     * the duplicate notification.
      *
      * @param event The reprocess event
+     * @return true if the event was posted, false if it was dropped because shutdown was in progress
      */
-    void postReprocessEvent(FileEvent event) {
+    boolean postReprocessEvent(FileEvent event) {
+        if (stopping) {
+            postsDroppedOnShutdown.incrementAndGet();
+            log.warn("Shutdown in progress; dropping the reprocess enqueue for file {} (lease will expire and retry)",
+                    event.getFileId());
+            return false;
+        }
         AppContext.getInstance().getAsyncEventBus().post(event);
+        return true;
     }
 
     /**

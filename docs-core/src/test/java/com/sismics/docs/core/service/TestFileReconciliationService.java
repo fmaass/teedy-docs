@@ -4,6 +4,7 @@ import com.google.common.util.concurrent.Service;
 import com.sismics.BaseTest;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.event.FileCreatedAsyncEvent;
 import com.sismics.docs.core.event.FileEvent;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
@@ -147,8 +148,9 @@ public class TestFileReconciliationService extends BaseTest {
         int[] posts = {0};
         FileReconciliationService service = new FileReconciliationService() {
             @Override
-            void postReprocessEvent(FileEvent event) {
+            boolean postReprocessEvent(FileEvent event) {
                 posts[0]++;
+                return true;
             }
         };
         FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
@@ -158,6 +160,64 @@ public class TestFileReconciliationService extends BaseTest {
         Assertions.assertEquals(1, counters.terminalSkipped, "it is counted as a terminal skip");
         Assertions.assertNotNull(readFile(fileId).getProcessed(),
                 "it is terminal-skip-stamped so the scan stops re-selecting it");
+    }
+
+    // --- blocker 1: a transient lookup failure is RETRYABLE, never terminal (no permanent loss) --------
+
+    /**
+     * A transient owner-lookup failure (a DB hiccup) must NOT terminal-stamp the row — that would be
+     * permanent loss for a recoverable file. Only owner-gone / blob-missing / decrypt-failure are terminal.
+     * Mutation proof: terminal-stamping on any lookup exception makes {@code terminalSkipped} 1 and stamps
+     * the row, so this test fails.
+     */
+    @Test
+    public void transientOwnerLookupFailureIsRetryableNotTerminal() throws Exception {
+        String userId = createUserId();
+        String fileId = createFileRow(userId);
+
+        FileReconciliationService service = new FileReconciliationService() {
+            @Override
+            User fetchUser(String uid) {
+                throw new RuntimeException("simulated transient owner-lookup failure");
+            }
+
+            @Override
+            boolean postReprocessEvent(FileEvent event) {
+                throw new AssertionError("a transiently-failed reconcile must not enqueue");
+            }
+        };
+        FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
+        service.reconcileFile(readFile(fileId), counters);
+
+        Assertions.assertEquals(0, counters.terminalSkipped,
+                "a transient owner-lookup failure must NOT terminal-skip the row");
+        Assertions.assertEquals(0, counters.enqueued, "and it must not enqueue");
+        Assertions.assertNull(readFile(fileId).getProcessed(),
+                "the row is left unprocessed (retryable) so a later cycle recovers it");
+    }
+
+    // --- shutdown: a pending enqueue is dropped (counted) and never resurrects a torn-down context -----
+
+    /**
+     * Once shutdown is requested, {@link FileReconciliationService#postReprocessEvent} must DROP the event
+     * (counting it) instead of touching {@link com.sismics.docs.core.model.context.AppContext#getInstance()}
+     * — so a slow iteration resuming during shutdown can neither post into a closing executor nor
+     * resurrect a cleared singleton. Mutation proof: removing the stop guard makes it call getInstance()
+     * (booting a context) and return true, so the drop assertion fails.
+     */
+    @Test
+    public void shutdownDropsPendingEnqueueWithoutResurrectingContext() {
+        FileReconciliationService service = new FileReconciliationService();
+        service.requestStop();
+
+        FileCreatedAsyncEvent event = new FileCreatedAsyncEvent();
+        event.setFileId("shutdown-drop-file");
+        boolean posted = service.postReprocessEvent(event);
+
+        Assertions.assertFalse(posted, "a pending enqueue is dropped once shutdown is requested");
+        Assertions.assertEquals(1, service.getPostsDroppedOnShutdown(), "the shutdown drop is counted");
+        Assertions.assertNotEquals(Service.State.RUNNING, service.state(),
+                "the service is not running after a stop request");
     }
 
     // --- a claimed replay that does not complete leaves the file unmarked and is retried ---------------
@@ -178,11 +238,12 @@ public class TestFileReconciliationService extends BaseTest {
         try {
             FileReconciliationService service = new FileReconciliationService() {
                 @Override
-                void postReprocessEvent(FileEvent event) {
+                boolean postReprocessEvent(FileEvent event) {
                     // Simulate a replay that ran but ended RETRYABLE (no completion recorded), releasing the
                     // in-memory marker + temp exactly as the real processEvent finally would.
                     FileUtil.endProcessingFile(event.getFileId());
                     FileUtil.deleteTempGuarded(event.getFileId(), event.getUnencryptedFile());
+                    return true;
                 }
             };
             FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();

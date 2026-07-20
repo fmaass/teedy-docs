@@ -481,15 +481,22 @@ public class AppContext {
         // Stop the file reconciliation service FIRST and AWAIT its termination, before the async executors
         // and the index shut down (#159). It ENQUEUES replay events onto those executors and its replays
         // write the index, so stopping it after them would risk a rejected enqueue onto a closing executor
-        // or a write to a closed index. This reverses the historical order, which shut the executors/index
-        // before the backfill services.
+        // or a write to a closed index. requestStop() sets a stop flag the running iteration checks between
+        // steps (so it stops promptly and drops any pending enqueue rather than posting into a closing
+        // executor) and interrupts a thread blocked in a decrypt. This reverses the historical order, which
+        // shut the executors/index before the backfill services.
         if (fileReconciliationService != null) {
-            fileReconciliationService.stopAsync();
+            fileReconciliationService.requestStop();
             try {
                 fileReconciliationService.awaitTerminated(1, TimeUnit.MINUTES);
+            } catch (java.util.concurrent.TimeoutException e) {
+                // An iteration outlived the grace period. Fail LOUDLY — the stop flag still fences its
+                // post/getInstance so it cannot corrupt state, but a stuck decrypt is worth surfacing.
+                log.error("The file reconciliation service did not terminate within the shutdown grace period; "
+                        + "an iteration is still running (its enqueue is fenced off, but investigate the stall)", e);
             } catch (Exception e) {
-                // Best-effort: a slow/failed stop must not block the rest of shutdown.
-                log.warn("The file reconciliation service did not terminate cleanly during shutdown", e);
+                // A FAILED-state service surfaces its cause here; log it and continue shutting down.
+                log.error("The file reconciliation service did not terminate cleanly during shutdown", e);
             }
         }
 
