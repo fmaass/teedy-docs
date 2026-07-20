@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { getDocument, createDocument, updateDocument, importEml } from '../../api/document'
-import { uploadFile, deleteFile, getFileUrl } from '../../api/file'
+import { uploadFile, deleteFile } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
 import { getVocabulary } from '../../api/vocabulary'
 import { buildMetadataParams, shouldResetMetadata, type MetadataValue } from '../../utils/metadataSerialize'
@@ -28,6 +28,7 @@ import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
 import TagBadge from '../../components/TagBadge.vue'
 import RichDescriptionEditor from '../../components/RichDescriptionEditor.vue'
+import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
@@ -72,6 +73,16 @@ const loading = ref(false)
 const showAdvanced = ref(false)
 const existingFiles = ref<AttachedFile[]>([])
 const pendingFiles = ref<File[]>([])
+
+// Safe in-app preview (#144): clicking an existing file's name opens the shared preview
+// dialog instead of navigating to the original file URL, which the backend serves as an
+// attachment (opening it would just trigger a download).
+const previewVisible = ref(false)
+const previewFile = ref<PreviewFile | null>(null)
+function openPreview(file: AttachedFile) {
+  previewFile.value = { id: file.id, name: file.name, mimetype: file.mimetype }
+  previewVisible.value = true
+}
 // CREATE-mode retry guard: once createDocument() succeeds we remember the new id, so
 // a subsequent Save (after a file-upload failure) updates that document instead of
 // creating a second one. uploadedCount tracks how many of the CURRENT pendingFiles
@@ -706,7 +717,7 @@ async function onEmlSelected(event: Event) {
       <div v-if="existingFiles.length" class="existing-files">
         <div v-for="file in existingFiles" :key="file.id" class="file-row">
           <i :class="file.mimetype.startsWith('image/') ? 'pi pi-image' : file.mimetype === 'application/pdf' ? 'pi pi-file-pdf' : 'pi pi-file'" class="file-icon" />
-          <a :href="getFileUrl(file.id)" target="_blank" class="file-name">{{ displayName(file.name, t) }}</a>
+          <button type="button" class="file-name" @click="openPreview(file)">{{ displayName(file.name, t) }}</button>
           <span class="file-size">{{ formatFileSize(file.size) }}</span>
           <Button
             icon="pi pi-times"
@@ -778,6 +789,9 @@ async function onEmlSelected(event: Event) {
         {{ t('ui.files_upload_hint', { count: pendingFiles.length }) }}
       </p>
     </div></template></Card>
+
+    <!-- Safe in-app file preview (#144). -->
+    <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" />
   </div>
 </template>
 
@@ -894,14 +908,21 @@ async function onEmlSelected(event: Event) {
 
 .file-name {
   flex: 1;
+  min-width: 0;
   font-size: 0.875rem;
   color: var(--p-text-color);
   text-decoration: none;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
 }
-a.file-name:hover {
+.file-name:hover {
   text-decoration: underline;
   color: var(--teedy-brand);
 }
