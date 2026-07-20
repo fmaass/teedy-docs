@@ -812,6 +812,35 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Absent, non-numeric or <= 0 falls back to 20; values above 100 are clamped to 100",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "before_date",
+            "in": "query",
+            "required": false,
+            "description": "Keyset cursor: create_date (epoch millis) of the previous page's last row. Must be supplied together with before_id",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "description": "Keyset cursor: id of the previous page's last row. Must be supplied together with before_date",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3370,6 +3399,14 @@
                   "locale": {
                     "type": "string",
                     "description": "Preferred UI locale code (e.g. de, zh_CN); must be a supported SPA locale"
+                  },
+                  "dark_mode": {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ],
+                    "description": "Persisted per-user dark-mode preference. Absent leaves the stored value unchanged (absent is not false); any other value is a validation error"
                   }
                 }
               }
