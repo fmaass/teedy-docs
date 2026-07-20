@@ -87,7 +87,7 @@
     "security": {
       "enable_totp": "Включить двухфакторную аутентификацию",
       "enable_totp_message": "Убедитесь, что на вашем телефоне есть приложение, совместимое с TOTP, чтобы добавить новую учетную запись",
-      "title": "Двухфакторная <small>аутентификация</small>",
+      "title": "Двухфакторная аутентификация",
       "message_1": "Двухфакторная аутентификация позволяет вам добавить уровень безопасности в свою учетную запись <strong>{appName}</strong>.<br/>Прежде чем активировать эту функцию, убедитесь, что на вашем телефоне есть приложение, совместимое с TOTP:",
       "message_google_authenticator": "Для Android, iOS и Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
       "message_duo_mobile": "Для Android и iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
@@ -126,7 +126,7 @@
       "deleteImported": "Удалять сообщение из почтового ящика после импорта"
     },
     "session": {
-      "title": "Открытые <small>сеансы</small>",
+      "title": "Открытые сеансы",
       "created_date": "Дата создания",
       "last_connection_date": "Дата последней связи",
       "user_agent": "Из",

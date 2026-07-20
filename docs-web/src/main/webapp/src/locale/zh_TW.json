@@ -87,7 +87,7 @@
     "security": {
       "enable_totp": "激活雙重身份驗證",
       "enable_totp_message": "請確保您的手機上已經擁有一個TOTP兼容的應用程序方可添加新賬戶",
-      "title": "雙重身份 <small>驗證</small>",
+      "title": "雙重身份 驗證",
       "message_1": "雙重身份驗證將讓您的<strong>{appName}</strong> 帳號獲得多一層的安全保障.<br/>在啟用該功能前, 請確保在您的手機上擁有一個與TOTP兼容的應用程序:",
       "message_google_authenticator": "給安卓, 蘋果, 和 黑莓系統: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">谷歌認證</a>",
       "message_duo_mobile": "給 安卓 和 蘋果系統: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
@@ -126,7 +126,7 @@
       "deleteImported": "匯入後從信箱刪除郵件"
     },
     "session": {
-      "title": "打開 <small>會話</small>",
+      "title": "打開 會話",
       "created_date": "創建日期",
       "last_connection_date": "最後登錄時間",
       "user_agent": "從",

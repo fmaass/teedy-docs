@@ -119,7 +119,7 @@
       "tag": "Tag ajouté aux documents importés",
       "test": "Tester les paramètres",
       "last_sync": "Dernière synchronisation : {date}, {count} message importé",
-      "test_success": "La connexion à la boîte de réception est réussie ({count} message) non lus",
+      "test_success": "La connexion à la boîte de réception est réussie ({count} message) <strong>non lus</strong>",
       "test_fail": "Une erreur est survenue lors de la connexion à la boîte de réception, veuillez vérifier les paramètres",
       "saved": "Configuration IMAP sauvegardée avec succès",
       "autoTagsEnabled": "Ajouter automatiquement les tags des titres marqués par #",
