@@ -83,11 +83,15 @@ back after the interaction (`/api/document`, `/api/route`, `/api/favorite`,
 ## Running both
 
 ```bash
-# Build the current image (E1's default target), boot it, then run each layer:
+# Build the current image (E1's default target), boot it, then run each layer.
+# The teedy-bh container below is a throwaway instance — exactly the disposable target
+# the harness's E2E_ALLOW_SEED guard requires.
 ./mvnw -Pprod -DskipTests clean install && docker build -t teedy-e2e:local .
 docker run -d --name teedy-bh -p 8080:8080 teedy-e2e:local
-# wait for /api/app to answer, then:
-E2E_BASE_URL=http://localhost:8080 scripts/e2e-browser-harness.sh   # E2
+# wait for /api/app to answer, then (E2E_EXPECT_VERSION must match the built pom <version>;
+# E2E_ALLOW_SEED=1 acknowledges the target is disposable):
+E2E_ALLOW_SEED=1 E2E_EXPECT_VERSION=<pom version> \
+  E2E_BASE_URL=http://localhost:8080 scripts/e2e-browser-harness.sh   # E2
 # (E1 runs via the Playwright project in docs-web/src/main/webapp)
 docker rm -f teedy-bh
 ```
