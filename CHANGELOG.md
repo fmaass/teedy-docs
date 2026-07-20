@@ -16,6 +16,21 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.6.7] - 2026-07-20
+
+A bug-fix and enhancement release. Database migration to version 58 (a nullable per-user
+dark-mode preference column on the users table; additive, so a rollback to 3.6.6 is safe).
+
+### Added
+- Dark mode is now a per-user preference persisted server-side: the choice seeds a fresh device on login, while the on-device toggle always wins locally (#147).
+- The document activity log is fully pageable via a "load older" control (keyset pagination on a stable order), instead of only ever showing the newest 20 entries (#139).
+- Full translation parity for every shipped locale — Greek, Spanish, French, Italian, Polish, Portuguese, Russian, Albanian, and Simplified & Traditional Chinese are now complete, and the file-upload "Choose" button is localized (#146). The ten machine-translated locales await native-speaker review.
+
+### Fixed
+- Uploaded file names containing non-ASCII characters (e.g. umlauts) or a literal `+` are now stored correctly instead of as mojibake; already-stored names are unaffected (#143).
+- The right-click tag menu reflects the current tags immediately after an add/remove, instead of showing a stale snapshot from when the menu opened (#142).
+- The reassign and clean_storage batch operations now acquire document and tag row locks in the same order as the tagging path, closing a latent deadlock class (#137).
+
 ## [3.6.6] - 2026-07-19
 
 A security and bug-fix release. No database migration (db.version stays 57).
