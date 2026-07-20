@@ -48,13 +48,17 @@ public class PdfFormatHandler implements FormatHandler {
     }
 
     @Override
-    public String extractContent(String language, Path file) {
-        String content = null;
+    public String extractContent(String language, Path file) throws Exception {
+        String content;
         try (InputStream inputStream = Files.newInputStream(file);
              PDDocument pdfDocument = Loader.loadPDF(new RandomAccessReadBuffer(inputStream))) {
             content = new PDFTextStripper().getText(pdfDocument);
         } catch (Exception e) {
+            // Surface the failure rather than swallowing it: returning null here is indistinguishable from a
+            // legitimately text-less PDF, so a genuine extraction failure would be indexed as empty and
+            // stamped complete, permanently excluding a recoverable file from later reprocessing (#159).
             log.error("Error while extracting text from the PDF", e);
+            throw e;
         }
 
         // No text content, try to OCR it
@@ -70,7 +74,9 @@ public class PdfFormatHandler implements FormatHandler {
                 }
                 return sb.toString();
             } catch (Exception e) {
+                // As above: an OCR failure must not masquerade as an empty-content success.
                 log.error("Error while OCR-izing the PDF", e);
+                throw e;
             }
         }
 

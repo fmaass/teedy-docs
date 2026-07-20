@@ -7,6 +7,8 @@ import com.sismics.util.io.InputStreamReaderThread;
 import com.sismics.util.mime.MimeType;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -23,6 +25,11 @@ import java.util.List;
  * @author bgamard
  */
 public class VideoFormatHandler implements FormatHandler {
+    /**
+     * Logger.
+     */
+    private static final Logger log = LoggerFactory.getLogger(VideoFormatHandler.class);
+
     @Override
     public boolean accept(String mimeType) {
         return mimeType.equals(MimeType.VIDEO_MP4) || mimeType.equals(MimeType.VIDEO_WEBM);
@@ -47,7 +54,7 @@ public class VideoFormatHandler implements FormatHandler {
     }
 
     @Override
-    public String extractContent(String language, Path file) {
+    public String extractContent(String language, Path file) throws Exception {
         List<String> result = Lists.newLinkedList();
         result.add("mediainfo");
         result.add(file.toAbsolutePath().toString());
@@ -56,6 +63,10 @@ public class VideoFormatHandler implements FormatHandler {
         try {
             process = pb.start();
         } catch (IOException e) {
+            // The mediainfo binary is unavailable: like an unsupported format, there is simply no extractor
+            // for this deployment, so no metadata is a LEGITIMATE resting state (not a recoverable loss).
+            // Return null so the pipeline treats it as terminal-empty rather than retrying it forever (#159).
+            log.warn("mediainfo is not available; skipping video metadata extraction for {}", file, e);
             return null;
         }
 
@@ -63,11 +74,11 @@ public class VideoFormatHandler implements FormatHandler {
         final String commandName = pb.command().get(0);
         new InputStreamReaderThread(process.getErrorStream(), commandName).start();
 
-        // Consume the data as a string
+        // Consume the data as a string. A read failure here is a TRANSIENT loss of otherwise-extractable
+        // metadata, so surface it (do not swallow to null) — otherwise the file is indexed empty and stamped
+        // complete, permanently excluded from later reprocessing (#159).
         try (InputStream is = process.getInputStream()) {
             return new String(ByteStreams.toByteArray(is), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return null;
         }
     }
 
