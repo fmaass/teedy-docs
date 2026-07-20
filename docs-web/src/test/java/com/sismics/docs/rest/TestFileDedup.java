@@ -5,6 +5,7 @@ import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import jakarta.json.JsonObject;
 import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.MediaType;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
@@ -50,6 +51,41 @@ public class TestFileDedup extends BaseJerseyTest {
         return target().path("/file/" + fileId + "/versions").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .get(JsonObject.class).getJsonArray("files").size();
+    }
+
+    /**
+     * (#150/#160) A file uploaded standalone (orphan, MAC null) and attached to a document AFTER the
+     * one-shot startup backfill has drained must get its content MAC computed SYNCHRONOUSLY on the attach
+     * path — WITHOUT waiting for a restart or the periodic backfill. Proven end-to-end: the attached
+     * orphan participates in duplicate detection immediately, so a subsequent identical upload to the same
+     * document carries the advisory content-duplicate hint pointing at it. The backfill service is not
+     * driven in this test, so the ONLY way the hint can fire is a MAC computed on attach.
+     */
+    @Test
+    public void orphanAttachedPostBackfill_getsMacSynchronously() throws Exception {
+        clientUtil.createUser("dedup_attach");
+        String token = clientUtil.login("dedup_attach");
+
+        // Feature ON before the orphan is even uploaded.
+        ContentMacUtil.setMasterKeyForTest("rest-master-secret");
+
+        // Upload an ORPHAN (no document): newSink(null) is null, so its stored MAC is null.
+        String orphanFileId = clientUtil.addFileToDocument(FILE_DOCUMENT_TXT, token, null);
+
+        // Attach it to a document AFTER creation — the path that previously left the MAC null forever.
+        String documentId = clientUtil.createDocument(token);
+        target().path("/file/" + orphanFileId + "/attach").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("id", documentId)), JsonObject.class);
+
+        // Upload an identical (renamed) file to the SAME document: the advisory content-duplicate hint
+        // fires ONLY if the attached orphan already carries a matching per-document MAC — i.e. it was
+        // MAC'd on attach, without a restart.
+        JsonObject twin = upload(token, documentId, null, "twin.txt");
+        Assertions.assertEquals("content", twin.getString("duplicateKind"),
+                "the orphan attached post-creation must be MAC'd synchronously so it participates in dedup");
+        Assertions.assertEquals(orphanFileId, twin.getString("duplicateOfId"),
+                "the hint must point at the orphan that was attached and MAC'd on the attach path");
     }
 
     @Test

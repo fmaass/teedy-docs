@@ -12,9 +12,25 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Changed
 
+- Duplicate-detection master key (`DOCS_DEDUP_MASTER_KEY` / `DOCS_DEDUP_MASTER_KEY_FILE`) now requires an
+  explicit encoding prefix — `hex:<hex>` (e.g. `hex:$(openssl rand -hex 32)`) or `base64:<base64>`. A bare,
+  unprefixed value is ambiguous (a hex string is also valid base64 and decodes differently) and is rejected,
+  leaving duplicate detection off. The feature remains off by default (#160).
+
 ### Fixed
 
+- Inbox import no longer fails on a message that has no `From` header (or an empty/non-Internet sender
+  address): such a message is imported and attributed to the unknown-sender (admin) fallback (#150, #160).
+- A standalone (orphan) file attached to a document now has its duplicate-detection content MAC computed on
+  the attach path, so it participates in duplicate detection immediately instead of only after the periodic
+  backfill (#150, #160).
+
 ### Security
+
+- Inbox import no longer issues a generic folder-wide IMAP `EXPUNGE` on servers that lack `UIDPLUS` unless the
+  operator has explicitly acknowledged (`INBOX_DEDICATED_FOLDER`) that the import folder is dedicated to Teedy.
+  This prevents finalizing another IMAP client's `\Deleted` messages; without the acknowledgement the expunge
+  is skipped and the messages are receipt-deduped on the next cycle (#150).
 
 ## [3.7.0] - 2026-07-20
 

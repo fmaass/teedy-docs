@@ -343,6 +343,38 @@ public class FileUtil {
     }
 
     /**
+     * Compute and store the content MAC (#150/#160) for a file that was just attached to a document. An
+     * orphan uploaded standalone carries no MAC (the upload path keys the MAC on a document it did not yet
+     * have); attaching it later — after the one-shot startup backfill has drained — would otherwise leave
+     * the MAC null until the periodic backfill runs. This mirrors the upload path: the SAME per-document
+     * key over the SAME plaintext bytes, run synchronously in the caller's transaction so the file
+     * participates in duplicate detection immediately, without a restart.
+     *
+     * <p>Best-effort: with the feature off, or when the plaintext cannot be read, the MAC stays null (the
+     * periodic backfill remains the safety net) and the attach is unaffected. The conditional
+     * {@code where FIL_CONTENTMAC_C is null} write only fills a still-null cell.</p>
+     *
+     * @param fileId The just-attached file id
+     * @param documentId The document it was attached to (keys the MAC)
+     * @param plaintextFile The decrypted plaintext temp to hash
+     */
+    public static void computeAndStoreAttachMac(String fileId, String documentId, Path plaintextFile) {
+        if (!ContentMacUtil.isEnabled()) {
+            return;
+        }
+        String contentMac = null;
+        try (InputStream plaintext = Files.newInputStream(plaintextFile)) {
+            contentMac = ContentMacUtil.computeMac(documentId, plaintext);
+        } catch (Exception e) {
+            log.warn("Unable to compute the content MAC on attach for file " + fileId
+                    + "; the periodic backfill will retry", e);
+        }
+        if (contentMac != null) {
+            new FileDao().setContentMacIfNull(fileId, contentMac);
+        }
+    }
+
+    /**
      * Start processing a file.
      *
      * @param fileId File ID

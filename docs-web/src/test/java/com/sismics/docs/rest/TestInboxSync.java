@@ -1,5 +1,6 @@
 package com.sismics.docs.rest;
 
+import com.icegreen.greenmail.user.GreenMailUser;
 import com.icegreen.greenmail.util.GreenMail;
 import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetup;
@@ -7,6 +8,7 @@ import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.service.InboxService;
+import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.ImapSourceIdentity;
 import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -16,6 +18,9 @@ import jakarta.ws.rs.core.Form;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import javax.mail.Message;
+import javax.mail.Session;
+import javax.mail.internet.MimeMessage;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -82,6 +87,67 @@ public class TestInboxSync extends BaseJerseyTest {
         AppContext.getInstance().getInboxService().syncInbox();
     }
 
+    /**
+     * POST the inbox configuration. The four required fields are always sent; {@code dedicatedFolder} is
+     * sent only when non-null, to model both an explicit set and the current SPA form (which omits it).
+     */
+    private void postInboxConfig(String adminToken, String dedicatedFolder) {
+        Form form = new Form()
+                .param("enabled", "false")
+                .param("autoTagsEnabled", "false")
+                .param("deleteImported", "false")
+                .param("starttls", "false")
+                .param("hostname", "localhost")
+                .param("port", "993")
+                .param("username", "test@sismics.com")
+                .param("folder", "INBOX");
+        if (dedicatedFolder != null) {
+            form.param("dedicatedFolder", dedicatedFolder);
+        }
+        target().path("/app/config_inbox").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(form), JsonObject.class);
+    }
+
+    private boolean getDedicatedFolder(String adminToken) {
+        JsonObject json = target().path("/app/config_inbox").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        return json.getBoolean("dedicatedFolder");
+    }
+
+    /**
+     * (#150/#160) The dedicated-folder acknowledgement must be operable through the inbox config endpoint:
+     * POST persists it, GET returns it, and a POST that omits it (the current SPA form) PRESERVES the set
+     * value instead of clobbering it. The persisted value is exactly what the expunge wiring reads.
+     */
+    @Test
+    public void dedicatedFolderConfigRoundTripsAndPreserves() {
+        String adminToken = adminToken();
+
+        // POST WITH the acknowledgement persists it; GET returns it.
+        postInboxConfig(adminToken, "true");
+        Assertions.assertTrue(getDedicatedFolder(adminToken),
+                "POST with dedicatedFolder=true must persist and be returned by GET");
+
+        // POST WITHOUT the field (the current SPA form) must PRESERVE the set value, not clobber it.
+        postInboxConfig(adminToken, null);
+        Assertions.assertTrue(getDedicatedFolder(adminToken),
+                "a POST omitting dedicatedFolder must preserve the prior value");
+
+        // The persisted value is readable via the EXACT accessor InboxService.readConfig uses to populate
+        // config.dedicatedFolder, which feeds expungeMode (whose branch table TestInboxExpungeMode covers).
+        boolean[] wired = {false};
+        TransactionUtil.handle(() ->
+                wired[0] = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DEDICATED_FOLDER, false));
+        Assertions.assertTrue(wired[0], "the persisted acknowledgement must be readable by the expunge wiring");
+
+        // POST WITH the acknowledgement cleared turns it back off.
+        postInboxConfig(adminToken, "false");
+        Assertions.assertFalse(getDedicatedFolder(adminToken),
+                "POST with dedicatedFolder=false must clear the acknowledgement");
+    }
+
     @Test
     public void ambiguousSenderEmailImportsAsAdmin() throws Exception {
         GreenMail greenMail = new GreenMail(new ServerSetup[] {
@@ -117,6 +183,55 @@ public class TestInboxSync extends BaseJerseyTest {
                     .get(JsonObject.class);
             Assertions.assertEquals("admin", document.getString("creator"),
                     "an ambiguous sender email must fall back to admin ownership");
+            Assertions.assertEquals(0, unseenCount(adminToken), "the imported message must be acknowledged");
+        } finally {
+            greenMail.stop();
+        }
+    }
+
+    /**
+     * (#150/#160) A message with NO From header must import successfully, attributed to the unknown-email
+     * (admin) fallback, instead of NPEing the import. Both the materialization ({@code getFrom()[0]}) and
+     * the create path (sender logging + senderEmail resolution) must tolerate a null sender.
+     */
+    @Test
+    public void missingFromHeaderImportsAsAdminFallback() throws Exception {
+        GreenMail greenMail = new GreenMail(new ServerSetup[] {
+                ServerSetup.SMTP.dynamicPort(), ServerSetup.IMAP.dynamicPort() });
+        GreenMailUser mailbox = greenMail.setUser("test@sismics.com", "Test1234");
+        greenMail.start();
+        InboxService inbox = AppContext.getInstance().getInboxService();
+        try {
+            String adminToken = adminToken();
+            String tagName = "InboxNoFrom" + System.nanoTime();
+            String tagId = createInboxTag(adminToken, tagName);
+            configureInbox(adminToken, greenMail.getImap().getPort(), tagId, false);
+
+            // Deliver a message with NO From header directly into the mailbox (SMTP would attach an
+            // envelope sender; direct delivery preserves the absent From).
+            MimeMessage message = new MimeMessage((Session) null);
+            message.setRecipients(Message.RecipientType.TO, "test@sismics.com");
+            message.setSubject("No sender");
+            message.setText("body without a From header");
+            message.saveChanges();
+            mailbox.deliver(message);
+
+            sync();
+
+            Assertions.assertNull(inbox.getLastSyncError(), "a missing From header must not fail the sync");
+            JsonObject list = target().path("/document/list")
+                    .queryParam("search", "tag:" + tagName)
+                    .request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get(JsonObject.class);
+            Assertions.assertEquals(1, list.getJsonArray("documents").size(),
+                    "the From-less message must be imported exactly once");
+            String documentId = list.getJsonArray("documents").getJsonObject(0).getString("id");
+            JsonObject document = target().path("/document/" + documentId).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get(JsonObject.class);
+            Assertions.assertEquals("admin", document.getString("creator"),
+                    "a null sender must fall back to admin ownership");
             Assertions.assertEquals(0, unseenCount(adminToken), "the imported message must be acknowledged");
         } finally {
             greenMail.stop();

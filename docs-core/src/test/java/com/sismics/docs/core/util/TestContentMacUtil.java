@@ -56,12 +56,12 @@ public class TestContentMacUtil extends com.sismics.BaseTest {
         Assertions.assertFalse(ContentMacUtil.isEnabled());
     }
 
-    /** A strong (>= 32-byte) master secret in the preferred hex encoding (`openssl rand -hex 32` shape). */
+    /** The 32-byte key material as bare lowercase hex (`openssl rand -hex 32` shape); prefixed at use sites. */
     private static final String HEX_KEY_32B = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     @Test
     public void resolve_directValue() {
-        System.setProperty(ContentMacUtil.KEY_PROP, "  " + HEX_KEY_32B + "  ");
+        System.setProperty(ContentMacUtil.KEY_PROP, "  hex:" + HEX_KEY_32B + "  ");
         byte[] key = ContentMacUtil.resolveMasterKey();
         Assertions.assertNotNull(key);
         Assertions.assertArrayEquals(BaseEncoding.base16().lowerCase().decode(HEX_KEY_32B), key,
@@ -76,15 +76,44 @@ public class TestContentMacUtil extends com.sismics.BaseTest {
 
     @Test
     public void resolve_weakOrShortKeyDegradesToOff() {
-        // A passphrase (not hex/base64 key material) and a short hex (16 hex = 8 bytes) both fail the
-        // 32-byte floor: the feature stays OFF, exactly like an absent key — no throw, MAC null.
-        System.setProperty(ContentMacUtil.KEY_PROP, "password");
-        Assertions.assertNull(ContentMacUtil.resolveMasterKey(), "a weak passphrase must NOT enable the feature");
-        System.setProperty(ContentMacUtil.KEY_PROP, "0123456789abcdef");
-        Assertions.assertNull(ContentMacUtil.resolveMasterKey(), "a 8-byte key is below the 256-bit floor");
+        // A prefixed but too-short key (16 hex = 8 bytes) and a prefixed base64 passphrase (8 bytes) both
+        // fail the 32-byte floor: the feature stays OFF, exactly like an absent key — no throw, MAC null.
+        System.setProperty(ContentMacUtil.KEY_PROP, "hex:0123456789abcdef");
+        Assertions.assertNull(ContentMacUtil.resolveMasterKey(), "a prefixed 8-byte key is below the 256-bit floor");
+        System.setProperty(ContentMacUtil.KEY_PROP,
+                "base64:" + Base64.getEncoder().encodeToString("password".getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertNull(ContentMacUtil.resolveMasterKey(), "a prefixed weak passphrase must NOT enable the feature");
         // And it composes with degrade-to-off: isEnabled() is false and computeMac returns null.
         ContentMacUtil.resetForTest();
         Assertions.assertFalse(ContentMacUtil.isEnabled(), "a weak key leaves the feature OFF");
+    }
+
+    @Test
+    public void resolve_encodingMustBePrefixed_bareIsRejected() {
+        // #150/#160: the master-secret encoding must be EXPLICIT. A "hex:"-prefixed value decodes as
+        // hex; a "base64:"-prefixed value decodes as base64; a BARE long value is ambiguous (a
+        // lowercase-hex string is ALSO valid base64 and would decode to DIFFERENT bytes) and is
+        // REJECTED (feature off) rather than silently guessed. This is the behavior that fails today.
+        byte[] material = new byte[32];
+        for (int i = 0; i < material.length; i++) {
+            material[i] = (byte) (i + 1);
+        }
+        String hex = BaseEncoding.base16().lowerCase().encode(material);
+        String base64 = Base64.getEncoder().encodeToString(material);
+
+        System.setProperty(ContentMacUtil.KEY_PROP, "hex:" + hex);
+        Assertions.assertArrayEquals(material, ContentMacUtil.resolveMasterKey(),
+                "a hex:-prefixed value decodes as hex to the exact key material");
+
+        System.setProperty(ContentMacUtil.KEY_PROP, "base64:" + base64);
+        Assertions.assertArrayEquals(material, ContentMacUtil.resolveMasterKey(),
+                "a base64:-prefixed value decodes as base64 to the exact key material");
+
+        // A bare (unprefixed) long value — even one that is valid hex AND >= 32 bytes — is ambiguous
+        // and must be rejected rather than silently guessed.
+        System.setProperty(ContentMacUtil.KEY_PROP, hex);
+        Assertions.assertNull(ContentMacUtil.resolveMasterKey(),
+                "a bare (unprefixed) value is ambiguous and must be rejected");
     }
 
     @Test
@@ -93,14 +122,14 @@ public class TestContentMacUtil extends com.sismics.BaseTest {
         for (int i = 0; i < material.length; i++) {
             material[i] = (byte) (i + 1);
         }
-        System.setProperty(ContentMacUtil.KEY_PROP, Base64.getEncoder().encodeToString(material));
+        System.setProperty(ContentMacUtil.KEY_PROP, "base64:" + Base64.getEncoder().encodeToString(material));
         Assertions.assertArrayEquals(material, ContentMacUtil.resolveMasterKey(), "a 32-byte base64 key is accepted");
     }
 
     @Test
     public void resolve_properKeyEnablesAndProducesMac() throws Exception {
         // Drive the REAL resolution path (not the test seam): a strong key enables the feature and MACs flow.
-        System.setProperty(ContentMacUtil.KEY_PROP, HEX_KEY_32B);
+        System.setProperty(ContentMacUtil.KEY_PROP, "hex:" + HEX_KEY_32B);
         ContentMacUtil.resetForTest();
         Assertions.assertTrue(ContentMacUtil.isEnabled(), "a >= 32-byte key enables the feature");
         Assertions.assertNotNull(ContentMacUtil.computeMac("doc-1", new ByteArrayInputStream("x".getBytes())),
@@ -110,7 +139,7 @@ public class TestContentMacUtil extends com.sismics.BaseTest {
     @Test
     public void resolve_mountedSecretFileTakesPrecedence_andStripsTrailingNewline() throws Exception {
         Path secret = Files.createTempFile("dedup-secret", ".key");
-        Files.write(secret, (HEX_KEY_32B + "\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(secret, ("hex:" + HEX_KEY_32B + "\n").getBytes(StandardCharsets.UTF_8));
         try {
             System.setProperty(ContentMacUtil.KEY_FILE_PROP, secret.toString());
             System.setProperty(ContentMacUtil.KEY_PROP, "ignored-when-file-present");

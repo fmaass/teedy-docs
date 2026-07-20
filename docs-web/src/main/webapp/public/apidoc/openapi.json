@@ -458,6 +458,9 @@
                   "deleteImported": {
                     "type": "string"
                   },
+                  "dedicatedFolder": {
+                    "type": "string"
+                  },
                   "hostname": {
                     "type": "string"
                   },
