@@ -28,13 +28,16 @@ import java.util.regex.Pattern;
  * or as a mounted secret FILE whose path is given by {@code DOCS_DEDUP_MASTER_KEY_FILE} (the Docker/K8s
  * secret convention). It is read once, cached, and NEVER stored in {@code T_CONFIG} or any table.</p>
  *
- * <p><b>Key strength (required).</b> Because a DB-read adversary holding a documentId, a stored MAC, and a
- * candidate plaintext could brute-force a WEAK master key offline, the configured value MUST supply at least
- * 256 bits (32 bytes) of key material, given as hex (preferred — generate with {@code openssl rand -hex 32})
- * or base64. A value that is ABSENT, blank, malformed, or decodes to fewer than 32 bytes DEGRADES TO OFF and
- * is treated exactly like an absent key: {@link #isEnabled()} is false, {@link #computeMac} / {@link
- * #newSink} return {@code null}, the column stays NULL, uploads are unchanged, and NO error is raised (a
- * WARN naming the requirement is logged). A too-weak secret is NEVER silently enabled.</p>
+ * <p><b>Key strength + explicit encoding (required).</b> Because a DB-read adversary holding a documentId, a
+ * stored MAC, and a candidate plaintext could brute-force a WEAK master key offline, the configured value
+ * MUST supply at least 256 bits (32 bytes) of key material. The encoding must be stated EXPLICITLY with a
+ * prefix — {@code hex:<hex>} (preferred — generate with {@code hex:$(openssl rand -hex 32)}) or
+ * {@code base64:<base64>} — because a bare value is ambiguous: a lowercase-hex string is ALSO valid base64
+ * and would decode to different bytes. A value that is ABSENT, blank, UNPREFIXED (bare), malformed, or decodes
+ * to fewer than 32 bytes DEGRADES TO OFF and is treated exactly like an absent key: {@link #isEnabled()} is
+ * false, {@link #computeMac} / {@link #newSink} return {@code null}, the column stays NULL, uploads are
+ * unchanged, and NO error is raised (a WARN naming the requirement is logged). A too-weak or ambiguously
+ * encoded secret is NEVER silently enabled.</p>
  *
  * <p><b>Per-document derivation (v1, no rotation).</b> For a document id {@code d} the document key is
  * {@code Kdoc = HMAC-SHA-256(Kmaster, "teedy-dedup-v1:" || d)} and the stored value is
@@ -66,6 +69,10 @@ public final class ContentMacUtil {
 
     /** Lowercase-hex matcher for the preferred key encoding (`openssl rand -hex 32`). */
     private static final Pattern HEX = Pattern.compile("[0-9a-f]+");
+
+    /** Explicit encoding prefixes: the operator MUST state whether the key material is hex or base64. */
+    private static final String HEX_PREFIX = "hex:";
+    private static final String BASE64_PREFIX = "base64:";
 
     /** Domain-separation prefix binding a derived key to this feature + version + a specific document id. */
     private static final String DOC_KEY_PREFIX = "teedy-dedup-v1:";
@@ -112,11 +119,12 @@ public final class ContentMacUtil {
 
     /**
      * Read + strength-check the master secret from the external channel: the mounted secret FILE takes
-     * precedence over the direct value. The value must supply at least {@link #MIN_KEY_BYTES} bytes of key
-     * material, encoded as hex (preferred, e.g. {@code openssl rand -hex 32}) or base64. A blank / missing /
-     * unreadable / malformed-path file, a value that fails to decode, and a value that decodes to too few
-     * bytes ALL resolve to {@code null} (feature OFF) with a WARN — never an exception, and never a
-     * silently-enabled-but-weak key. Package-private so it can be exercised directly by tests.
+     * precedence over the direct value. The value must state its encoding explicitly with a
+     * {@code hex:}/{@code base64:} prefix and supply at least {@link #MIN_KEY_BYTES} bytes of key material.
+     * A blank / missing / unreadable / malformed-path file, an unprefixed (bare) value, a value that fails
+     * to decode, and a value that decodes to too few bytes ALL resolve to {@code null} (feature OFF) with a
+     * WARN — never an exception, and never a silently-enabled-but-weak or ambiguously-encoded key.
+     * Package-private so it can be exercised directly by tests.
      *
      * @return the validated key material (&gt;= 32 bytes), or {@code null} when unset/weak/malformed
      */
@@ -159,34 +167,67 @@ public final class ContentMacUtil {
     }
 
     /**
-     * Decode and strength-check a configured secret value. Returns the key material only when it decodes
-     * (hex preferred, then base64) to at least {@link #MIN_KEY_BYTES} bytes; otherwise DEGRADES TO OFF
-     * (returns {@code null}) with a WARN naming the requirement — a too-short / malformed key behaves
-     * exactly like an absent one (feature off, MAC null, uploads unchanged). Package-private for tests.
+     * Decode and strength-check a configured secret value. The encoding must be stated explicitly with a
+     * {@code hex:} or {@code base64:} prefix (a bare value is ambiguous and rejected). Returns the key
+     * material only when it decodes to at least {@link #MIN_KEY_BYTES} bytes; otherwise DEGRADES TO OFF
+     * (returns {@code null}) with a WARN naming the requirement — an unprefixed / too-short / malformed key
+     * behaves exactly like an absent one (feature off, MAC null, uploads unchanged). Package-private for tests.
      */
     static byte[] validateKeyMaterial(String raw, String source) {
         byte[] key = decode(raw);
-        if (key == null || key.length < MIN_KEY_BYTES) {
-            log.warn("{} does not provide a strong enough dedup master secret (need >= {} bytes of hex or "
-                    + "base64 key material, e.g. `openssl rand -hex 32`); duplicate detection stays OFF",
-                    source, MIN_KEY_BYTES);
+        if (key == null) {
+            log.warn("{} must state its encoding explicitly as \"{}<hex>\" (e.g. hex:$(openssl rand -hex 32)) "
+                    + "or \"{}<base64>\", supplying >= {} bytes of key material; the configured value is not "
+                    + "prefixed or does not decode, so duplicate detection stays OFF",
+                    source, HEX_PREFIX, BASE64_PREFIX, MIN_KEY_BYTES);
+            return null;
+        }
+        if (key.length < MIN_KEY_BYTES) {
+            log.warn("{} does not provide a strong enough dedup master secret (need >= {} bytes of key "
+                    + "material after the {}/{} prefix, e.g. hex:$(openssl rand -hex 32)); duplicate "
+                    + "detection stays OFF", source, MIN_KEY_BYTES, HEX_PREFIX, BASE64_PREFIX);
             return null;
         }
         return key;
     }
 
-    /** Decode key material as hex (case-insensitive, preferred) then base64; {@code null} if neither works. */
+    /**
+     * Decode key material from its EXPLICIT encoding prefix: {@code hex:<hex>} (case-insensitive hex) or
+     * {@code base64:<base64>}. A bare (unprefixed) value is ambiguous — a lowercase-hex string is also valid
+     * base64 and would decode to different bytes — so it is rejected ({@code null}). {@code null} is also
+     * returned when the prefixed body does not decode.
+     */
     private static byte[] decode(String raw) {
-        String hex = raw.toLowerCase(Locale.ROOT);
-        if (hex.length() % 2 == 0 && HEX.matcher(hex).matches()) {
-            try {
-                return BaseEncoding.base16().lowerCase().decode(hex);
-            } catch (IllegalArgumentException ignore) {
-                // fall through to base64
-            }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.startsWith(HEX_PREFIX)) {
+            return decodeHex(raw.substring(HEX_PREFIX.length()).strip());
+        }
+        if (lower.startsWith(BASE64_PREFIX)) {
+            return decodeBase64(raw.substring(BASE64_PREFIX.length()).strip());
+        }
+        return null;
+    }
+
+    /** Decode a hex body (case-insensitive, even length, hex digits only); {@code null} if it is not hex. */
+    private static byte[] decodeHex(String body) {
+        String hex = body.toLowerCase(Locale.ROOT);
+        if (hex.isEmpty() || hex.length() % 2 != 0 || !HEX.matcher(hex).matches()) {
+            return null;
         }
         try {
-            return Base64.getDecoder().decode(raw);
+            return BaseEncoding.base16().lowerCase().decode(hex);
+        } catch (IllegalArgumentException ignore) {
+            return null;
+        }
+    }
+
+    /** Decode a base64 body; {@code null} if it is blank or not valid base64. */
+    private static byte[] decodeBase64(String body) {
+        if (body.isEmpty()) {
+            return null;
+        }
+        try {
+            return Base64.getDecoder().decode(body);
         } catch (IllegalArgumentException ignore) {
             return null;
         }

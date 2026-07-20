@@ -539,6 +539,8 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} username IMAP username
      * @apiSuccess {String} folder IMAP folder
      * @apiSuccess {String} tag Tag for created documents
+     * @apiSuccess {Boolean} dedicatedFolder True if the import folder is dedicated to Teedy (enables the
+     * non-UIDPLUS generic-expunge fallback)
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission admin
      * @apiVersion 1.5.0
@@ -557,6 +559,8 @@ public class AppResource extends BaseResource {
         Boolean enabled = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_ENABLED);
         Boolean autoTags = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_AUTOMATIC_TAGS);
         Boolean deleteImported = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED);
+        // Not DB-seeded (default off), so read with a default rather than the throwing single-arg accessor.
+        Boolean dedicatedFolder = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DEDICATED_FOLDER, false);
         Config hostnameConfig = configDao.getById(ConfigType.INBOX_HOSTNAME);
         Config portConfig = configDao.getById(ConfigType.INBOX_PORT);
         Boolean starttls = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_STARTTLS);
@@ -568,6 +572,7 @@ public class AppResource extends BaseResource {
         response.add("enabled", enabled);
         response.add("autoTagsEnabled", autoTags);
         response.add("deleteImported", deleteImported);
+        response.add("dedicatedFolder", dedicatedFolder);
         if (hostnameConfig == null) {
             response.addNull("hostname");
         } else {
@@ -621,6 +626,8 @@ public class AppResource extends BaseResource {
      * @apiParam {Boolean} enabled True if the inbox scanning is enabled
      * @apiParam {Boolean} autoTagsEnabled If true automatically add tags to document (prefixed by #)
      * @apiParam {Boolean} deleteImported If true delete message from mailbox after import
+     * @apiParam {Boolean} [dedicatedFolder] If true the import folder is dedicated to Teedy, enabling the
+     * non-UIDPLUS generic-expunge fallback. Optional: when absent the stored value is preserved.
      * @apiParam {String} hostname IMAP hostname
      * @apiParam {Integer} port IMAP port
      * @apiParam {String} username IMAP username
@@ -646,6 +653,7 @@ public class AppResource extends BaseResource {
     public Response configInbox(@FormParam("enabled") Boolean enabled,
                                 @FormParam("autoTagsEnabled") Boolean autoTagsEnabled,
                                 @FormParam("deleteImported") Boolean deleteImported,
+                                @FormParam("dedicatedFolder") Boolean dedicatedFolder,
                                 @FormParam("hostname") String hostname,
                                 @FormParam("port") String portStr,
                                 @FormParam("starttls") Boolean starttls,
@@ -670,6 +678,12 @@ public class AppResource extends BaseResource {
         configDao.update(ConfigType.INBOX_ENABLED, enabled.toString());
         configDao.update(ConfigType.INBOX_AUTOMATIC_TAGS, autoTagsEnabled.toString());
         configDao.update(ConfigType.INBOX_DELETE_IMPORTED, deleteImported.toString());
+        // Optional acknowledgement: update ONLY when the field is present, so the current SPA settings
+        // form (which does not send it) cannot clobber a value the operator set out-of-band. Absent =
+        // preserve the stored value.
+        if (dedicatedFolder != null) {
+            configDao.update(ConfigType.INBOX_DEDICATED_FOLDER, dedicatedFolder.toString());
+        }
         if (!Strings.isNullOrEmpty(hostname)) {
             configDao.update(ConfigType.INBOX_HOSTNAME, hostname);
         }

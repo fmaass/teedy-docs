@@ -54,6 +54,17 @@ public enum ConfigType {
     INBOX_DELETE_IMPORTED,
 
     /**
+     * Explicit operator acknowledgement that teedy EXCLUSIVELY owns the configured import folder (a
+     * dedicated mailbox). Only when {@code true} may the non-UIDPLUS fallback issue a generic folder-wide
+     * {@code EXPUNGE}, which finalizes EVERY {@code \Deleted} message in the folder — including one another
+     * IMAP client marked. Default {@code false}: on a server without UIDPLUS the batch expunge is SKIPPED
+     * (the imported+deleted messages are re-seen and receipt-deduped next cycle, no data loss) rather than
+     * risk finalizing another client's deletions. Ignored when the server supports UIDPLUS — a targeted
+     * {@code UID EXPUNGE} removes only teedy's messages regardless.
+     */
+    INBOX_DEDICATED_FOLDER,
+
+    /**
      * Persisted baseline of the inbox source's accepted UIDVALIDITY epoch, stored as
      * {@code <sourceIdentityDigest>:<uidValidity>}. On each sync the current folder UIDVALIDITY is
      * compared with this baseline for the SAME source: a change means the mailbox was recreated and

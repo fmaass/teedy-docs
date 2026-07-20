@@ -192,7 +192,7 @@ public class InboxService extends AbstractScheduledService {
 
             // Expunge the imported+deleted messages by UID (once per cycle).
             if (config.deleteImported && !ackedForExpunge.isEmpty()) {
-                expungeImported(inbox, ackedForExpunge, uidValidity);
+                expungeImported(inbox, ackedForExpunge, uidValidity, config);
             }
         } catch (FolderClosedException e) {
             // Ignore this, we will just continue importing on the next cycle
@@ -254,6 +254,7 @@ public class InboxService extends AbstractScheduledService {
             config.password = ConfigUtil.getConfigStringValue(ConfigType.INBOX_PASSWORD);
             config.folder = ConfigUtil.getConfigStringValue(ConfigType.INBOX_FOLDER);
             config.deleteImported = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED, false);
+            config.dedicatedFolder = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DEDICATED_FOLDER, false);
             config.defaultLanguage = ConfigUtil.getConfigStringValue(ConfigType.DEFAULT_LANGUAGE);
             config.inboxTagId = ConfigUtil.getConfigStringValue(ConfigType.INBOX_TAG);
             config.tagMap = getAllTags();
@@ -347,7 +348,7 @@ public class InboxService extends AbstractScheduledService {
                     continue;
                 }
                 item.uid = uid;
-                item.sender = (InternetAddress) message.getFrom()[0];
+                item.sender = firstSenderAddress(message.getFrom());
                 item.mailContent.setSubject(message.getSubject());
                 item.mailContent.setDate(message.getSentDate());
                 EmailUtil.parseMailContent(message, item.mailContent);
@@ -483,11 +484,12 @@ public class InboxService extends AbstractScheduledService {
 
     /**
      * Expunge the imported+deleted messages BY UID. Prefers UIDPLUS {@code UID EXPUNGE} so only our
-     * messages are removed; falls back to a generic expunge only under the precondition that teedy
-     * exclusively owns this configured import folder (a generic expunge removes every {@code \Deleted}
-     * message in the folder).
+     * messages are removed; the non-UIDPLUS fallback issues a generic folder-wide expunge ONLY when the
+     * operator has acknowledged (via {@link ConfigType#INBOX_DEDICATED_FOLDER}) that teedy exclusively
+     * owns this folder — otherwise it is SKIPPED, because a generic expunge finalizes every
+     * {@code \Deleted} message in the folder, possibly one another IMAP client marked.
      */
-    private void expungeImported(Folder inbox, List<WorkItem> acked, long uidValidity) {
+    private void expungeImported(Folder inbox, List<WorkItem> acked, long uidValidity, InboxConfig config) {
         try {
             UIDFolder uidFolder = (UIDFolder) inbox;
             if (uidFolder.getUIDValidity() != uidValidity) {
@@ -505,18 +507,57 @@ public class InboxService extends AbstractScheduledService {
                 return;
             }
             Store store = inbox.getStore();
-            if (inbox instanceof IMAPFolder && store instanceof IMAPStore
-                    && ((IMAPStore) store).hasCapability("UIDPLUS")) {
-                // UID EXPUNGE: removes only the listed messages, never another client's \Deleted message.
-                ((IMAPFolder) inbox).expunge(messages.toArray(new Message[0]));
-            } else {
-                // Precondition: teedy exclusively owns this configured import folder (a dedicated mailbox),
-                // so every \Deleted message in it is one we imported.
-                inbox.expunge();
+            boolean hasUidPlus = inbox instanceof IMAPFolder && store instanceof IMAPStore
+                    && ((IMAPStore) store).hasCapability("UIDPLUS");
+            switch (expungeMode(hasUidPlus, config.dedicatedFolder)) {
+                case UID_EXPUNGE:
+                    // UID EXPUNGE: removes only the listed messages, never another client's \Deleted message.
+                    ((IMAPFolder) inbox).expunge(messages.toArray(new Message[0]));
+                    break;
+                case GENERIC_EXPUNGE:
+                    // Operator acknowledged a dedicated folder teedy exclusively owns, so every \Deleted
+                    // message in it is one we imported: a generic expunge is safe.
+                    inbox.expunge();
+                    break;
+                case SKIP:
+                    // No UIDPLUS and no dedicated-folder acknowledgement: a generic expunge would finalize
+                    // EVERY \Deleted message in the folder, possibly another client's. Skip it — the
+                    // imported+deleted messages are re-seen and receipt-deduped next cycle (no duplicate,
+                    // no data loss). Set INBOX_DEDICATED_FOLDER=true to enable the fallback expunge.
+                    log.warn("Skipping the generic inbox expunge: the IMAP server lacks UIDPLUS and this folder"
+                            + " is not acknowledged as dedicated (set INBOX_DEDICATED_FOLDER to true only if"
+                            + " teedy exclusively owns it). The imported messages stay \\Deleted and are"
+                            + " receipt-deduped next cycle.");
+                    break;
             }
         } catch (Exception e) {
             log.error("Failed to expunge imported inbox messages; they will be re-seen and receipt-deduped next cycle", e);
         }
+    }
+
+    /**
+     * Which expunge strategy to finalize the imported+deleted messages with. With UIDPLUS a targeted
+     * {@code UID EXPUNGE} removes only teedy's messages and is always safe. Without it, a generic
+     * folder-wide {@code EXPUNGE} finalizes EVERY {@code \Deleted} message — including another IMAP
+     * client's — so it is issued ONLY when the operator explicitly acknowledged (via
+     * {@link ConfigType#INBOX_DEDICATED_FOLDER}) that teedy exclusively owns the folder; otherwise it is
+     * SKIPPED and the messages are receipt-deduped next cycle. Package-private for direct unit testing.
+     */
+    static ExpungeMode expungeMode(boolean hasUidPlus, boolean dedicatedFolderAck) {
+        if (hasUidPlus) {
+            return ExpungeMode.UID_EXPUNGE;
+        }
+        return dedicatedFolderAck ? ExpungeMode.GENERIC_EXPUNGE : ExpungeMode.SKIP;
+    }
+
+    /** Strategy for finalizing imported+deleted messages after a delete-imported cycle. */
+    enum ExpungeMode {
+        /** UIDPLUS targeted expunge: removes only teedy's listed messages. */
+        UID_EXPUNGE,
+        /** Generic folder-wide expunge: finalizes every {@code \Deleted} message (dedicated folder only). */
+        GENERIC_EXPUNGE,
+        /** No safe strategy: skip the expunge; the messages are receipt-deduped next cycle. */
+        SKIP
     }
 
     /**
@@ -593,7 +634,8 @@ public class InboxService extends AbstractScheduledService {
     private String createDocumentAndFiles(WorkItem item, InboxConfig config) throws Exception {
         EmailUtil.MailContent mailContent = item.mailContent;
         InternetAddress sender = item.sender;
-        log.info("Importing message: " + mailContent.getSubject() + ",sender=" + sender.getAddress());
+        log.info("Importing message: " + mailContent.getSubject() + ",sender="
+                + (sender == null ? "<unknown>" : sender.getAddress()));
 
         // Create the document
         Document document = new Document();
@@ -616,7 +658,10 @@ public class InboxService extends AbstractScheduledService {
             subject = subject.trim().replaceAll(" +", " ");
         }
         UserDao userDao = new UserDao();
-        String senderEmail = sender.getAddress();
+        // A null sender (no From header, empty address list, or a non-Internet address) resolves to a
+        // null email, which getByEmail() matches to no user — attributing the document to the admin
+        // fallback below rather than NPEing the import.
+        String senderEmail = sender == null ? null : sender.getAddress();
         com.sismics.docs.core.model.jpa.User user = userDao.getByEmail(senderEmail);
         if (user == null && senderEmail != null && userDao.hasMultipleActiveUsersByEmail(senderEmail)) {
             log.warn("Multiple active users match inbox sender email {}; attributing document to admin", senderEmail);
@@ -668,6 +713,19 @@ public class InboxService extends AbstractScheduledService {
         }
 
         return document.getId();
+    }
+
+    /**
+     * Extract the first sender as an {@link InternetAddress}, or {@code null} when the message carries no
+     * usable From header — an absent header ({@code getFrom()} is null), an empty address list, or a
+     * non-Internet address. A null sender is attributed to the unknown-email (admin) fallback downstream
+     * rather than NPEing the import.
+     */
+    private static InternetAddress firstSenderAddress(javax.mail.Address[] from) {
+        if (from != null && from.length > 0 && from[0] instanceof InternetAddress) {
+            return (InternetAddress) from[0];
+        }
+        return null;
     }
 
     /**
@@ -802,6 +860,7 @@ public class InboxService extends AbstractScheduledService {
         private String password;
         private String folder;
         private boolean deleteImported;
+        private boolean dedicatedFolder;
         private String defaultLanguage;
         private String inboxTagId;
         private Map<String, String> tagMap;

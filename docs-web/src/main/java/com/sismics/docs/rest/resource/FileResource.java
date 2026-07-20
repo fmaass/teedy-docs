@@ -294,6 +294,13 @@ public class FileResource extends BaseResource {
         boolean ownershipTransferred = false;
         try {
             unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
+
+            // #150/#160: an orphan file attached AFTER the one-shot startup MAC backfill has drained would
+            // otherwise keep a NULL content MAC until the next backfill cycle. Compute+store it synchronously
+            // (through the core util, mirroring the upload path's per-document keyed MAC over the same
+            // plaintext bytes) so the file participates in duplicate detection without waiting for a restart.
+            FileUtil.computeAndStoreAttachMac(id, documentId, unencryptedFile);
+
             FileUtil.markProcessingWithRollbackCleanup(id, unencryptedFile);
             FileUpdatedAsyncEvent fileUpdatedAsyncEvent = new FileUpdatedAsyncEvent();
             fileUpdatedAsyncEvent.setUserId(principal.getId());
