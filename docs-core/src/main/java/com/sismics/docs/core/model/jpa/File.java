@@ -116,6 +116,39 @@ public class File implements Loggable {
     private String contentMac;
 
     /**
+     * Durable post-upload processing completion marker (#159). NULL = not proven complete. Non-null (a
+     * DB-clock timestamp) = the full pipeline reached a terminal state (real success OR terminal-skip). The
+     * startup reconciliation service replays lost processing for any active file whose marker is still null.
+     * Written only through the fenced compare-and-swap in {@code FileDao}, never copied by {@link
+     * com.sismics.docs.core.dao.FileDao#update}.
+     */
+    @Column(name = "FIL_PROCESSED_D")
+    private Date processed;
+
+    /**
+     * Reconciliation claim lease timestamp (#159), written from the DB clock. Drives claimability and
+     * expiry: a row is claimable while its marker is null and either it is unclaimed or this lease is older
+     * than the lease TTL. Never compared against a per-JVM clock.
+     */
+    @Column(name = "FIL_PROCESSINGAT_D")
+    private Date processingAt;
+
+    /**
+     * Per-claim fencing token (#159): a fresh UUID stamped on each reconciliation claim. Completion is
+     * fenced to it, so a claimant whose lease expired and was reclaimed by a later cycle cannot mark a
+     * successor's work complete.
+     */
+    @Column(name = "FIL_PROCESSINGTOKEN_C", length = 36)
+    private String processingToken;
+
+    /**
+     * Bounded-retry counter (#159), incremented on each claim. At a cap the reconciler terminal-skip-stamps
+     * the row so a persistently-retryable-failing file cannot keep the service alive forever.
+     */
+    @Column(name = "FIL_PROCATTEMPTS_N")
+    private Integer procAttempts;
+
+    /**
      * Private key to decrypt the file.
      * Not saved to database, of course.
      */
@@ -260,6 +293,42 @@ public class File implements Loggable {
 
     public File setContentMac(String contentMac) {
         this.contentMac = contentMac;
+        return this;
+    }
+
+    public Date getProcessed() {
+        return processed;
+    }
+
+    public File setProcessed(Date processed) {
+        this.processed = processed;
+        return this;
+    }
+
+    public Date getProcessingAt() {
+        return processingAt;
+    }
+
+    public File setProcessingAt(Date processingAt) {
+        this.processingAt = processingAt;
+        return this;
+    }
+
+    public String getProcessingToken() {
+        return processingToken;
+    }
+
+    public File setProcessingToken(String processingToken) {
+        this.processingToken = processingToken;
+        return this;
+    }
+
+    public Integer getProcAttempts() {
+        return procAttempts;
+    }
+
+    public File setProcAttempts(Integer procAttempts) {
+        this.procAttempts = procAttempts;
         return this;
     }
 

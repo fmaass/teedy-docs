@@ -311,6 +311,11 @@ public class FileDao {
         // (new-version create and current-version delete). Copying them from a caller's possibly-stale
         // entity would let a rename/processing update that loaded a row as latest, then paused across a
         // concurrent version-create that demoted it, resurrect latestVersion=true and yield two latest rows.
+        // The reconciliation columns (FIL_PROCESSED_D, FIL_PROCESSINGAT_D, FIL_PROCESSINGTOKEN_C,
+        // FIL_PROCATTEMPTS_N, #159) are likewise NOT copied: they change ONLY through the fenced claim /
+        // completion compare-and-swap methods below — the file-processing pipeline calls this update to save
+        // content in the SAME transaction it may hold a stale copy of those columns, so copying them back
+        // would clobber a concurrent claim.
         fileDb.setDocumentId(file.getDocumentId());
         fileDb.setName(file.getName());
         fileDb.setContent(file.getContent());
@@ -502,5 +507,152 @@ public class FileDao {
         q.setParameter("size", File.UNKNOWN_SIZE);
         q.setMaxResults(limit);
         return q.getResultList();
+    }
+
+    /**
+     * Reads the database server's current wall-clock time (#159). ALL reconciliation lease timing derives
+     * from this one clock — never a per-JVM {@code new Date()} — so leases written and compared against a
+     * timezone-less timestamp column stay consistent regardless of the JVM's zone or clock skew.
+     *
+     * @return the database clock's "now"
+     */
+    public Date getDatabaseTime() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Object now = em.createNativeQuery("select localtimestamp").getSingleResult();
+        return toDate(now);
+    }
+
+    /**
+     * Coerce the assorted JDBC/JSR-310 shapes {@code select localtimestamp} can return (H2 and PostgreSQL,
+     * across driver versions) into a {@link Date}. A {@code timestamp without time zone} is read in the
+     * JVM's own zone on both engines, which is fine here because every lease value is round-tripped through
+     * that same conversion — only their RELATIVE order matters.
+     *
+     * @param value Raw native-query result
+     * @return the value as a {@link Date}
+     */
+    private static Date toDate(Object value) {
+        if (value instanceof java.sql.Timestamp ts) {
+            return new Date(ts.getTime());
+        }
+        if (value instanceof java.time.LocalDateTime ldt) {
+            return java.sql.Timestamp.valueOf(ldt);
+        }
+        if (value instanceof java.time.OffsetDateTime odt) {
+            return Date.from(odt.toInstant());
+        }
+        if (value instanceof java.time.Instant instant) {
+            return Date.from(instant);
+        }
+        if (value instanceof Date date) {
+            return new Date(date.getTime());
+        }
+        throw new IllegalStateException("Unexpected database time type: "
+                + (value == null ? "null" : value.getClass().getName()));
+    }
+
+    /**
+     * A batch of ACTIVE files still awaiting post-upload processing (#159): marker unset and either never
+     * claimed or their claim lease expired (older than {@code cutoff}). Ordered oldest-first so the longest
+     * unsearchable files recover first; a live in-flight claim (lease newer than {@code cutoff}) is excluded
+     * so the reconciler does not pile onto work already running.
+     *
+     * @param cutoff Lease-expiry cutoff (DB now minus the lease TTL)
+     * @param limit Batch size
+     * @return up to {@code limit} reconcilable files
+     */
+    public List<File> getFilesToReconcile(Date cutoff, int limit) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<File> q = em.createQuery("select f from File f" +
+                " where f.processed is null and f.deleteDate is null" +
+                " and (f.processingToken is null or f.processingAt < :cutoff)" +
+                " order by f.createDate asc", File.class);
+        q.setParameter("cutoff", cutoff);
+        q.setMaxResults(limit);
+        return q.getResultList();
+    }
+
+    /**
+     * The live count of ACTIVE files whose processing is not yet proven complete (#159), whether unclaimed,
+     * leased-in-flight, or expired. The reconciliation service self-stops ONLY when this reaches zero, so a
+     * still-running replay (its row still unprocessed) or a lease that will expire is never stranded without
+     * a reconciler left to resolve it.
+     *
+     * @return the number of unprocessed active files
+     */
+    public long countUnprocessedActiveFiles() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("select count(f) from File f where f.processed is null and f.deleteDate is null");
+        return (Long) q.getSingleResult();
+    }
+
+    /**
+     * Atomically claim a file for reprocessing (#159) as a compare-and-swap: stamp a fresh fencing token,
+     * the DB-clock lease time, and bump the attempt counter IFF the file is still active, unprocessed, and
+     * either unclaimed or its lease has expired. The single bulk UPDATE takes a row write lock, so two
+     * racing claimers serialize and exactly one observes a returned 1.
+     *
+     * @param id File ID
+     * @param newToken Fresh per-claim fencing token the caller generated
+     * @param dbNow Database-clock now (the new lease time)
+     * @param cutoff Lease-expiry cutoff (DB now minus the lease TTL)
+     * @return 1 when this caller won the claim, 0 when it was already processed or a live claim holds it
+     */
+    public int claimForReprocess(String id, String newToken, Date dbNow, Date cutoff) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f" +
+                " set f.processingAt = :dbNow, f.processingToken = :newToken," +
+                " f.procAttempts = coalesce(f.procAttempts, 0) + 1" +
+                " where f.id = :id and f.processed is null and f.deleteDate is null" +
+                " and (f.processingToken is null or f.processingAt < :cutoff)");
+        q.setParameter("dbNow", dbNow);
+        q.setParameter("newToken", newToken);
+        q.setParameter("id", id);
+        q.setParameter("cutoff", cutoff);
+        return q.executeUpdate();
+    }
+
+    /**
+     * Record processing completion FENCED to a reconciliation claim token (#159): set the marker and clear
+     * the lease IFF the row is still active, unprocessed, and still owned by {@code token}. A re-claim
+     * writes a NEW token, so a stale claimant past its lease matches 0 rows and cannot clear a successor's
+     * lease or mark a successor's work complete.
+     *
+     * @param id File ID
+     * @param token The claim's fencing token this worker holds
+     * @param dbNow Database-clock now (the completion marker value)
+     * @return 1 when the marker was written, 0 when the claim was superseded or the row processed/deleted
+     */
+    public int markProcessedIfClaimant(String id, String token, Date dbNow) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f" +
+                " set f.processed = :dbNow, f.processingToken = null, f.processingAt = null" +
+                " where f.id = :id and f.processed is null and f.deleteDate is null" +
+                " and f.processingToken = :token");
+        q.setParameter("dbNow", dbNow);
+        q.setParameter("id", id);
+        q.setParameter("token", token);
+        return q.executeUpdate();
+    }
+
+    /**
+     * Record processing completion for the LIVE (un-reconciled) path (#159): set the marker IFF the row is
+     * still active, unprocessed, and UNCLAIMED. If a reconciler has meanwhile claimed the row (token set),
+     * this is a clean no-op and that reconciler's replay owns completion — so a slow live upload racing a
+     * reconciliation cycle converges to a single marker without either clobbering the other.
+     *
+     * @param id File ID
+     * @param dbNow Database-clock now (the completion marker value)
+     * @return 1 when the marker was written, 0 when the row was already claimed/processed/deleted
+     */
+    public int markProcessedIfUnclaimed(String id, Date dbNow) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f" +
+                " set f.processed = :dbNow, f.processingToken = null, f.processingAt = null" +
+                " where f.id = :id and f.processed is null and f.deleteDate is null" +
+                " and f.processingToken is null");
+        q.setParameter("dbNow", dbNow);
+        q.setParameter("id", id);
+        return q.executeUpdate();
     }
 }
