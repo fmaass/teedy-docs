@@ -16,6 +16,28 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.7.0] - 2026-07-20
+
+A minor release. No database migration (db.version stays 58).
+
+The version moves to 3.7.0 rather than a further 3.6.x patch to reflect the size of the line
+it closes. Between 3.6.1 and 3.7.0 the fork gained server-side dark mode, a fully pageable
+activity log, translation parity for every shipped locale, credential-epoch invalidation and
+API-key revocation, the `?share=` access-control fix and CSRF enforcement — 109 commits across
+six database migrations. That is a feature release under semantic versioning, and the number
+now says so.
+
+### Changed
+- The About dialog's "What's new" highlights now describe the 3.7 line instead of the 3.6.0 one.
+- Release tooling: a pre-push hook runs the four "mirror" gates — OpenAPI spec parity, locale key parity, db.version overlay parity, and version literals — that previously ran only in the CI build job. Each compares a hand-maintained file against its source of truth and so cannot be failed by a unit test; running them at push time catches drift before it becomes a failed release build.
+
+### Fixed
+- The dark-mode class is now cleared on logout, so a theme seeded from one account's server-side preference can no longer follow the next user to log in on a shared browser. A device's own explicit choice is preserved.
+- Uploaded API documentation now lists the audit-log pagination parameters (`limit`, `before_date`, `before_id`) and the dark-mode preference field, which were added to the REST resources in 3.6.7 without being mirrored into the published OpenAPI spec.
+
+### Security
+- Matrix parameters are stripped before the CSRF filter matches its mutating-GET inventory. JAX-RS ignores matrix parameters when selecting a resource method, so `GET /api/user;x=1` reached the same handler as `/api/user` while failing the filter's literal path comparison — letting a mutating GET skip token and Origin evaluation even under enforcement. Only the GET inventory was affected: every non-safe method was already unconditionally evaluated, so the reachable impact was refreshing a victim's session clock or forcing an export permit, not data disclosure or modification.
+
 ## [3.6.7] - 2026-07-20
 
 A bug-fix and enhancement release. Database migration to version 58 (a nullable per-user
@@ -312,7 +334,12 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/fmaass/teedy-docs/compare/v3.6.7...v3.7.0
+[3.6.7]: https://github.com/fmaass/teedy-docs/compare/v3.6.6...v3.6.7
+[3.6.6]: https://github.com/fmaass/teedy-docs/compare/v3.6.5...v3.6.6
+[3.6.5]: https://github.com/fmaass/teedy-docs/compare/v3.6.1...v3.6.5
+[3.6.1]: https://github.com/fmaass/teedy-docs/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/fmaass/teedy-docs/compare/v3.5.2...v3.6.0
 [3.5.2]: https://github.com/fmaass/teedy-docs/compare/v3.5.0...v3.5.2
 [3.5.0]: https://github.com/fmaass/teedy-docs/compare/v3.4.1...v3.5.0
