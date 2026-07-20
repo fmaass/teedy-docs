@@ -9,7 +9,7 @@
 // The heading tracks MAJOR.MINOR only: a patch release reuses the current minor's
 // bullets and does not need to touch this file. A new minor (or major) release
 // with fresh bullets bumps this to match.
-export const HIGHLIGHTS_VERSION = '3.6.0'
+export const HIGHLIGHTS_VERSION = '3.7.0'
 
 /**
  * The MAJOR.MINOR prefix of a semantic version ("3.5.2" -> "3.5"). Returns the
@@ -34,14 +34,15 @@ export function headingVersion(currentVersion: string | null | undefined): strin
 }
 
 // Each entry is an i18n key so the bullets translate. The list is intentionally
-// short and accurate to the 3.6.0 line (forgiving fuzzy search, deleted-user
-// document reassignment, the new settings landing page, verbatim OIDC usernames,
-// per-instance branding, and the page-size / gallery-tag controls).
+// short and accurate to the 3.7 line, which folds in everything since 3.6.1:
+// account-level dark mode, a fully browsable activity log, complete translations
+// for every shipped language, correct handling of accented upload file names, and
+// the CSRF / share-link / credential-revocation hardening.
 export const HIGHLIGHT_KEYS = [
-  'ui.about.highlights.fuzzy_search',
-  'ui.about.highlights.reassign_documents',
-  'ui.about.highlights.settings_home',
-  'ui.about.highlights.oidc_verbatim_username',
-  'ui.about.highlights.custom_branding',
-  'ui.about.highlights.page_size_gallery_tags',
+  'ui.about.highlights.dark_mode_account',
+  'ui.about.highlights.activity_history',
+  'ui.about.highlights.complete_translations',
+  'ui.about.highlights.accented_filenames',
+  'ui.about.highlights.csrf_and_sharing',
+  'ui.about.highlights.credential_revocation',
 ] as const

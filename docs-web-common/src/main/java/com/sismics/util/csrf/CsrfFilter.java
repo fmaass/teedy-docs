@@ -399,6 +399,28 @@ public class CsrfFilter implements Filter {
         if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
             path = path.substring(contextPath.length());
         }
+        // Strip matrix parameters (";name=value") from every segment BEFORE any other matching.
+        // JAX-RS ignores them when selecting a resource method (JSR-370 3.7.1) but getRequestURI()
+        // retains them, so "/api/user;x=1" reaches the same handler as "/api/user" while failing a
+        // literal inventory comparison. Left in place, that lets a mutating GET be classified
+        // non-state-changing and skip token/Origin evaluation entirely. Stripping happens before the
+        // "/api" handling so a matrix segment on the prefix itself ("/api;x=1/user") cannot evade it.
+        if (path.indexOf(';') >= 0) {
+            String[] segments = path.split("/", -1);
+            StringBuilder cleaned = new StringBuilder(path.length());
+            for (int i = 0; i < segments.length; i++) {
+                String segment = segments[i];
+                int semicolon = segment.indexOf(';');
+                if (semicolon >= 0) {
+                    segment = segment.substring(0, semicolon);
+                }
+                if (i > 0) {
+                    cleaned.append('/');
+                }
+                cleaned.append(segment);
+            }
+            path = cleaned.toString();
+        }
         if (path.equals("/api")) {
             path = "";
         } else if (path.startsWith("/api/")) {

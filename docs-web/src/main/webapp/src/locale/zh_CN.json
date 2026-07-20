@@ -1031,12 +1031,12 @@
       "whats_new_title": "{version} 的新功能",
       "view_releases": "查看所有版本",
       "highlights": {
-        "fuzzy_search": "文档搜索现在可匹配部分词语并容忍小的拼写错误，因此即使某个词只对了一部分，您仍能找到文档。",
-        "reassign_documents": "删除用户时，您可以将其文档移交给另一位用户，而不是将其移入回收站。",
-        "settings_home": "设置现在打开的是带分组导航的着陆页，而不是直接进入您的帐号。",
-        "oidc_verbatim_username": "管理员可以选择将 OIDC 的 preferred_username 逐字用作帐号名。",
-        "custom_branding": "为每个实例设置各自的应用标题和网站图标。",
-        "page_size_gallery_tags": "选择每页显示多少个文档，并直接从图库的右键菜单编辑文档的标签。"
+        "dark_mode_account": "您的深色模式设置会保存到帐号中，换用新设备时会直接沿用您已经在用的主题。",
+        "activity_history": "文档的活动记录不再只显示最近的条目——可以加载更早的活动，查看完整历史。",
+        "complete_translations": "所有随附语言现已完成翻译，界面不会再在页面中途回退到英文。",
+        "accented_filenames": "上传的文件名会保留重音符号、变音符号和加号，不再出现乱码。",
+        "csrf_and_sharing": "加强了对跨站请求伪造（CSRF）的防护，共享链接也不会再泄露其授权范围之外的文档。",
+        "credential_revocation": "更改密码或吊销 API 密钥后，受影响的会话会立即结束。"
       }
     },
     "sso_failed": "单点登录失败。您可以重试，或使用本地帐号登录。",

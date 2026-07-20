@@ -1031,12 +1031,12 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "fuzzy_search": "Document search now matches partial words and tolerates small typos, so you still find documents when a term is only partly right.",
-        "reassign_documents": "When you delete a user, you can hand their documents to another user instead of moving them to the trash.",
-        "settings_home": "Settings open on a landing page with a grouped navigation, instead of jumping straight into your account.",
-        "oidc_verbatim_username": "Admins can opt in to using the OIDC preferred_username verbatim as the account name.",
-        "custom_branding": "Give each instance its own application title and favicon.",
-        "page_size_gallery_tags": "Choose how many documents show per page, and edit a document's tags directly from a right-click menu in the gallery."
+        "dark_mode_account": "Your dark-mode choice is saved to your account, so a new device picks up the theme you already use.",
+        "activity_history": "A document's activity log is no longer capped at the most recent entries — load older activity to see its full history.",
+        "complete_translations": "Every shipped language is now fully translated, so the interface no longer falls back to English part-way down a screen.",
+        "accented_filenames": "Uploaded file names keep their accents, umlauts and plus signs instead of arriving garbled.",
+        "csrf_and_sharing": "Hardened against cross-site request forgery, and share links no longer reveal documents beyond what they grant.",
+        "credential_revocation": "Changing a password or revoking an API key now ends the affected sessions straight away."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",

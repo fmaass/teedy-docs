@@ -1031,12 +1031,12 @@
       "whats_new_title": "Co nowego w {version}",
       "view_releases": "Zobacz wszystkie wydania",
       "highlights": {
-        "fuzzy_search": "Wyszukiwanie dokumentów pasuje teraz do częściowych słów i toleruje drobne literówki, więc nadal znajdziesz dokumenty, gdy termin jest tylko częściowo poprawny.",
-        "reassign_documents": "Gdy usuwasz użytkownika, możesz przekazać jego dokumenty innemu użytkownikowi zamiast przenosić je do kosza.",
-        "settings_home": "Ustawienia otwierają się na stronie startowej z pogrupowaną nawigacją, zamiast od razu przechodzić do Twojego konta.",
-        "oidc_verbatim_username": "Administratorzy mogą zdecydować się na dosłowne używanie preferred_username z OIDC jako nazwy konta.",
-        "custom_branding": "Nadaj każdej instancji własny tytuł aplikacji i favicon.",
-        "page_size_gallery_tags": "Wybierz, ile dokumentów wyświetla się na stronie, i edytuj etykiety dokumentu bezpośrednio z menu kontekstowego w galerii."
+        "dark_mode_account": "Twój wybór trybu ciemnego jest zapisywany na koncie, więc nowe urządzenie od razu przejmuje motyw, którego już używasz.",
+        "activity_history": "Dziennik aktywności dokumentu nie jest już ograniczony do najnowszych wpisów — doładuj starsze wpisy, aby zobaczyć pełną historię.",
+        "complete_translations": "Wszystkie dołączone języki są teraz w pełni przetłumaczone, więc interfejs nie przełącza się już w połowie ekranu na angielski.",
+        "accented_filenames": "Nazwy przesyłanych plików zachowują znaki diakrytyczne, umlauty i plusy, zamiast docierać zniekształcone.",
+        "csrf_and_sharing": "Wzmocniona ochrona przed atakami cross-site request forgery (CSRF), a linki udostępniania nie ujawniają już dokumentów wykraczających poza przyznane uprawnienia.",
+        "credential_revocation": "Zmiana hasła lub unieważnienie klucza API natychmiast kończy objęte tym sesje."
       }
     },
     "sso_failed": "Logowanie jednokrotne (SSO) nie powiodło się. Możesz spróbować ponownie lub zalogować się przy użyciu konta lokalnego.",

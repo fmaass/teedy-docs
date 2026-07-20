@@ -1031,12 +1031,12 @@
       "whats_new_title": "{version} 的新功能",
       "view_releases": "檢視所有版本",
       "highlights": {
-        "fuzzy_search": "文件搜尋現在可比對部分字詞並容許小的拼字錯誤，因此即使字詞只對了一部分，您仍能找到文件。",
-        "reassign_documents": "刪除使用者時，您可以將其文件交給另一位使用者，而不是移至垃圾桶。",
-        "settings_home": "設定會開啟在有分組導覽的著陸頁面，而不是直接跳到您的帳號。",
-        "oidc_verbatim_username": "管理員可以選擇逐字使用 OIDC 的 preferred_username 作為帳號名稱。",
-        "custom_branding": "為每個執行個體提供各自的應用程式標題和 favicon。",
-        "page_size_gallery_tags": "選擇每頁顯示多少份文件，並直接從圖庫的右鍵選單編輯文件的標籤。"
+        "dark_mode_account": "您的深色模式設定會儲存到帳號中，換用新裝置時會直接沿用您已經在用的佈景主題。",
+        "activity_history": "文件的活動記錄不再只顯示最近的項目——可以載入更早的活動，檢視完整的歷程。",
+        "complete_translations": "所有隨附的語言現已完整翻譯，介面不會再在頁面中途退回英文。",
+        "accented_filenames": "上傳的檔案名稱會保留重音符號、變音符號和加號，不再出現亂碼。",
+        "csrf_and_sharing": "強化了對跨網站請求偽造（CSRF）的防護，分享連結也不會再洩漏其授權範圍之外的文件。",
+        "credential_revocation": "變更密碼或撤銷 API 金鑰後，受影響的工作階段會立即結束。"
       }
     },
     "sso_failed": "單一登入失敗。您可以再試一次，或使用本機帳號登入。",

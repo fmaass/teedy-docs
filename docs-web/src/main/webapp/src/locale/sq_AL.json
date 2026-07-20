@@ -1031,12 +1031,12 @@
       "whats_new_title": "Çfarë ka të re në {version}",
       "view_releases": "Shiko të gjitha versionet",
       "highlights": {
-        "fuzzy_search": "Kërkimi i dokumenteve tani përputhet me fjalë të pjesshme dhe toleron gabime të vogla shtypi, kështu që i gjeni dokumentet edhe kur një term është vetëm pjesërisht i saktë.",
-        "reassign_documents": "Kur fshini një përdorues, mund t'ia jepni dokumentet e tij një përdoruesi tjetër në vend që t'i çoni në kosh.",
-        "settings_home": "Cilësimet hapen në një faqe hyrëse me një navigim të grupuar, në vend që të kaloni drejt e në llogarinë tuaj.",
-        "oidc_verbatim_username": "Administratorët mund të zgjedhin të përdorin preferred_username-in e OIDC fjalë për fjalë si emrin e llogarisë.",
-        "custom_branding": "Jepini çdo instance titullin dhe favicon-in e vet të aplikacionit.",
-        "page_size_gallery_tags": "Zgjidhni sa dokumente shfaqen për faqe, dhe redaktoni etiketat e një dokumenti drejtpërdrejt nga një menu me klik të djathtë në galeri."
+        "dark_mode_account": "Zgjedhja juaj për modalitetin e errët ruhet në llogarinë tuaj, kështu që një pajisje e re merr menjëherë temën që përdorni tashmë.",
+        "activity_history": "Regjistri i aktivitetit të një dokumenti nuk kufizohet më te hyrjet më të fundit — ngarkoni aktivitetin e mëparshëm për të parë historikun e plotë.",
+        "complete_translations": "Të gjitha gjuhët e përfshira tani janë përkthyer plotësisht, ndaj ndërfaqja nuk kthehet më në anglisht në mes të ekranit.",
+        "accented_filenames": "Emrat e skedarëve të ngarkuar i ruajnë theksat, umlautet dhe shenjat plus, në vend që të mbërrijnë të shtrembëruar.",
+        "csrf_and_sharing": "Mbrojtje e forcuar ndaj cross-site request forgery (CSRF), dhe lidhjet e ndarjes nuk zbulojnë më dokumente përtej atyre që lejojnë.",
+        "credential_revocation": "Ndryshimi i një fjalëkalimi ose revokimi i një çelësi API tani i mbyll menjëherë seancat e prekura."
       }
     },
     "sso_failed": "Identifikimi me një hyrje (SSO) dështoi. Mund të provoni përsëri ose të hyni me një llogari lokale.",

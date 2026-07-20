@@ -345,5 +345,49 @@ describe('auth store', () => {
 
       expect(result).toBeNull()
     })
+
+    // #147 follow-up: the server's dark-mode preference is applied as a live class on <html> and is
+    // deliberately NOT written to localStorage. Logout is an SPA route change with no page reload, so
+    // unless logout resets the class it survives into the next session — on a shared browser the next
+    // account inherits the previous user's theme. The reset must use the same rule main.ts boots with
+    // (dark only when the stored value is the string 'true').
+    describe('dark-mode class on logout', () => {
+      it('clears a server-seeded dark mode so it cannot leak to the next account', async () => {
+        mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ dark_mode: true })))
+        mockApiLogout.mockResolvedValue(logoutResp())
+        const store = useAuthStore()
+        await store.fetchCurrentUser()
+        // Seeded live from the server, with no on-device choice recorded.
+        expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
+        expect(localStorage.getItem('teedy-dark-mode')).toBeNull()
+
+        await store.logout()
+
+        expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
+      })
+
+      it("preserves this device's explicit dark choice across logout", async () => {
+        localStorage.setItem('teedy-dark-mode', 'true')
+        document.documentElement.classList.add('dark-mode')
+        mockApiLogout.mockResolvedValue(logoutResp())
+        const store = useAuthStore()
+
+        await store.logout()
+
+        // An explicit on-device choice is the device's own preference, not the departing user's.
+        expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
+      })
+
+      it("restores this device's explicit light choice after a dark-preferring session", async () => {
+        localStorage.setItem('teedy-dark-mode', 'false')
+        document.documentElement.classList.add('dark-mode')
+        mockApiLogout.mockResolvedValue(logoutResp())
+        const store = useAuthStore()
+
+        await store.logout()
+
+        expect(document.documentElement.classList.contains('dark-mode')).toBe(false)
+      })
+    })
   })
 })

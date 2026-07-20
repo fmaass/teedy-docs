@@ -1031,12 +1031,12 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "fuzzy_search": "Die Dokumentsuche findet jetzt auch Teilwörter und verzeiht kleine Tippfehler, sodass du Dokumente selbst dann findest, wenn ein Begriff nur teilweise stimmt.",
-        "reassign_documents": "Beim Löschen eines Benutzers kannst du dessen Dokumente einem anderen Benutzer übertragen, statt sie in den Papierkorb zu verschieben.",
-        "settings_home": "Die Einstellungen öffnen sich auf einer Übersichtsseite mit gruppierter Navigation, statt direkt in dein Konto zu springen.",
-        "oidc_verbatim_username": "Administratoren können optional den OIDC-preferred_username unverändert als Kontonamen übernehmen.",
-        "custom_branding": "Gib jeder Instanz einen eigenen Anwendungstitel und ein eigenes Favicon.",
-        "page_size_gallery_tags": "Lege fest, wie viele Dokumente pro Seite angezeigt werden, und bearbeite die Tags eines Dokuments direkt über ein Rechtsklick-Menü in der Galerie."
+        "dark_mode_account": "Deine Dark-Mode-Einstellung wird in deinem Konto gespeichert, sodass ein neues Gerät gleich das gewohnte Design übernimmt.",
+        "activity_history": "Das Aktivitätsprotokoll eines Dokuments ist nicht mehr auf die neuesten Einträge begrenzt – lade ältere Aktivitäten nach, um den vollständigen Verlauf zu sehen.",
+        "complete_translations": "Alle mitgelieferten Sprachen sind jetzt vollständig übersetzt, sodass die Oberfläche nicht mehr mitten auf der Seite auf Englisch zurückfällt.",
+        "accented_filenames": "Hochgeladene Dateinamen behalten Umlaute, Akzente und Pluszeichen, statt verstümmelt anzukommen.",
+        "csrf_and_sharing": "Härtung gegen Cross-Site-Request-Forgery, und Freigabelinks geben keine Dokumente mehr über ihre Berechtigungen hinaus preis.",
+        "credential_revocation": "Das Ändern eines Passworts oder das Widerrufen eines API-Schlüssels beendet betroffene Sitzungen jetzt sofort."
       }
     },
     "sso_failed": "Single Sign-On fehlgeschlagen. Sie können es erneut versuchen oder sich mit einem lokalen Konto anmelden.",
