@@ -38,7 +38,9 @@ describe('AboutDialog highlights', () => {
     // Account-level dark mode + the uncapped activity log are two load-bearing 3.7 additions.
     expect(enText).toContain('dark-mode')
     expect(enText).toContain('activity log')
-    expect(deText).toContain('dark-mode')
+    // The German bullet keeps the interface's "Dark Mode" label (spaced), not the
+    // English "dark-mode" hyphenation.
+    expect(deText).toContain('dark mode')
     expect(deText).toContain('aktivitätsprotokoll')
     // The stale 3.6.0 bullets (fuzzy search, deleted-user reassignment) must be gone.
     expect(enText).not.toContain('typo')
