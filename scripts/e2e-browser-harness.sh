@@ -18,20 +18,36 @@
 # PRECONDITION — this script does NOT boot anything. It assumes a RUNNING Teedy
 # at E2E_BASE_URL (default http://localhost:8080) with the default admin/admin
 # credentials — a fresh embedded-H2 boot of the current image, exactly what
-# scripts/e2e-run.sh builds. Typical combined run:
+# scripts/e2e-run.sh builds. Typical combined run (the teedy-bh container below is the
+# disposable, throwaway instance the E2E_ALLOW_SEED guard requires):
 #
 #   ./mvnw -Pprod -DskipTests clean install && docker build -t teedy-e2e:local .
 #   docker run -d --name teedy-bh -p 8080:8080 teedy-e2e:local
-#   # wait for /api/app to answer, then:
-#   scripts/e2e-browser-harness.sh
+#   # wait for /api/app to answer, then (E2E_EXPECT_VERSION must match the built pom
+#   # <version>; E2E_ALLOW_SEED=1 acknowledges the target is disposable):
+#   E2E_ALLOW_SEED=1 E2E_EXPECT_VERSION=<pom version> \
+#     E2E_BASE_URL=http://localhost:8080 scripts/e2e-browser-harness.sh
 #   docker rm -f teedy-bh
 #
 # Requires: the `browser-harness` CLI (browser-use) on PATH, a local Chrome with
 # CDP remote debugging allowed, curl, python3.
 #
-# Data hygiene: every artifact this run creates (documents, tags) is stamped with a
-# unique RUN token, so reruns against a long-lived instance never collide. Created
-# documents are trashed at the end (best-effort cleanup).
+# Target guard: this harness is DESTRUCTIVE — it logs in as admin/admin, seeds fixture
+# tags and documents, and stores a deliberate XSS payload as a document description. It MUST
+# run only against a disposable, throwaway instance. E2E_ALLOW_SEED=1 is REQUIRED and is the
+# sole guard: no runtime signal reliably tells a disposable instance from a real deployment
+# (a hostname is spoofable and a fresh restore also has admin/admin), so the operator must
+# explicitly acknowledge the target is disposable. Without it the harness refuses BEFORE any
+# login or write (exit 2).
+#
+# Data hygiene: every artifact this run creates (documents, tags) is stamped with a unique
+# RUN token, so reruns against a long-lived instance never collide. Cleanup runs from an EXIT
+# trap, so it purges on EVERY exit path — normal, check failure, error, or a SIGINT/SIGTERM
+# (CI cancel) after seeding — and can never strand the XSS payload or fixture tags. It PURGES
+# everything it created: each seeded document is moved to the trash AND then permanently
+# deleted from the recycle bin (so the stored XSS payload cannot linger there), and every
+# seeded tag is deleted. Any artifact it fails to purge forces a non-zero exit, so the run
+# never reports success with known residue left behind.
 #
 # Version gate: check 1 asserts current_version == E2E_EXPECT_VERSION. That env var
 # is REQUIRED (no hardcoded default) — CI derives it from the checked-out pom.xml and
@@ -61,6 +77,21 @@
 set -uo pipefail
 
 base_url="${E2E_BASE_URL:-http://localhost:8080}"
+
+# --- Target guard (REQUIRED, checked before any login or write) ---------------
+# This harness is destructive: it authenticates as admin/admin, seeds fixture tags and
+# documents, and stores a deliberate XSS payload as a document description. Pointing it at a
+# real deployment would inject that payload and default-credential writes into live data.
+# There is deliberately NO hostname/heuristic auto-detection — no runtime signal reliably
+# distinguishes a disposable instance from production (hostnames are spoofable; a fresh prod
+# restore also answers on admin/admin), so a heuristic would give false confidence. The only
+# honest guard is an explicit operator opt-in acknowledging the target is disposable. This
+# check runs before check 1 and before the seed login, so an unset opt-in touches nothing.
+if [ "${E2E_ALLOW_SEED:-}" != "1" ]; then
+  echo "FATAL: E2E_ALLOW_SEED is not set to 1 — refusing to run. This harness seeds admin/admin fixture data and an XSS payload into ${base_url}, then purges it; it is safe ONLY against a disposable, throwaway instance. Never point it at a real deployment. Export E2E_ALLOW_SEED=1 to acknowledge the target is disposable." >&2
+  exit 2
+fi
+
 # E2E_EXPECT_VERSION is REQUIRED — there is deliberately no hardcoded version default
 # anywhere, so the harness can never silently certify against a stale expectation. CI
 # derives it from the checked-out pom.xml; a local caller must export it.
@@ -73,12 +104,82 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 art_dir="${repo_root}/e2e-artifacts/browser-harness"
 mkdir -p "${art_dir}"
 cookie_jar="$(mktemp)"
-trap 'rm -f "${cookie_jar}"' EXIT
+
+# Ids of everything this run seeds, filled in by the seed section below. Declared up front so
+# the cleanup trap can safely reference them even if the run is interrupted before they are set.
+ovf_doc_id=""
+rich_doc_id=""
+org_doc_id=""
+seeded_tag_ids=""
+
+fail=0            # set when any check fails
+cleanup_fail=0    # set when any seeded artifact could not be purged
+_cleanup_done=0   # cleanup runs exactly once, even if it is entered twice
+
+# Permanently remove one seeded document, INCLUDING from the recycle bin. A plain DELETE is
+# only a soft-delete into the trash, so the document — and its stored description, which for
+# the rich-description check holds an XSS payload — must then be permanently deleted or it
+# survives. A failure is counted so the run cannot report success with residue left behind.
+purge_document() {
+  local d="$1"
+  [ -n "${d}" ] || return 0
+  # Move to trash (soft-delete) first — /document/:id/permanent only accepts a document that
+  # is already in the recycle bin. Then purge it so nothing (payload included) lingers there.
+  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 || true
+  if curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}/permanent" >/dev/null 2>&1; then
+    echo "[cleanup] purged document ${d} (trashed + permanently deleted)" | tee -a "${art_dir}/checks.log"
+  else
+    echo "[cleanup] WARNING: could not permanently delete document ${d} — it may remain in the recycle bin" | tee -a "${art_dir}/checks.log"
+    cleanup_fail=$((cleanup_fail + 1))
+  fi
+}
+
+# EXIT-trap cleanup. Runs on every exit path — normal end, check failure, error, and (via the
+# INT/TERM handlers below) a Ctrl-C or CI cancel after seeding — so an interruption can never
+# strand the XSS payload or the fixture tags. Idempotent (guarded to run once) and tolerant of
+# a partially-seeded state (the id vars may still be empty).
+cleanup() {
+  local rc=$?
+  [ "${_cleanup_done}" -eq 1 ] && return
+  _cleanup_done=1
+
+  for d in "${ovf_doc_id}" "${rich_doc_id}" "${org_doc_id}"; do
+    purge_document "${d}"
+  done
+  for t in ${seeded_tag_ids}; do
+    if curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/tag/${t}" >/dev/null 2>&1; then
+      echo "[cleanup] deleted tag ${t}" | tee -a "${art_dir}/checks.log"
+    else
+      echo "[cleanup] WARNING: could not delete tag ${t}" | tee -a "${art_dir}/checks.log"
+      cleanup_fail=$((cleanup_fail + 1))
+    fi
+  done
+  rm -f "${cookie_jar}"
+
+  # Never exit 0 when a check failed, a purge failed, or the run was interrupted (rc already
+  # non-zero) — any of those means this was not a clean, fully-cleaned pass.
+  if [ "${rc}" -eq 0 ] && { [ "${fail}" -ne 0 ] || [ "${cleanup_fail}" -ne 0 ]; }; then
+    rc=1
+  fi
+  if [ "${cleanup_fail}" -ne 0 ]; then
+    echo "== RESULT: FAIL — cleanup incomplete: ${cleanup_fail} seeded artifact(s) may remain (see ${art_dir}) ==" | tee -a "${art_dir}/checks.log" >&2
+  elif [ "${rc}" -ne 0 ]; then
+    echo "== RESULT: FAIL (exit ${rc}); seeded artifacts purged (see ${art_dir}) ==" | tee -a "${art_dir}/checks.log"
+  else
+    echo "== RESULT: all browser-harness checks passed; seeded artifacts purged (artifacts: ${art_dir}) ==" | tee -a "${art_dir}/checks.log"
+  fi
+  exit "${rc}"
+}
+# A trapped INT/TERM otherwise waits for the running foreground command, then leaves via the
+# default action WITHOUT running EXIT on some shells; make each one exit explicitly so the
+# EXIT trap (cleanup) always fires and purges.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap cleanup EXIT
 
 # Unique per-run token so reruns against a long-lived instance never collide.
 run_token="bh-$(date +%s)-$$"
 
-fail=0
 note() { echo "[$1] $2" | tee -a "${art_dir}/checks.log"; [ "$1" = "FAIL" ] && fail=1 || true; }
 
 echo "== Teedy browser-harness e2e against ${base_url} (run ${run_token}) ==" | tee "${art_dir}/checks.log"
@@ -112,10 +213,14 @@ json_field() { python3 -c "import sys,json;print(json.load(sys.stdin).get('$1','
 ovf_tag_ids=""
 ovf_tag_4=""
 ovf_tag_5=""
+# seeded_tag_ids (declared up top for the cleanup trap) accumulates every seeded tag id so
+# cleanup can delete each one. ovf_tag_ids instead carries the curl "-d tags=<id>" flags for
+# the document PUT and is unsuitable for iteration.
 for n in 1 2 3 4 5; do
   tid="$(api_put -d "name=${run_token}-ovf${n}&color=#2aabd2" "${base_url}/api/tag" | json_field id || true)"
   [ -z "${tid}" ] && note FAIL "seed: could not create overflow tag ${n}"
   ovf_tag_ids="${ovf_tag_ids} -d tags=${tid}"
+  [ -n "${tid}" ] && seeded_tag_ids="${seeded_tag_ids} ${tid}"
   [ "${n}" = "4" ] && ovf_tag_4="${tid}"
   [ "${n}" = "5" ] && ovf_tag_5="${tid}"
 done
@@ -381,19 +486,6 @@ for key, (ok, detail) in res.items():
 sys.exit(1 if bad else 0)
 PY
 
-# --- Cleanup: trash the documents this run created -----------------------------
-# Best-effort; every artifact is uniquely RUN-token stamped so a missed cleanup
-# never collides with a later run. The top-of-script cookie_jar admin session is
-# still valid (the harness never logs it out).
-for d in "${ovf_doc_id:-}" "${rich_doc_id:-}" "${org_doc_id:-}"; do
-  [ -n "${d}" ] || continue
-  curl -sf -b "${cookie_jar}" -X DELETE "${base_url}/api/document/${d}" >/dev/null 2>&1 \
-    && echo "[cleanup] trashed document ${d}" | tee -a "${art_dir}/checks.log" \
-    || echo "[cleanup] could not trash document ${d} (non-fatal)" | tee -a "${art_dir}/checks.log"
-done
-
-if [ "${fail}" -ne 0 ]; then
-  echo "== RESULT: FAIL (see ${art_dir}) =="
-  exit 1
-fi
-echo "== RESULT: all browser-harness checks passed (artifacts: ${art_dir}) =="
+# Cleanup (purge of every seeded document + tag) and the final RESULT line / exit code are
+# handled by the cleanup() EXIT trap registered near the top of this script, so they run on
+# EVERY exit path — including a signal after seeding — not only when control reaches here.

@@ -163,7 +163,12 @@ ws="${ws//\[::1\]/127.0.0.1}"
 echo "OK: Chrome DevTools at ${ws}"
 
 # --- 4. Run the harness against the booted app + attached Chrome -------------
+# This runner OWNS the target's disposability: it just booted a throwaway container from
+# ${image} on embedded H2 (step 2) and tears it down on exit (cleanup trap). That is exactly
+# the disposable instance the harness's E2E_ALLOW_SEED guard requires, so set the opt-in here.
+# A caller running the harness by hand against some other E2E_BASE_URL must set it themselves.
 echo "Running browser-harness smoke suite..."
 BU_NAME="harness-$$" BU_CDP_WS="${ws}" \
   E2E_BASE_URL="http://localhost:${host_port}" \
+  E2E_ALLOW_SEED=1 \
   bash "${repo_root}/scripts/e2e-browser-harness.sh"
