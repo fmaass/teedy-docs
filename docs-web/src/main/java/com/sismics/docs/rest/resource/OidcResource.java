@@ -226,6 +226,25 @@ public class OidcResource extends BaseResource {
         return key.defaultValue;
     }
 
+    /**
+     * The system-property-only override for the RP-initiated-logout {@code end_session_endpoint}.
+     * Deliberately NOT an {@link OidcKey}: it has no {@code T_CONFIG}/DB tier, no admin-UI surface,
+     * and no default. An operator sets it via a JVM property only, to force a specific
+     * end_session_endpoint (e.g. when discovery is unreachable or advertises none).
+     */
+    static final String END_SESSION_ENDPOINT_PROPERTY = "docs.oidc_end_session_endpoint";
+
+    /**
+     * Resolves a property-only override by its exact property name. This overload of the accessor
+     * exists so the {@link #END_SESSION_ENDPOINT_PROPERTY} read stays inside the single accessor
+     * chokepoint whitelisted by {@link com.sismics.docs.rest.resource.TestOidcAccessorGuard}; a bare
+     * property read elsewhere would fail that guard. Property-only means no DB tier and no default,
+     * so it returns the raw property value or null when unset.
+     */
+    private static String resolveEffective(String propertyName) {
+        return System.getProperty(propertyName);
+    }
+
     /** The effective source tier of a key, so the admin UI can hint "currently from JVM property". */
     static String oidcConfigSource(OidcKey key) {
         ConfigDao configDao = new ConfigDao();
@@ -249,14 +268,25 @@ public class OidcResource extends BaseResource {
      */
     static final class OidcConfigSnapshot {
         private final Map<OidcKey, String> values;
+        private final String endSessionEndpointOverride;
 
-        private OidcConfigSnapshot(Map<OidcKey, String> values) {
+        private OidcConfigSnapshot(Map<OidcKey, String> values, String endSessionEndpointOverride) {
             this.values = values;
+            this.endSessionEndpointOverride = endSessionEndpointOverride;
         }
 
         /** The snapshotted effective value for a key (null when unset with no default). */
         String get(OidcKey key) {
             return values.get(key);
+        }
+
+        /**
+         * The system-property-only {@code end_session_endpoint} override for this request (null
+         * when unset), snapshotted alongside the keyed values so logout composes from ONE atomic
+         * snapshot — the same-snapshot invariant {@link #resolveLogoutUrl(String)} relies on.
+         */
+        String endSessionEndpointOverride() {
+            return endSessionEndpointOverride;
         }
 
         boolean enabled() {
@@ -292,8 +322,9 @@ public class OidcResource extends BaseResource {
      * atomic query (a single {@code SELECT ... WHERE CFG_ID_C IN (...)}), so the snapshot cannot be
      * torn by a save that commits between two per-key reads — every DB value in the snapshot is from
      * the same committed instant. The property/default tiers are then applied per key via the single
-     * {@link #resolveEffective} chokepoint. Every subsequent read in the request uses this immutable
-     * snapshot.
+     * {@link #resolveEffective(OidcKey, String)} chokepoint, and the property-only
+     * {@link #END_SESSION_ENDPOINT_PROPERTY} override is resolved once (via the same chokepoint) into
+     * the snapshot. Every subsequent read in the request uses this immutable snapshot.
      */
     static OidcConfigSnapshot snapshot() {
         Map<ConfigType, String> dbValues = readOidcConfigRows();
@@ -301,7 +332,7 @@ public class OidcResource extends BaseResource {
         for (OidcKey key : OidcKey.values()) {
             values.put(key, resolveEffective(key, dbValues.get(key.configType())));
         }
-        return new OidcConfigSnapshot(values);
+        return new OidcConfigSnapshot(values, resolveEffective(END_SESSION_ENDPOINT_PROPERTY));
     }
 
     /**
@@ -922,7 +953,7 @@ public class OidcResource extends BaseResource {
      * Normalizes a raw claim into a username stem truncated to {@code budget} characters. The
      * hash-suffix path passes the hash-reserved budget; the verbatim path
      * ({@link #sanitizeUsernameVerbatim(String)}) passes the FULL {@link #USERNAME_MAX_LENGTH}
-     * so the sanitized {@code preferred_username} is used at its full length (Codex B4).
+     * so the sanitized {@code preferred_username} is used at its full length.
      *
      * @param raw Raw claim value (may contain {@code @ /} whitespace, Unicode — Core §5.1)
      * @param budget Maximum stem length to keep
@@ -1416,19 +1447,26 @@ public class OidcResource extends BaseResource {
 
     /**
      * Composes the full OIDC RP-initiated logout URL from ONE request snapshot (torn-read guard for
-     * the logout path): the enabled check, the {@code end_session_endpoint} resolution (via the
-     * snapshot's discovery cache key), and the {@code post_logout_redirect_uri} (from the snapshot's
-     * redirect URI) all read from the SAME snapshot, so a provider change landing mid-logout can
-     * never send the stored {@code id_token_hint} to one provider's endpoint with another provider's
-     * redirect. The stored token is additionally BOUND to its provider fingerprint, mirroring the
-     * callback validation: its {@code iss} must equal the current effective issuer AND its {@code aud}
-     * must contain the current client_id. If an admin switched the OIDC provider (or client
-     * registration) live since the login that minted this token, either half no longer matches and
-     * the method returns null (so provider A's token is never disclosed to provider B's endpoint).
-     * Returns null when OIDC is disabled, no id_token is stored, the stored token's issuer or
-     * audience does not match the current provider (or cannot be parsed), discovery has not been
-     * fetched, or the provider advertises no {@code end_session_endpoint} (the caller then omits
-     * the external logout redirect and just clears the local session).
+     * the logout path): the enabled check, the {@code end_session_endpoint} resolution (the
+     * system-property override or the snapshot's discovery), and the {@code post_logout_redirect_uri}
+     * (from the snapshot's redirect URI) all read from the SAME snapshot, so a provider change landing
+     * mid-logout can never send the stored {@code id_token_hint} to one provider's endpoint with
+     * another provider's redirect. The stored token is additionally BOUND to its provider fingerprint,
+     * mirroring the callback validation: its {@code iss} must equal the current effective issuer AND
+     * its {@code aud} must contain the current client_id. If an admin switched the OIDC provider (or
+     * client registration) live since the login that minted this token, either half no longer matches
+     * and the method returns null (so provider A's token is never disclosed to provider B's endpoint).
+     *
+     * <p>Fail-safe contract — every one of these returns null, and the caller then omits the external
+     * logout redirect and just clears the local session (no exception, no hang): OIDC is disabled; no
+     * id_token is stored; the stored token's issuer or audience does not match the current provider
+     * (or cannot be parsed); or no {@code end_session_endpoint} can be resolved. The endpoint is
+     * resolved via {@link #getEndSessionEndpoint(OidcConfigSnapshot)}, which honors the
+     * system-property-only {@link #END_SESSION_ENDPOINT_PROPERTY} override and otherwise fetches the
+     * provider's discovery document ON DEMAND when the cache is empty (the explicit-endpoints case);
+     * that fetch is bounded by the shared HTTP client's call timeout and fails open — a discovery
+     * outage, timeout, or a provider that advertises no {@code end_session_endpoint} yields null and
+     * degrades to local-only logout rather than blocking it.
      *
      * @param oidcIdToken The stored OIDC id_token to pass as {@code id_token_hint} (may be null)
      * @return The composed logout URL, or null when no OIDC logout redirect applies
@@ -1473,23 +1511,51 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Returns the {@code end_session_endpoint} from the cached discovery document for the SNAPSHOT's
-     * issuer, or null if OIDC is disabled (per the snapshot), discovery has not been fetched, or the
-     * provider does not advertise one. Reads the value-keyed discovery cache under the snapshot's
-     * discovery URL, so it is consistent with every other value that logout request uses.
+     * Resolves the {@code end_session_endpoint} for the SNAPSHOT's provider. Resolution order:
+     * <ol>
+     *   <li>OIDC disabled (per the snapshot) → null (no RP-initiated logout).</li>
+     *   <li>The system-property-only {@link #END_SESSION_ENDPOINT_PROPERTY} override, when set on the
+     *       snapshot → returned verbatim, WITHOUT any discovery fetch.</li>
+     *   <li>Otherwise the {@code end_session_endpoint} advertised by the provider's discovery
+     *       document, read from the value-keyed discovery cache under the snapshot's discovery URL.</li>
+     * </ol>
+     *
+     * <p>The discovery cache is populated lazily by the login/callback endpoint getters, each of
+     * which short-circuits when its endpoint is configured explicitly — so when an operator sets all
+     * four endpoints explicitly, no request ever fetches discovery and the cache stays empty (#156,
+     * reported in #155). To keep RP-initiated logout working in that configuration, a cache MISS here
+     * fetches discovery ON DEMAND (bounded by the shared {@link #httpClient}'s call timeout, which
+     * also validates the discovered issuer and populates the cache). The fetch FAILS OPEN: any
+     * failure, timeout, or absent {@code end_session_endpoint} returns null so the caller falls back
+     * to local logout — a discovery outage never throws and never blocks logout indefinitely.
      */
     static String getEndSessionEndpoint(OidcConfigSnapshot cfg) {
         try {
             if (!cfg.enabled()) {
                 return null;
             }
+            // A system-property override forces a specific endpoint and short-circuits discovery.
+            String override = cfg.endSessionEndpointOverride();
+            if (StringUtils.isNotBlank(override)) {
+                return override;
+            }
             String discoveryUrl = cfg.discoveryUrl();
-            JsonObject discovery = discoveryUrl == null ? null : discoveryCache.get(discoveryUrl);
+            if (discoveryUrl == null) {
+                return null;
+            }
+            JsonObject discovery = discoveryCache.get(discoveryUrl);
+            if (discovery == null) {
+                // Cache miss (all endpoints explicit ⇒ login/callback never fetched discovery):
+                // fetch on demand, bounded by the shared client's call timeout, so logout still
+                // reaches the IdP. getDiscovery validates the issuer and fills the cache.
+                discovery = new OidcResource().getDiscovery(cfg);
+            }
             if (discovery == null) {
                 return null;
             }
             return discovery.getString("end_session_endpoint", null);
         } catch (Exception e) {
+            // Fail open to local logout on ANY fetch failure/timeout: never throw, never hang.
             return null;
         }
     }
