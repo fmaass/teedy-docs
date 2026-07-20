@@ -186,6 +186,61 @@ redirected to after logout; when set it takes precedence over any OIDC
 logout URL from the provider's `end_session_endpoint`. If neither applies, no
 external redirect is performed.
 
+### Reaching the local login form (`?local=1`)
+
+When OIDC is enabled, the login page automatically redirects to your provider, so
+the local username/password form is not shown by default. Use the local form to
+sign in as the break-glass `admin`, use another local account, or log in while the
+provider is unavailable.
+
+There are two equivalent ways to reach it:
+
+* **The `?local=1` URL parameter.** Append `?local=1` to the login URL—for
+  example, `https://teedy.example.com/#/login?local=1`—to suppress the SSO
+  auto-redirect and show the local form. Any value works; `?local=1` is the
+  canonical form. The redirect is skipped whenever the `local` query parameter is
+  present. Bookmark this URL as your break-glass entry point.
+* **The "Use a local account" link.** When OIDC is enabled, a **Use a local
+  account** link appears beneath the login card. Selecting it sets `?local` and
+  reveals the username/password form without leaving the page. Local-only
+  installations show the form directly and do not need the link.
+
+The built-in `admin` account authenticates against the **local database** and is
+never routed through OIDC. A misconfigured or unreachable provider therefore
+cannot block local access. See [local login](#1-local-login).
+
+#### When SSO itself fails
+
+If the provider is unreachable, rejects the login, or the callback fails a
+security check, Teedy does **not** enter a redirect loop. The OIDC endpoint
+returns the browser to `/#/login?error=oidc`. When the login page sees the
+`error` parameter, it **suppresses the auto-redirect and shows the local form**
+with this notice:
+
+> Single sign-on failed. You can try again or sign in with a local account.
+
+From there, you can retry SSO or sign in locally. This fallback prevents a broken
+IdP from making the instance unreachable.
+
+#### Logging out really ends the SSO session
+
+Logout performs RP-initiated logout at the provider's `end_session_endpoint`
+(see [Logout](#logout) above). As a result, opening the login form with
+`?local=1` after logging out shows the form instead of silently signing you in
+again through a still-live provider session.
+
+Teedy resolves the endpoint from the provider's discovery document, which is
+fetched on demand with a bounded timeout. If discovery is unreachable, logout
+fails open to local-only logout. When all four OIDC endpoints are configured
+manually, you can set the endpoint explicitly with the
+`docs.oidc_end_session_endpoint` system property.
+
+> **Deferred follow-up — not yet available.** An operator-facing option to
+> disable the SSO auto-redirect entirely—always showing the local form, with an
+> explicit "Login with SSO" button as the only SSO entry point—is proposed but
+> not implemented today. Until then, `?local=1` and the **Use a local account**
+> link are the supported ways to reach the local form.
+
 ## 3. Header / reverse-proxy authentication
 
 Header-based auth is a **separate code path** from the OIDC client. A trusted
