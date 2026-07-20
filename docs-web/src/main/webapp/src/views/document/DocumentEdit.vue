@@ -724,6 +724,7 @@ async function onEmlSelected(event: Event) {
       <FileUpload
         ref="fileUploadRef"
         mode="advanced"
+        :chooseLabel="t('ui.choose')"
         multiple
         customUpload
         :showUploadButton="false"

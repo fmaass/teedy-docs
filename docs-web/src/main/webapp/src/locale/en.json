@@ -159,6 +159,7 @@
   "disabled": "Disabled",
   "create": "Create",
   "ui": {
+    "choose": "Choose",
     "documents": "Documents",
     "no_documents_match": "No documents match your filters",
     "no_documents_yet": "No documents yet",

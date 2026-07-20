@@ -159,6 +159,7 @@
   "disabled": "Deaktiviert",
   "create": "Erstellen",
   "ui": {
+    "choose": "Auswählen",
     "documents": "Dokumente",
     "no_documents_match": "Keine Dokumente entsprechen Ihren Filtern",
     "no_documents_yet": "Noch keine Dokumente",

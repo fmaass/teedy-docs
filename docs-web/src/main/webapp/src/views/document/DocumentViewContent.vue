@@ -782,6 +782,7 @@ function confirmDelete(file: { id: string; name: string | null }) {
       <FileUpload
         ref="fileUploadRef"
         mode="advanced"
+        :chooseLabel="t('ui.choose')"
         multiple
         customUpload
         auto

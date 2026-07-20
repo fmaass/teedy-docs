@@ -10,7 +10,11 @@
 //     every other locale, missing keys are reported as a non-fatal warning because
 //     vue-i18n resolves them through fallbackLocale:'en' at runtime.
 //
-// Expand STRICT_LOCALES as a locale is brought to full parity with a human translator.
+// #146: every shipped locale was brought to full en-parity (de by prior human work; the other ten —
+// el/es/fr/it/pl/pt/ru/sq_AL/zh_CN/zh_TW — via LLM translation, pending native-speaker review, see the
+// #146 follow-up issue) and is STRICT below. Consequence: a NEW en key must be translated to EVERY
+// locale or this check fails. If that per-change burden is unwanted, revert STRICT_LOCALES to ['de']
+// (the translations stay; they simply fall back to en at runtime until re-completed).
 // Run: npm run i18n:check
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -21,7 +25,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url))
 const localeDir = join(scriptDir, '..', 'src', 'locale')
 const srcDir = join(scriptDir, '..', 'src')
 const REFERENCE = 'en'
-const STRICT_LOCALES = ['de']
+const STRICT_LOCALES = ['de', 'el', 'es', 'fr', 'it', 'pl', 'pt', 'ru', 'sq_AL', 'zh_CN', 'zh_TW']
 
 // UNUSED-KEY guard (FE-01 hardening). After parity, the reference locale is scanned
 // against the app source so dead keys can't silently re-accumulate (the ~46% dead
