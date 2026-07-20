@@ -16,36 +16,59 @@
 // file changed, finds the sink line's new coordinate by matching the exact bytes of
 // the sink line (whitespace included).
 //
-// It REFUSES (nonzero exit, writes nothing) when it cannot remap safely:
-//   * 0 matches  -> the triaged sink line changed or was removed; re-triage required.
-//   * >1 matches -> ambiguous; the tool will not guess which copy is the sink.
-// Refusal is all-or-nothing: if ANY entry cannot be cleanly remapped, the whole run
-// fails and the baseline is left untouched (no partial writes).
+// Per-entry degradation (NOT all-or-nothing): each entry is judged independently.
+//   * A byte-identical single-match shift is remapped automatically.
+//   * An entry that cannot be remapped safely does NOT abort the run and does NOT
+//     block the entries that can. It is left UNCHANGED and reported for manual
+//     follow-up. The reasons an entry cannot auto-remap:
+//       - 0 matches  -> the triaged sink line changed or was removed; re-triage.
+//       - >1 matches -> ambiguous; the tool will not guess which copy is the sink.
+//       - the sink line was already non-unique at <old-rev> (cannot tell which copy
+//         the baseline referred to).
+//       - the id is malformed, or the file is absent at <old-rev> or in the tree.
+//   With --interactive, each such entry prompts for a new start line (validated to be
+//   byte-identical to the triaged sink) or is skipped; without it, they are skipped.
+//
+// The clean remaps are still written even when some entries were skipped. Exit 3
+// signals "some entries need manual follow-up" so CI/humans notice, while the safe
+// remaps have already landed.
 //
 // Usage:
-//   node scripts/refresh-codeql-baseline.mjs <old-rev> [--baseline <path>] [--root <dir>] [--dry-run]
+//   node scripts/refresh-codeql-baseline.mjs <old-rev> [--baseline <path>] [--root <dir>] [--dry-run] [--interactive]
 //
-//   <old-rev>    git revision to diff the working tree against (e.g. the tag/commit
-//                the current baseline coordinates were valid at).
-//   --baseline   baseline JSON (default .github/baselines/codeql-known.json).
-//   --root       repo root that entry URIs resolve against and that git runs in
-//                (default: current directory).
-//   --dry-run    report what would change; do not write.
+//   <old-rev>       git revision to diff the working tree against (e.g. the tag/commit
+//                   the current baseline coordinates were valid at).
+//   --baseline      baseline JSON (default .github/baselines/codeql-known.json).
+//   --root          repo root that entry URIs resolve against and that git runs in
+//                   (default: current directory).
+//   --dry-run       report what would change; do not write.
+//   --interactive   for each entry that cannot auto-remap, print a prompt and read ONE
+//                   line from stdin: a new start line (accepted only if byte-identical
+//                   to the triaged sink) or 's'/blank to skip. Prompts appear one at a
+//                   time (a piped answer per prompt works too, e.g. printf '456\ns\n').
 //
 // Run from the repository root.
+//
+// Exit codes:
+//   0  everything is up to date or was remapped cleanly; nothing needs manual work.
+//   2  a precondition/structural failure: missing or unresolvable <old-rev>, or an
+//      unreadable/invalid baseline. Distinct from the per-entry manual case below.
+//   3  one or more entries could not be auto-remapped and were skipped (or, under
+//      --interactive, left unresolved). Any clean remaps were still written.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 
 function parseArgs(argv) {
-  const opts = { oldRev: null, baseline: '.github/baselines/codeql-known.json', root: '.', dryRun: false };
+  const opts = { oldRev: null, baseline: '.github/baselines/codeql-known.json', root: '.', dryRun: false, interactive: false };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--baseline') opts.baseline = argv[++i];
     else if (a === '--root') opts.root = argv[++i];
     else if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--interactive') opts.interactive = true;
     else rest.push(a);
   }
   opts.oldRev = rest[0] || null;
@@ -57,7 +80,7 @@ function parseArgs(argv) {
 // trailing whitespace verbatim ("compare raw bytes including whitespace").
 function fileAtRev(root, rev, uri) {
   // Discard git's stderr: a missing path at <rev> is an expected condition the
-  // caller turns into a clean refusal, not raw "fatal:" noise on our output.
+  // caller turns into a clean skip, not raw "fatal:" noise on our output.
   return execFileSync('git', ['-C', root, 'show', `${rev}:${uri}`], {
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -66,6 +89,20 @@ function fileAtRev(root, rev, uri) {
 
 function currentFile(root, uri) {
   return readFileSync(join(root, uri)).toString('latin1');
+}
+
+// Whether <rev> resolves to a commit in the repo at <root>. Validated ONCE up front so
+// a typo'd or unavailable revision is a clear precondition error (exit 2) rather than
+// showing up as every entry "failing to read at <rev>" (which reads as manual, exit 3).
+function revExists(root, rev) {
+  try {
+    execFileSync('git', ['-C', root, 'rev-parse', '--verify', '--quiet', `${rev}^{commit}`], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Parse "<ruleId>@<uri>:<startLine>:<startColumn>". The ruleId may contain '/' but
@@ -80,13 +117,150 @@ function parseId(id) {
   return { ruleId, uri: m[1], line: Number(m[2]), col: Number(m[3]) };
 }
 
+// Judge a single entry against <old-rev>. Returns one of:
+//   { kind: 'unchanged' }
+//   { kind: 'remap', index, oldId, newId, uri, oldLine, newLine }
+//   { kind: 'manual', index, id, why, sinkLine, ruleId?, uri?, col?, newLines? }
+// A 'manual' verdict never aborts the run; the caller reports/skips it (or prompts).
+function evaluateEntry(findings, index, root, oldRev) {
+  const entry = findings[index];
+  const parsed = parseId(entry.id);
+  if (!parsed) {
+    return { kind: 'manual', index, id: entry.id, why: `id "${entry.id}" is not <ruleId>@<uri>:<line>:<col>`, sinkLine: null };
+  }
+  const { ruleId, uri, line: oldLine, col } = parsed;
+
+  let oldContent;
+  try {
+    oldContent = fileAtRev(root, oldRev, uri);
+  } catch {
+    return { kind: 'manual', index, id: entry.id, why: `cannot read ${uri} at ${oldRev} (file absent there?)`, sinkLine: null };
+  }
+  let newContent;
+  try {
+    newContent = currentFile(root, uri);
+  } catch {
+    return { kind: 'manual', index, id: entry.id, why: `cannot read current ${uri} (removed?)`, sinkLine: null };
+  }
+
+  if (oldContent === newContent) {
+    return { kind: 'unchanged' }; // file byte-identical -> coordinate still valid
+  }
+
+  const oldLines = oldContent.split('\n');
+  if (oldLine < 1 || oldLine > oldLines.length) {
+    return { kind: 'manual', index, id: entry.id, why: `startLine ${oldLine} is out of range for ${uri}@${oldRev}`, sinkLine: null };
+  }
+  const sinkLine = oldLines[oldLine - 1];
+  const newLines = newContent.split('\n');
+
+  // The sink line must be UNIQUE at <old-rev> too: if the old file already had a
+  // byte-identical twin, a single surviving current match may be that twin rather than
+  // the real (now-changed) sink, so remapping would baseline an unrelated line while
+  // the actually-changed finding goes undispositioned and slips the gate. Only
+  // auto-remap when the sink line is unique in BOTH the old and the new file.
+  const oldMatchCount = oldLines.reduce((n, l) => (l === sinkLine ? n + 1 : n), 0);
+  if (oldMatchCount > 1) {
+    return { kind: 'manual', index, id: entry.id, ruleId, uri, col, oldLine, newLines, sinkLine,
+      why: `sink line content is not unique at ${oldRev} (${oldMatchCount} identical lines in ${uri}) — cannot disambiguate which the baseline referred to` };
+  }
+
+  const matches = [];
+  for (let k = 0; k < newLines.length; k++) {
+    if (newLines[k] === sinkLine) matches.push(k + 1); // 1-based line numbers
+  }
+
+  if (matches.length === 0) {
+    return { kind: 'manual', index, id: entry.id, ruleId, uri, col, oldLine, newLines, sinkLine,
+      why: `sink line content not found in current ${uri} — the triaged line changed or was removed` };
+  }
+  if (matches.length > 1) {
+    return { kind: 'manual', index, id: entry.id, ruleId, uri, col, oldLine, newLines, sinkLine,
+      why: `sink line content matches ${matches.length} lines (${matches.join(', ')}) in current ${uri} — ambiguous` };
+  }
+
+  const newLine = matches[0];
+  if (newLine === oldLine) {
+    return { kind: 'unchanged' }; // sink did not move (change was elsewhere in the file)
+  }
+  return { kind: 'remap', index, oldId: entry.id, newId: `${ruleId}@${uri}:${newLine}:${col}`, uri, oldLine, newLine };
+}
+
+// Sleep synchronously — used only to avoid a busy spin while a TTY has no input yet.
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Read ONE line from stdin synchronously so each interactive prompt is shown and
+// answered one at a time (rather than reading the whole stream up front, which looks
+// hung at a TTY). Returns the line without its newline, or null at end of input.
+function readLineSync() {
+  const buf = Buffer.alloc(1);
+  let line = '';
+  let sawByte = false;
+  for (;;) {
+    let n;
+    try {
+      n = readSync(0, buf, 0, 1, null);
+    } catch (err) {
+      if (err.code === 'EAGAIN') { sleepMs(20); continue; } // TTY not ready yet
+      if (err.code === 'EOF') break;
+      throw err;
+    }
+    if (n === 0) break; // end of input
+    sawByte = true;
+    const ch = buf[0];
+    if (ch === 0x0a) return line; // newline terminates the line
+    if (ch === 0x0d) continue;    // ignore CR in CRLF input
+    line += String.fromCharCode(ch);
+  }
+  return sawByte ? line : null; // trailing unterminated line, or null at EOF
+}
+
+// Try to resolve one manual entry interactively. Returns a remap descriptor if the
+// answer is a valid byte-identical line, else null (skip).
+function resolveInteractively(manual) {
+  if (manual.sinkLine == null || !manual.newLines) {
+    process.stderr.write(`  ? ${manual.id}: ${manual.why}\n    (no recoverable sink content — skipping)\n`);
+    return null;
+  }
+  const candidates = manual.newLines
+    .map((l, k) => (l === manual.sinkLine ? k + 1 : null))
+    .filter((n) => n !== null);
+  process.stderr.write(
+    `  ? ${manual.id}: ${manual.why}\n` +
+    `    sink line: ${JSON.stringify(manual.sinkLine)}\n` +
+    `    matching lines in current file: ${candidates.length ? candidates.join(', ') : '(none)'}\n` +
+    `    enter new start line, or 's'/blank to skip: `,
+  );
+  const answer = (readLineSync() || '').trim();
+  if (answer === '' || answer.toLowerCase() === 's') {
+    process.stderr.write('    skipped.\n');
+    return null;
+  }
+  const line = Number(answer);
+  if (!Number.isInteger(line) || line < 1 || line > manual.newLines.length) {
+    process.stderr.write(`    "${answer}" is not a valid line in range — skipping.\n`);
+    return null;
+  }
+  if (manual.newLines[line - 1] !== manual.sinkLine) {
+    process.stderr.write(`    line ${line} is not byte-identical to the triaged sink — skipping.\n`);
+    return null;
+  }
+  return { index: manual.index, oldId: manual.id, newId: `${manual.ruleId}@${manual.uri}:${line}:${manual.col}`, uri: manual.uri, oldLine: manual.oldLine, newLine: line };
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.oldRev) {
-    console.error('Usage: node scripts/refresh-codeql-baseline.mjs <old-rev> [--baseline <path>] [--root <dir>] [--dry-run]');
+    console.error('Usage: node scripts/refresh-codeql-baseline.mjs <old-rev> [--baseline <path>] [--root <dir>] [--dry-run] [--interactive]');
     process.exit(2);
   }
   const root = resolve(opts.root);
+  if (!revExists(root, opts.oldRev)) {
+    console.error(`old-rev "${opts.oldRev}" does not resolve to a commit in ${root}`);
+    process.exit(2);
+  }
   const today = new Date().toISOString().slice(0, 10);
 
   let baseline;
@@ -102,113 +276,63 @@ function main() {
     process.exit(2);
   }
 
-  const refusals = [];
-  const remaps = []; // { index, oldId, newId, uri, oldLine, newLine }
+  const remaps = [];  // { index, oldId, newId, uri, oldLine, newLine }
+  const manuals = []; // entries that could not auto-remap
   let unchanged = 0;
 
   for (let i = 0; i < findings.length; i++) {
-    const entry = findings[i];
-    const parsed = parseId(entry.id);
-    if (!parsed) {
-      refusals.push(`finding ${i}: id "${entry.id}" is not <ruleId>@<uri>:<line>:<col>`);
-      continue;
-    }
-    const { ruleId, uri, line: oldLine, col } = parsed;
-
-    let oldContent;
-    try {
-      oldContent = fileAtRev(root, opts.oldRev, uri);
-    } catch {
-      refusals.push(`${entry.id}: cannot read ${uri} at ${opts.oldRev} (file absent there?) — re-triage required`);
-      continue;
-    }
-    let newContent;
-    try {
-      newContent = currentFile(root, uri);
-    } catch {
-      refusals.push(`${entry.id}: cannot read current ${uri} (removed?) — re-triage required`);
-      continue;
-    }
-
-    if (oldContent === newContent) {
-      unchanged++;
-      continue; // file byte-identical -> coordinate still valid, nothing to remap
-    }
-
-    const oldLines = oldContent.split('\n');
-    if (oldLine < 1 || oldLine > oldLines.length) {
-      refusals.push(`${entry.id}: startLine ${oldLine} is out of range for ${uri}@${opts.oldRev}`);
-      continue;
-    }
-    const sinkLine = oldLines[oldLine - 1];
-
-    // The sink line must be UNIQUE at <old-rev> as well: if the old file already had
-    // a byte-identical twin, a single surviving current match may be that twin rather
-    // than the real (now-changed) sink, so remapping would baseline an unrelated line
-    // while the actually-changed finding goes undispositioned and slips the gate.
-    // Only auto-remap when the sink line is unique in BOTH the old and the new file.
-    const oldMatchCount = oldLines.reduce((n, l) => (l === sinkLine ? n + 1 : n), 0);
-    if (oldMatchCount > 1) {
-      refusals.push(`${entry.id}: sink line content is not unique at ${opts.oldRev} (${oldMatchCount} identical lines in ${uri}) — cannot disambiguate which the baseline referred to; re-triage required`);
-      continue;
-    }
-
-    const newLines = newContent.split('\n');
-    const matches = [];
-    for (let k = 0; k < newLines.length; k++) {
-      if (newLines[k] === sinkLine) matches.push(k + 1); // 1-based line numbers
-    }
-
-    if (matches.length === 0) {
-      refusals.push(`${entry.id}: sink line content not found in current ${uri} — the triaged line changed or was removed; re-triage required`);
-      continue;
-    }
-    if (matches.length > 1) {
-      refusals.push(`${entry.id}: sink line content matches ${matches.length} lines (${matches.join(', ')}) in current ${uri} — ambiguous, refusing to guess`);
-      continue;
-    }
-
-    const newLine = matches[0];
-    // Belt-and-suspenders: the match is byte-identical by construction, but assert it.
-    if (newLines[newLine - 1] !== sinkLine) {
-      refusals.push(`${entry.id}: internal error, matched line ${newLine} is not byte-identical`);
-      continue;
-    }
-    if (newLine === oldLine) {
-      unchanged++;
-      continue; // sink did not move (change was elsewhere in the file)
-    }
-
-    const newId = `${ruleId}@${uri}:${newLine}:${col}`;
-    remaps.push({ index: i, oldId: entry.id, newId, uri, oldLine, newLine });
+    const verdict = evaluateEntry(findings, i, root, opts.oldRev);
+    if (verdict.kind === 'unchanged') unchanged++;
+    else if (verdict.kind === 'remap') remaps.push(verdict);
+    else manuals.push(verdict);
   }
 
-  if (refusals.length > 0) {
-    console.error('REFUSED — baseline left untouched:');
-    for (const r of refusals) console.error(`  ✖ ${r}`);
-    process.exit(1);
+  // Interactive resolution: give each manual entry one chance to be remapped by hand.
+  const stillManual = [];
+  if (opts.interactive && manuals.length > 0) {
+    process.stderr.write(`Resolving ${manuals.length} entr${manuals.length === 1 ? 'y' : 'ies'} that could not auto-remap:\n`);
+    for (const manual of manuals) {
+      const resolved = resolveInteractively(manual);
+      if (resolved) remaps.push(resolved);
+      else stillManual.push(manual);
+    }
+  } else {
+    stillManual.push(...manuals);
   }
 
-  if (remaps.length === 0) {
-    console.log(`No drift to remap (${unchanged} entr${unchanged === 1 ? 'y' : 'ies'} unchanged vs ${opts.oldRev}).`);
-    return;
-  }
-
+  // Apply the remaps (auto + interactively resolved) to the baseline object.
   for (const r of remaps) {
     const entry = findings[r.index];
     entry.id = r.newId;
     const note = ` Coordinates refreshed ${today}: sink shifted from line ${r.oldLine} to ${r.newLine} vs ${opts.oldRev}; content verified byte-identical.`;
     entry.reason = (entry.reason || '') + note;
-    console.log(`remap ${r.oldId}\n   -> ${r.newId}`);
   }
 
-  if (opts.dryRun) {
-    console.log(`\n[dry-run] ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'} would be remapped; not writing.`);
+  // Report.
+  for (const r of remaps) {
+    console.log(`remap ${r.oldId}\n   -> ${r.newId}`);
+  }
+  if (stillManual.length > 0) {
+    console.error(`\nMANUAL FOLLOW-UP NEEDED — ${stillManual.length} entr${stillManual.length === 1 ? 'y' : 'ies'} left unchanged:`);
+    for (const m of stillManual) console.error(`  ! ${m.id}: ${m.why}`);
+  }
+
+  if (remaps.length === 0 && stillManual.length === 0) {
+    console.log(`No drift to remap (${unchanged} entr${unchanged === 1 ? 'y' : 'ies'} unchanged vs ${opts.oldRev}).`);
     return;
   }
 
-  writeFileSync(opts.baseline, JSON.stringify(baseline, null, 2) + '\n');
-  console.log(`\nRemapped ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'}; wrote ${opts.baseline}.`);
+  if (opts.dryRun) {
+    console.log(`\n[dry-run] ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'} would be remapped; ${stillManual.length} need manual follow-up; not writing.`);
+  } else if (remaps.length > 0) {
+    writeFileSync(opts.baseline, JSON.stringify(baseline, null, 2) + '\n');
+    console.log(`\nRemapped ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'}; wrote ${opts.baseline}.${stillManual.length ? ` ${stillManual.length} still need manual follow-up.` : ''}`);
+  } else {
+    console.log(`\nNothing to write; ${stillManual.length} entr${stillManual.length === 1 ? 'y' : 'ies'} need manual follow-up.`);
+  }
+
+  // Exit 3 when any entry still needs a human; the clean remaps have already landed.
+  if (stillManual.length > 0) process.exit(3);
 }
 
 main();

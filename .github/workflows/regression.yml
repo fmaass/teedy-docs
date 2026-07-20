@@ -136,6 +136,102 @@ jobs:
       - name: Gate new high-severity CodeQL findings
         run: python3 scripts/codeql-gate.py "${{ runner.temp }}/codeql-sarif"
 
+  codeql-expiry:
+    # Reminder MONITOR for the CodeQL triage baseline's re-triage deadline. It warns
+    # (a workflow annotation + a tracking issue) while the earliest `expires` date in
+    # .github/baselines/codeql-known.json is inside the lead window, so the re-triage
+    # is planned work rather than a surprise red `codeql` gate on the expiry date. The
+    # `codeql` gate above is what actually enforces expiry.
+    #
+    # Failure policy is deliberate and split:
+    #   * The countdown itself never reds the build — an approaching or past expiry is a
+    #     warning, and the issue-filing mechanics are wrapped in continue-on-error so a
+    #     transient GitHub API failure (rate limit, issues disabled, blip) can never red
+    #     this monitor.
+    #   * A STRUCTURAL problem in the baseline (unreadable/invalid JSON, an entry with no
+    #     or a malformed `expires`) is a real config error, so the check step is allowed
+    #     to fail loudly (checker exit 2) — that is not the countdown path.
+    runs-on: ubuntu-latest
+    needs: [resolve-ref]
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.ref }}
+
+      # A malformed baseline (checker exit 2) is a genuine config error and is allowed to
+      # fail this step; an approaching/past expiry is exit 0 with a status output.
+      - name: Check CodeQL baseline expiry
+        id: check
+        run: python3 scripts/check-codeql-expiry.py --lead-days 45
+
+      # continue-on-error: the annotation from the step above has already landed; a GitHub
+      # API failure while filing the reminder issue must never red the build.
+      - name: Open or update the re-triage reminder issue
+        if: steps.check.outputs.status == 'warn' || steps.check.outputs.status == 'expired'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATUS: ${{ steps.check.outputs.status }}
+          MIN_EXPIRY: ${{ steps.check.outputs.min_expiry }}
+          DAYS_REMAINING: ${{ steps.check.outputs.days_remaining }}
+          SUMMARY: ${{ steps.check.outputs.summary }}
+        run: |
+          set -euo pipefail
+
+          LABEL="codeql-retriage-due"
+
+          # Ensure the tracking label exists (idempotent; tolerate "already exists").
+          gh label create "${LABEL}" \
+            --color FBCA04 \
+            --description "Automated: the CodeQL triage baseline is nearing or past its re-triage deadline" \
+            --repo "${REPO}" 2>/dev/null || true
+
+          DATE_UTC="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
+          BODY_FILE="$(mktemp)"
+          cat > "${BODY_FILE}" <<EOF
+          ${SUMMARY}
+
+          - **Earliest baseline expiry:** \`${MIN_EXPIRY}\`
+          - **Days remaining:** ${DAYS_REMAINING}
+          - **Checked:** ${DATE_UTC} — ${RUN_URL}
+
+          On the expiry date, \`scripts/codeql-gate.py\` fails every build until each entry
+          in \`.github/baselines/codeql-known.json\` is re-triaged. Re-verify that each
+          entry's compensating control still holds and update its \`expires\` date (rather
+          than blanket-extending the dates), then close this issue.
+
+          _Filed automatically by the \`Scheduled Regression\` workflow. Subsequent checks
+          comment on this issue rather than opening a duplicate._
+          EOF
+
+          # DE-DUP: comment on an existing open reminder rather than opening a new one.
+          existing="$(gh issue list \
+            --repo "${REPO}" \
+            --label "${LABEL}" \
+            --state open \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${existing}" ]; then
+            echo "Open ${LABEL} issue #${existing} exists — commenting instead of opening a duplicate."
+            gh issue comment "${existing}" --repo "${REPO}" --body-file "${BODY_FILE}"
+          else
+            echo "No open ${LABEL} issue — opening a new one."
+            gh issue create \
+              --repo "${REPO}" \
+              --title "CodeQL triage baseline re-triage due — expires ${MIN_EXPIRY}" \
+              --label "${LABEL}" \
+              --body-file "${BODY_FILE}"
+          fi
+
   trivy-fs:
     runs-on: ubuntu-latest
     needs: [resolve-ref]
