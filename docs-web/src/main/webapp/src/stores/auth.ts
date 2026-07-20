@@ -78,6 +78,16 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       user.value = null
       initialized.value = false
+      // #147 follow-up: fetchCurrentUser applies the SERVER's dark-mode preference as a live class on
+      // <html> without writing it to localStorage. Logout is an SPA route change with no page reload,
+      // so that class would otherwise survive the session and the next account to log in on a shared
+      // browser would inherit the previous user's theme. Reset to this device's own explicit choice,
+      // using exactly the boot rule in main.ts (dark only when the stored value is the string 'true'),
+      // so a device that never chose keeps the light default.
+      document.documentElement.classList.toggle(
+        'dark-mode',
+        localStorage.getItem('teedy-dark-mode') === 'true',
+      )
     }
     return logoutUrl
   }
