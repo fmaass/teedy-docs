@@ -12,25 +12,42 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Changed
 
-- Duplicate-detection master key (`DOCS_DEDUP_MASTER_KEY` / `DOCS_DEDUP_MASTER_KEY_FILE`) now requires an
-  explicit encoding prefix — `hex:<hex>` (e.g. `hex:$(openssl rand -hex 32)`) or `base64:<base64>`. A bare,
-  unprefixed value is ambiguous (a hex string is also valid base64 and decodes differently) and is rejected,
-  leaving duplicate detection off. The feature remains off by default (#160).
-
 ### Fixed
-
-- Inbox import no longer fails on a message that has no `From` header (or an empty/non-Internet sender
-  address): such a message is imported and attributed to the unknown-sender (admin) fallback (#150, #160).
-- A standalone (orphan) file attached to a document now has its duplicate-detection content MAC computed on
-  the attach path, so it participates in duplicate detection immediately instead of only after the periodic
-  backfill (#150, #160).
 
 ### Security
 
-- Inbox import no longer issues a generic folder-wide IMAP `EXPUNGE` on servers that lack `UIDPLUS` unless the
-  operator has explicitly acknowledged (`INBOX_DEDICATED_FOLDER`) that the import folder is dedicated to Teedy.
-  This prevents finalizing another IMAP client's `\Deleted` messages; without the acknowledgement the expunge
-  is skipped and the messages are receipt-deduped on the next cycle (#150).
+## [3.7.1] - 2026-07-21
+
+A patch release with one additive database migration (`db.version` 58 → 59) that re-runs cleanly.
+
+### Added
+
+- In-app file preview: opening a document or file now shows it inside the app, using web-size rendering for images, the built-in PDF viewer, extracted text where available, and an explicit "preview unavailable" state otherwise. Only controls labelled Download fetch the original file (#144).
+- Crash-safe file processing: a durable per-file completion marker and startup reconciliation service re-derive a file's text extraction, search-index entry, thumbnail and automatic tags if a hard shutdown interrupts processing after an upload is saved. Replays never send a duplicate webhook. Recovery covers first-time post-upload processing; migration 059 (#159).
+- The local login path is now documented, including the `?local=1` parameter, the "Use a local account" link, and behavior when the identity provider is unreachable (#157).
+- The optional `docs.oidc_end_session_endpoint` system property pins the OIDC logout endpoint for deployments that avoid outbound discovery (#156).
+- The inbox settings endpoint now accepts an optional `dedicatedFolder` acknowledgement, required before the import will issue a folder-wide expunge on servers without UIDPLUS (#150, #160).
+
+### Changed
+
+- The German interface now uses natural, informal German across the settings, admin and dialog prose (about 75 strings). The i18n parity check now also enforces balanced HTML markup in every locale (#149).
+- The duplicate-detection master key now requires an explicit encoding prefix: `hex:<hex>` or `base64:<base64>`. A bare value is ambiguous and is rejected, leaving the feature off (#160).
+- CodeQL baseline lifecycle: triaged alerts are dismissed with the baseline's own reasons, a nightly job warns before triage expiry, the refresh tool degrades per entry instead of refusing the whole baseline, and a pre-push gate detects when a code change moves a triaged line (#138, #158).
+
+### Fixed
+
+- Uploads with an RFC 5987 `filename*` header no longer have their already-decoded name corrupted by the filename repair introduced for mojibake plain filenames (#148).
+- OIDC logout now reaches the provider's `end_session_endpoint` even when all four endpoints are configured explicitly. The discovery document is fetched on demand with a bounded timeout, falling back to local-only logout on any failure (#156, reported in #155).
+- Inbox import no longer fails on a message without a `From` header; it uses the unknown-sender fallback (#150, #160).
+- A standalone file attached to a document now gets its duplicate-detection MAC computed immediately on attach instead of waiting for the periodic backfill (#150, #160).
+- A guard test now reports a verdict instead of crashing with a NullPointerException when a javadoc ends in a parenthesized construct (#161).
+
+### Security
+
+- The destructive browser test harness now refuses to run without an explicit opt-in acknowledging a disposable target, and purges everything it seeds — including from the recycle bin — even when interrupted (#154).
+- Inbox import no longer issues a generic folder-wide IMAP `EXPUNGE` on servers without `UIDPLUS` unless the operator has acknowledged that the folder is dedicated (#150).
+- Dependency updates: axios 1.18.1 (GHSA-gcfj-64vw-6mp9) and the importer's transitive js-yaml 3.15.0 (CVE-2026-59869).
+- The two published security advisories now list 3.7.0 as the patched version (#153).
 
 ## [3.7.0] - 2026-07-20
 
@@ -350,7 +367,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...HEAD
+[3.7.1]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/fmaass/teedy-docs/compare/v3.6.7...v3.7.0
 [3.6.7]: https://github.com/fmaass/teedy-docs/compare/v3.6.6...v3.6.7
 [3.6.6]: https://github.com/fmaass/teedy-docs/compare/v3.6.5...v3.6.6
