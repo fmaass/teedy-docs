@@ -496,7 +496,7 @@ public class FileDao {
      */
     public List<File> getByVersionId(String versionId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        TypedQuery<File> q = em.createQuery("select f from File f where f.versionId = :versionId and f.deleteDate is null order by f.order asc", File.class);
+        TypedQuery<File> q = em.createQuery("select f from File f where f.versionId = :versionId and f.deleteDate is null order by f.order asc, f.version asc", File.class);
         q.setParameter("versionId", versionId);
         return q.getResultList();
     }
