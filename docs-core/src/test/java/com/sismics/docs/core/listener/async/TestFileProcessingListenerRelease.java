@@ -40,7 +40,7 @@ public class TestFileProcessingListenerRelease extends BaseTest {
     /** Listener whose file-processing body throws an Error — the hardest case for the release finally. */
     private static final class ErrorThrowingListener extends FileProcessingAsyncListener {
         @Override
-        protected void processFile(FileEvent event, boolean isFileCreated) {
+        protected FileProcessingOutcome processFile(FileEvent event, boolean isFileCreated) {
             throw new AssertionError("injected processing failure");
         }
     }

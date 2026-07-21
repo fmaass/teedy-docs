@@ -10,6 +10,7 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.listener.async.*;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.service.ContentMacBackfillService;
+import com.sismics.docs.core.service.FileReconciliationService;
 import com.sismics.docs.core.service.FileService;
 import com.sismics.docs.core.service.FileSizeService;
 import com.sismics.docs.core.service.InboxService;
@@ -120,6 +121,11 @@ public class AppContext {
     private ContentMacBackfillService contentMacBackfillService;
 
     /**
+     * File reconciliation service (#159): replays lost post-upload processing on startup.
+     */
+    private FileReconciliationService fileReconciliationService;
+
+    /**
      * Trash purge service.
      */
     private TrashPurgeService trashPurgeService;
@@ -218,6 +224,24 @@ public class AppContext {
             }
         }
 
+        // Start the file reconciliation service (#159). It is registered AFTER resetEventBus() (so the
+        // processing + webhook listeners exist) and AFTER the indexing handler started (its replays write
+        // the index). Like the backfill above it SELF-COMPLETES — it stops as soon as no active file remains
+        // unprocessed (immediately on a clean corpus where the migration stamped every legacy row) — so it
+        // can reach TERMINATED before awaitRunning() observes RUNNING. Tolerate exactly that benign self-stop
+        // (TERMINATED/STOPPING) while still propagating a genuine startup failure; runOneIteration() catches
+        // every Throwable, so it can never enter FAILED on its own.
+        fileReconciliationService = new FileReconciliationService();
+        fileReconciliationService.startAsync();
+        try {
+            fileReconciliationService.awaitRunning();
+        } catch (IllegalStateException e) {
+            Service.State state = fileReconciliationService.state();
+            if (state != Service.State.TERMINATED && state != Service.State.STOPPING) {
+                throw e;
+            }
+        }
+
         // Start trash purge service
         trashPurgeService = new TrashPurgeService();
         trashPurgeService.startAsync();
@@ -275,6 +299,19 @@ public class AppContext {
         mailEventBus.register(new PasswordLostAsyncListener());
         mailEventBus.register(new RouteStepValidateAsyncListener());
         mailEventBus.register(new RouteStepRejectedAsyncListener());
+    }
+
+    /**
+     * Returns the current application context WITHOUT constructing one — {@code null} when the singleton has
+     * not been built yet or has been cleared by {@link #shutDown()}. A background service that must not
+     * resurrect a torn-down context during shutdown (the file reconciliation service, #159) posts through
+     * this accessor and drops its work when it returns null, rather than through {@link #getInstance()},
+     * which would rebuild (and leak) a fresh context.
+     *
+     * @return the current context, or null if none is published
+     */
+    public static AppContext peekInstance() {
+        return instance;
     }
 
     /**
@@ -454,6 +491,28 @@ public class AppContext {
     }
 
     public void shutDown() {
+        // Stop the file reconciliation service FIRST and AWAIT its termination, before the async executors
+        // and the index shut down (#159). It ENQUEUES replay events onto those executors and its replays
+        // write the index, so stopping it after them would risk a rejected enqueue onto a closing executor
+        // or a write to a closed index. requestStop() sets a stop flag the running iteration checks between
+        // steps (so it stops promptly and drops any pending enqueue rather than posting into a closing
+        // executor) and interrupts a thread blocked in a decrypt. This reverses the historical order, which
+        // shut the executors/index before the backfill services.
+        if (fileReconciliationService != null) {
+            fileReconciliationService.requestStop();
+            try {
+                fileReconciliationService.awaitTerminated(1, TimeUnit.MINUTES);
+            } catch (java.util.concurrent.TimeoutException e) {
+                // An iteration outlived the grace period. Fail LOUDLY — the stop flag still fences its
+                // post/getInstance so it cannot corrupt state, but a stuck decrypt is worth surfacing.
+                log.error("The file reconciliation service did not terminate within the shutdown grace period; "
+                        + "an iteration is still running (its enqueue is fenced off, but investigate the stall)", e);
+            } catch (Exception e) {
+                // A FAILED-state service surfaces its cause here; log it and continue shutting down.
+                log.error("The file reconciliation service did not terminate cleanly during shutdown", e);
+            }
+        }
+
         for (ExecutorService executor : asyncExecutorList) {
             // Shutdown executor, don't accept any more tasks (can cause error with nested events)
             try {

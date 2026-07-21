@@ -221,16 +221,16 @@ public class LuceneIndexingHandler implements IndexingHandler {
     }
 
     @Override
-    public void createFile(final File file) {
-        handle(indexWriter -> {
+    public boolean createFile(final File file) {
+        return handle(indexWriter -> {
             org.apache.lucene.document.Document luceneDocument = getDocumentFromFile(file);
             indexWriter.addDocument(luceneDocument);
         });
     }
 
     @Override
-    public void updateFile(final File file) {
-        handle(indexWriter -> {
+    public boolean updateFile(final File file) {
+        return handle(indexWriter -> {
             org.apache.lucene.document.Document luceneDocument = getDocumentFromFile(file);
             indexWriter.updateDocument(new Term("id", file.getId()), luceneDocument);
         });
@@ -247,6 +247,27 @@ public class LuceneIndexingHandler implements IndexingHandler {
     @Override
     public void deleteDocument(final String id) {
         handle(indexWriter -> indexWriter.deleteDocuments(new Term("id", id)));
+    }
+
+    /**
+     * Count the index entries carrying a given id. Test support (#159): a keyed {@link #updateFile} write
+     * leaves exactly one entry however many times it runs, whereas an append-only {@link #createFile} would
+     * accumulate one per call — this lets a test prove the processing pipeline's keyed write converges to a
+     * single doc rather than duplicating on a live-index / replay race.
+     *
+     * @param id File or document id
+     * @return the number of index entries with that id
+     */
+    int countIndexedDocuments(String id) {
+        DirectoryReader reader = getDirectoryReader();
+        if (reader == null) {
+            return 0;
+        }
+        try {
+            return new IndexSearcher(reader).count(new org.apache.lucene.search.TermQuery(new Term("id", id)));
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to count indexed documents for id " + id, e);
+        }
     }
 
     @Override
@@ -652,16 +673,24 @@ public class LuceneIndexingHandler implements IndexingHandler {
     }
 
     /**
-     * Encapsulate a process into a Lucene context.
+     * Encapsulate a process into a Lucene context, reporting whether the write durably committed.
+     *
+     * <p>Failures are still swallowed (logged, no rethrow) so a transient index error never aborts the
+     * caller's live work — but the boolean lets a caller that needs to record durable completion (the file
+     * processing pipeline, issue #159) distinguish a committed write from a swallowed failure, instead of
+     * marking a file processed whose index write silently failed.
      *
      * @param runnable Runnable
+     * @return true if the write committed, false if it failed and the commit was skipped
      */
-    private void handle(LuceneRunnable runnable) {
+    private boolean handle(LuceneRunnable runnable) {
         try {
             runnable.run(indexWriter);
             indexWriter.commit();
+            return true;
         } catch (Exception e) {
             log.error("Error in index writing, skipping commit", e);
+            return false;
         }
     }
 

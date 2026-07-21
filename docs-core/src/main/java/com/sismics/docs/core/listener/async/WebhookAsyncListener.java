@@ -78,12 +78,22 @@ public class WebhookAsyncListener {
     @Subscribe
     @AllowConcurrentEvents
     public void on(final FileCreatedAsyncEvent event) {
+        // A reconciliation replay (#159) re-fires the create event only to re-run lost processing; it is not
+        // a user-facing file event, so it must NOT emit a second FILE_CREATED notification. Only the
+        // reconciler sets this flag, so the live upload path is unchanged.
+        if (event.isReprocess()) {
+            return;
+        }
         triggerWebhook(WebhookEvent.FILE_CREATED, event.getFileId());
     }
 
     @Subscribe
     @AllowConcurrentEvents
     public void on(final FileUpdatedAsyncEvent event) {
+        // As above: a reconciliation replay must not emit a duplicate FILE_UPDATED notification.
+        if (event.isReprocess()) {
+            return;
+        }
         triggerWebhook(WebhookEvent.FILE_UPDATED, event.getFileId());
     }
 
