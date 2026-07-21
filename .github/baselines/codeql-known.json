@@ -2,6 +2,7 @@
   "schema": {
     "required": [
       "id",
+      "sink_line",
       "finding",
       "reason",
       "owner",
@@ -16,6 +17,7 @@
   "findings": [
     {
       "id": "java/command-line-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/VideoFormatHandler.java:36:48",
+      "sink_line": "    public boolean accept(String mimeType) {",
       "finding": "CodeQL command-line-injection: ffmpeg thumbnail invocation flagged as command-line injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -26,6 +28,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/EncryptionUtil.java:79:52",
+      "sink_line": "        try (InputStream is = Files.newInputStream(file)) {",
       "finding": "CodeQL path-injection: decrypt-to-temp stream open flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -36,6 +39,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:174:95",
+      "sink_line": "                try (OutputStream outputStream = new CipherOutputStream(Files.newOutputStream(webTemp), webCipher)) {",
       "finding": "CodeQL path-injection: raster web-size temp output stream flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -46,6 +50,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:178:95",
+      "sink_line": "                try (OutputStream outputStream = new CipherOutputStream(Files.newOutputStream(thumbTemp), thumbCipher)) {",
       "finding": "CodeQL path-injection: raster thumbnail temp output stream flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -56,6 +61,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:221:24",
+      "sink_line": "            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);",
       "finding": "CodeQL path-injection: atomic move of raster web temp to final path (source argument)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -66,6 +72,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:221:32",
+      "sink_line": "            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);",
       "finding": "CodeQL path-injection: atomic move of raster web temp to final path (target argument)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -76,6 +83,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:223:24",
+      "sink_line": "            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);",
       "finding": "CodeQL path-injection: atomic move of raster thumb temp to final path (source argument)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -86,6 +94,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:223:32",
+      "sink_line": "            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);",
       "finding": "CodeQL path-injection: atomic move of raster thumb temp to final path (target argument)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -96,6 +105,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/RasterGenerationUtil.java:257:34",
+      "sink_line": "            Files.deleteIfExists(path);",
       "finding": "CodeQL path-injection: cleanup delete of raster temp path flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -106,6 +116,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/DocxFormatHandler.java:63:69",
+      "sink_line": "                try (InputStream inputStream = Files.newInputStream(file);",
       "finding": "CodeQL path-injection: docx source stream open during PDF conversion flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
@@ -116,6 +127,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/OdtFormatHandler.java:63:69",
+      "sink_line": "                try (InputStream inputStream = Files.newInputStream(file);",
       "finding": "CodeQL path-injection: odt source stream open during PDF conversion flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
@@ -126,6 +138,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/PptxFormatHandler.java:75:65",
+      "sink_line": "            try (InputStream inputStream = Files.newInputStream(file)) {",
       "finding": "CodeQL path-injection: pptx source stream open flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -136,6 +149,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/PdfFormatHandler.java:43:61",
+      "sink_line": "        try (InputStream inputStream = Files.newInputStream(file);",
       "finding": "CodeQL path-injection: pdf source stream open for thumbnailing flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -146,6 +160,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/ImageFormatHandler.java:42:61",
+      "sink_line": "        try (InputStream inputStream = Files.newInputStream(file)) {",
       "finding": "CodeQL path-injection: image source stream open for thumbnailing flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -156,6 +171,7 @@
     },
     {
       "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/TextPlainFormatHandler.java:51:64",
+      "sink_line": "                String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);",
       "finding": "CodeQL path-injection: plain-text content read flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations.",
       "owner": "fmaass",
@@ -166,6 +182,7 @@
     },
     {
       "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:463:42",
+      "sink_line": "                    Files.deleteIfExists(unencryptedFile);",
       "finding": "CodeQL path-injection: cleanup delete of decrypted rotation temp flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical. Refreshed again 2026-07-19 after #143 shifted FileResource imports (+3 lines); sink content verified byte-identical. Refreshed again 2026-07-20 after the upload filename resolution change (#148) removed lines above these sinks (-5); sink content verified byte-identical and coordinates confirmed against the live alerts. Refreshed again 2026-07-21 after the dormant-subsystem hardening added lines to the attach path above these sinks (+7); sink content verified byte-identical at the new coordinates.",
       "owner": "fmaass",
@@ -176,6 +193,7 @@
     },
     {
       "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:628:34",
+      "sink_line": "            Files.deleteIfExists(unencryptedFile);",
       "finding": "CodeQL path-injection: cleanup delete of orphan decrypted temp flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical. Refreshed again 2026-07-19 after #143 shifted FileResource imports (+3 lines); sink content verified byte-identical. Refreshed again 2026-07-20 after the upload filename resolution change (#148) removed lines above these sinks (-5); sink content verified byte-identical and coordinates confirmed against the live alerts. Refreshed again 2026-07-21 after the dormant-subsystem hardening added lines to the attach path above these sinks (+7); sink content verified byte-identical at the new coordinates.",
       "owner": "fmaass",
@@ -186,6 +204,7 @@
     },
     {
       "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:918:31",
+      "sink_line": "            if (!Files.exists(storedFile)) {",
       "finding": "CodeQL path-injection: existence check on sized variant path flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical. Refreshed again 2026-07-19 after #143 shifted FileResource imports (+3 lines); sink content verified byte-identical. Refreshed again 2026-07-20 after the upload filename resolution change (#148) removed lines above these sinks (-5); sink content verified byte-identical and coordinates confirmed against the live alerts. Refreshed again 2026-07-21 after the dormant-subsystem hardening added lines to the attach path above these sinks (+7); sink content verified byte-identical at the new coordinates.",
       "owner": "fmaass",
@@ -196,6 +215,7 @@
     },
     {
       "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/FileResource.java:920:67",
+      "sink_line": "                    storedFile = Paths.get(getClass().getResource(\"/image/file-\" + size + \".png\").toURI());",
       "finding": "CodeQL path-injection: placeholder image classpath lookup flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-18: the version-contract change shifted lines in these files; sink content verified byte-identical at the new locations. Refreshed again 2026-07-18 after the page-operations endpoint shifted lines; sink content verified byte-identical. Refreshed again 2026-07-19 after #143 shifted FileResource imports (+3 lines); sink content verified byte-identical. Refreshed again 2026-07-20 after the upload filename resolution change (#148) removed lines above these sinks (-5); sink content verified byte-identical and coordinates confirmed against the live alerts. Refreshed again 2026-07-21 after the dormant-subsystem hardening added lines to the attach path above these sinks (+7); sink content verified byte-identical at the new coordinates.",
       "owner": "fmaass",
@@ -206,6 +226,7 @@
     },
     {
       "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/ThemeResource.java:211:37",
+      "sink_line": "            Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);",
       "finding": "CodeQL path-injection: theme image write flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -216,6 +237,7 @@
     },
     {
       "id": "java/polynomial-redos@docs-web-common/src/main/java/com/sismics/rest/util/ValidationUtil.java:101:36",
+      "sink_line": "        if (!EMAIL_PATTERN.matcher(s).matches()) {",
       "finding": "CodeQL polynomial-redos: email format regex flagged as polynomial ReDoS",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -226,6 +248,7 @@
     },
     {
       "id": "java/regex-injection@docs-core/src/main/java/com/sismics/docs/core/util/RegexRulePolicy.java:92:29",
+      "sink_line": "            Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);",
       "finding": "CodeQL regex-injection: shared policy admission compiles the rule pattern (relocated sink)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
@@ -236,12 +259,24 @@
     },
     {
       "id": "java/regex-injection@docs-core/src/main/java/com/sismics/docs/core/util/RegexRulePolicy.java:114:43",
+      "sink_line": "        Matcher matcher = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE)",
       "finding": "CodeQL regex-injection: shared policy evaluation compiles the rule pattern (relocated sink)",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
       "compensating_control": "The endpoints are ADMIN-only; patterns are syntax- and length-validated on admission (RegexRulePolicy.validate, max 1000 chars) and EVERY evaluation is bounded: content capped to the leading 512 KiB and a 2 s wall-clock deadline enforced from inside the match loop (deadline-checking CharSequence), with timeout treated as a fail-safe rule skip plus bounded once-per-rule logging. The java.util.regex engine is retained deliberately so historically authored rule semantics are preserved by construction.",
+      "removal_issue": "#104"
+    },
+    {
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/FileUtil.java:366:59",
+      "sink_line": "        try (InputStream plaintext = Files.newInputStream(plaintextFile)) {",
+      "finding": "CodeQL path-injection: reading the decrypted attach temp for the content MAC flagged as path injection",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "owner": "fmaass",
+      "introduced": "2026-07-21",
+      "expires": "2026-10-15",
+      "compensating_control": "The read Path is the decrypted plaintext temp produced by EncryptionUtil.decryptFile (FileResource.java:296), whose destination is created by FileService.createTemporaryFile() with NO argument — a fully server-generated, app-owned temp path with no user-controlled path component (stronger than the suffix-flow handler entries, where the uploaded filename flows into the temp-file suffix). The decryption source is a server-side UUID-keyed storage path (DirectoryUtil.getStorageDirectory().resolve(id)). No request-derived string participates in either path.",
       "removal_issue": "#104"
     }
   ]

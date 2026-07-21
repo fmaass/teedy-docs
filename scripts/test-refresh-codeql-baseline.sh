@@ -105,6 +105,17 @@ refute_id() {
   fi
 }
 
+assert_grep() {
+  local desc="$1" needle="$2" file="${3:-$repo/baseline.json}"
+  if grep -qF "$needle" "$file"; then
+    echo "ok   - $desc"
+    pass=$((pass + 1))
+  else
+    echo "FAIL - $desc (\"$needle\" not in $file)"
+    fail=$((fail + 1))
+  fi
+}
+
 # (a) DRIFT: insert 3 blank lines above the sink -> sink shifts 5 -> 8, content
 #     byte-identical -> remap, exit 0.
 write_canonical_sink
@@ -114,6 +125,7 @@ mv "$repo/src/Sink.java.tmp" "$repo/src/Sink.java"
 rc="$(run_tool)"
 expect_rc "byte-identical drift remaps (exit 0)" 0 "$rc"
 assert_id "drift remapped id to line 8" "java/path-injection@src/Sink.java:8:5"
+assert_grep "remap wrote the sink_line fingerprint" '"sink_line": "    Files.newInputStream(sinkPath);"'
 
 # (b) CHANGED CONTENT: edit the sink line's bytes in place -> old bytes absent ->
 #     cannot map -> skip-with-report (exit 3), baseline untouched.

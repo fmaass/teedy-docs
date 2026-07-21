@@ -7,6 +7,7 @@
 #   openapi.json          vs the JAX-RS resource annotations
 #   the locale JSONs      vs en.json's key set
 #   db.version (3 files)  vs the newest dbupdate-NNN migration
+#   codeql-known.json     vs the triaged sink lines (coordinate drift)
 #   poms + package.json   vs the release tag            (only with a tag argument)
 #
 # Drift in a mirror cannot fail a unit test, so without this it surfaces only in the push
@@ -54,6 +55,9 @@ run_gate "i18n key parity (locale JSONs vs en.json)" \
 
 run_gate "db.version parity (3 overlays vs newest migration)" \
   bash scripts/check-db-version.sh
+
+run_gate "CodeQL baseline drift (codeql-known.json coordinates vs triaged sink lines)" \
+  node scripts/check-codeql-baseline-drift.mjs
 
 if [ -n "$TAG" ]; then
   run_gate "version consistency (tag vs poms vs package.json)" \

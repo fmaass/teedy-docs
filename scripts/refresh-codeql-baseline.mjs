@@ -16,6 +16,11 @@
 // file changed, finds the sink line's new coordinate by matching the exact bytes of
 // the sink line (whitespace included).
 //
+// On every remap it also writes the matched sink line verbatim into the entry's
+// `sink_line` field -- the fingerprint the local pre-push drift gate
+// (scripts/check-codeql-baseline-drift.mjs) compares against. A remap whose fingerprint
+// cannot be established is refused (left unchanged) rather than written unverifiable.
+//
 // Per-entry degradation (NOT all-or-nothing): each entry is judged independently.
 //   * A byte-identical single-match shift is remapped automatically.
 //   * An entry that cannot be remapped safely does NOT abort the run and does NOT
@@ -183,7 +188,9 @@ function evaluateEntry(findings, index, root, oldRev) {
   if (newLine === oldLine) {
     return { kind: 'unchanged' }; // sink did not move (change was elsewhere in the file)
   }
-  return { kind: 'remap', index, oldId: entry.id, newId: `${ruleId}@${uri}:${newLine}:${col}`, uri, oldLine, newLine };
+  // sinkLine is the byte-identical matched content -> it is the fingerprint written
+  // alongside the new coordinate so the drift gate can verify it locally.
+  return { kind: 'remap', index, oldId: entry.id, newId: `${ruleId}@${uri}:${newLine}:${col}`, uri, oldLine, newLine, sinkLine };
 }
 
 // Sleep synchronously — used only to avoid a busy spin while a TTY has no input yet.
@@ -247,7 +254,7 @@ function resolveInteractively(manual) {
     process.stderr.write(`    line ${line} is not byte-identical to the triaged sink — skipping.\n`);
     return null;
   }
-  return { index: manual.index, oldId: manual.id, newId: `${manual.ruleId}@${manual.uri}:${line}:${manual.col}`, uri: manual.uri, oldLine: manual.oldLine, newLine: line };
+  return { index: manual.index, oldId: manual.id, newId: `${manual.ruleId}@${manual.uri}:${line}:${manual.col}`, uri: manual.uri, oldLine: manual.oldLine, newLine: line, sinkLine: manual.sinkLine };
 }
 
 function main() {
@@ -300,16 +307,31 @@ function main() {
     stillManual.push(...manuals);
   }
 
-  // Apply the remaps (auto + interactively resolved) to the baseline object.
+  // Refuse to write any remap whose fingerprint could not be established: the drift
+  // gate REQUIRES a sink_line, so writing a new coordinate without one would move the
+  // entry to an unverifiable state. In practice every remap carries the byte-identical
+  // matched content, so this only guards a future code path.
+  const applicable = [];
   for (const r of remaps) {
+    if (typeof r.sinkLine !== 'string') {
+      stillManual.push({ id: r.oldId, why: 'cannot establish the sink_line fingerprint for the new coordinate — left unchanged' });
+    } else {
+      applicable.push(r);
+    }
+  }
+
+  // Apply the remaps (auto + interactively resolved) to the baseline object, writing
+  // the new coordinate AND its sink_line fingerprint.
+  for (const r of applicable) {
     const entry = findings[r.index];
     entry.id = r.newId;
+    entry.sink_line = r.sinkLine;
     const note = ` Coordinates refreshed ${today}: sink shifted from line ${r.oldLine} to ${r.newLine} vs ${opts.oldRev}; content verified byte-identical.`;
     entry.reason = (entry.reason || '') + note;
   }
 
   // Report.
-  for (const r of remaps) {
+  for (const r of applicable) {
     console.log(`remap ${r.oldId}\n   -> ${r.newId}`);
   }
   if (stillManual.length > 0) {
@@ -317,16 +339,16 @@ function main() {
     for (const m of stillManual) console.error(`  ! ${m.id}: ${m.why}`);
   }
 
-  if (remaps.length === 0 && stillManual.length === 0) {
+  if (applicable.length === 0 && stillManual.length === 0) {
     console.log(`No drift to remap (${unchanged} entr${unchanged === 1 ? 'y' : 'ies'} unchanged vs ${opts.oldRev}).`);
     return;
   }
 
   if (opts.dryRun) {
-    console.log(`\n[dry-run] ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'} would be remapped; ${stillManual.length} need manual follow-up; not writing.`);
-  } else if (remaps.length > 0) {
+    console.log(`\n[dry-run] ${applicable.length} entr${applicable.length === 1 ? 'y' : 'ies'} would be remapped; ${stillManual.length} need manual follow-up; not writing.`);
+  } else if (applicable.length > 0) {
     writeFileSync(opts.baseline, JSON.stringify(baseline, null, 2) + '\n');
-    console.log(`\nRemapped ${remaps.length} entr${remaps.length === 1 ? 'y' : 'ies'}; wrote ${opts.baseline}.${stillManual.length ? ` ${stillManual.length} still need manual follow-up.` : ''}`);
+    console.log(`\nRemapped ${applicable.length} entr${applicable.length === 1 ? 'y' : 'ies'}; wrote ${opts.baseline}.${stillManual.length ? ` ${stillManual.length} still need manual follow-up.` : ''}`);
   } else {
     console.log(`\nNothing to write; ${stillManual.length} entr${stillManual.length === 1 ? 'y' : 'ies'} need manual follow-up.`);
   }
