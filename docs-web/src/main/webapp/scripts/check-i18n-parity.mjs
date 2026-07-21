@@ -115,25 +115,15 @@ function tagCounts(value) {
   return counts
 }
 
-// KNOWN_TAG_DEBT (tag-parity). Pre-existing markup loss in the native-review-pending
-// locales (the #146 follow-up above): each string below dropped en's markup together
-// with the *translated words it wrapped* — the "unread" word in `inbox.test_success`,
-// the whole "<strong>unread</strong> … <a>Gmail</a>/<a>Outlook.com</a>/<a>Yahoo</a>"
-// body in `inbox.message`. Restoring parity there needs the missing translation, not a
-// mechanical tag re-wrap, so it is deferred to native-speaker review rather than
-// fabricated here without the source translation. Listed per `${locale}::${key}` — NOT a
-// blanket skip — so the debt is enumerated in the output on every run (never silent) and
-// every other key/locale, German included, stays fully enforced. Prune an entry once
-// native review restores its markup.
-const KNOWN_TAG_DEBT = new Set([
-  'fr::settings.inbox.message',
-  'ru::settings.inbox.message',
-  'ru::settings.inbox.test_success',
-  'zh_CN::settings.inbox.message',
-  'zh_CN::settings.inbox.test_success',
-  'zh_TW::settings.inbox.message',
-  'zh_TW::settings.inbox.test_success',
-])
+// KNOWN_TAG_DEBT (tag-parity). Escape hatch for strings whose markup loss cannot be
+// repaired mechanically because the translated words the markup wrapped are missing —
+// restoring parity there needs the missing translation, deferred to native-speaker
+// review rather than fabricated here. Listed per `${locale}::${key}` — NOT a blanket
+// skip — so any debt is enumerated in the output on every run (never silent) and every
+// other key/locale stays fully enforced. Prune an entry once native review restores its
+// markup. Currently empty: the #146/#149 inbox-settings debt (fr/ru/zh_CN/zh_TW) was
+// retired when the full translations landed.
+const KNOWN_TAG_DEBT = new Set([])
 
 const referenceFlat = loadFlat(REFERENCE)
 const referenceKeys = new Set(Object.keys(referenceFlat))
