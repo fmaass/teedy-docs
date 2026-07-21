@@ -175,21 +175,30 @@ public class FileProcessingAsyncListener {
                 return;
             }
 
-            // Fence the WRITES, not just the completion stamp: a stale reconciliation claimant past its lease
-            // (already reclaimed by a successor) or a live listener racing an active replay must NOT overwrite
-            // the current owner's content/index. Ownership is by the claim token, NOT by the processed marker:
-            //  - replay path: the row's token must still equal ours. A reclaim writes a NEW token and a
-            //    completion clears it to null, so a stale claimant's token no longer matches and is fenced out
-            //    — this alone covers "wrote after a successor completed", without a processed check.
-            //  - live path (no token): the row must be UNCLAIMED. This blocks racing an active reconciler
-            //    claim, yet still lets a legitimate live re-index (attach / manual reprocess of an
-            //    already-processed file) proceed — keying the fence on the processed marker would wrongly
-            //    block that, since the marker is one-shot while those obligations recur.
+            // Fence the WRITES, not just the completion stamp, so a stale reconciliation claimant past its
+            // lease (already reclaimed by a successor) or a live listener racing an active replay cannot
+            // overwrite the current owner's content/index. The gate is by event PROVENANCE:
+            //  - replay (has a token): the row's token must still equal ours. A reclaim writes a NEW token and
+            //    a completion clears it to null, so a stale claimant no longer matches and is fenced out.
+            //  - first-time live create (FileCreatedAsyncEvent, no token): token IS NULL AND processed IS
+            //    NULL. This event must NEVER write over completed state — the exploit it closes is a paused
+            //    live create resuming after a reconciler replay completed (token cleared to null) and
+            //    clobbering the recovered content with a stale/failed extraction.
+            //  - recurring live obligation (FileUpdatedAsyncEvent from attach / manual reprocess, no token):
+            //    token IS NULL only, so a legitimate re-index of an already-processed file still works. This
+            //    weaker arm is only reachable by a FileUpdatedAsyncEvent (isFileCreated == false); a stale
+            //    first-processing listener is always a FileCreatedAsyncEvent (isFileCreated == true) and can
+            //    never reach it.
             // The DB gate runs BEFORE the index write, so a fenced-out worker touches neither store.
             String myToken = event.getProcessingToken();
-            boolean owns = myToken == null
-                    ? freshFile.getProcessingToken() == null
-                    : myToken.equals(freshFile.getProcessingToken());
+            boolean owns;
+            if (myToken != null) {
+                owns = myToken.equals(freshFile.getProcessingToken());
+            } else if (isFileCreated) {
+                owns = freshFile.getProcessingToken() == null && freshFile.getProcessed() == null;
+            } else {
+                owns = freshFile.getProcessingToken() == null;
+            }
             if (!owns) {
                 fencedOut.set(true);
                 return;

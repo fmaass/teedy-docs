@@ -3,6 +3,7 @@ package com.sismics.docs.core.listener.async;
 import com.sismics.docs.BaseTransactionalTest;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.event.FileCreatedAsyncEvent;
+import com.sismics.docs.core.event.FileUpdatedAsyncEvent;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
@@ -153,6 +154,77 @@ public class TestFileProcessingCompletion extends BaseTransactionalTest {
                     "the stale claimant must NOT overwrite the successor's completed content");
         } finally {
             Files.deleteIfExists(evil);
+        }
+    }
+
+    private void setContent(String fileId, String content) {
+        ThreadLocalContext.get().getEntityManager()
+                .createNativeQuery("update T_FILE set FIL_CONTENT_C = :c where FIL_ID_C = :id")
+                .setParameter("c", content)
+                .setParameter("id", fileId)
+                .executeUpdate();
+    }
+
+    @Test
+    public void firstCreateEventCannotOverwriteCompletedContent() throws Exception {
+        User user = createUser("proc_create_" + UUID.randomUUID().toString().substring(0, 8));
+        String fileId = createOrphanTextFile(user);
+        FileDao fileDao = new FileDao();
+
+        // A successor (reconciler replay) already completed: it wrote good content and stamped the marker,
+        // clearing its token. So the row is processed with token == null.
+        Date now = fileDao.getDatabaseTime();
+        fileDao.claimForReprocess(fileId, "successor-token", now, new Date(now.getTime() - 60_000));
+        setContent(fileId, "recovered-content");
+        fileDao.markProcessedIfClaimant(fileId, "successor-token", fileDao.getDatabaseTime());
+        ThreadLocalContext.get().getEntityManager().clear();
+
+        // A PAUSED first-time live create (FileCreatedAsyncEvent, no token) resumes with a stale extraction.
+        // Because it is a first-processing event it must fence on token IS NULL AND processed IS NULL, so the
+        // set marker blocks it — it cannot clobber the recovered content.
+        Path stale = Files.createTempFile("recon-stale-", ".txt");
+        Files.write(stale, "stale-content".getBytes(StandardCharsets.UTF_8));
+        try {
+            FileProcessingOutcome outcome = new IndexResultListener(true).processFile(eventFor(fileId, stale), true);
+
+            Assertions.assertEquals(FileProcessingOutcome.RETRYABLE_FAILURE, outcome,
+                    "a fenced-out first-create event does nothing and reports retryable");
+            Assertions.assertEquals("recovered-content", refetch(fileId).getContent(),
+                    "a resumed first-create event must NOT overwrite a successor's completed content");
+        } finally {
+            Files.deleteIfExists(stale);
+        }
+    }
+
+    @Test
+    public void recurringUpdateEventReindexesMarkedFile() throws Exception {
+        User user = createUser("proc_update_" + UUID.randomUUID().toString().substring(0, 8));
+        String fileId = createOrphanTextFile(user);
+        FileDao fileDao = new FileDao();
+
+        // The file is already processed (marked) with old content, unclaimed.
+        setContent(fileId, "old-content");
+        fileDao.markProcessedIfUnclaimed(fileId, fileDao.getDatabaseTime());
+        ThreadLocalContext.get().getEntityManager().clear();
+
+        // A recurring live obligation (attach / manual reprocess) is a FileUpdatedAsyncEvent (isFileCreated
+        // false, no token). It must still re-index an already-marked file — the weaker token-IS-NULL fence.
+        Path fresh = Files.createTempFile("recon-fresh-", ".txt");
+        Files.write(fresh, "new-content".getBytes(StandardCharsets.UTF_8));
+        try {
+            FileUpdatedAsyncEvent update = new FileUpdatedAsyncEvent();
+            update.setUserId("ignored");
+            update.setFileId(fileId);
+            update.setLanguage("eng");
+            update.setUnencryptedFile(fresh);
+
+            FileProcessingOutcome outcome = new IndexResultListener(true).processFile(update, false);
+
+            Assertions.assertEquals(FileProcessingOutcome.COMPLETE, outcome, "a recurring re-index completes");
+            Assertions.assertEquals("new-content", refetch(fileId).getContent(),
+                    "a recurring update event must re-index (re-write) an already-marked file");
+        } finally {
+            Files.deleteIfExists(fresh);
         }
     }
 
