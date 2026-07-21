@@ -16,10 +16,10 @@
   "identity_scheme": "<ruleId>@<artifact uri>:<startLine>:<startColumn> of the result's primary location (one-to-one with code-scanning alerts; line shifts in flagged files require a deliberate baseline update)",
   "findings": [
     {
-      "id": "java/command-line-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/VideoFormatHandler.java:36:48",
-      "sink_line": "    public boolean accept(String mimeType) {",
+      "id": "java/command-line-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/VideoFormatHandler.java:45:48",
+      "sink_line": "        ProcessBuilder pb = new ProcessBuilder(result);",
       "finding": "CodeQL command-line-injection: ffmpeg thumbnail invocation flagged as command-line injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-21: three video-handler refactors had moved the sink from line 36 to line 45 without a remap (the entry was a stale suppression); sink content verified byte-identical at the new coordinate against the live scan finding.",
       "owner": "fmaass",
       "introduced": "2026-07-15",
       "expires": "2026-10-15",
