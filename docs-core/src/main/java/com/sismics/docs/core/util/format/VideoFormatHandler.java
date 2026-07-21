@@ -61,13 +61,19 @@ public class VideoFormatHandler implements FormatHandler {
         ProcessBuilder pb = new ProcessBuilder(result);
         Process process;
         try {
-            process = pb.start();
+            process = startProcess(pb);
         } catch (IOException e) {
-            // The mediainfo binary is unavailable: like an unsupported format, there is simply no extractor
-            // for this deployment, so no metadata is a LEGITIMATE resting state (not a recoverable loss).
-            // Return null so the pipeline treats it as terminal-empty rather than retrying it forever (#159).
-            log.warn("mediainfo is not available; skipping video metadata extraction for {}", file, e);
-            return null;
+            // Only a DETERMINATE "executable not found" is a legitimate no-extractor resting state (like an
+            // unsupported format), returned as terminal-empty. The JVM reports a missing program as ENOENT —
+            // "error=2" in the IOException message ("Cannot run program \"mediainfo\": error=2, ..."). Any
+            // OTHER spawn failure (a permission error, a resource limit) may be transient, so surface it as a
+            // recoverable failure rather than silently indexing the video empty and stamping it complete (#159).
+            String message = e.getMessage();
+            if (message != null && message.contains("error=2")) {
+                log.warn("mediainfo is not installed; skipping video metadata extraction for {}", file, e);
+                return null;
+            }
+            throw e;
         }
 
         // Consume the process error stream
@@ -80,6 +86,18 @@ public class VideoFormatHandler implements FormatHandler {
         try (InputStream is = process.getInputStream()) {
             return new String(ByteStreams.toByteArray(is), StandardCharsets.UTF_8);
         }
+    }
+
+    /**
+     * Start the mediainfo process. Package-private so a test can drive the spawn-failure classification (a
+     * determinate ENOENT vs. any other IOException) without depending on the host's installed binaries.
+     *
+     * @param pb Configured process builder
+     * @return the started process
+     * @throws IOException if the process cannot be started
+     */
+    Process startProcess(ProcessBuilder pb) throws IOException {
+        return pb.start();
     }
 
     @Override
