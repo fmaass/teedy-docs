@@ -302,6 +302,19 @@ public class AppContext {
     }
 
     /**
+     * Returns the current application context WITHOUT constructing one — {@code null} when the singleton has
+     * not been built yet or has been cleared by {@link #shutDown()}. A background service that must not
+     * resurrect a torn-down context during shutdown (the file reconciliation service, #159) posts through
+     * this accessor and drops its work when it returns null, rather than through {@link #getInstance()},
+     * which would rebuild (and leak) a fresh context.
+     *
+     * @return the current context, or null if none is published
+     */
+    public static AppContext peekInstance() {
+        return instance;
+    }
+
+    /**
      * Returns a single instance of the application context.
      *
      * @return Application context

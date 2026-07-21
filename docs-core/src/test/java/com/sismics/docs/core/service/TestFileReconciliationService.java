@@ -6,6 +6,7 @@ import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.event.FileCreatedAsyncEvent;
 import com.sismics.docs.core.event.FileEvent;
+import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.DirectoryUtil;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -194,6 +196,107 @@ public class TestFileReconciliationService extends BaseTest {
         Assertions.assertEquals(0, counters.enqueued, "and it must not enqueue");
         Assertions.assertNull(readFile(fileId).getProcessed(),
                 "the row is left unprocessed (retryable) so a later cycle recovers it");
+    }
+
+    // --- blocker 2: indeterminate blob presence is RETRYABLE, not a terminal missing blob -------------
+
+    /**
+     * A transient filesystem failure makes {@code Files.exists} return false without proving the blob is
+     * gone. That INDETERMINATE case must be retryable, not terminal. Mutation proof: treating indeterminate
+     * as a missing blob terminal-stamps the row and this test fails.
+     */
+    @Test
+    public void indeterminateBlobPresenceIsRetryableNotTerminal() throws Exception {
+        String userId = createUserId();
+        String fileId = createFileRow(userId);
+
+        FileReconciliationService service = new FileReconciliationService() {
+            @Override
+            BlobPresence blobPresence(Path storedFile) {
+                return BlobPresence.INDETERMINATE;
+            }
+
+            @Override
+            boolean postReprocessEvent(FileEvent event) {
+                throw new AssertionError("an indeterminate blob must not enqueue");
+            }
+        };
+        FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
+        service.reconcileFile(readFile(fileId), counters);
+
+        Assertions.assertEquals(0, counters.terminalSkipped,
+                "an indeterminate blob presence must NOT terminal-skip the row");
+        Assertions.assertNull(readFile(fileId).getProcessed(),
+                "the row is left unprocessed (retryable) so a later cycle recovers it");
+    }
+
+    // --- blocker 4: an Error after decrypt must not strand the decrypted plaintext temp ---------------
+
+    /**
+     * The per-step catches are Exception-scoped; an Error during the language lookup would otherwise unwind
+     * to the iteration's Throwable catch and strand the decrypted plaintext. A try/finally deletes the temp
+     * on every exit unless it was handed off to a successful enqueue. Mutation proof: reverting to the
+     * Exception-scoped cleanup leaves the temp on disk and this test fails.
+     */
+    @Test
+    public void errorAfterDecryptLeavesNoPlaintextTemp() throws Exception {
+        String userId = createUserId();
+        String fileId = createFileRow(userId);
+        Files.write(DirectoryUtil.getStorageDirectory().resolve(fileId), new byte[]{1, 2, 3, 4});
+        Path plaintext = Files.createTempFile("recon-error-", ".tmp");
+        Files.write(plaintext, "secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        try {
+            FileReconciliationService service = new FileReconciliationService() {
+                @Override
+                Path decrypt(Path storedFile, String privateKey) {
+                    return plaintext;
+                }
+
+                @Override
+                String fetchLanguage(String documentId) {
+                    throw new AssertionError("simulated Error (not an Exception) after decrypt");
+                }
+            };
+            FileReconciliationService.IterationCounters counters = new FileReconciliationService.IterationCounters();
+
+            Assertions.assertThrows(Error.class, () -> service.reconcileFile(readFile(fileId), counters),
+                    "the Error propagates out of reconcileFile");
+            Assertions.assertFalse(Files.exists(plaintext),
+                    "the decrypted plaintext temp must be deleted even when an Error unwinds through the method");
+        } finally {
+            Files.deleteIfExists(plaintext);
+            Files.deleteIfExists(DirectoryUtil.getStorageDirectory().resolve(fileId));
+            FileUtil.endProcessingFile(fileId);
+        }
+    }
+
+    // --- blocker 5: a post after teardown drops via peekInstance, never resurrecting a context ---------
+
+    /**
+     * The pause-across-teardown timing: an iteration observed {@code stopping==false}, paused, and resumed
+     * after shutdown cleared the singleton. The post must resolve the context via the NON-instantiating
+     * accessor, see null, and drop — never call the constructing getInstance() and rebuild a context.
+     * Mutation proof: using getInstance() rebuilds a context (peekInstance becomes non-null) and returns
+     * posted=true, so both the drop and the no-resurrection assertions fail.
+     */
+    @Test
+    public void pausedPostAfterTeardownDropsAndDoesNotResurrectContext() {
+        AppContext existing = AppContext.peekInstance();
+        if (existing != null) {
+            existing.shutDown();
+        }
+        Assertions.assertNull(AppContext.peekInstance(), "precondition: the singleton is torn down");
+
+        FileReconciliationService service = new FileReconciliationService();
+        FileCreatedAsyncEvent event = new FileCreatedAsyncEvent();
+        event.setFileId("post-after-teardown");
+        boolean posted = service.postReprocessEvent(event);
+
+        Assertions.assertFalse(posted, "a post after teardown is dropped, not sent");
+        Assertions.assertEquals(1, service.getPostsDroppedOnShutdown(), "the drop is counted");
+        Assertions.assertNull(AppContext.peekInstance(),
+                "the reconciler must NOT resurrect a context during shutdown");
     }
 
     // --- shutdown: a pending enqueue is dropped (counted) and never resurrects a torn-down context -----

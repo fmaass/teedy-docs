@@ -276,15 +276,24 @@ public class FileReconciliationService extends AbstractScheduledService {
             return;
         }
         Path storedFile = DirectoryUtil.getStorageDirectory().resolve(fileId);
-        if (!Files.exists(storedFile)) {
+        // Distinguish DETERMINATE absence from an INDETERMINATE result: a transient mount/permission failure
+        // also makes exists() return false. Only a determinate "not there" is terminal; an indeterminate
+        // result is retryable, so a transient filesystem glitch cannot permanently exclude a recoverable file.
+        BlobPresence presence = blobPresence(storedFile);
+        if (presence == BlobPresence.ABSENT) {
             terminalSkip(fileId, token);
             counters.terminalSkipped++;
-            log.warn("File {} blob is missing; marking it terminally skipped", fileId);
+            log.warn("File {} blob is determinately missing; marking it terminally skipped", fileId);
+            return;
+        }
+        if (presence == BlobPresence.INDETERMINATE) {
+            log.warn("File {} blob presence is indeterminate (transient filesystem failure?); leaving it to a "
+                    + "later cycle", fileId);
             return;
         }
         Path unencryptedFile;
         try {
-            unencryptedFile = EncryptionUtil.decryptFile(storedFile, user.getPrivateKey());
+            unencryptedFile = decrypt(storedFile, user.getPrivateKey());
         } catch (Exception e) {
             terminalSkip(fileId, token);
             counters.terminalSkipped++;
@@ -292,68 +301,133 @@ public class FileReconciliationService extends AbstractScheduledService {
             return;
         }
 
-        // Language lookup is a transient-failure-sensitive DB read; on failure clean up the decrypted temp
-        // (never leak plaintext) and retry later — it is NOT a terminal cause.
-        String language;
+        // From here a decrypted plaintext temp exists and is OWNED by this method until it is handed off to a
+        // SUCCESSFUL enqueue (after which the async listener's processEvent finally owns it). Delete it — and
+        // release the in-memory processing marker — in a finally on EVERY other exit, INCLUDING an Error: the
+        // per-step catches below are Exception-scoped, so without this finally an Error in the language lookup
+        // or enqueue would unwind to the iteration's Throwable catch and strand the decrypted plaintext.
+        boolean marked = false;
+        boolean handedOff = false;
         try {
-            language = fetchLanguage(claim.documentId);
-        } catch (Exception e) {
-            FileUtil.deleteTempGuarded(fileId, unencryptedFile);
-            log.warn("File {} language lookup failed transiently; leaving it to a later cycle", fileId, e);
-            return;
-        }
+            String language;
+            try {
+                language = fetchLanguage(claim.documentId);
+            } catch (Exception e) {
+                log.warn("File {} language lookup failed transiently; leaving it to a later cycle", fileId, e);
+                return;
+            }
 
-        // Enqueue the reprocess replay. A post failure or a shutdown-drop is NOT terminal (the lease expires
-        // and a later cycle retries); release the in-memory marker + temp we took ownership of.
-        FileUtil.startProcessingFile(fileId);
-        FileCreatedAsyncEvent event = new FileCreatedAsyncEvent();
-        event.setUserId(claim.userId);
-        event.setLanguage(language);
-        event.setFileId(fileId);
-        event.setUnencryptedFile(unencryptedFile);
-        event.setReprocess(true);
-        event.setProcessingToken(token);
-        boolean posted;
-        try {
-            posted = postReprocessEvent(event);
-        } catch (Exception e) {
-            log.error("Failed to enqueue the reprocess event for file {}; the lease will expire and retry", fileId, e);
-            FileUtil.endProcessingFile(fileId);
-            FileUtil.deleteTempGuarded(fileId, unencryptedFile);
-            return;
-        }
-        if (posted) {
-            counters.enqueued++;
-        } else {
-            // Dropped because shutdown began between the checks above and the post: clean up and let the
-            // lease expire.
-            FileUtil.endProcessingFile(fileId);
-            FileUtil.deleteTempGuarded(fileId, unencryptedFile);
+            FileUtil.startProcessingFile(fileId);
+            marked = true;
+            FileCreatedAsyncEvent event = new FileCreatedAsyncEvent();
+            event.setUserId(claim.userId);
+            event.setLanguage(language);
+            event.setFileId(fileId);
+            event.setUnencryptedFile(unencryptedFile);
+            event.setReprocess(true);
+            event.setProcessingToken(token);
+            boolean posted;
+            try {
+                posted = postReprocessEvent(event);
+            } catch (Exception e) {
+                log.error("Failed to enqueue the reprocess event for file {}; the lease will expire and retry", fileId, e);
+                return;
+            }
+            if (posted) {
+                // Handed off: the async listener's processEvent finally now owns the marker + temp.
+                handedOff = true;
+                counters.enqueued++;
+            }
+            // posted == false is a shutdown-drop: not handed off, so the finally releases the marker + temp.
+        } finally {
+            if (!handedOff) {
+                if (marked) {
+                    FileUtil.endProcessingFile(fileId);
+                }
+                FileUtil.deleteTempGuarded(fileId, unencryptedFile);
+            }
         }
     }
 
     /**
-     * Post the reprocess event onto the async bus, or drop it if shutdown has begun. The shutdown guard is
-     * the single choke point that touches {@link AppContext#getInstance()}: checking {@link #stopping} FIRST
-     * ensures a slow iteration resuming during shutdown never posts into a closing executor (which
-     * CallerRunsPolicy would silently discard while we counted it enqueued) and never calls
-     * {@code getInstance()} after the singleton was cleared, resurrecting a fresh context. Package-private so
-     * a test can intercept it. The event carries {@code reprocess=true}, so the processing listener takes the
-     * keyed index write and records completion fenced to the claim token, while the webhook listener skips
-     * the duplicate notification.
+     * Post the reprocess event onto the async bus, or drop it if shutdown has begun. Two guards, in order:
+     * the {@link #stopping} flag is a fast-path drop, and — closing the check/use race where an iteration
+     * observes {@code stopping==false}, pauses, and resumes after teardown cleared the singleton — the post
+     * resolves the context through the NON-instantiating {@link AppContext#peekInstance()} and drops when it
+     * is null. It therefore never calls the constructing {@code getInstance()}, so it can neither post into a
+     * closing executor (which CallerRunsPolicy would silently discard while we counted it enqueued) nor
+     * resurrect a fresh context. Package-private so a test can intercept it. The event carries {@code
+     * reprocess=true}, so the processing listener takes the keyed index write and records completion fenced to
+     * the claim token, while the webhook listener skips the duplicate notification.
      *
      * @param event The reprocess event
      * @return true if the event was posted, false if it was dropped because shutdown was in progress
      */
     boolean postReprocessEvent(FileEvent event) {
         if (stopping) {
-            postsDroppedOnShutdown.incrementAndGet();
-            log.warn("Shutdown in progress; dropping the reprocess enqueue for file {} (lease will expire and retry)",
-                    event.getFileId());
-            return false;
+            return dropOnShutdown(event);
         }
-        AppContext.getInstance().getAsyncEventBus().post(event);
+        AppContext context = AppContext.peekInstance();
+        if (context == null) {
+            // The singleton was torn down after our stopping check; drop rather than reconstruct a context.
+            return dropOnShutdown(event);
+        }
+        context.getAsyncEventBus().post(event);
         return true;
+    }
+
+    /**
+     * Count and log a reprocess enqueue dropped because shutdown was in progress.
+     *
+     * @param event The dropped event
+     * @return false, always (the caller propagates "not posted")
+     */
+    private boolean dropOnShutdown(FileEvent event) {
+        postsDroppedOnShutdown.incrementAndGet();
+        log.warn("Shutdown in progress; dropping the reprocess enqueue for file {} (lease will expire and retry)",
+                event.getFileId());
+        return false;
+    }
+
+    /**
+     * The three-valued presence of a stored blob. {@link #INDETERMINATE} is the case a plain
+     * {@code Files.exists} collapses into "false": the filesystem could not decide (a transient mount or
+     * permission failure), which must be treated as retryable, not as a terminal missing blob.
+     */
+    enum BlobPresence {
+        PRESENT,
+        ABSENT,
+        INDETERMINATE
+    }
+
+    /**
+     * Resolve the tri-state presence of a stored blob. Package-private so a test can inject the
+     * INDETERMINATE case (which is otherwise hard to provoke deterministically).
+     *
+     * @param storedFile Stored blob path
+     * @return PRESENT, ABSENT (determinate), or INDETERMINATE (undecidable — transient failure)
+     */
+    BlobPresence blobPresence(Path storedFile) {
+        if (Files.exists(storedFile)) {
+            return BlobPresence.PRESENT;
+        }
+        if (Files.notExists(storedFile)) {
+            return BlobPresence.ABSENT;
+        }
+        return BlobPresence.INDETERMINATE;
+    }
+
+    /**
+     * Decrypt the stored blob to a plaintext temp. Package-private so a test can control the temp path and
+     * drive the ownership/cleanup paths (including an Error after decrypt).
+     *
+     * @param storedFile Stored (encrypted) blob path
+     * @param privateKey Owner private key
+     * @return the decrypted plaintext temp
+     * @throws Exception on a decryption failure
+     */
+    Path decrypt(Path storedFile, String privateKey) throws Exception {
+        return EncryptionUtil.decryptFile(storedFile, privateKey);
     }
 
     /**
