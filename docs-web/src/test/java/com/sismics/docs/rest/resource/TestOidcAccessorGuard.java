@@ -110,6 +110,60 @@ public class TestOidcAccessorGuard {
                         + withoutWhitelist);
     }
 
+    /**
+     * Regression for issue #161: a whitelisted accessor whose javadoc ends with a {@code word(...)}
+     * construct — and no {@code ;}/{@code &#123;}/{@code &#125;} between that prose and the method
+     * body — must still resolve to its enclosing accessor method, so the legitimate read is exempt
+     * and produces NO violation. Before the fix the enclosing-method regex bridged from the javadoc
+     * {@code word(...)} across the comment boundary into the real signature, resolved null, and the
+     * subsequent {@code List.of(...).contains(null)} threw NPE (build crash). The trigger javadoc is
+     * exactly the innocuous shape that forced a real-world javadoc rewording workaround.
+     */
+    @Test
+    public void parserResolvesWhitelistedReadDespiteJavadocParenConstruct() {
+        String source = ""
+                + "package com.sismics.docs.rest.resource;\n"
+                + "class OidcResource {\n"
+                + "    /**\n"
+                + "     * Resolves a property-only override, mirroring resolveEffective(key) semantics\n"
+                + "     */\n"
+                + "    private static String resolveEffective(String propertyName) {\n"
+                + "        return System.getProperty(propertyName);\n"
+                + "    }\n"
+                + "}\n";
+        List<String> violations = new ArrayList<>();
+        scanSource("OidcResource.java", source, true, violations);
+        Assertions.assertTrue(violations.isEmpty(),
+                "a whitelisted accessor read must remain exempt even when the preceding javadoc "
+                        + "contains a word(...) construct; got: " + violations);
+    }
+
+    /**
+     * Negative control for issue #161: the comment-masking fix must NOT weaken the guard. A bare
+     * {@code docs.oidc_*} read in a NON-accessor method of the accessor file (its javadoc also
+     * carries a {@code word(...)} construct) must still be flagged — the enclosing method resolves,
+     * is not in the whitelist, and the read is reported.
+     */
+    @Test
+    public void guardStillFlagsBareReadOutsideAWhitelistedMethod() {
+        String source = ""
+                + "package com.sismics.docs.rest.resource;\n"
+                + "class OidcResource {\n"
+                + "    /**\n"
+                + "     * Some helper, see relatedThing(arg) for the wider contract\n"
+                + "     */\n"
+                + "    private static String notAnAccessor() {\n"
+                + "        return System.getProperty(\"docs.oidc_issuer\");\n"
+                + "    }\n"
+                + "}\n";
+        List<String> violations = new ArrayList<>();
+        scanSource("OidcResource.java", source, true, violations);
+        Assertions.assertFalse(violations.isEmpty(),
+                "a docs.oidc_* read outside any whitelisted accessor method must still be flagged");
+        Assertions.assertTrue(violations.stream().anyMatch(v -> v.contains("docs.oidc_issuer")),
+                "the flagged violation must name the offending read; got: " + violations);
+    }
+
     private static List<String> scanAllRoots(boolean applyWhitelist) throws IOException {
         List<String> violations = new ArrayList<>();
         for (Path root : mainJavaRoots()) {
@@ -125,10 +179,19 @@ public class TestOidcAccessorGuard {
     private static void scanFile(Path file, boolean applyWhitelist, List<String> violations)
             throws IOException {
         String source = Files.readString(file, StandardCharsets.UTF_8);
+        scanSource(file.getFileName().toString(), source, applyWhitelist, violations);
+    }
+
+    /**
+     * Scans a single source unit (the file's name and full text). Extracted from {@link #scanFile}
+     * so the parser — in particular the enclosing-method resolution the accessor whitelist depends
+     * on — is exercisable against synthetic source in a unit test, without materializing a file.
+     */
+    static void scanSource(String fileName, String source, boolean applyWhitelist,
+            List<String> violations) {
         if (!source.contains("System.getProperty") && !source.contains("System . getProperty")) {
             return;
         }
-        String fileName = file.getFileName().toString();
         boolean authClass = AUTH_CLASS_FILES.contains(fileName);
         byte[] states = lexStates(source);
         Matcher m = GET_PROPERTY.matcher(source);
@@ -142,9 +205,18 @@ public class TestOidcAccessorGuard {
             String argument = source.substring(openParen + 1, argEnd);
 
             // Whitelist: the EXACT accessor location — the accessor file AND an accessor method.
-            if (applyWhitelist && fileName.equals(ACCESSOR_FILE)
-                    && ACCESSOR_METHODS.contains(enclosingMethod(source, states, m.start()))) {
-                continue;
+            // An unresolvable enclosing method inside the accessor file is a clean test failure
+            // below (never an NPE), because the guard then cannot decide whether the read is exempt.
+            if (applyWhitelist && fileName.equals(ACCESSOR_FILE)) {
+                String enclosing = enclosingMethod(source, states, m.start());
+                Assertions.assertNotNull(enclosing,
+                        "the accessor guard could not resolve the method enclosing a System.getProperty "
+                                + "read in " + ACCESSOR_FILE + " at line " + lineOf(source, m.start())
+                                + " [" + snippet(source, m.start()) + "], so it cannot tell whether the "
+                                + "read is inside a whitelisted accessor; treat as a guard failure");
+                if (ACCESSOR_METHODS.contains(enclosing)) {
+                    continue;
+                }
             }
 
             if (authClass) {
@@ -198,10 +270,18 @@ public class TestOidcAccessorGuard {
      * Best-effort name of the method enclosing {@code index}: the nearest preceding
      * {@code <name>(...) {} whose brace-span contains {@code index}. A null result is treated as
      * "outside the accessor" (a violation candidate).
+     *
+     * <p>The scan runs over a position-preserving COPY of the source in which every comment/string
+     * character is blanked ({@link #maskNonCode}), so javadoc/block-comment/line-comment prose can
+     * never be parsed as a method signature. Without that, the {@code [^;{}]*} parameter span could
+     * bridge from a {@code word(...)} construct in a javadoc across the {@code *\/} boundary into the
+     * real method signature that follows, swallowing that declaration and yielding a spurious null
+     * for a read that is genuinely inside a whitelisted method (issue #161).
      */
     private static String enclosingMethod(String source, byte[] states, int index) {
+        String scannable = maskNonCode(source, states);
         Pattern method = Pattern.compile("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\([^;{}]*\\)\\s*\\{");
-        Matcher m = method.matcher(source);
+        Matcher m = method.matcher(scannable);
         String best = null;
         while (m.find()) {
             if (m.start() >= index) {
@@ -210,16 +290,52 @@ public class TestOidcAccessorGuard {
             if (states[m.start()] != CODE) {
                 continue;
             }
-            int bodyStart = source.indexOf('{', m.start());
+            int bodyStart = scannable.indexOf('{', m.start());
             if (bodyStart < 0) {
                 continue;
             }
-            int bodyEnd = matchingBrace(source, states, bodyStart);
+            int bodyEnd = matchingBrace(scannable, states, bodyStart);
             if (bodyStart < index && (bodyEnd < 0 || index < bodyEnd)) {
                 best = m.group(1);
             }
         }
         return best;
+    }
+
+    /**
+     * A copy of {@code source} with every non-code character blanked to a space (newlines kept, so
+     * indices AND line structure are preserved). Comment and string prose therefore contains no
+     * identifiers, parentheses or braces the method-signature regex could latch onto.
+     */
+    private static String maskNonCode(String source, byte[] states) {
+        char[] masked = source.toCharArray();
+        for (int i = 0; i < masked.length; i++) {
+            if (states[i] != CODE && masked[i] != '\n') {
+                masked[i] = ' ';
+            }
+        }
+        return new String(masked);
+    }
+
+    /** 1-based line number of {@code index} within {@code source}. */
+    private static int lineOf(String source, int index) {
+        int line = 1;
+        for (int i = 0; i < index && i < source.length(); i++) {
+            if (source.charAt(i) == '\n') {
+                line++;
+            }
+        }
+        return line;
+    }
+
+    /** The trimmed, whitespace-collapsed source line containing {@code index}, for error messages. */
+    private static String snippet(String source, int index) {
+        int start = source.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+        int end = source.indexOf('\n', index);
+        if (end < 0) {
+            end = source.length();
+        }
+        return collapse(source.substring(start, end));
     }
 
     private static int matchingBrace(String source, byte[] states, int open) {
