@@ -18,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Video format handler.
@@ -65,11 +67,12 @@ public class VideoFormatHandler implements FormatHandler {
         } catch (IOException e) {
             // Only a DETERMINATE "executable not found" is a legitimate no-extractor resting state (like an
             // unsupported format), returned as terminal-empty. The JVM reports a missing program as ENOENT —
-            // "error=2" in the IOException message ("Cannot run program \"mediainfo\": error=2, ..."). Any
-            // OTHER spawn failure (a permission error, a resource limit) may be transient, so surface it as a
-            // recoverable failure rather than silently indexing the video empty and stamping it complete (#159).
-            String message = e.getMessage();
-            if (message != null && message.contains("error=2")) {
+            // "error=2" in the IOException message ("Cannot run program \"mediainfo\": error=2, ..."). Parse
+            // the errno NUMERICALLY (not a substring match, which would also match error=20..29 such as
+            // "error=24, Too many open files") and treat ONLY errno 2 as terminal. Any other spawn failure (a
+            // permission error, a resource limit) may be transient, so surface it as a recoverable failure
+            // rather than silently indexing the video empty and stamping it complete (#159).
+            if (isExecutableNotFound(e.getMessage())) {
                 log.warn("mediainfo is not installed; skipping video metadata extraction for {}", file, e);
                 return null;
             }
@@ -98,6 +101,29 @@ public class VideoFormatHandler implements FormatHandler {
      */
     Process startProcess(ProcessBuilder pb) throws IOException {
         return pb.start();
+    }
+
+    /**
+     * Errno embedded by the JVM in a process-spawn IOException message ("... error=&lt;errno&gt;, ...").
+     * The number is captured so it can be compared NUMERICALLY — a plain {@code contains("error=2")} would
+     * also match error=20..29 (e.g. "error=24, Too many open files"), misclassifying a transient
+     * resource-exhaustion failure as a missing binary.
+     */
+    private static final Pattern SPAWN_ERRNO = Pattern.compile("error=(\\d+)");
+
+    /**
+     * True only for a DETERMINATE "executable not found" spawn failure — errno 2 (ENOENT). Any other errno
+     * (or an unparseable message) is not treated as a missing binary, so it propagates as recoverable.
+     *
+     * @param message The spawn IOException message (may be null)
+     * @return true if the message reports ENOENT (errno 2)
+     */
+    static boolean isExecutableNotFound(String message) {
+        if (message == null) {
+            return false;
+        }
+        Matcher matcher = SPAWN_ERRNO.matcher(message);
+        return matcher.find() && "2".equals(matcher.group(1));
     }
 
     @Override

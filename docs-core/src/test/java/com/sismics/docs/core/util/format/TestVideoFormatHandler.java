@@ -40,4 +40,28 @@ public class TestVideoFormatHandler {
                 () -> handler.extractContent("eng", Path.of("/tmp/does-not-matter.mp4")),
                 "a non-ENOENT spawn failure must surface as a recoverable failure");
     }
+
+    @Test
+    public void resourceExhaustionErrno24Propagates() {
+        // The boundary case: "error=24" (EMFILE, too many open files) starts with "error=2" but is a
+        // TRANSIENT resource-exhaustion failure, not ENOENT. It must propagate, not be misclassified as a
+        // missing binary and swallowed to terminal-empty.
+        VideoFormatHandler handler = handlerThrowing(
+                new IOException("Cannot run program \"mediainfo\": error=24, Too many open files"));
+        Assertions.assertThrows(IOException.class,
+                () -> handler.extractContent("eng", Path.of("/tmp/does-not-matter.mp4")),
+                "error=24 (EMFILE) must propagate, not be treated as a missing binary");
+    }
+
+    @Test
+    public void errnoIsMatchedNumericallyNotAsSubstring() {
+        // Direct helper contract: exactly errno 2 is "executable not found"; 20-29 are not.
+        Assertions.assertTrue(VideoFormatHandler.isExecutableNotFound(
+                "Cannot run program \"mediainfo\": error=2, No such file or directory"));
+        Assertions.assertFalse(VideoFormatHandler.isExecutableNotFound(
+                "Cannot run program \"mediainfo\": error=20, Not a directory"));
+        Assertions.assertFalse(VideoFormatHandler.isExecutableNotFound(
+                "Cannot run program \"mediainfo\": error=24, Too many open files"));
+        Assertions.assertFalse(VideoFormatHandler.isExecutableNotFound(null));
+    }
 }
