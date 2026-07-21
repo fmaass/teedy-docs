@@ -2,8 +2,9 @@
 #
 # Pre-push guardrail: run the release mirror gates before anything leaves the machine.
 #
-# The mirror gates (openapi.json, locale key parity, db.version overlays, version literals)
-# only run in the CI build job. A unit-test run cannot catch drift in them, so without this
+# The mirror gates (openapi.json, locale key parity, db.version overlays, CodeQL baseline
+# coordinates, version literals) only run in the CI build job. A unit-test run cannot catch
+# drift in them, so without this
 # hook the first sign of a broken mirror is a failed build -- and if the push was a tag, a
 # failed release build on a public tag.
 #

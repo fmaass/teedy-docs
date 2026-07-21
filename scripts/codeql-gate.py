@@ -9,6 +9,11 @@
 # scans every *.sarif under the given SARIF directory and fails if a result with a
 # security-severity >= 7.0 has an identity not present in the baseline.
 #
+# Every entry is REQUIRED to carry a `sink_line` fingerprint (the verbatim source line
+# at its coordinate). This gate does not read it, but requiring it here means a new
+# entry added without one fails loudly rather than being silently unchecked by the
+# pre-push coordinate-drift gate (scripts/check-codeql-baseline-drift.mjs).
+#
 # Identity scheme (must stay in lockstep with scripts/refresh-codeql-baseline.mjs):
 #   <ruleId>@<artifact uri>:<startLine>:<startColumn>
 # One result = one identity. Location identities are injective per result, auditable
@@ -39,7 +44,7 @@ def main():
     args = parser.parse_args()
 
     required = {
-        "id", "finding", "reason", "owner", "introduced", "expires",
+        "id", "sink_line", "finding", "reason", "owner", "introduced", "expires",
         "compensating_control", "removal_issue",
     }
     baseline = json.loads(Path(args.baseline).read_text())
