@@ -108,7 +108,7 @@
     },
     "inbox": {
       "title": "收件箱扫描",
-      "message": "通过启用此功能，系统会定期扫描指定收件箱中的新电子邮件并自动导入它们。",
+      "message": "启用此功能后，系统将每分钟扫描一次指定的收件箱，查找<strong>未读</strong>邮件并自动导入。<br/>邮件导入后将被标记为已读。<br/>请参阅<a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>、<a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>和<a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>的配置说明。",
       "enabled": "启用收件箱扫描",
       "hostname": "IMAP主机名",
       "port": "IMAP端口（143或993）",
@@ -119,7 +119,7 @@
       "tag": "标签添加到导入的文档",
       "test": "测试参数",
       "last_sync": "上次同步：{date}，{count}消息导入",
-      "test_success": "与收件箱的连接成功（{count}消息）",
+      "test_success": "收件箱连接成功（{count} 封<strong>未读</strong>邮件）",
       "test_fail": "连接到收件箱时发生错误，请检查参数",
       "saved": "IMAP 配置保存成功",
       "autoTagsEnabled": "自动添加主题行中以 # 标记的标签",
