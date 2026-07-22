@@ -249,8 +249,8 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await page.goto(`/#/document/view/${id}/content`)
     await expect(page.locator('.file-preview-grid')).toBeVisible()
 
-    // Images preview from the derived size=web raster (never the original attachment).
-    await expect(page.locator('.file-preview-card img').first()).toHaveAttribute('src', /size=web/)
+    // Images load through the preview queue (blob URLs), not direct API links.
+    await expect(page.locator('.file-preview-card img').first()).toHaveAttribute('src', /^blob:/)
 
     // The generic (non-image/non-PDF) card is a BUTTON, not a link to the original /data URL.
     const genericCard = page.locator('.file-preview-generic .generic-open')
