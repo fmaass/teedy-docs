@@ -49,6 +49,32 @@ vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
 }))
 
+const objectUrls = new Map<string, string>()
+vi.stubGlobal('URL', {
+  ...URL,
+  createObjectURL: (blob: Blob) => {
+    const tag = (blob as unknown as { _tag?: string })?._tag ?? 'blob:test'
+    return tag
+  },
+  revokeObjectURL: () => {},
+})
+vi.mock('../../composables/usePreviewQueue', () => ({
+  usePreviewQueue: () => ({
+    enqueue: (fileId: string, size?: string, _p?: number, _s?: string, rotation?: number) => {
+      const params = new URLSearchParams()
+      if (size) params.set('size', size)
+      if ((size === 'web' || size === 'thumb') && rotation) params.set('v', String(rotation))
+      const suffix = params.toString()
+      const url = `/api/file/${fileId}/data${suffix ? `?${suffix}` : ''}`
+      const blob = new Blob(['x'])
+      ;(blob as unknown as { _tag: string })._tag = url
+      return Promise.resolve(blob)
+    },
+    cancel: () => {},
+    reprioritize: () => {},
+  }),
+}))
+
 import DocumentViewContent from './DocumentViewContent.vue'
 
 function makeDoc(id: string, rotations: [number?, number?] = [undefined, undefined]): DocumentDetail {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
@@ -32,6 +32,7 @@ import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { usePreviewQueue } from '../../composables/usePreviewQueue'
 import { useAuthStore } from '../../stores/auth'
 import { formatDate } from '../../utils/formatters'
 import { injectDocument } from './documentKey'
@@ -496,6 +497,87 @@ function confirmDelete(file: { id: string; name: string | null }) {
   })
 }
 
+const previewQueue = usePreviewQueue()
+const previewObjectUrls = ref<Record<string, string>>({})
+const previewCardRefs = ref<Record<string, HTMLElement>>({})
+let observer: IntersectionObserver | null = null
+
+function revokeAllObjectUrls() {
+  for (const url of Object.values(previewObjectUrls.value)) {
+    URL.revokeObjectURL(url)
+  }
+  previewObjectUrls.value = {}
+}
+
+function setPreviewCardRef(fileId: string, el: HTMLElement | null) {
+  if (el) {
+    previewCardRefs.value[fileId] = el
+    observer?.observe(el)
+  }
+}
+
+function loadPreview(fileId: string, rotation: number | undefined, priority: number) {
+  previewQueue
+    .enqueue(fileId, 'web', priority, undefined, rotation)
+    .then((blob) => {
+      if (blob) previewObjectUrls.value[fileId] = URL.createObjectURL(blob)
+    })
+}
+
+function setupObserver() {
+  observer?.disconnect()
+  if (typeof IntersectionObserver === 'undefined') {
+    observer = null
+    return
+  }
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const fileId = (entry.target as HTMLElement).dataset.fileId
+        if (!fileId) continue
+        if (entry.isIntersecting) {
+          previewQueue.reprioritize(fileId, 0)
+        }
+      }
+    },
+    { rootMargin: '200px' },
+  )
+}
+
+function loadAllImagePreviews() {
+  previewQueue.cancel()
+  revokeAllObjectUrls()
+  setupObserver()
+
+  const files = doc.value?.files ?? []
+  for (const file of files) {
+    if (!file.mimetype.startsWith('image/')) continue
+    loadPreview(file.id, effectiveRotation(file), 1)
+  }
+}
+
+watch(
+  () => doc.value?.id,
+  () => {
+    nextTick(() => loadAllImagePreviews())
+  },
+  { immediate: true },
+)
+
+watch(
+  () => doc.value?.files?.map((f) => `${f.id}:${effectiveRotation(f)}`).join(','),
+  (next, prev) => {
+    if (next !== prev) nextTick(() => loadAllImagePreviews())
+  },
+)
+
+onUnmounted(() => {
+  previewQueue.cancel()
+  revokeAllObjectUrls()
+  observer?.disconnect()
+  observer = null
+})
+
 </script>
 
 <template>
@@ -626,16 +708,20 @@ function confirmDelete(file: { id: string; name: string | null }) {
            #file-extra mount point) is present in BOTH views. -->
       <div v-if="fileViewMode === 'grid'" class="file-preview-grid">
         <template v-for="file in doc.files" :key="file.id">
-          <div v-if="isImage(file.mimetype)" class="file-preview-card">
+          <div
+            v-if="isImage(file.mimetype)"
+            class="file-preview-card"
+            :data-file-id="file.id"
+            :ref="(el: any) => setPreviewCardRef(file.id, el as HTMLElement | null)"
+          >
             <div class="image-preview-stage">
-              <!-- No CSS transform: the served _web raster is already physically rotated by the
-                   server. The rotation only cache-busts the URL so the fresh raster loads. -->
               <img
-                :src="getFileUrl(file.id, 'web', undefined, effectiveRotation(file))"
+                v-if="previewObjectUrls[file.id]"
+                :src="previewObjectUrls[file.id]"
                 :alt="displayName(file.name, t)"
-                loading="lazy"
                 class="rotatable-image"
               />
+              <i v-else class="pi pi-spin pi-spinner preview-loading-spinner" aria-hidden="true" />
             </div>
             <div v-if="doc.writable" class="image-preview-controls">
               <Button
@@ -1082,5 +1168,9 @@ function confirmDelete(file: { id: string; name: string | null }) {
 }
 .file-upload-empty i {
   font-size: 1.25rem;
+}
+.preview-loading-spinner {
+  font-size: 2rem;
+  color: var(--p-text-muted-color);
 }
 </style>

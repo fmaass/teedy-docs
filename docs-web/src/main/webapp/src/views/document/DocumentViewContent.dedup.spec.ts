@@ -38,6 +38,13 @@ vi.mock('@tanstack/vue-query', () => ({
 vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
 }))
+vi.mock('../../composables/usePreviewQueue', () => ({
+  usePreviewQueue: () => ({
+    enqueue: () => Promise.resolve(null),
+    cancel: () => {},
+    reprioritize: () => {},
+  }),
+}))
 
 import DocumentViewContent from './DocumentViewContent.vue'
 
