@@ -59,6 +59,31 @@ vi.mock('../../composables/useConfirmDanger', () => ({
   }),
 }))
 
+vi.stubGlobal('URL', {
+  ...URL,
+  createObjectURL: (blob: Blob) => {
+    const tag = (blob as unknown as { _tag?: string })?._tag ?? 'blob:test'
+    return tag
+  },
+  revokeObjectURL: () => {},
+})
+vi.mock('../../composables/usePreviewQueue', () => ({
+  usePreviewQueue: () => ({
+    enqueue: (fileId: string, size?: string, _p?: number, _s?: string, rotation?: number) => {
+      const params = new URLSearchParams()
+      if (size) params.set('size', size)
+      if ((size === 'web' || size === 'thumb') && rotation) params.set('v', String(rotation))
+      const suffix = params.toString()
+      const url = `/api/file/${fileId}/data${suffix ? `?${suffix}` : ''}`
+      const blob = new Blob(['x'])
+      ;(blob as unknown as { _tag: string })._tag = url
+      return Promise.resolve(blob)
+    },
+    cancel: () => {},
+    reprioritize: () => {},
+  }),
+}))
+
 import DocumentViewContent from './DocumentViewContent.vue'
 
 function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
@@ -230,18 +255,19 @@ describe('DocumentViewContent — persisted image rotation', () => {
     } as unknown as Partial<DocumentDetail>)
   }
 
-  it('does NOT apply a CSS rotate transform to the persisted image (no double-rotation)', () => {
+  it('does NOT apply a CSS rotate transform to the persisted image (no double-rotation)', async () => {
     const { wrapper } = mountView(imageDoc(90))
+    await flushPromises()
     const img = wrapper.find('.rotatable-image')
     expect(img.exists()).toBe(true)
     const style = img.attributes('style') ?? ''
     expect(style).not.toContain('rotate')
-    // The rotation lives in the URL cache-bust key, not a transform.
     expect(img.attributes('src')).toBe('/api/file/img-1/data?size=web&v=90')
   })
 
-  it('an upright image (rotation 0/absent) has no cache-bust key', () => {
+  it('an upright image (rotation 0/absent) has no cache-bust key', async () => {
     const { wrapper } = mountView(imageDoc(0))
+    await flushPromises()
     expect(wrapper.find('.rotatable-image').attributes('src')).toBe('/api/file/img-1/data?size=web')
   })
 

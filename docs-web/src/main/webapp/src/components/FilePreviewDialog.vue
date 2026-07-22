@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import { getFileUrl, getFileContent } from '../api/file'
@@ -64,10 +64,9 @@ const textFailed = ref(false)
 const imageFailed = ref(false)
 const pdfFailed = ref(false)
 
-// Guards the text fetch against out-of-order completion: open A then quickly open B (or
-// close-then-reopen) and A's slower response must not clobber B's content or state. Each
-// load claims a generation; a stale one is dropped after its await.
 const textGen = createGeneration()
+let activeAbort: AbortController | null = null
+let currentImageObjectUrl: string | null = null
 
 type PreviewMode = 'image' | 'pdf' | 'text-loading' | 'text' | 'unavailable'
 const previewMode = computed<PreviewMode>(() => {
@@ -87,6 +86,9 @@ const previewMode = computed<PreviewMode>(() => {
 
 async function loadText(file: PreviewFile) {
   const gen = textGen.next()
+  activeAbort?.abort()
+  const controller = new AbortController()
+  activeAbort = controller
   try {
     const content = await getFileContent(file.id, props.shareId)
     if (!textGen.isCurrent(gen)) return
@@ -94,13 +96,23 @@ async function loadText(file: PreviewFile) {
   } catch {
     if (!textGen.isCurrent(gen)) return
     textFailed.value = true
+  } finally {
+    if (activeAbort === controller) activeAbort = null
   }
 }
 
-// Reset all transient preview state and invalidate any in-flight text fetch (via a fresh
-// generation) so a slower earlier response cannot resurrect a prior file's state.
+function revokeImageUrl() {
+  if (currentImageObjectUrl) {
+    URL.revokeObjectURL(currentImageObjectUrl)
+    currentImageObjectUrl = null
+  }
+}
+
 function resetPreviewState() {
   textGen.next()
+  activeAbort?.abort()
+  activeAbort = null
+  revokeImageUrl()
   textContent.value = null
   textFailed.value = false
   imageFailed.value = false
@@ -115,6 +127,10 @@ watch(
   },
   { immediate: true },
 )
+
+onUnmounted(() => {
+  resetPreviewState()
+})
 </script>
 
 <template>
