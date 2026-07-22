@@ -158,7 +158,40 @@ public class TagDao {
             return null;
         }
     }
-    
+
+    /**
+     * Locks (SELECT ... FOR UPDATE) every tag row where the given user holds an active WRITE USER
+     * ACL and the tag is linked to a surviving document owned by a DIFFERENT user. The return value
+     * is unused — the method's purpose is acquiring row-level locks that serialize with
+     * {@link AclDao#delete}, which takes the same tag-row lock via {@link #getByIdForUpdate}.
+     *
+     * <p>Lock ordering: the caller holds the user-row lock first (via
+     * {@link com.sismics.docs.core.util.CredentialLifecycleUtil#lockActiveUser}), then acquires tag
+     * locks here ordered by TAG_ID_C. AclDao.delete holds only the tag lock — no circular
+     * dependency, so no deadlock.</p>
+     *
+     * @param userId User ID whose foreign-linked WRITE tags are locked
+     * @return the locked tag IDs (caller does not use the list; the locks are the side-effect)
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> lockForeignLinkedWriteTagIds(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery(
+                "select t.TAG_ID_C from T_TAG t"
+                        + " where t.TAG_DELETEDATE_D is null"
+                        + " and exists (select 1 from T_ACL a where a.ACL_SOURCEID_C = t.TAG_ID_C"
+                        + "   and a.ACL_PERM_C = 'WRITE' and a.ACL_TYPE_C = 'USER'"
+                        + "   and a.ACL_TARGETID_C = :userId and a.ACL_DELETEDATE_D is null)"
+                        + " and exists (select 1 from T_DOCUMENT_TAG dt"
+                        + "   join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C"
+                        + "   where dt.DOT_IDTAG_C = t.TAG_ID_C and dt.DOT_DELETEDATE_D is null"
+                        + "   and d.DOC_DELETEDATE_D is null and d.DOC_IDUSER_C <> :userId)"
+                        + " order by t.TAG_ID_C"
+                        + " for update");
+        q.setParameter("userId", userId);
+        return q.getResultList();
+    }
+
     /**
      * Update tags on a document.
      * 

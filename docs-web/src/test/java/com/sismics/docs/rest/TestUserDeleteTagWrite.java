@@ -130,6 +130,114 @@ public class TestUserDeleteTagWrite extends BaseJerseyTest {
                 "the other owner's document keeps its tag link");
     }
 
+    /**
+     * #133 sequential invariant (ordering 1): after a co-holder's WRITE is revoked, the remaining
+     * holder's self-delete is refused because they are now sole.
+     */
+    @Test
+    public void selfDeleteRefusedAfterCoHolderWriteRevoked() {
+        clientUtil.createUser("twdel133_a");
+        clientUtil.createUser("twdel133_b");
+        clientUtil.createUser("twdel133_c");
+        String tokenA = clientUtil.login("twdel133_a");
+        String tokenC = clientUtil.login("twdel133_c");
+        String userBId = userId("twdel133_b");
+
+        // a creates tag T (sole WRITE holder initially)
+        String tagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenA)
+                .put(Entity.form(new Form().param("name", "Twdel133CoRevoke").param("color", "#ff0000")), JsonObject.class)
+                .getString("id");
+
+        // a grants WRITE on T to b (now 2 WRITE holders: a + b)
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenA)
+                .put(Entity.form(new Form()
+                        .param("source", tagId)
+                        .param("perm", "WRITE")
+                        .param("target", "twdel133_b")
+                        .param("type", "USER")));
+
+        // c owns a document; tag T is linked to it
+        String foreignDoc = clientUtil.createDocument(tokenC);
+        linkTag(foreignDoc, tagId);
+
+        // a revokes b's WRITE on T (a has WRITE, so is allowed to revoke b)
+        Response revokeResponse = target().path("/acl/" + tagId + "/WRITE/" + userBId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenA)
+                .delete();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(revokeResponse.getStatus()),
+                "revoking co-holder's WRITE must succeed when 2 holders exist");
+
+        // a tries to self-delete -> refused (now sole WRITE holder of foreign-linked tag)
+        Response deleteResponse = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenA)
+                .delete();
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(deleteResponse.getStatus()));
+        JsonObject json = deleteResponse.readEntity(JsonObject.class);
+        Assertions.assertEquals("SoleTagWriteHolderError", json.getString("type"),
+                "self-delete must be refused after co-holder's WRITE was revoked");
+    }
+
+    /**
+     * #133 sequential invariant (ordering 2): after a co-holder self-deletes, revoking the
+     * remaining holder's WRITE is refused because they are now sole.
+     */
+    @Test
+    public void aclRevokeRefusedAfterCoHolderSelfDeleted() {
+        clientUtil.createUser("twdel133_d");
+        clientUtil.createUser("twdel133_e");
+        clientUtil.createUser("twdel133_f");
+        String tokenD = clientUtil.login("twdel133_d");
+        String tokenE = clientUtil.login("twdel133_e");
+        String tokenF = clientUtil.login("twdel133_f");
+        String userEId = userId("twdel133_e");
+
+        // e creates tag T (sole WRITE holder initially)
+        String tagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenE)
+                .put(Entity.form(new Form().param("name", "Twdel133SelfDel").param("color", "#00ff00")), JsonObject.class)
+                .getString("id");
+
+        // e grants WRITE on T to d (now 2 WRITE holders: d + e)
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenE)
+                .put(Entity.form(new Form()
+                        .param("source", tagId)
+                        .param("perm", "WRITE")
+                        .param("target", "twdel133_d")
+                        .param("type", "USER")));
+
+        // f owns a document; tag T is linked to it
+        String foreignDoc = clientUtil.createDocument(tokenF);
+        linkTag(foreignDoc, tagId);
+
+        // d self-deletes -> allowed (2 WRITE holders, not sole)
+        Response selfDeleteResponse = target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tokenD)
+                .delete();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(selfDeleteResponse.getStatus()),
+                "self-delete must succeed when a co-holder exists");
+
+        // try to revoke e's WRITE on T (e is the creator, so the creator guard blocks it — but
+        // the last-WRITE lockout guard would also refuse since e is now the sole holder after d's
+        // departure). Use admin to bypass the WRITE-permission requirement on the caller.
+        // The creator guard (line 189 AclResource) fires first and refuses.
+        Response revokeResponse = target().path("/acl/" + tagId + "/WRITE/" + userEId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken())
+                .delete();
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(revokeResponse.getStatus()),
+                "revoking the last WRITE holder must be refused");
+
+        // The tag survives with its link intact
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_TAG where TAG_ID_C = :v and TAG_DELETEDATE_D is null", tagId),
+                "the tag must survive");
+        Assertions.assertEquals(1L, readCount(
+                "select count(*) from T_DOCUMENT_TAG where DOT_IDTAG_C = :v and DOT_DELETEDATE_D is null", tagId),
+                "the foreign document's tag link must survive");
+    }
+
     // ---- helpers ----
 
     /** Links a tag to a document by inserting a T_DOCUMENT_TAG row directly (committed). */
