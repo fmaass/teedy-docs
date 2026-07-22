@@ -451,7 +451,7 @@ public class FileDao {
      */
     public List<File> getByDocumentsIds(Iterable<String> documentIds) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        TypedQuery<File> q = em.createQuery("select f from File f where f.documentId in :documentIds and f.latestVersion = true and f.deleteDate is null order by f.order asc", File.class);
+        TypedQuery<File> q = em.createQuery("select f from File f where f.documentId in :documentIds and f.latestVersion = true and f.deleteDate is null order by f.order asc, f.createDate asc, f.id asc", File.class);
         q.setParameter("documentIds", documentIds);
         return q.getResultList();
     }
