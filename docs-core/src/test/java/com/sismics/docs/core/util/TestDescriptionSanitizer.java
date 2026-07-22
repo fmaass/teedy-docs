@@ -205,6 +205,30 @@ public class TestDescriptionSanitizer {
         Assertions.assertTrue(https.contains("href=\"https://ok.example/b\""), https);
     }
 
+    // --- composite XSS fixture (Quill-shaped payload) ------------------------------
+
+    @Test
+    public void xssQuillShapedPayloadStripped() throws Exception {
+        String out = DescriptionSanitizer.sanitize(fixture("xss-quill-shaped"));
+        Assertions.assertFalse(out.contains("<script"), out);
+        Assertions.assertFalse(out.contains("</script"), out);
+        Assertions.assertFalse(out.contains("onerror"), out);
+        Assertions.assertFalse(out.contains("onclick"), out);
+        Assertions.assertFalse(out.contains("javascript:"), out);
+        Assertions.assertFalse(out.contains("data:"), out);
+        Assertions.assertFalse(out.contains("style="), out);
+        Assertions.assertFalse(out.contains("<iframe"), out);
+        Assertions.assertFalse(out.contains("<img"), out);
+        Assertions.assertFalse(out.contains("//evil.com"), out);
+        Assertions.assertTrue(out.contains("<strong>"), out);
+        Assertions.assertTrue(out.contains("<em>"), out);
+        Assertions.assertTrue(out.contains("<blockquote>"), out);
+        Assertions.assertTrue(out.contains("<pre"), out);
+        Assertions.assertTrue(out.contains("<code>"), out);
+        Assertions.assertTrue(out.contains("Normal paragraph text"), out);
+        Assertions.assertTrue(out.contains("Legitimate bold stays"), out);
+    }
+
     // --- contract behaviour --------------------------------------------------------
 
     @Test

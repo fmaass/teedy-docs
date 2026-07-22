@@ -1,0 +1,12 @@
+<p>Normal paragraph text</p>
+<p><strong>Bold</strong> and <em>italic</em> with <script>alert('xss')</script></p>
+<p><a href="javascript:alert('xss')">malicious link</a></p>
+<p><a href="https://example.com" onclick="alert('xss')">link with handler</a></p>
+<p style="background:url(javascript:alert('xss'))">styled paragraph</p>
+<p><img src="x" onerror="alert('xss')"></p>
+<iframe src="https://evil.com"></iframe>
+<p><a href="data:text/html,<script>alert('xss')</script>">data url</a></p>
+<p><a href="//evil.com/steal">protocol-relative</a></p>
+<pre data-language="plain"><code>legitimate code block</code></pre>
+<blockquote>legitimate blockquote</blockquote>
+<p><strong>Legitimate bold stays</strong></p>
