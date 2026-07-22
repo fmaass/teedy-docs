@@ -85,12 +85,18 @@ test('image rotation persists to the server and survives a reload', async ({ pag
   const upright = await rasterDimensions(page, await fileIdOf(page.request, id), 'up')
   expect(upright.width).toBeGreaterThan(upright.height)
 
+  // Capture the pre-rotation blob URL so we can detect a refresh after rotation.
+  const preRotateSrc = await img.getAttribute('src')
+
   // Rotate right 90°. AUTHORITATIVE persistence: the server now reports rotation 90.
   await card.getByRole('button', { name: 'Rotate right' }).click()
   await expect.poll(() => persistedRotation(page.request, id)).toBe(90)
 
-  // The <img src> carries the ?v=90 cache-bust so the freshly-oriented raster loads.
-  await expect.poll(async () => (await img.getAttribute('src'))?.includes('v=90')).toBe(true)
+  // The preview queue re-fetches the rotated raster and assigns a new blob URL.
+  await expect.poll(async () => {
+    const src = await img.getAttribute('src')
+    return src !== preRotateSrc && src?.startsWith('blob:')
+  }).toBe(true)
 
   // The regenerated web raster's axes are SWAPPED — full content preserved, no crop (a cropping
   // rotation would keep the landscape box).
@@ -104,7 +110,7 @@ test('image rotation persists to the server and survives a reload', async ({ pag
   expect(await persistedRotation(page.request, id)).toBe(90)
   const afterReload = page.locator('.file-preview-card').first().locator('.rotatable-image')
   await expect(afterReload).toBeVisible()
-  await expect.poll(async () => (await afterReload.getAttribute('src'))?.includes('v=90')).toBe(true)
+  await expect(afterReload).toHaveAttribute('src', /^blob:/)
 
   // Cleanup.
   await page.goto(`/#/document/view/${id}`)
