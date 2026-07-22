@@ -694,6 +694,12 @@ public class UserResource extends BaseResource {
                     "This account owns documents shared with other users and cannot be deleted");
         }
 
+        // #133: lock all tags where this user has WRITE and the tag is linked to a surviving foreign
+        // document, FOR UPDATE. AclDao.delete takes the same tag-row lock, so a concurrent ACL revoke
+        // on one of these tags blocks until this transaction commits — closing the write-skew where both
+        // a self-delete and an ACL revoke see 2 holders and both proceed to 0.
+        new TagDao().lockForeignLinkedWriteTagIds(principal.getId());
+
         // #122 self-delete guard (evaluated under the self owner-row lock held above): refuse when this
         // account is the SOLE WRITE holder of a tag that a SURVIVING document (owned by another user) still
         // uses. Self-delete has no reassignment target, so silently deleting would orphan the tag (its owner
