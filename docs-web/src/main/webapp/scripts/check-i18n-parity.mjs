@@ -293,6 +293,34 @@ if (unused.length) {
   console.log('✓ no unused reference keys')
 }
 
+// ── de.json formal-address guard (#163) ─────────────────────────────────────
+const DE_FORMAL_TOKENS = ['Sie', 'Ihnen', 'Ihr', 'Ihre', 'Ihren', 'Ihrem', 'Ihrer', 'Ihres']
+const DE_FORMAL_ALLOWLIST = new Map([
+  ['ui.bulk.delete_confirm::Sie', 'third-person-plural referring to documents, not formal address'],
+])
+
+const deFlat = loadFlat('de')
+const formalIssues = []
+for (const [key, value] of Object.entries(deFlat)) {
+  if (typeof value !== 'string') continue
+  for (const token of DE_FORMAL_TOKENS) {
+    if (new RegExp(`\\b${token}\\b`).test(value)) {
+      if (!DE_FORMAL_ALLOWLIST.has(`${key}::${token}`)) {
+        formalIssues.push(`${key}: contains formal-address token "${token}"`)
+      }
+    }
+  }
+}
+
+console.log(`\nde formal-address scan — ${Object.keys(deFlat).length} keys, ${DE_FORMAL_TOKENS.length} forbidden tokens`)
+if (formalIssues.length) {
+  hasError = true
+  console.error(`✗ de: ${formalIssues.length} formal-address violation(s):`)
+  for (const issue of formalIssues) console.error(`    ${issue}`)
+} else {
+  console.log('✓ de: no formal-address tokens (Sie/Ihr… series)')
+}
+
 if (hasError) {
   console.error('\ni18n parity check FAILED')
   process.exit(1)
