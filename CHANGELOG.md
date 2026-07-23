@@ -16,12 +16,13 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
-## [3.7.2] - 2026-07-22
+## [3.7.2] - 2026-07-23
 
 No database migration required; `db.version` remains 59 (unchanged from v3.7.1).
 
 ### Security
 
+- Updated Jetty from 12.0.34 to 12.0.36, fixing CVE-2026-10050 (Digest Authentication bypass, HIGH).
 - Updated `brace-expansion`, `dompurify` (3.3.3 → 3.4.12), and the `esbuild` dependency through Vite (7.3.5 → 7.3.6) to address high-severity npm advisories.
 - A low-severity `quill` advisory remains open because no upstream fix is available. Server-side sanitization of relevant XSS payloads is now covered by a regression test (#166).
 
