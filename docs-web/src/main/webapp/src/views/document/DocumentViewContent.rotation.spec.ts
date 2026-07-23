@@ -49,7 +49,6 @@ vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
 }))
 
-const objectUrls = new Map<string, string>()
 vi.stubGlobal('URL', {
   ...URL,
   createObjectURL: (blob: Blob) => {

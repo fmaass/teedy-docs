@@ -16,6 +16,26 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.7.2] - 2026-07-22
+
+No database migration required; `db.version` remains 59 (unchanged from v3.7.1).
+
+### Security
+
+- Updated `brace-expansion`, `dompurify` (3.3.3 → 3.4.12), and the `esbuild` dependency through Vite (7.3.5 → 7.3.6) to address high-severity npm advisories.
+- A low-severity `quill` advisory remains open because no upstream fix is available. Server-side sanitization of relevant XSS payloads is now covered by a regression test (#166).
+
+### Fixed
+
+- Fixed a rare race condition that could leave a shared tag with no user able to edit it when an account was deleted at the same time as another user's write access was revoked (#133).
+- Attachments with the same display order now appear in a consistent sequence across page loads (#164).
+- Completed missing French, Russian, Simplified Chinese, and Traditional Chinese translations in the inbox settings.
+
+### Changed
+
+- Attachment previews now load in controlled batches, with visible items prioritized. This reduces browser and server load for documents with many attachments (#165).
+- German translations now consistently use informal address (`du/dein`) instead of formal address (`Sie/Ihr`) (#163).
+
 ## [3.7.1] - 2026-07-21
 
 A patch release with one additive database migration (`db.version` 58 → 59) that re-runs cleanly.
@@ -367,7 +387,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...HEAD
+[3.7.2]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/fmaass/teedy-docs/compare/v3.6.7...v3.7.0
 [3.6.7]: https://github.com/fmaass/teedy-docs/compare/v3.6.6...v3.6.7

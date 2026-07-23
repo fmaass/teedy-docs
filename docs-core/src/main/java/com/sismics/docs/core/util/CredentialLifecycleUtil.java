@@ -155,4 +155,16 @@ public final class CredentialLifecycleUtil {
     public static boolean hasSoleWriteTagLinkedToSurvivingDocument(String userId) {
         return new AclDao().hasSoleWriteTagLinkedToForeignDocument(userId);
     }
+
+    /**
+     * #133: lock all tags where {@code userId} has WRITE and the tag is linked to a surviving foreign
+     * document, FOR UPDATE. Serializes with {@link AclDao#delete} (which takes the same tag-row lock),
+     * closing the write-skew where a concurrent self-delete and ACL-revoke both see 2 holders and both
+     * proceed to 0.
+     *
+     * @param userId Departing user ID
+     */
+    public static void lockForeignLinkedWriteTags(String userId) {
+        new TagDao().lockForeignLinkedWriteTagIds(userId);
+    }
 }
