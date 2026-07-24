@@ -36,9 +36,14 @@ const twoFiles: FilePanelFile[] = [
   makeFile({ id: 'f2', name: 'beta.pdf', mimetype: 'application/pdf' }),
 ]
 
-function mountTable(files: FilePanelFile[], writable = true, slots: Record<string, string> = {}) {
+function mountTable(
+  files: FilePanelFile[],
+  writable = true,
+  slots: Record<string, string> = {},
+  coverFileId: string | null = null,
+) {
   return mount(FileListTable, {
-    props: { files, writable },
+    props: { files, writable, coverFileId },
     global: {
       plugins: [[PrimeVue, { theme: 'none' }]],
       directives: { tooltip: {} },
@@ -258,6 +263,48 @@ describe('FileListTable', () => {
     expect(opener.exists()).toBe(true)
     await opener.trigger('click')
     expect(wrapper.emitted('open')?.[0]).toEqual([twoFiles[0]])
+  })
+
+  it('shows the cover badge only on the cover row, and no badge when no cover is set', () => {
+    expect(mountTable(twoFiles).findAll('.cover-badge').length).toBe(0)
+    const wrapper = mountTable(twoFiles, true, {}, 'f1')
+    const badges = wrapper.findAll('.cover-badge')
+    expect(badges.length).toBe(1)
+    const f1Row = wrapper.findAll('tbody tr').find((r) => r.text().includes('alpha.txt'))!
+    expect(f1Row.find('.cover-badge').exists()).toBe(true)
+    const f2Row = wrapper.findAll('tbody tr').find((r) => r.text().includes('beta.pdf'))!
+    expect(f2Row.find('.cover-badge').exists()).toBe(false)
+  })
+
+  it('a non-cover row offers set-as-cover (not remove) and forwards setCover with its file', async () => {
+    const wrapper = mountTable(twoFiles, true, {}, 'f1')
+    const f2Row = wrapper.findAll('tbody tr').find((r) => r.text().includes('beta.pdf'))!
+    const f2Set = f2Row.findAll('button').find((b) => b.attributes('aria-label') === 'ui.set_as_cover')!
+    expect(f2Set).toBeTruthy()
+    expect(f2Row.findAll('button').find((b) => b.attributes('aria-label') === 'ui.remove_as_cover')).toBeUndefined()
+
+    await f2Set.trigger('click')
+    expect(wrapper.emitted('setCover')?.[0]).toEqual([twoFiles[1]])
+  })
+
+  it('the cover row offers remove-as-cover (not set) and forwards clearCover with its file', async () => {
+    const wrapper = mountTable(twoFiles, true, {}, 'f1')
+    const f1Row = wrapper.findAll('tbody tr').find((r) => r.text().includes('alpha.txt'))!
+    const f1Remove = f1Row.findAll('button').find((b) => b.attributes('aria-label') === 'ui.remove_as_cover')!
+    expect(f1Remove).toBeTruthy()
+    expect(f1Row.findAll('button').find((b) => b.attributes('aria-label') === 'ui.set_as_cover')).toBeUndefined()
+
+    await f1Remove.trigger('click')
+    expect(wrapper.emitted('clearCover')?.[0]).toEqual([twoFiles[0]])
+  })
+
+  it('read-only: no cover badge action even on the cover row', () => {
+    const wrapper = mountTable(twoFiles, false, {}, 'f1')
+    const labels = wrapper.findAll('button').map((b) => b.attributes('aria-label'))
+    expect(labels).not.toContain('ui.set_as_cover')
+    expect(labels).not.toContain('ui.remove_as_cover')
+    // The read-only badge itself still renders (it is a passive indicator, not an action).
+    expect(wrapper.findAll('.cover-badge').length).toBe(1)
   })
 
   it('virtual-scrolls only above the ~100-file threshold', () => {

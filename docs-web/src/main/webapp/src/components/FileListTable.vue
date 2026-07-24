@@ -36,6 +36,10 @@ export interface FilePanelFile {
 const props = defineProps<{
   files: FilePanelFile[]
   writable: boolean
+  // The document's explicit cover file id (#174), or null when the cover is derived from order. The
+  // matching row shows a cover badge and offers "remove as cover"; every other row offers "set as
+  // cover".
+  coverFileId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +48,8 @@ const emit = defineEmits<{
   delete: [file: FilePanelFile]
   versions: [file: FilePanelFile]
   reorder: [orderedIds: string[]]
+  setCover: [file: FilePanelFile]
+  clearCover: [file: FilePanelFile]
 }>()
 
 const { t } = useI18n()
@@ -336,6 +342,14 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             @dblclick.stop="startRename(data)"
             @keydown="onNameKeydown($event, data)"
           >{{ displayName(data.name, t) }}</span>
+          <span
+            v-if="coverFileId && data.id === coverFileId"
+            class="cover-badge"
+            :aria-label="t('ui.cover_badge')"
+          >
+            <i class="pi pi-image" aria-hidden="true" />
+            {{ t('ui.cover_badge') }}
+          </span>
         </template>
       </Column>
 
@@ -362,9 +376,12 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
           <FileActionMenu
             :file="data"
             :writable="writable"
+            :is-cover="!!coverFileId && data.id === coverFileId"
             @versions="emit('versions', data)"
             @rename="startRename(data)"
             @delete="emit('delete', data)"
+            @set-cover="emit('setCover', data)"
+            @clear-cover="emit('clearCover', data)"
           >
             <!-- Forward the parent's per-file extra actions into the (writable-gated)
                  action menu, so #73/#117 mount in ONE place and light up here too. -->
@@ -385,6 +402,26 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 <style scoped>
 .file-list-section {
   margin-top: 0.5rem;
+}
+
+.cover-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--p-primary-contrast-color, #fff);
+  background: var(--p-primary-color, #3b82f6);
+  vertical-align: middle;
+}
+
+.cover-badge .pi {
+  font-size: 0.7rem;
 }
 
 .file-list-toolbar {

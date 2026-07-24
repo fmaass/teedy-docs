@@ -41,8 +41,8 @@ import java.util.List;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059). */
-    private static final int TARGET_VERSION = 59;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060). */
+    private static final int TARGET_VERSION = 60;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -1181,6 +1181,31 @@ public class TestPopulatedMigration {
                 "052 CLEAN_STORAGE_LOCK sentinel must exist after the full upgrade");
         Assertions.assertEquals(1, count(connection, "T_CONFIG", "CFG_ID_C = 'GLOBAL_QUOTA_LOCK'"),
                 "053 GLOBAL_QUOTA_LOCK sentinel must exist after the full upgrade");
+
+        // 5m. DOC_IDFILECOVER_C (060) has DELIBERATELY NO foreign key, so a stale cover can never block a
+        //     file/document purge — hence an arbitrary, non-existent file id must be accepted.
+        connection.commit();
+        Assertions.assertEquals(1, scalarCount(connection,
+                        "select count(*) from information_schema.columns where upper(table_name) = upper('T_DOCUMENT') and upper(column_name) = upper('DOC_IDFILECOVER_C')"),
+                "060 must add the DOC_IDFILECOVER_C column to T_DOCUMENT");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_DOCUMENT set DOC_IDFILECOVER_C = 'file-1' where DOC_ID_C = 'doc-1'");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_DOCUMENT", "DOC_ID_C = 'doc-1' and DOC_IDFILECOVER_C = 'file-1'"),
+                "060 column: an explicit cover file id must round-trip");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_DOCUMENT set DOC_IDFILECOVER_C = 'no-such-file-0000' where DOC_ID_C = 'doc-1'");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_DOCUMENT", "DOC_ID_C = 'doc-1' and DOC_IDFILECOVER_C = 'no-such-file-0000'"),
+                "060 column must have NO foreign key: a dangling file id is accepted, so a stale cover can never block a purge");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_DOCUMENT set DOC_IDFILECOVER_C = null where DOC_ID_C = 'doc-1'");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_DOCUMENT", "DOC_ID_C = 'doc-1' and DOC_IDFILECOVER_C is null"),
+                "060 column must be nullable");
 
         connection.commit();
     }

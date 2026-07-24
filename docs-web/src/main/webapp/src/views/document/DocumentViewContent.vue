@@ -10,6 +10,8 @@ import { displayName } from '../../utils/fileName'
 import {
   listDocuments,
   updateDocument,
+  setDocumentCover,
+  clearDocumentCover,
   buildRelationsParams,
   type DocumentListItem,
 } from '../../api/document'
@@ -498,6 +500,40 @@ function confirmDelete(file: { id: string; name: string | null }) {
   })
 }
 
+// Invalidate BOTH the document detail (this view's file_id_cover + served file_id) AND the documents
+// list (gallery/table/slide-over rows render the served file_id thumbnail), because setting or
+// clearing the cover changes which file the thumbnail resolves to.
+async function invalidateAfterCoverChange() {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['document', doc.value?.id] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.documents() }),
+  ])
+}
+
+async function setCoverFor(file: { id: string }) {
+  const documentId = doc.value?.id
+  if (!documentId) return
+  try {
+    await setDocumentCover(documentId, file.id)
+    await invalidateAfterCoverChange()
+    toast.add({ severity: 'success', summary: t('ui.cover_set'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.failed_set_cover'), life: 3000 })
+  }
+}
+
+async function clearCoverFor() {
+  const documentId = doc.value?.id
+  if (!documentId) return
+  try {
+    await clearDocumentCover(documentId)
+    await invalidateAfterCoverChange()
+    toast.add({ severity: 'success', summary: t('ui.cover_cleared'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.failed_set_cover'), life: 3000 })
+  }
+}
+
 const previewQueue = usePreviewQueue()
 const previewObjectUrls = ref<Record<string, string>>({})
 const previewCardRefs = ref<Record<string, HTMLElement>>({})
@@ -831,9 +867,12 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @rename="startGridRename"
                 @delete="confirmDelete"
+                @set-cover="setCoverFor"
+                @clear-cover="clearCoverFor"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -864,9 +903,12 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @rename="startGridRename"
                 @delete="confirmDelete"
+                @set-cover="setCoverFor"
+                @clear-cover="clearCoverFor"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -905,9 +947,12 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @rename="startGridRename"
                 @delete="confirmDelete"
+                @set-cover="setCoverFor"
+                @clear-cover="clearCoverFor"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -926,11 +971,14 @@ onUnmounted(() => {
         ref="fileListRef"
         :files="doc.files"
         :writable="doc.writable"
+        :cover-file-id="doc.file_id_cover"
         @open="openPreview"
         @rename="renameFileTo"
         @delete="confirmDelete"
         @versions="showVersions"
         @reorder="onReorderFiles"
+        @set-cover="setCoverFor"
+        @clear-cover="clearCoverFor"
       >
         <template #file-extra="s">
           <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>

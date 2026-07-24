@@ -17,12 +17,18 @@ export interface FileActionTarget {
 defineProps<{
   file: FileActionTarget
   writable: boolean
+  // True when this file is the document's explicit cover: the "set as cover" action is hidden and a
+  // "remove as cover" action is offered instead. Defaults to false so consumers that do not manage a
+  // cover keep their current behaviour.
+  isCover?: boolean
 }>()
 
 const emit = defineEmits<{
   versions: [file: FileActionTarget]
   rename: [file: FileActionTarget]
   delete: [file: FileActionTarget]
+  setCover: [file: FileActionTarget]
+  clearCover: [file: FileActionTarget]
 }>()
 
 const { t } = useI18n()
@@ -43,6 +49,28 @@ const { t } = useI18n()
     <!-- Write actions: gated on `writable` so a read-only viewer sees history only. -->
     <template v-if="writable">
       <slot name="extra" :file="file" :writable="writable" />
+      <Button
+        v-if="!isCover"
+        icon="pi pi-image"
+        text
+        rounded
+        size="small"
+        severity="secondary"
+        @click="emit('setCover', file)"
+        v-tooltip="t('ui.set_as_cover')"
+        :aria-label="t('ui.set_as_cover')"
+      />
+      <Button
+        v-else
+        icon="pi pi-image"
+        text
+        rounded
+        size="small"
+        severity="contrast"
+        @click="emit('clearCover', file)"
+        v-tooltip="t('ui.remove_as_cover')"
+        :aria-label="t('ui.remove_as_cover')"
+      />
       <Button
         icon="pi pi-pencil"
         text

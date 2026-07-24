@@ -186,6 +186,7 @@ public class JpaDocumentRepository implements DocumentRepository {
                 documentDto.getCreateTimestamp(),
                 documentDto.getDescription(),
                 documentDto.getFileId(),
+                documentDto.getIdFileCover(),
                 documentDto.getFileRotation(),
                 documentDto.getId(),
                 documentDto.getLanguage(),

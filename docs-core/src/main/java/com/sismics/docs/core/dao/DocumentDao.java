@@ -5,6 +5,7 @@ import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.model.jpa.Document;
+import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.AuditLogUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
@@ -227,7 +228,7 @@ public class DocumentDao {
         }
 
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C, d.DOC_TITLE_C, d.DOC_DESCRIPTION_C, d.DOC_SUBJECT_C, d.DOC_IDENTIFIER_C, d.DOC_PUBLISHER_C, d.DOC_FORMAT_C, d.DOC_SOURCE_C, d.DOC_TYPE_C, d.DOC_COVERAGE_C, d.DOC_RIGHTS_C, d.DOC_CREATEDATE_D, d.DOC_UPDATEDATE_D, d.DOC_LANGUAGE_C, d.DOC_IDFILE_C,");
+        StringBuilder sb = new StringBuilder("select distinct d.DOC_ID_C, d.DOC_TITLE_C, d.DOC_DESCRIPTION_C, d.DOC_SUBJECT_C, d.DOC_IDENTIFIER_C, d.DOC_PUBLISHER_C, d.DOC_FORMAT_C, d.DOC_SOURCE_C, d.DOC_TYPE_C, d.DOC_COVERAGE_C, d.DOC_RIGHTS_C, d.DOC_CREATEDATE_D, d.DOC_UPDATEDATE_D, d.DOC_LANGUAGE_C, d.DOC_IDFILE_C, d.DOC_IDFILECOVER_C,");
         sb.append(" (select count(s.SHA_ID_C) from T_SHARE s, T_ACL ac where ac.ACL_SOURCEID_C = d.DOC_ID_C and ac.ACL_TARGETID_C = s.SHA_ID_C and ac.ACL_DELETEDATE_D is null and s.SHA_DELETEDATE_D is null) shareCount, ");
         sb.append(" (select count(f.FIL_ID_C) from T_FILE f where f.FIL_DELETEDATE_D is null and f.FIL_IDDOC_C = d.DOC_ID_C) fileCount, ");
         sb.append(" u.USE_USERNAME_C ");
@@ -262,6 +263,7 @@ public class DocumentDao {
         documentDto.setUpdateTimestamp(((Timestamp) o[i++]).getTime());
         documentDto.setLanguage((String) o[i++]);
         documentDto.setFileId((String) o[i++]);
+        documentDto.setIdFileCover((String) o[i++]);
         documentDto.setShared(((Number) o[i++]).intValue() > 0);
         documentDto.setFileCount(((Number) o[i++]).intValue());
         documentDto.setCreator((String) o[i]);
@@ -443,6 +445,61 @@ public class DocumentDao {
         query.setParameter("fileId", document.getFileId());
         query.setParameter("id", document.getId());
         query.executeUpdate();
+    }
+
+    /**
+     * Sets (or, with a null file ID, clears) a document's explicit cover pointer. The derived serving
+     * pointer ({@code DOC_IDFILE_C}) is reconciled separately by the document-updated listener, so this
+     * only writes the intent column and does not touch the update date.
+     *
+     * @param documentId Document ID
+     * @param fileId Explicit cover file ID, or null to clear the explicit choice
+     */
+    public void updateCoverFileId(String documentId, String fileId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query query = em.createNativeQuery("update T_DOCUMENT d set DOC_IDFILECOVER_C = :fileId where d.DOC_ID_C = :id");
+        query.setParameter("fileId", fileId);
+        query.setParameter("id", documentId);
+        query.executeUpdate();
+    }
+
+    /**
+     * Re-derives a document's served cover pointer ({@code DOC_IDFILE_C}) from its explicit cover and
+     * current files, holding a pessimistic row lock so concurrent passes cannot interleave a stale
+     * read with a later write (a read-then-write without the lock lets an older pass overwrite a newer
+     * selection). The lock is taken FOR UPDATE and held to commit; each pass therefore re-reads the
+     * current cover and file set under the lock and lands the same result whichever runs last. An
+     * explicit cover that is set and still attached serves; a dangling one is cleared; otherwise the
+     * first file by order serves (or none when the document has no files). Returns the locked document
+     * for the caller to reindex, or null when the document no longer exists.
+     *
+     * @param documentId Document ID
+     * @return the reconciled document, or null if it does not exist / was trashed
+     */
+    public Document reconcileServingCover(String documentId) {
+        Document document = getActiveByIdForUpdate(documentId);
+        if (document == null) {
+            return null;
+        }
+        List<File> fileList = new FileDao().getByDocumentId(null, documentId);
+        String explicitCover = document.getIdFileCover();
+        boolean explicitCoverAttached = explicitCover != null
+                && fileList.stream().anyMatch(file -> file.getId().equals(explicitCover));
+        if (explicitCover != null && !explicitCoverAttached) {
+            // Clear the dangling cover in the DB and on the managed entity, so a subsequent flush of the
+            // (fileId-dirty) entity cannot write the stale cover column back.
+            updateCoverFileId(documentId, null);
+            document.setIdFileCover(null);
+        }
+        if (explicitCoverAttached) {
+            document.setFileId(explicitCover);
+        } else if (fileList.isEmpty()) {
+            document.setFileId(null);
+        } else {
+            document.setFileId(fileList.get(0).getId());
+        }
+        updateFileId(document);
+        return document;
     }
 
     /**

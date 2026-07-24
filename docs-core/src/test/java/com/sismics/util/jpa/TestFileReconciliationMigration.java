@@ -75,7 +75,10 @@ public class TestFileReconciliationMigration {
 
             @Override
             public void onUpgrade(int oldVersion, int newVersion) throws Exception {
-                for (int version = oldVersion + 1; version <= newVersion; version++) {
+                // Cap at this test's target: open() passes the configured db.version (which advances as
+                // later migrations land), but this fixture asserts the state immediately after 059.
+                int cap = Math.min(newVersion, TARGET_VERSION);
+                for (int version = oldVersion + 1; version <= cap; version++) {
                     executeAllScript(version);
                 }
             }

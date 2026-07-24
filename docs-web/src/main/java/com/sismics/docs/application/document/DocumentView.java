@@ -20,6 +20,7 @@ public record DocumentView(
         long createDate,
         String description,
         String fileId,
+        String idFileCover,
         int fileRotation,
         String id,
         String language,

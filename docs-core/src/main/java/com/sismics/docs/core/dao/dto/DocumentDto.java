@@ -17,6 +17,12 @@ public class DocumentDto {
     private String fileId;
 
     /**
+     * Explicit cover file ID (the user's chosen cover), or null when the cover is derived from file
+     * order. Distinct from {@link #fileId}, the derived serving pointer.
+     */
+    private String idFileCover;
+
+    /**
      * Clockwise rotation baked into the main file's rasters (0 when none/absent). Exposed so the
      * list thumbnail/preview can cache-bust to the freshly-oriented raster.
      */
@@ -136,6 +142,15 @@ public class DocumentDto {
 
     public DocumentDto setFileId(String fileId) {
         this.fileId = fileId;
+        return this;
+    }
+
+    public String getIdFileCover() {
+        return idFileCover;
+    }
+
+    public DocumentDto setIdFileCover(String idFileCover) {
+        this.idFileCover = idFileCover;
         return this;
     }
 

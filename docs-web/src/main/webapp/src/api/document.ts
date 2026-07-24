@@ -66,6 +66,10 @@ export interface DocumentDetail extends DocumentListItem {
   // JsonUtil.nullable surface.
   creator: string
   writable: boolean
+  // Explicit cover file id (#174): the file the user chose as the cover, or null when the cover is
+  // derived from file order. Serialized via JsonUtil.nullable (LegacyDocumentResponseMapper). Distinct
+  // from `file_id` (the derived served pointer the list/gallery thumbnails read).
+  file_id_cover: string | null
   file_count: number
   contributors: Array<{ username: string; email: string }>
   relations: Array<{ id: string; title: string; source: boolean }>
@@ -126,6 +130,24 @@ export function createDocument(params: URLSearchParams) {
 
 export function updateDocument(id: string, params: URLSearchParams) {
   return api.post<{ id: string }>(`/document/${id}`, params)
+}
+
+/**
+ * Set the explicit cover file of a document (#174): POST /document/:id/cover, form param `file`.
+ * The chosen file must be attached to the document; the server reconciles the served pointer.
+ */
+export function setDocumentCover(documentId: string, fileId: string) {
+  const params = new URLSearchParams()
+  params.set('file', fileId)
+  return api.post(`/document/${documentId}/cover`, params)
+}
+
+/**
+ * Clear the explicit cover of a document (#174): DELETE /document/:id/cover. The served cover
+ * reverts to the derived first-file-by-order behaviour.
+ */
+export function clearDocumentCover(documentId: string) {
+  return api.delete(`/document/${documentId}/cover`)
 }
 
 /**

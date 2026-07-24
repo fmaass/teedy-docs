@@ -49,6 +49,7 @@ public final class LegacyDocumentResponseMapper {
                 .add("file_count", view.fileCount());
         nullableString(document, "description", view.description());
         nullableString(document, "file_id", view.fileId());
+        nullableString(document, "file_id_cover", view.idFileCover());
         nullableString(document, "coverage", view.coverage());
         nullableString(document, "format", view.format());
         nullableString(document, "identifier", view.identifier());

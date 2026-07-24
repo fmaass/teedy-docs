@@ -36,6 +36,15 @@ public class Document implements Loggable {
     private String fileId;
 
     /**
+     * Explicit cover file ID: the file the user chose as the document's cover, or null to derive the
+     * cover from file order. This is the intent; {@link #fileId} is the derived serving pointer a
+     * post-update listener reconciles from it. Deliberately not a foreign key, so a stale value can
+     * never block a file/document purge.
+     */
+    @Column(name = "DOC_IDFILECOVER_C", length = 36)
+    private String idFileCover;
+
+    /**
      * Language (ISO 639-9).
      */
     @Column(name = "DOC_LANGUAGE_C", nullable = false, length = 3)
@@ -149,6 +158,15 @@ public class Document implements Loggable {
 
     public Document setFileId(String fileId) {
         this.fileId = fileId;
+        return this;
+    }
+
+    public String getIdFileCover() {
+        return idFileCover;
+    }
+
+    public Document setIdFileCover(String idFileCover) {
+        this.idFileCover = idFileCover;
         return this;
     }
 

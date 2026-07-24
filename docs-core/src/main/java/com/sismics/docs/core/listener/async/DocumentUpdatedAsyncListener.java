@@ -4,12 +4,10 @@ import com.google.common.eventbus.AllowConcurrentEvents;
 import com.google.common.eventbus.Subscribe;
 import com.sismics.docs.core.dao.ContributorDao;
 import com.sismics.docs.core.dao.DocumentDao;
-import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Contributor;
 import com.sismics.docs.core.model.jpa.Document;
-import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.util.TransactionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,25 +38,14 @@ public class DocumentUpdatedAsyncListener {
         }
 
         TransactionUtil.handle(() -> {
-            // Get the document
+            // The row lock inside reconcileServingCover serializes this pass against concurrent
+            // document-updated events (and the synchronous cover endpoints) on the same document.
             DocumentDao documentDao = new DocumentDao();
-            Document document = documentDao.getById(event.getDocumentId());
+            Document document = documentDao.reconcileServingCover(event.getDocumentId());
             if (document == null) {
-                // Document deleted since event fired
+                // Document deleted since the event fired.
                 return;
             }
-
-            // Set the main file
-            FileDao fileDao = new FileDao();
-            List<File> fileList = fileDao.getByDocumentId(null, event.getDocumentId());
-            if (fileList.isEmpty()) {
-                document.setFileId(null);
-            } else {
-                document.setFileId(fileList.get(0).getId());
-            }
-
-            // Update database and index
-            documentDao.updateFileId(document);
             AppContext.getInstance().getIndexingHandler().updateDocument(document);
 
             // Update contributors list

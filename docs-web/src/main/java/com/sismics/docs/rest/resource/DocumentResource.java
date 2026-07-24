@@ -19,6 +19,7 @@ import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.event.DocumentRestoredAsyncEvent;
 import com.sismics.docs.core.event.DocumentTrashedAsyncEvent;
+import com.sismics.docs.core.event.DocumentUpdatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.AuditLog;
 import com.sismics.docs.core.model.jpa.Document;
@@ -860,6 +861,115 @@ public class DocumentResource extends BaseResource {
         trashedEvent.setUserId(principal.getId());
         trashedEvent.setDocumentId(id);
         ThreadLocalContext.get().addAsyncEvent(trashedEvent);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Sets a document's explicit cover file. The chosen file becomes the document's served cover
+     * (its thumbnail in the list/gallery); a document-updated event reconciles the served pointer.
+     *
+     * @api {post} /document/:id/cover Set the document cover file
+     * @apiName PostDocumentCover
+     * @apiGroup Document
+     * @apiParam {String} id Document ID
+     * @apiParam {String} file File ID to use as the cover (must be attached to the document)
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError The file is not attached to this document
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param documentId Document ID
+     * @param fileId File ID to use as the cover
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/cover")
+    public Response setCover(
+            @PathParam("id") String documentId,
+            @FormParam("file") String fileId) {
+        // Guests are read-only, even where a WRITE ACL would otherwise resolve for the guest account.
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        // Validate input data
+        ValidationUtil.validateRequired(fileId, "file");
+
+        AclDao aclDao = new AclDao();
+        if (!aclDao.checkPermission(documentId, PermType.WRITE, getTargetIdList(null))) {
+            throw new ForbiddenClientException();
+        }
+
+        // The chosen file must be attached to THIS document (latest version, not deleted). Setting a
+        // cover to a file that does not belong to the document is a client error, not a silent no-op.
+        FileDao fileDao = new FileDao();
+        boolean attached = fileDao.getByDocumentId(null, documentId).stream()
+                .anyMatch(file -> file.getId().equals(fileId));
+        if (!attached) {
+            throw new ClientException("ValidationError", MessageFormat.format("File not found: {0}", fileId));
+        }
+
+        // Reconcile the served pointer synchronously in this transaction so an immediate read-back
+        // reflects the new cover without waiting for the async event; the row lock inside
+        // reconcileServingCover keeps this atomic against concurrent file operations. The event still
+        // fires to refresh the search index and contributor list.
+        DocumentDao documentDao = new DocumentDao();
+        documentDao.updateCoverFileId(documentId, fileId);
+        documentDao.reconcileServingCover(documentId);
+
+        DocumentUpdatedAsyncEvent event = new DocumentUpdatedAsyncEvent();
+        event.setUserId(principal.getId());
+        event.setDocumentId(documentId);
+        ThreadLocalContext.get().addAsyncEvent(event);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Clears a document's explicit cover file, restoring the derived (first-file-by-order) cover.
+     *
+     * @api {delete} /document/:id/cover Clear the document cover file
+     * @apiName DeleteDocumentCover
+     * @apiGroup Document
+     * @apiParam {String} id Document ID
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param documentId Document ID
+     * @return Response
+     */
+    @DELETE
+    @Path("{id: [a-z0-9\\-]+}/cover")
+    public Response clearCover(
+            @PathParam("id") String documentId) {
+        // Guests are read-only, even where a WRITE ACL would otherwise resolve for the guest account.
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        AclDao aclDao = new AclDao();
+        if (!aclDao.checkPermission(documentId, PermType.WRITE, getTargetIdList(null))) {
+            throw new ForbiddenClientException();
+        }
+
+        // Re-derive the served pointer synchronously in this transaction (under the row lock) so an
+        // immediate read-back shows the restored first-file cover; the event refreshes index/contributors.
+        DocumentDao documentDao = new DocumentDao();
+        documentDao.updateCoverFileId(documentId, null);
+        documentDao.reconcileServingCover(documentId);
+
+        DocumentUpdatedAsyncEvent event = new DocumentUpdatedAsyncEvent();
+        event.setUserId(principal.getId());
+        event.setDocumentId(documentId);
+        ThreadLocalContext.get().addAsyncEvent(event);
 
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
