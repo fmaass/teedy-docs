@@ -1104,5 +1104,15 @@
       "filter": "我的最愛",
       "toggle_failed": "無法更新您的我的最愛"
     }
+  },
+  "primevue": {
+    "today": "今天",
+    "clear": "清除",
+    "weak": "弱",
+    "medium": "中",
+    "strong": "強",
+    "password_prompt": "請輸入密碼",
+    "empty_message": "沒有可用選項",
+    "empty_filter_message": "找不到結果"
   }
 }

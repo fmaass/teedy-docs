@@ -1104,5 +1104,15 @@
       "filter": "Favoris",
       "toggle_failed": "Impossible de mettre à jour vos favoris"
     }
+  },
+  "primevue": {
+    "today": "Aujourd'hui",
+    "clear": "Effacer",
+    "weak": "Faible",
+    "medium": "Moyen",
+    "strong": "Fort",
+    "password_prompt": "Saisissez un mot de passe",
+    "empty_message": "Aucune option disponible",
+    "empty_filter_message": "Aucun résultat trouvé"
   }
 }

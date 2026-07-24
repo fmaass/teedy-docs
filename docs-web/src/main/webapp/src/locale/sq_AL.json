@@ -1104,5 +1104,15 @@
       "filter": "Të preferuarat",
       "toggle_failed": "Të preferuarat tuaja nuk mund të përditësoheshin"
     }
+  },
+  "primevue": {
+    "today": "Sot",
+    "clear": "Pastro",
+    "weak": "I dobët",
+    "medium": "Mesatar",
+    "strong": "I fortë",
+    "password_prompt": "Vendosni një fjalëkalim",
+    "empty_message": "Nuk ka opsione në dispozicion",
+    "empty_filter_message": "Nuk u gjet asnjë rezultat"
   }
 }

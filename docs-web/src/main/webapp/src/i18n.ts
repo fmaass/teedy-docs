@@ -28,6 +28,20 @@ const localeImports: Record<string, () => Promise<LocaleModule>> = {
   sq_AL: () => import('./locale/sq_AL.json'),
 }
 
+type LocaleListener = (locale: string) => void
+const localeListeners = new Set<LocaleListener>()
+
+/**
+ * Subscribe to locale switches. The callback fires after the new locale's
+ * messages are loaded AND the active locale has been switched, so a listener can
+ * safely read the freshly-active translations (e.g. to mirror them into a
+ * non-vue-i18n consumer such as PrimeVue's own built-in locale). Returns nothing;
+ * listeners live for the app's lifetime.
+ */
+export function onLocaleChange(fn: LocaleListener): void {
+  localeListeners.add(fn)
+}
+
 export async function setLocale(locale: string) {
   if (locale !== 'en' && localeImports[locale]) {
     const messages = await localeImports[locale]()
@@ -36,4 +50,5 @@ export async function setLocale(locale: string) {
   }
   ;(i18n.global.locale as { value: string }).value = locale
   document.documentElement.lang = locale.replace('_', '-')
+  localeListeners.forEach((fn) => fn(locale))
 }

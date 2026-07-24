@@ -16,6 +16,7 @@ import { getStoredTheme, loadPreset } from './theme/presets'
 import App from './App.vue'
 import router from './router'
 import { i18n, setLocale } from './i18n'
+import { buildPrimeVueLocale, bindPrimeVueConfig } from './primevueLocale'
 
 const savedLocale = localStorage.getItem('teedy-locale')
 if (savedLocale && savedLocale !== 'en') {
@@ -52,6 +53,12 @@ app.use(VueQueryPlugin, { queryClient })
 app.use(router)
 app.use(i18n)
 app.use(PrimeVue, {
+  // Seed PrimeVue's built-in strings from the app's active locale. The initial
+  // setLocale above is async and un-awaited, so at this point it may or may not
+  // have switched the locale yet — buildPrimeVueLocale reads whatever is active,
+  // and bindPrimeVueConfig re-applies once installation completes; the
+  // onLocaleChange subscription inside primevueLocale then catches a later resolve.
+  locale: buildPrimeVueLocale(),
   theme: {
     preset: TeedyPreset,
     options: {
@@ -63,6 +70,9 @@ app.use(PrimeVue, {
     },
   },
 })
+bindPrimeVueConfig(
+  (app.config.globalProperties.$primevue as unknown as { config: { locale: Record<string, unknown> } }).config,
+)
 app.use(ToastService)
 app.use(ConfirmationService)
 app.directive('tooltip', Tooltip)

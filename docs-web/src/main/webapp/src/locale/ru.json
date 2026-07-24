@@ -1104,5 +1104,15 @@
       "filter": "Избранное",
       "toggle_failed": "Не удалось обновить избранное"
     }
+  },
+  "primevue": {
+    "today": "Сегодня",
+    "clear": "Очистить",
+    "weak": "Слабый",
+    "medium": "Средний",
+    "strong": "Надёжный",
+    "password_prompt": "Введите пароль",
+    "empty_message": "Нет доступных вариантов",
+    "empty_filter_message": "Ничего не найдено"
   }
 }

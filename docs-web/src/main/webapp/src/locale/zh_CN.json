@@ -1104,5 +1104,15 @@
       "filter": "收藏",
       "toggle_failed": "无法更新您的收藏"
     }
+  },
+  "primevue": {
+    "today": "今天",
+    "clear": "清除",
+    "weak": "弱",
+    "medium": "中",
+    "strong": "强",
+    "password_prompt": "请输入密码",
+    "empty_message": "没有可用选项",
+    "empty_filter_message": "未找到结果"
   }
 }

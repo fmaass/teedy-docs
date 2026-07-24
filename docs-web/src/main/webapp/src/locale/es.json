@@ -1104,5 +1104,15 @@
       "filter": "Favoritos",
       "toggle_failed": "No se pudieron actualizar sus favoritos"
     }
+  },
+  "primevue": {
+    "today": "Hoy",
+    "clear": "Limpiar",
+    "weak": "Débil",
+    "medium": "Medio",
+    "strong": "Fuerte",
+    "password_prompt": "Introduce una contraseña",
+    "empty_message": "No hay opciones disponibles",
+    "empty_filter_message": "No se encontraron resultados"
   }
 }
