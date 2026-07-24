@@ -1,6 +1,5 @@
 package com.sismics.docs.rest.document;
 
-import com.sismics.docs.application.document.ClearDocumentCoverCommand;
 import com.sismics.docs.application.document.DocumentAccessDeniedException;
 import com.sismics.docs.application.document.DocumentFileAccessException;
 import com.sismics.docs.application.document.DocumentNotFoundException;
@@ -8,7 +7,6 @@ import com.sismics.docs.application.document.DocumentValidationException;
 import com.sismics.docs.application.document.DocumentView;
 import com.sismics.docs.application.document.DuplicateDocumentCommand;
 import com.sismics.docs.application.document.GetDocumentQuery;
-import com.sismics.docs.application.document.SetDocumentCoverCommand;
 import com.sismics.docs.application.document.UpdateDocumentCommand;
 import com.sismics.docs.application.document.UpdatedDocumentResult;
 import com.sismics.docs.bootstrap.DocumentSliceModule;
@@ -22,8 +20,6 @@ import com.sismics.rest.util.ValidationUtil;
 
 import jakarta.json.Json;
 import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.DELETE;
-import jakarta.ws.rs.FormParam;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
@@ -197,88 +193,6 @@ public class LegacyDocumentResource extends BaseResource {
         return LegacyDocumentResponseMapper.toResponse(result);
     }
 
-    /**
-     * Sets a document's explicit cover file. The chosen file becomes the document's served cover (its
-     * thumbnail in the list/gallery); the served pointer is reconciled synchronously in this request's
-     * transaction and a document-updated event refreshes the search index and contributor list.
-     *
-     * @api {post} /document/:id/cover Set the document cover file
-     * @apiName PostDocumentCover
-     * @apiGroup Document
-     * @apiParam {String} id Document ID
-     * @apiParam {String} file File ID to use as the cover (must be attached to the document)
-     * @apiSuccess {String} status Status OK
-     * @apiError (client) ForbiddenError Access denied
-     * @apiError (client) ValidationError The file is not attached to this document
-     * @apiPermission user
-     * @apiVersion 1.5.0
-     *
-     * @param documentId Document ID
-     * @param fileId     File ID to use as the cover
-     * @return Response
-     */
-    @POST
-    @Path("{id: [a-z0-9\\-]+}/cover")
-    public Response setCover(
-            @PathParam("id") String documentId,
-            @FormParam("file") String fileId) {
-        // Guests are read-only, even where a WRITE ACL would otherwise resolve for the guest account.
-        if (!authenticate() || principal.isGuest()) {
-            throw new ForbiddenClientException();
-        }
-
-        // Validate input data
-        ValidationUtil.validateRequired(fileId, "file");
-
-        SetDocumentCoverCommand command = new SetDocumentCoverCommand(
-                documentId, principal.getId(), getTargetIdList(null), fileId);
-        try {
-            module.unitOfWork().required(() -> module.documentCoverHandler().setCover(command));
-        } catch (DocumentAccessDeniedException e) {
-            throw new ForbiddenClientException();
-        } catch (DocumentValidationException e) {
-            throw new ClientException(e.getType(), e.getMessage());
-        }
-
-        return LegacyDocumentResponseMapper.statusOk();
-    }
-
-    /**
-     * Clears a document's explicit cover file, restoring the derived (first-file-by-order) cover. The
-     * served pointer is re-derived synchronously in this request's transaction and a document-updated
-     * event refreshes the search index and contributor list.
-     *
-     * @api {delete} /document/:id/cover Clear the document cover file
-     * @apiName DeleteDocumentCover
-     * @apiGroup Document
-     * @apiParam {String} id Document ID
-     * @apiSuccess {String} status Status OK
-     * @apiError (client) ForbiddenError Access denied
-     * @apiPermission user
-     * @apiVersion 1.5.0
-     *
-     * @param documentId Document ID
-     * @return Response
-     */
-    @DELETE
-    @Path("{id: [a-z0-9\\-]+}/cover")
-    public Response clearCover(
-            @PathParam("id") String documentId) {
-        // Guests are read-only, even where a WRITE ACL would otherwise resolve for the guest account.
-        if (!authenticate() || principal.isGuest()) {
-            throw new ForbiddenClientException();
-        }
-
-        ClearDocumentCoverCommand command = new ClearDocumentCoverCommand(
-                documentId, principal.getId(), getTargetIdList(null));
-        try {
-            module.unitOfWork().required(() -> module.documentCoverHandler().clearCover(command));
-        } catch (DocumentAccessDeniedException e) {
-            throw new ForbiddenClientException();
-        }
-
-        return LegacyDocumentResponseMapper.statusOk();
-    }
     /**
      * Duplicates a document into a new document owned by the requester.
      *
