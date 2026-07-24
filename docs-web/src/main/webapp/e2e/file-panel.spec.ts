@@ -303,42 +303,52 @@ test('opening a file previews it in-app; only Download targets the original (#14
   }
 })
 
-// #170 — a long unbreakable filename must not expand the name column and push the row's
-// action buttons off the visible area behind a horizontal scrollbar. The name column is
-// bounded so its ellipsis engages while the actions column keeps its place on-screen. This
-// SHARED spec runs under BOTH the desktop and mobile projects: the actions must stay within
-// the viewport at the narrow mobile width too (the acceptance floor is ≥360px). It fails on
-// the pre-fix layout, where the 120-char name expands the table far past the viewport.
-test('a long unbreakable filename keeps the row actions on-screen with no horizontal scroll (#170)', async ({ page }) => {
+// #170 — a long unbreakable filename must not expand the name column and push the row
+// actions off-screen behind a horizontal scrollbar, and every filename (long or short) must
+// stay VISIBLE — never collapse to a zero-width cell. The name column carries a guaranteed
+// min-width floor and the optional metadata columns drop below the mobile breakpoint, so both
+// hold deterministically, independent of font metrics. This SHARED spec runs under BOTH the
+// desktop and mobile projects; the mobile run is the hard gate (the ≥360px floor). It fails
+// on a name column that is only max-width:0 (the filename collapses to zero width at mobile).
+test('long and short filenames stay visible with row actions on-screen and no horizontal scroll (#170)', async ({ page }) => {
   // 120 chars, no space/hyphen/underscore the browser could break on — the exact shape that
-  // broke the layout (a breakable name would wrap and never trigger the overflow).
+  // broke the layout (a breakable name would wrap and never trigger the overflow) — plus a
+  // short name that must also stay fully visible.
   const longName = 'x'.repeat(116) + '.txt'
-  const id = await seedDoc(page.request, unique('overflow'), [txtFile(longName)])
+  const shortName = 'short.txt'
+  const id = await seedDoc(page.request, unique('overflow'), [txtFile(longName), txtFile(shortName)])
   try {
     await page.goto(`/#/document/view/${id}/content`)
     await openFileList(page)
+    await expect(page.locator('.file-data-table')).toBeVisible()
 
-    const table = page.locator('.file-data-table')
-    await expect(table).toBeVisible()
-    const row = table.locator('tbody tr').first()
-    // The always-present, read-only-safe per-row action button.
-    const versions = row.getByRole('button', { name: 'Version history' })
+    // Both names are actually painted (non-zero box) — the conversion specs' locator pattern.
+    // On the earlier max-width:0-only layout the name column collapsed to zero at mobile width
+    // and these failed.
+    for (const name of [longName, shortName]) {
+      await expect(page.locator('.file-list-section .file-name-text', { hasText: name })).toBeVisible()
+    }
+
+    // The long-name row is the overflow trigger: its actions stay on-screen and clickable,
+    // with no horizontal scroll.
+    const longRow = page.locator('.file-data-table tbody tr', { hasText: longName })
+    const versions = longRow.getByRole('button', { name: 'Version history' })
     await expect(versions).toBeVisible()
 
     // ONE atomic geometry read taken BEFORE any click (a click auto-scrolls its target into
     // view, which would mask a real horizontal overflow). Everything is measured against the
     // visible content viewport (documentElement.clientWidth) — the true "no horizontal
-    // scroll" reference, immune to a flex ancestor that might expand to the overflowing
-    // table's width.
-    const geom = await table.evaluate((root) => {
+    // scroll" reference, immune to a flex ancestor that might expand to the overflowing table.
+    const geom = await longRow.evaluate((rowEl) => {
       const right = (el: Element) => el.getBoundingClientRect().right
-      const nameSpan = root.querySelector('tbody tr .file-name-text') as HTMLElement
+      const table = rowEl.closest('.file-data-table')!
+      const nameSpan = rowEl.querySelector('.file-name-text') as HTMLElement
       return {
         viewportWidth: document.documentElement.clientWidth,
-        tableRight: right(root.querySelector('.p-datatable-table')!),
-        actionsRight: right(root.querySelector('tbody tr .file-action-menu')!),
-        nameScrollWidth: nameSpan.scrollWidth,
-        nameClientWidth: nameSpan.clientWidth,
+        tableRight: right(table.querySelector('.p-datatable-table')!),
+        actionsRight: right(rowEl.querySelector('.file-action-menu')!),
+        nameWidth: nameSpan.getBoundingClientRect().width,
+        nameEllipsized: nameSpan.scrollWidth > nameSpan.clientWidth + 1,
       }
     })
 
@@ -350,10 +360,9 @@ test('a long unbreakable filename keeps the row actions on-screen with no horizo
     expect(geom.actionsRight, 'row action menu right edge within the viewport').toBeLessThanOrEqual(
       geom.viewportWidth + 1,
     )
-    // The name-cell ellipsis actually engages: the text is wider than its bounded cell.
-    expect(geom.nameScrollWidth, 'name text clipped by its bounded cell').toBeGreaterThan(
-      geom.nameClientWidth,
-    )
+    // The long name keeps a meaningful visible width and its ellipsis actually engages.
+    expect(geom.nameWidth, 'long name keeps a visible width').toBeGreaterThan(0)
+    expect(geom.nameEllipsized, 'long name text clipped by its bounded cell').toBe(true)
 
     // The action button is genuinely clickable (not occluded) — it opens the versions dialog.
     await versions.click()
