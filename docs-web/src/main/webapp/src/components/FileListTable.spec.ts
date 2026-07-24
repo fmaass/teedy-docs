@@ -68,21 +68,6 @@ describe('FileListTable', () => {
     expect(heads).not.toContain('ui.file_view.col_uploader')
   })
 
-  it('carries the name-floor and metadata-hide class hooks that keep the row layout within a mobile viewport (#170)', () => {
-    // The name column's cells carry the bounding class (paired with its scoped min-width/
-    // max-width rule that floors the column and truncates), and every optional metadata
-    // column carries the hide class (paired with its ≤1024px display:none rule that drops
-    // them on mobile so the row actions stay on-screen). jsdom cannot measure layout, so this
-    // asserts the structural hooks are present; the geometric proof (name visible, no
-    // horizontal scroll, actions on-screen) lives in the file-panel e2e spec.
-    const wrapper = mountTable(twoFiles)
-    expect(wrapper.findAll('th.file-name-col').length).toBe(1)
-    expect(wrapper.findAll('td.file-name-col').length).toBe(twoFiles.length)
-    // Default columns show Created + Size (Uploader off) — both are hide-tagged.
-    expect(wrapper.findAll('th.file-meta-col').length).toBe(2)
-    expect(wrapper.findAll('td.file-meta-col').length).toBe(2 * twoFiles.length)
-  })
-
   it('shows the Uploader column once it is enabled (optional columns)', async () => {
     const wrapper = mountTable(twoFiles)
     ;(wrapper.vm as unknown as { columns: Record<string, boolean> }).columns.uploader = true

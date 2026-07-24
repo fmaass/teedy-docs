@@ -323,7 +323,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
         </template>
       </Column>
 
-      <Column field="name" :header="t('ui.file_view.col_name')" sortable headerClass="file-name-col" bodyClass="file-name-col">
+      <Column field="name" :header="t('ui.file_view.col_name')" sortable>
         <template #body="{ data }">
           <InputText
             v-if="renamingId === data.id"
@@ -353,19 +353,19 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
         </template>
       </Column>
 
-      <Column v-if="columns.created" field="create_date" :header="t('ui.file_view.col_created')" sortable headerStyle="width: 10rem" headerClass="file-meta-col" bodyClass="file-meta-col">
+      <Column v-if="columns.created" field="create_date" :header="t('ui.file_view.col_created')" sortable headerStyle="width: 10rem">
         <template #body="{ data }">
           <span class="file-meta">{{ formatDate(data.create_date) }}</span>
         </template>
       </Column>
 
-      <Column v-if="columns.size" field="size" :header="t('ui.file_view.col_size')" sortable headerStyle="width: 7rem" headerClass="file-meta-col" bodyClass="file-meta-col">
+      <Column v-if="columns.size" field="size" :header="t('ui.file_view.col_size')" sortable headerStyle="width: 7rem">
         <template #body="{ data }">
           <span class="file-meta">{{ formatFileSize(data.size) }}</span>
         </template>
       </Column>
 
-      <Column v-if="columns.uploader" field="creator" :header="t('ui.file_view.col_uploader')" sortable headerStyle="width: 10rem" headerClass="file-meta-col" bodyClass="file-meta-col">
+      <Column v-if="columns.uploader" field="creator" :header="t('ui.file_view.col_uploader')" sortable headerStyle="width: 10rem">
         <template #body="{ data }">
           <span class="file-meta">{{ data.creator }}</span>
         </template>
@@ -493,31 +493,6 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 }
 .file-open-link:hover {
   color: var(--teedy-brand);
-}
-
-/* Bound the name column and give it a guaranteed floor: max-width: 0 caps its preferred
-   width so the auto table-layout hands it only the slack the fixed-width columns leave —
-   it truncates instead of expanding and pushing the actions column off-screen behind a
-   horizontal scrollbar (#170), and its .file-name-text ellipsis engages against the bounded
-   cell. min-width keeps a meaningful, always-visible name at every viewport rather than the
-   font-dependent zero-width collapse a bare max-width: 0 caused. Kept on the default
-   `table-layout: auto`: a fixed layout would hard-pin the metadata columns' rem widths and
-   overflow the narrow mobile viewport instead. */
-.file-data-table :deep(th.file-name-col),
-.file-data-table :deep(td.file-name-col) {
-  min-width: 6rem;
-  max-width: 0;
-}
-
-/* Below the app's mobile breakpoint the name (6rem) + icon + reorder + actions columns
-   already fill a ~360px viewport, so the optional metadata columns are dropped there to keep
-   the row actions on-screen without relying on font-dependent auto-shrink slack. They return
-   above the breakpoint, where every column fits with room to spare. */
-@media (max-width: 1024px) {
-  .file-data-table :deep(th.file-meta-col),
-  .file-data-table :deep(td.file-meta-col) {
-    display: none;
-  }
 }
 
 .file-name-text {
