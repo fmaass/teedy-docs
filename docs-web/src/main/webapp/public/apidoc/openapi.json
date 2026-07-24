@@ -1766,6 +1766,44 @@
         }
       }
     },
+    "/file/{id}/move": {
+      "post": {
+        "tags": [
+          "file"
+        ],
+        "summary": "Move a file to another document",
+        "operationId": "post_file_id_move",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "targetDocumentId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/file/{id}": {
       "post": {
         "tags": [

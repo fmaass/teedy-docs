@@ -50,6 +50,7 @@ const emit = defineEmits<{
   reorder: [orderedIds: string[]]
   setCover: [file: FilePanelFile]
   clearCover: [file: FilePanelFile]
+  move: [file: FilePanelFile]
 }>()
 
 const { t } = useI18n()
@@ -382,6 +383,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             @delete="emit('delete', data)"
             @set-cover="emit('setCover', data)"
             @clear-cover="emit('clearCover', data)"
+            @move="emit('move', data)"
           >
             <!-- Forward the parent's per-file extra actions into the (writable-gated)
                  action menu, so #73/#117 mount in ONE place and light up here too. -->

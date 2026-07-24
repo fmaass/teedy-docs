@@ -170,6 +170,19 @@ export function renameFile(fileId: string, name: string) {
   return api.post(`/file/${fileId}`, params)
 }
 
+/**
+ * Move a file (its whole active version chain) to another document via POST /file/:id/move
+ * (form-encoded). The caller needs WRITE on BOTH the source and the target document — the file
+ * list rows carry no writable flag, so the server is the sole authority and a target the caller
+ * cannot write to comes back as 403 (surfaced as an error toast). The backend re-parents the chain,
+ * reconciles each document's served cover, and re-points the search index.
+ */
+export function moveFile(fileId: string, targetDocumentId: string) {
+  const params = new URLSearchParams()
+  params.set('targetDocumentId', targetDocumentId)
+  return api.post(`/file/${fileId}/move`, params)
+}
+
 export function reprocessFile(fileId: string) {
   return api.post(`/file/${fileId}/process`)
 }

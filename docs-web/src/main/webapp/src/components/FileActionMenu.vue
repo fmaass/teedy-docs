@@ -29,6 +29,7 @@ const emit = defineEmits<{
   delete: [file: FileActionTarget]
   setCover: [file: FileActionTarget]
   clearCover: [file: FileActionTarget]
+  move: [file: FileActionTarget]
 }>()
 
 const { t } = useI18n()
@@ -70,6 +71,16 @@ const { t } = useI18n()
         @click="emit('clearCover', file)"
         v-tooltip="t('ui.remove_as_cover')"
         :aria-label="t('ui.remove_as_cover')"
+      />
+      <Button
+        icon="pi pi-arrow-right"
+        text
+        rounded
+        size="small"
+        severity="secondary"
+        @click="emit('move', file)"
+        v-tooltip="t('ui.move_file')"
+        :aria-label="t('ui.move_file')"
       />
       <Button
         icon="pi pi-pencil"

@@ -364,7 +364,7 @@ public class TestContentMacDedup extends BaseTest {
 
         // B: demote v0 (flush -> hold v0's row lock, latestVersion=false uncommitted), then wait to commit.
         Thread b = new Thread(() -> runInHeldTx(errorB, em -> {
-            new FileDao().demoteCurrentLatestVersion(v0, UUID.randomUUID().toString());
+            new FileDao().demoteCurrentLatestVersion(v0, UUID.randomUUID().toString(), docId);
             em.flush();                 // push the demote UPDATE -> acquire v0's row write lock
             bHoldsLock.countDown();
             await(bMayCommit);

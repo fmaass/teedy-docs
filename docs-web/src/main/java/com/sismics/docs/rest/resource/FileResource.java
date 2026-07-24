@@ -44,6 +44,8 @@ import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileCreatedResult;
+import com.sismics.docs.core.util.FileMoveConflictException;
+import com.sismics.docs.core.util.FileMoveService;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.PreviousVersionMismatchException;
 import com.sismics.docs.core.util.RasterGenerationUtil;
@@ -325,6 +327,86 @@ public class FileResource extends BaseResource {
         }
 
         // Always return OK
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Move a file (its whole active version chain) to another document.
+     *
+     * @api {post} /file/:id/move Move a file to another document
+     * @apiName PostFileMove
+     * @apiGroup File
+     * @apiParam {String} id File ID
+     * @apiParam {String} targetDocumentId Destination document ID
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Validation error
+     * @apiError (client) SameDocument The file already belongs to the target document
+     * @apiError (client) IllegalFile The file is not attached to a document
+     * @apiError (client) NotFound File or target document not found
+     * @apiError (client) MoveConflict The move lost a concurrent race; retry
+     * @apiPermission user
+     * @apiVersion 1.13.0
+     *
+     * @param id File ID
+     * @param targetDocumentId Destination document ID
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/move")
+    public Response move(
+            @PathParam("id") String id,
+            @FormParam("targetDocumentId") String targetDocumentId) {
+        // Guests are read-only, even where a WRITE ACL would otherwise resolve for the guest account.
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        ValidationUtil.validateRequired(targetDocumentId, "targetDocumentId");
+
+        // Resolve the file and its source document.
+        FileDao fileDao = new FileDao();
+        File file = fileDao.getFile(id);
+        if (file == null) {
+            throw new NotFoundException();
+        }
+        String sourceDocumentId = file.getDocumentId();
+        if (sourceDocumentId == null) {
+            throw new ClientException("IllegalFile", MessageFormat.format("File is not attached to a document: {0}", id));
+        }
+
+        // WRITE on the source document is required to move a file out of it.
+        AclDao aclDao = new AclDao();
+        if (!aclDao.checkPermission(sourceDocumentId, PermType.WRITE, getTargetIdList(null))) {
+            throw new ForbiddenClientException();
+        }
+
+        // Moving to the same document is a no-op error.
+        if (sourceDocumentId.equals(targetDocumentId)) {
+            throw new ClientException("SameDocument", "The file already belongs to this document");
+        }
+
+        // The target must exist (unknown -> 404) and be writable (no permission -> 403). The picker sends no
+        // writable flag; the server is the sole authority, so a chosen but unwritable target is a clean 403.
+        DocumentDao documentDao = new DocumentDao();
+        if (documentDao.getById(targetDocumentId) == null) {
+            throw new NotFoundException();
+        }
+        if (!aclDao.checkPermission(targetDocumentId, PermType.WRITE, getTargetIdList(null))) {
+            throw new ForbiddenClientException();
+        }
+
+        // The move locks both documents, re-parents the chain, re-keys the content MACs, reconciles both
+        // covers, audits both documents, and queues the post-commit index re-point. A lost race under the
+        // locks rolls the whole move back as a retryable conflict.
+        try {
+            FileMoveService.moveFile(id, targetDocumentId, principal.getId());
+        } catch (FileMoveConflictException e) {
+            throw new ConflictException("MoveConflict", e.getMessage());
+        }
+
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");
         return Response.ok().entity(response.build()).build();

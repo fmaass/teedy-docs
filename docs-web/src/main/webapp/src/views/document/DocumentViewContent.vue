@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } fro
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
-import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles, getFileList } from '../../api/file'
+import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles, getFileList, moveFile } from '../../api/file'
 import { partitionByNameConflict, type FileConflict, type ConflictAction } from '../../utils/fileConflicts'
 import { shouldPoll, createProcessingPoller } from '../../utils/fileProcessing'
 import { displayName } from '../../utils/fileName'
@@ -24,12 +24,13 @@ import FileVersionsDialog from '../../components/FileVersionsDialog.vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import AutoComplete from 'primevue/autocomplete'
+import Dialog from 'primevue/dialog'
 import SelectButton from 'primevue/selectbutton'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
 import FileListTable from '../../components/FileListTable.vue'
-import FileActionMenu from '../../components/FileActionMenu.vue'
+import FileActionMenu, { type FileActionTarget } from '../../components/FileActionMenu.vue'
 import FileExtraActions from '../../components/FileExtraActions.vue'
 import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
@@ -534,6 +535,60 @@ async function clearCoverFor() {
   }
 }
 
+// "Move to document…": a search-driven picker over documents. The rows carry no writable flag — the
+// server is the sole authority, so a target the caller cannot write to comes back as a 403 surfaced
+// through the error toast (no client-side pre-filter). Both the source and the destination document's
+// cached views change, so both are invalidated alongside the document list.
+const moveDialogVisible = ref(false)
+const fileToMove = ref<FileActionTarget | null>(null)
+const moveSearchResults = ref<DocumentListItem[]>([])
+const moveTarget = ref<DocumentListItem | null>(null)
+const movingFile = ref(false)
+
+function openMoveDialog(file: FileActionTarget) {
+  fileToMove.value = file
+  moveTarget.value = null
+  moveSearchResults.value = []
+  moveDialogVisible.value = true
+}
+
+async function completeMoveSearch(event: { query: string }) {
+  const query = event.query.trim()
+  if (!query || !doc.value) {
+    moveSearchResults.value = []
+    return
+  }
+  try {
+    const { data } = await listDocuments({ search: query, limit: 10 })
+    // Exclude the current document — moving to the same document is rejected by the backend.
+    moveSearchResults.value = data.documents.filter((d) => d.id !== doc.value!.id)
+  } catch {
+    moveSearchResults.value = []
+  }
+}
+
+async function confirmMove() {
+  const sourceId = doc.value?.id
+  const targetId = moveTarget.value?.id
+  const fileId = fileToMove.value?.id
+  if (!sourceId || !targetId || !fileId) return
+  movingFile.value = true
+  try {
+    await moveFile(fileId, targetId)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.document(sourceId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.document(targetId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.documents() }),
+    ])
+    moveDialogVisible.value = false
+    toast.add({ severity: 'success', summary: t('ui.file_moved'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.failed_move_file'), life: 3000 })
+  } finally {
+    movingFile.value = false
+  }
+}
+
 const previewQueue = usePreviewQueue()
 const previewObjectUrls = ref<Record<string, string>>({})
 const previewCardRefs = ref<Record<string, HTMLElement>>({})
@@ -873,6 +928,7 @@ onUnmounted(() => {
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"
                 @clear-cover="clearCoverFor"
+                @move="openMoveDialog"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -909,6 +965,7 @@ onUnmounted(() => {
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"
                 @clear-cover="clearCoverFor"
+                @move="openMoveDialog"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -953,6 +1010,7 @@ onUnmounted(() => {
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"
                 @clear-cover="clearCoverFor"
+                @move="openMoveDialog"
               >
                 <template #extra="s">
                   <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -979,6 +1037,7 @@ onUnmounted(() => {
         @reorder="onReorderFiles"
         @set-cover="setCoverFor"
         @clear-cover="clearCoverFor"
+        @move="openMoveDialog"
       >
         <template #file-extra="s">
           <slot name="file-extra" v-bind="s"><FileExtraActions v-bind="s" /></slot>
@@ -1044,6 +1103,43 @@ onUnmounted(() => {
 
     <!-- Safe in-app file preview (#144). -->
     <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" />
+
+    <!-- Move a file to another document (#175). The picker searches all documents; the server enforces
+         WRITE on the destination, so no client-side pre-filter narrows the results. -->
+    <Dialog
+      v-model:visible="moveDialogVisible"
+      modal
+      :header="t('ui.move_file')"
+      :style="{ width: '30rem' }"
+    >
+      <AutoComplete
+        v-model="moveTarget"
+        :suggestions="moveSearchResults"
+        optionLabel="title"
+        forceSelection
+        fluid
+        size="small"
+        :placeholder="t('ui.move_search_placeholder')"
+        @complete="completeMoveSearch"
+      >
+        <template #option="{ option }">
+          <div class="relation-search-result">
+            <i class="pi pi-file" aria-hidden="true" />
+            <span>{{ option.title }}</span>
+          </div>
+        </template>
+      </AutoComplete>
+      <template #footer>
+        <Button :label="t('cancel')" text @click="moveDialogVisible = false" />
+        <Button
+          :label="t('ui.move_confirm')"
+          icon="pi pi-arrow-right"
+          :disabled="!moveTarget"
+          :loading="movingFile"
+          @click="confirmMove"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 

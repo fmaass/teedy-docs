@@ -30,11 +30,12 @@ function labels(wrapper: ReturnType<typeof mountMenu>) {
 }
 
 describe('FileActionMenu', () => {
-  it('writable, not the cover: exposes history, set-as-cover, rename and delete', () => {
+  it('writable, not the cover: exposes history, set-as-cover, move, rename and delete', () => {
     const wrapper = mountMenu(true)
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
       'ui.set_as_cover',
+      'ui.move_file',
       'rename',
       'ui.remove_file',
     ])
@@ -45,6 +46,7 @@ describe('FileActionMenu', () => {
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
       'ui.remove_as_cover',
+      'ui.move_file',
       'rename',
       'ui.remove_file',
     ])
@@ -80,6 +82,14 @@ describe('FileActionMenu', () => {
     await cover.findAll('button').find((b) => b.attributes('aria-label') === 'ui.remove_as_cover')!.trigger('click')
     expect(cover.emitted('clearCover')?.[0]).toEqual([file])
     expect(cover.emitted('setCover')).toBeUndefined()
+  })
+
+  it('emits move with the file, and only when writable', async () => {
+    const wrapper = mountMenu(true)
+    await wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'ui.move_file')!.trigger('click')
+    expect(wrapper.emitted('move')?.[0]).toEqual([file])
+    // A read-only viewer never sees the move action.
+    expect(labels(mountMenu(false))).not.toContain('ui.move_file')
   })
 
   it('renders the writable-only `extra` slot for callers to mount extra actions (#73/#117)', () => {

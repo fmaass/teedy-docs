@@ -259,25 +259,35 @@ public class FileUtil {
                 if (previousFile == null || !documentId.equals(previousFile.getDocumentId())) {
                     throw new PreviousVersionMismatchException("The previous file version is unknown or belongs to another document");
                 }
+                // The document the predecessor belongs to at read time. The demote CAS is constrained on it so
+                // a concurrent move re-parenting the predecessor makes this replacement lose closed.
+                String expectedDocumentId = previousFile.getDocumentId();
 
                 // Resolve the version-chain id (a first replacement mints one shared by both rows).
                 String versionId = previousFile.getVersionId() == null
                         ? UUID.randomUUID().toString() : previousFile.getVersionId();
 
-                // Atomic compare-and-swap: demote the predecessor IFF it is still the current active latest.
-                // Zero affected rows means a concurrent writer already replaced or deleted it (a stale base):
-                // fail with a typed conflict BEFORE inserting any successor, so a lost race can never leave
-                // two latest rows in the chain.
-                if (fileDao.demoteCurrentLatestVersion(previousFileId, versionId) == 0) {
+                // Atomic compare-and-swap: demote the predecessor IFF it is still the current active latest AND
+                // still in its expected document. Zero affected rows means a concurrent writer replaced, deleted
+                // or moved it (a stale base): fail with a typed conflict BEFORE inserting any successor, so a
+                // lost race can never leave two latest rows in the chain or split it across documents.
+                if (fileDao.demoteCurrentLatestVersion(previousFileId, versionId, expectedDocumentId) == 0) {
                     throw new VersionConcurrencyException("The file version was modified concurrently");
                 }
 
-                // Copy the predecessor metadata onto the successor, including its display rotation so the new
-                // version renders the same way.
-                file.setOrder(previousFile.getOrder());
+                // Re-read the predecessor AFTER the successful demote — its row is now write-locked until this
+                // transaction ends — and derive the successor's document from that committed-under-lock state,
+                // never the request parameter, so a successor is never inserted into a document the predecessor
+                // no longer belongs to.
+                File demotedPrevious = fileDao.getActiveById(previousFileId);
+                if (demotedPrevious == null) {
+                    throw new VersionConcurrencyException("The file version was modified concurrently");
+                }
+                file.setDocumentId(demotedPrevious.getDocumentId());
+                file.setOrder(demotedPrevious.getOrder());
                 file.setVersionId(versionId);
-                file.setVersion(previousFile.getVersion() + 1);
-                file.setRotation(previousFile.getRotation());
+                file.setVersion(demotedPrevious.getVersion() + 1);
+                file.setRotation(demotedPrevious.getRotation());
             }
         }
 

@@ -217,16 +217,24 @@ public class FileDao {
      * takes a row write lock, so two concurrent replacements of the same base serialize and exactly one
      * observes 1.
      *
+     * <p>The swap is additionally constrained on the predecessor's expected document: a concurrent move that
+     * re-parented the predecessor to another document changes {@code FIL_IDDOC_C}, so the CAS then affects 0
+     * rows and the replacement is rejected rather than inserting a successor into the wrong (stale) document
+     * or splitting the chain across two documents.</p>
+     *
      * @param expectedLatestId ID of the predecessor the caller believes is the current latest version
      * @param versionId Resolved version-chain id to stamp on the predecessor (and share with the successor)
+     * @param expectedDocumentId Document the predecessor must still belong to for the swap to apply
      * @return the number of rows updated: 1 when the swap succeeded, 0 when the base was stale
      */
-    public int demoteCurrentLatestVersion(String expectedLatestId, String versionId) {
+    public int demoteCurrentLatestVersion(String expectedLatestId, String versionId, String expectedDocumentId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         Query q = em.createQuery("update File f set f.latestVersion = false, f.versionId = :versionId" +
-                " where f.id = :id and f.latestVersion = true and f.deleteDate is null");
+                " where f.id = :id and f.latestVersion = true and f.deleteDate is null" +
+                " and f.documentId = :expectedDocumentId");
         q.setParameter("versionId", versionId);
         q.setParameter("id", expectedLatestId);
+        q.setParameter("expectedDocumentId", expectedDocumentId);
         return q.executeUpdate();
     }
 
@@ -424,7 +432,92 @@ public class FileDao {
         q.setParameter("id", id);
         return q.executeUpdate();
     }
-    
+
+    /**
+     * Re-parents the ACTIVE rows of a file's version chain from one document to another as a single guarded
+     * bulk UPDATE, giving every moved row the same appended target order. The predicate is constrained to
+     * rows still at {@code sourceDocumentId} and not soft-deleted, so a soft-deleted historical row keeps its
+     * original document and a concurrently re-parented row is not moved twice. When {@code versionId} is null
+     * the single file row is moved (the common no-chain case); otherwise every active row sharing that
+     * version chain is moved. The bulk UPDATE takes a row write lock on each affected row, serializing the
+     * move against a concurrent replacement/delete on the same rows.
+     *
+     * @param fileId File ID (the single row when it has no version chain)
+     * @param versionId Version-chain id, or null when the file has none
+     * @param sourceDocumentId Document the rows must currently belong to
+     * @param targetDocumentId Document to move the rows to
+     * @param order Appended order stamped on every moved row
+     * @return the number of rows actually re-parented
+     */
+    public int relinkActiveRowsToDocument(String fileId, String versionId, String sourceDocumentId,
+                                          String targetDocumentId, int order) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        String chainPredicate = versionId == null ? "f.id = :fileId" : "f.versionId = :versionId";
+        Query q = em.createQuery("update File f set f.documentId = :targetDocumentId, f.order = :order" +
+                " where " + chainPredicate + " and f.documentId = :sourceDocumentId and f.deleteDate is null");
+        q.setParameter("targetDocumentId", targetDocumentId);
+        q.setParameter("order", order);
+        q.setParameter("sourceDocumentId", sourceDocumentId);
+        if (versionId == null) {
+            q.setParameter("fileId", fileId);
+        } else {
+            q.setParameter("versionId", versionId);
+        }
+        return q.executeUpdate();
+    }
+
+    /**
+     * Counts the ACTIVE rows in a document whose id equals {@code fileId} OR whose version-chain id is in
+     * {@code versionIds}. Used by the move's post-update re-verification to detect a split chain: after the
+     * moved rows land at the target, any active row still at the source matching the moved file id or one of
+     * the moved rows' (possibly newly-minted) version ids means a concurrent replacement grew the chain at
+     * the source, so the move must roll back. Soft-deleted rows are excluded — a historical deleted row that
+     * legitimately stays at the source must not trip the check.
+     *
+     * @param documentId Document to count within
+     * @param fileId File ID to match
+     * @param versionIds Version-chain ids to match (may be empty)
+     * @return the number of matching active rows
+     */
+    public long countActiveMatchingInDocument(String documentId, String fileId, Collection<String> versionIds) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        StringBuilder jpql = new StringBuilder("select count(f) from File f where f.documentId = :documentId" +
+                " and f.deleteDate is null and (f.id = :fileId");
+        boolean hasVersions = versionIds != null && !versionIds.isEmpty();
+        if (hasVersions) {
+            jpql.append(" or f.versionId in :versionIds");
+        }
+        jpql.append(")");
+        Query q = em.createQuery(jpql.toString());
+        q.setParameter("documentId", documentId);
+        q.setParameter("fileId", fileId);
+        if (hasVersions) {
+            q.setParameter("versionIds", versionIds);
+        }
+        return ((Number) q.getSingleResult()).longValue();
+    }
+
+    /**
+     * Writes (or, with a null {@code contentMac}, clears) the content MAC of a moved row, guarded on the row
+     * being active and still at the target document. The guard keeps a target-keyed MAC from landing on a row
+     * a concurrent operation re-parented away in the same window. A null value clears the cell so a MAC keyed
+     * to the previous document can never survive the move (the feature-off / recompute-unavailable path).
+     *
+     * @param id File ID
+     * @param contentMac Target-keyed MAC to store, or null to clear
+     * @param targetDocumentId Document the row must currently belong to
+     * @return number of rows updated
+     */
+    public int setContentMacForMovedRow(String id, String contentMac, String targetDocumentId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update File f set f.contentMac = :contentMac" +
+                " where f.id = :id and f.documentId = :targetDocumentId and f.deleteDate is null");
+        q.setParameter("contentMac", contentMac);
+        q.setParameter("id", id);
+        q.setParameter("targetDocumentId", targetDocumentId);
+        return q.executeUpdate();
+    }
+
     /**
      * Get files by document ID or all orphan files of a user.
      * 
