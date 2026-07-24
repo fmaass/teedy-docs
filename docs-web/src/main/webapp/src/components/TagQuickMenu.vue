@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Popover from 'primevue/popover'
 import Select from 'primevue/select'
@@ -35,6 +35,7 @@ const emit = defineEmits<{
 }>()
 
 const popover = ref()
+const tagSelect = ref()
 const pendingTag = ref<string | null>(null)
 
 const assignedTagIds = computed(
@@ -57,6 +58,14 @@ function hide() {
   popover.value?.hide()
 }
 
+// autoFilterFocus only lands focus in the filter when the Select's overlay opens,
+// which otherwise takes a click. Opening it on the popover's `show` gives keyboard
+// tag entry with no click (#171). No-op when every tag is assigned (Select absent).
+async function onPopoverShow() {
+  await nextTick()
+  tagSelect.value?.show()
+}
+
 function onSelect(tagId: string | null) {
   if (!tagId) return
   emit('addTag', tagId)
@@ -76,13 +85,14 @@ defineExpose({ show, hide })
 </script>
 
 <template>
-  <Popover ref="popover" class="tag-quick-menu">
+  <Popover ref="popover" class="tag-quick-menu" @show="onPopoverShow">
     <div class="tqm-body">
       <!-- ADD -->
       <div class="tqm-section">
         <span class="tqm-label">{{ t('ui.context_add_tag') }}</span>
         <Select
           v-if="assignable.length"
+          ref="tagSelect"
           v-model="pendingTag"
           :options="assignable"
           optionLabel="name"

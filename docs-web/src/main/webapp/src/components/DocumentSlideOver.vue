@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
 import { getFileUrl } from '../api/file'
@@ -40,6 +40,16 @@ const emit = defineEmits<{
 const slideOverTab = ref<'overview' | 'files'>('overview')
 const slideOverTagAdding = ref(false)
 const selectedTagId = ref<string | null>(null)
+const tagSelect = ref()
+
+// PrimeVue 4's Select has no autofocus-on-mount, so opening its overlay when the
+// tag-add row appears is what lets autoFilterFocus put the caret in the filter —
+// keyboard tag entry with no click (#171). nextTick waits for the v-if'd ref.
+watch(slideOverTagAdding, async (adding) => {
+  if (!adding) return
+  await nextTick()
+  tagSelect.value?.show()
+})
 
 const sanitizedDescription = computed(() =>
   DOMPurify.sanitize(props.document?.description ?? ''),
@@ -154,10 +164,14 @@ const drawerStyle = computed(() =>
         </div>
         <div v-if="slideOverTagAdding" class="tag-add-row">
           <Select
+            ref="tagSelect"
             v-model="selectedTagId"
             :options="tagOptions"
             optionLabel="label"
             optionValue="value"
+            filter
+            :autoFilterFocus="true"
+            :filterPlaceholder="t('ui.tag_menu.search')"
             :placeholder="t('document.tags')"
             class="tag-add-select"
             @update:modelValue="onTagSelect"
