@@ -12,8 +12,12 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -1120,6 +1124,13 @@ public class FileResource extends BaseResource {
     private Response sendZippedFiles(String zipFileName, List<File> fileList) {
         final UserDao userDao = new UserDao();
 
+        // Pre-compute one unique archive entry name per file, in the list's processing order, from each
+        // file's sanitized original name. Sanitizing collapses a persisted/imported name that contains
+        // '/', '\' or traversal to a single safe path segment (the zip-slip guard stays exactly as before);
+        // the allocator then de-collides names that would otherwise repeat, so putNextEntry never sees a
+        // duplicate entry name.
+        List<String> entryNames = zipEntryNames(fileList);
+
         // Create the ZIP stream
         StreamingOutput stream = outputStream -> {
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
@@ -1137,12 +1148,7 @@ public class FileResource extends BaseResource {
                     // failure (one descriptor per file in the ZIP).
                     try (InputStream rawInputStream = Files.newInputStream(storedfile);
                          InputStream decryptedStream = EncryptionUtil.decryptInputStream(rawInputStream, user.getPrivateKey())) {
-                        // Sanitize the stored file name to a single safe path segment (a persisted or
-                        // imported name may contain '/', '\' or traversal), preventing a zip-slip entry
-                        // that escapes the extraction directory. The unique index prefix de-collides two
-                        // names that sanitize to the same basename.
-                        ZipEntry zipEntry = new ZipEntry(index + "-"
-                                + ExportUtil.sanitizeFileName(file.getFullName(Integer.toString(index))));
+                        ZipEntry zipEntry = new ZipEntry(entryNames.get(index));
                         zipOutputStream.putNextEntry(zipEntry);
                         ByteStreams.copy(decryptedStream, zipOutputStream);
                         zipOutputStream.closeEntry();
@@ -1154,12 +1160,99 @@ public class FileResource extends BaseResource {
             }
             outputStream.close();
         };
-        
+
         // Write to the output
         return Response.ok(stream)
                 .header("Content-Type", "application/zip")
                 .header("Content-Disposition", "attachment; filename=\"" + zipFileName + ".zip\"")
                 .build();
+    }
+
+    /**
+     * Computes a unique archive entry name for each file, preserving the list's processing order. Each name
+     * is the file's sanitized original name; a nameless file falls back to its position index so distinct
+     * files stay distinct. Delegates the collision resolution to {@link #deduplicateEntryNames(List)}.
+     *
+     * @param fileList Files in the order they will be written to the archive
+     * @return one unique entry name per file, in the same order
+     */
+    static List<String> zipEntryNames(List<File> fileList) {
+        List<String> baseNames = new ArrayList<>(fileList.size());
+        int index = 0;
+        for (File file : fileList) {
+            baseNames.add(ExportUtil.sanitizeFileName(file.getFullName(Integer.toString(index))));
+            index++;
+        }
+        return deduplicateEntryNames(baseNames);
+    }
+
+    /**
+     * Resolves an already-sanitized list of base names into unique entry names, preserving order. The first
+     * file to claim a given name keeps it verbatim; every later file whose name repeats is given the smallest
+     * free {@code " (N)"} suffix inserted before the extension. Because all first-occurrence names are
+     * reserved up front, a generated suffix is checked against BOTH those reservations AND the names already
+     * assigned — so a synthetic {@code "a (1).pdf"} can never steal a real file that is itself named
+     * {@code "a (1).pdf"} later in the list, and no two entries ever share a name.
+     *
+     * @param baseNames Sanitized base names, in processing order
+     * @return unique entry names, in the same order
+     */
+    static List<String> deduplicateEntryNames(List<String> baseNames) {
+        Set<String> reserved = new HashSet<>(baseNames);
+        List<String> result = new ArrayList<>(baseNames.size());
+        Set<String> assigned = new HashSet<>();
+        Set<String> seen = new HashSet<>();
+        for (String base : baseNames) {
+            String entryName;
+            if (seen.add(base)) {
+                // First occurrence: keep the name verbatim. It is reserved, and suffix allocation never
+                // picks a reserved name, so no earlier entry can have taken it.
+                entryName = base;
+            } else {
+                entryName = nextFreeName(base, reserved, assigned);
+            }
+            assigned.add(entryName);
+            result.add(entryName);
+        }
+        return result;
+    }
+
+    /**
+     * Finds the smallest {@code " (N)"}-suffixed variant of {@code base} that collides with neither a reserved
+     * first-occurrence name nor an already-assigned name.
+     *
+     * @param base Sanitized base name that is already taken
+     * @param reserved Names reserved by first occurrences
+     * @param assigned Names already handed out
+     * @return the first free suffixed name
+     */
+    private static String nextFreeName(String base, Set<String> reserved, Set<String> assigned) {
+        int n = 1;
+        while (true) {
+            String candidate = insertNameSuffix(base, n);
+            if (!reserved.contains(candidate) && !assigned.contains(candidate)) {
+                return candidate;
+            }
+            n++;
+        }
+    }
+
+    /**
+     * Inserts a {@code " (n)"} disambiguation suffix before a name's extension. A leading dot is not an
+     * extension separator (a dotfile such as {@code ".env"} stays extensionless), and an extensionless name
+     * gets the suffix appended at the end.
+     *
+     * @param name Base name
+     * @param n Suffix number
+     * @return the name with the suffix inserted before its extension
+     */
+    private static String insertNameSuffix(String name, int n) {
+        String suffix = " (" + n + ")";
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0) {
+            return name + suffix;
+        }
+        return name.substring(0, dot) + suffix + name.substring(dot);
     }
 
     /**
@@ -1192,7 +1285,24 @@ public class FileResource extends BaseResource {
         for (File file : files) {
             checkFileAccessible(null, file, PermType.READ);
         }
-        return files;
+
+        // The DAO loads the selection with an unordered "in :ids" query, so re-order the results to the
+        // submitted id order before they are named and zipped. Without this the duplicate-suffix assignment
+        // would depend on the database's arbitrary row order. Each resolved id is included once, in its
+        // first submitted position; ids that did not resolve (already deleted) are simply skipped.
+        Map<String, File> filesById = new HashMap<>();
+        for (File file : files) {
+            filesById.put(file.getId(), file);
+        }
+        List<File> ordered = new ArrayList<>(files.size());
+        Set<String> added = new HashSet<>();
+        for (String id : filesIds) {
+            File file = filesById.get(id);
+            if (file != null && added.add(id)) {
+                ordered.add(file);
+            }
+        }
+        return ordered;
     }
 
     /**

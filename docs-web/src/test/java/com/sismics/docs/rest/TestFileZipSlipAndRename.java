@@ -1,6 +1,7 @@
 package com.sismics.docs.rest;
 
 import com.google.common.io.ByteStreams;
+import com.google.common.io.Resources;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.jpa.EMF;
@@ -16,6 +17,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -99,6 +103,108 @@ public class TestFileZipSlipAndRename extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .post(Entity.form(new Form().param("name", "clean-name.txt")), JsonObject.class);
         Assertions.assertEquals("ok", ok.getString("status"));
+    }
+
+    /**
+     * A multi-select POST zip spanning two documents whose files share a name: the archive carries each
+     * file's real name, the collision is disambiguated with a " (N)" suffix before the extension, and the
+     * suffix assignment follows the SUBMITTED id order (the first submitted file keeps the verbatim name).
+     * Verified by content, so it proves both the ordering and that no entry name is ever duplicated.
+     */
+    @Test
+    public void zipMultiSelectCrossDocumentCollisionFollowsSubmittedOrder() throws Exception {
+        clientUtil.createUser("zip_dupnames");
+        String token = clientUtil.login("zip_dupnames");
+
+        String document1Id = clientUtil.createDocument(token);
+        String file1Id = clientUtil.addFileToDocument(FILE_PIA_00452_JPG, token, document1Id);
+        renameFile(file1Id, token, "report.pdf");
+
+        String document2Id = clientUtil.createDocument(token);
+        String file2Id = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, document2Id);
+        renameFile(file2Id, token, "report.pdf");
+
+        byte[] piaBytes = Resources.toByteArray(Resources.getResource(FILE_PIA_00452_JPG));
+        byte[] einsteinBytes = Resources.toByteArray(Resources.getResource(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG));
+
+        // Submit file1 then file2: the first submitted file keeps the verbatim name; the collision is
+        // pushed onto the second and suffixed before the extension.
+        LinkedHashMap<String, byte[]> forward = readZipEntries(postZip(token, file1Id, file2Id));
+        Assertions.assertEquals(List.of("report.pdf", "report (1).pdf"), new ArrayList<>(forward.keySet()));
+        Assertions.assertArrayEquals(piaBytes, forward.get("report.pdf"));
+        Assertions.assertArrayEquals(einsteinBytes, forward.get("report (1).pdf"));
+
+        // Reverse the submission: the suffix assignment tracks the submitted order, so file2 now owns the
+        // verbatim name and file1 is the suffixed one.
+        LinkedHashMap<String, byte[]> reversed = readZipEntries(postZip(token, file2Id, file1Id));
+        Assertions.assertEquals(List.of("report.pdf", "report (1).pdf"), new ArrayList<>(reversed.keySet()));
+        Assertions.assertArrayEquals(einsteinBytes, reversed.get("report.pdf"));
+        Assertions.assertArrayEquals(piaBytes, reversed.get("report (1).pdf"));
+    }
+
+    /**
+     * The multi-select POST zip emits entries in the SUBMITTED id order, not the database's arbitrary
+     * "in :ids" order: two distinct-named files produce entries whose order flips when the submission order
+     * flips.
+     */
+    @Test
+    public void zipMultiSelectEmitsEntriesInSubmittedOrder() throws Exception {
+        clientUtil.createUser("zip_order");
+        String token = clientUtil.login("zip_order");
+
+        String document1Id = clientUtil.createDocument(token);
+        String file1Id = clientUtil.addFileToDocument(FILE_PIA_00452_JPG, token, document1Id);
+        renameFile(file1Id, token, "zeta.pdf");
+
+        String document2Id = clientUtil.createDocument(token);
+        String file2Id = clientUtil.addFileToDocument(FILE_EINSTEIN_ROOSEVELT_LETTER_PNG, token, document2Id);
+        renameFile(file2Id, token, "alpha.pdf");
+
+        Assertions.assertEquals(List.of("zeta.pdf", "alpha.pdf"),
+                new ArrayList<>(readZipEntries(postZip(token, file1Id, file2Id)).keySet()));
+        Assertions.assertEquals(List.of("alpha.pdf", "zeta.pdf"),
+                new ArrayList<>(readZipEntries(postZip(token, file2Id, file1Id)).keySet()));
+    }
+
+    /**
+     * POSTs the zip-by-files endpoint with the given file ids in order and asserts an OK response.
+     */
+    private Response postZip(String token, String... fileIds) {
+        Form form = new Form();
+        for (String fileId : fileIds) {
+            form.param("files", fileId);
+        }
+        Response response = target().path("/file/zip").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(form));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+        return response;
+    }
+
+    /**
+     * Renames a file through the real REST endpoint.
+     */
+    private void renameFile(String fileId, String token, String newName) {
+        JsonObject ok = target().path("/file/" + fileId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("name", newName)), JsonObject.class);
+        Assertions.assertEquals("ok", ok.getString("status"));
+    }
+
+    /**
+     * Drains a ZIP response into an insertion-ordered map of entry name to its decrypted bytes.
+     */
+    private LinkedHashMap<String, byte[]> readZipEntries(Response response) throws Exception {
+        LinkedHashMap<String, byte[]> entries = new LinkedHashMap<>();
+        try (InputStream is = (InputStream) response.getEntity();
+             ZipInputStream zis = new ZipInputStream(is)) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                entries.put(entry.getName(), ByteStreams.toByteArray(zis));
+                zis.closeEntry();
+            }
+        }
+        return entries;
     }
 
     /**

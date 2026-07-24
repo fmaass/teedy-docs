@@ -278,7 +278,7 @@ public class TestFileResource extends BaseJerseyTest {
         Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
         InputStream is = (InputStream) response.getEntity();
         ZipInputStream zipInputStream = new ZipInputStream(is);
-        Assertions.assertEquals(zipInputStream.getNextEntry().getName(), "0-PIA00452.jpg");
+        Assertions.assertEquals("PIA00452.jpg", zipInputStream.getNextEntry().getName());
         Assertions.assertNull(zipInputStream.getNextEntry());
 
         // Fail if we don't have access to the document
