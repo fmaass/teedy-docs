@@ -84,6 +84,11 @@ test('move a file to another document: it leaves the source, the source cover fa
     await page.getByRole('option', { name: targetTitle }).click()
     await dialog.getByRole('button', { name: 'Move', exact: true }).click()
 
+    // A successful move dismisses the picker. Assert that here rather than moving straight on
+    // to the API checks: those read the server directly and settle while the dialog may still
+    // be up, and an undismissed modal's mask blocks every later click on the page.
+    await expect(dialog).toBeHidden()
+
     // The moved file is gone from the source and present in the target.
     await expect.poll(() => fileCount(page.request, sourceId)).toBe(1)
     await expect.poll(() => fileCount(page.request, targetId)).toBe(1)

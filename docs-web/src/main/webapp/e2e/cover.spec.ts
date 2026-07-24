@@ -53,6 +53,15 @@ async function deleteDoc(page: Page, id: string) {
   }
 }
 
+// The document list/gallery thumbnail src is the RELATIVE url getFileUrl() builds
+// (`api/file/<id>/data?size=thumb` — src/api/file.ts), so the app keeps working under a
+// non-root context path. An attribute selector matches the LITERAL attribute value, so it
+// must not assume a leading slash: `img[src*="/api/file/…"]` matches nothing and would make
+// both the positive and the negative assertion below vacuous.
+function thumbOf(fileId: string): string {
+  return `img[src*="api/file/${fileId}/data"]`
+}
+
 test('set a non-first file as cover: the badge appears and the gallery/table renders the chosen cover', async ({ page }) => {
   const id = await seedDoc(page.request, unique('cover'), [
     { name: 'first.png', mimeType: 'image/png', path: png },
@@ -77,8 +86,8 @@ test('set a non-first file as cover: the badge appears and the gallery/table ren
     await expect.poll(() => servedFileId(page.request, id)).toBe(ids['second.png'])
 
     await page.goto('/#/document')
-    await expect(page.locator(`img[src*="/api/file/${ids['second.png']}/data"]`).first()).toBeVisible()
-    await expect(page.locator(`img[src*="/api/file/${ids['first.png']}/data"]`)).toHaveCount(0)
+    await expect(page.locator(thumbOf(ids['second.png'])).first()).toBeVisible()
+    await expect(page.locator(thumbOf(ids['first.png']))).toHaveCount(0)
 
     await page.goto(`/#/document/view/${id}/content`)
     await openFileList(page)
@@ -88,7 +97,8 @@ test('set a non-first file as cover: the badge appears and the gallery/table ren
     await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
 
     await page.goto('/#/document')
-    await expect(page.locator(`img[src*="/api/file/${ids['first.png']}/data"]`).first()).toBeVisible()
+    await expect(page.locator(thumbOf(ids['first.png'])).first()).toBeVisible()
+    await expect(page.locator(thumbOf(ids['second.png']))).toHaveCount(0)
   } finally {
     await deleteDoc(page, id)
   }

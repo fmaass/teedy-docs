@@ -575,13 +575,17 @@ async function confirmMove() {
   movingFile.value = true
   try {
     await moveFile(fileId, targetId)
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.document(sourceId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.document(targetId) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.documents() }),
-    ])
+    // Dismiss the modal as soon as the SERVER has confirmed the move — the user's action is
+    // complete at that point. Holding a full-screen modal mask open across the cache refresh
+    // (as this handler used to) makes dismissal hostage to three extra round trips: a slow or
+    // failing refetch leaves the app pointer-blocked after a move that already succeeded.
+    // Every sibling mutation here (rename, remove, reorder, relations) already invalidates
+    // without gating its UI on the refetch.
     moveDialogVisible.value = false
     toast.add({ severity: 'success', summary: t('ui.file_moved'), life: 2000 })
+    queryClient.invalidateQueries({ queryKey: queryKeys.document(sourceId) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.document(targetId) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.documents() })
   } catch {
     toast.add({ severity: 'error', summary: t('ui.failed_move_file'), life: 3000 })
   } finally {
