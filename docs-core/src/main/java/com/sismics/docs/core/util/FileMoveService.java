@@ -1,6 +1,8 @@
 package com.sismics.docs.core.util;
 
 import com.sismics.docs.core.constant.AuditLogType;
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.FileDao;
 import com.sismics.docs.core.dao.UserDao;
@@ -38,6 +40,56 @@ public class FileMoveService {
     private static final Logger log = LoggerFactory.getLogger(FileMoveService.class);
 
     private FileMoveService() {
+    }
+
+    /**
+     * Resolve the file and its source document, authorize the caller for WRITE on both the source and the
+     * target, reject a same-document or unattached move, then perform the atomic move via
+     * {@link #moveFile(String, String, String)}. The resolution and both ACL checks run in the caller's
+     * transaction, before the pessimistic locks are taken; each rejection is a {@link FileMoveException}
+     * whose {@link FileMoveException.Reason} the edge maps to a status/type, and a lost race under the
+     * locks still surfaces as {@link FileMoveConflictException}.
+     *
+     * @param fileId File to move
+     * @param targetDocumentId Destination document
+     * @param userId Acting user (audit attribution; never becomes the file owner)
+     * @param aclTargetIdList The caller's ACL target set (user + groups) for the WRITE checks
+     * @throws FileMoveException on a pre-lock resolution/authorization rejection
+     * @throws FileMoveConflictException on a lost race under the locks
+     */
+    public static void authorizeAndMove(String fileId, String targetDocumentId, String userId, List<String> aclTargetIdList) {
+        // Resolve the file and its source document.
+        File file = new FileDao().getFile(fileId);
+        if (file == null) {
+            throw new FileMoveException(FileMoveException.Reason.FILE_NOT_FOUND);
+        }
+        String sourceDocumentId = file.getDocumentId();
+        if (sourceDocumentId == null) {
+            throw new FileMoveException(FileMoveException.Reason.FILE_NOT_ATTACHED);
+        }
+
+        // WRITE on the source document is required to move a file out of it.
+        AclDao aclDao = new AclDao();
+        if (!aclDao.checkPermission(sourceDocumentId, PermType.WRITE, aclTargetIdList)) {
+            throw new FileMoveException(FileMoveException.Reason.SOURCE_FORBIDDEN);
+        }
+
+        // Moving to the same document is a no-op error.
+        if (sourceDocumentId.equals(targetDocumentId)) {
+            throw new FileMoveException(FileMoveException.Reason.SAME_DOCUMENT);
+        }
+
+        // The target must exist (unknown -> not found) and be writable (no permission -> forbidden). The
+        // picker sends no writable flag; the server is the sole authority, so a chosen but unwritable target
+        // is a clean forbidden.
+        if (new DocumentDao().getById(targetDocumentId) == null) {
+            throw new FileMoveException(FileMoveException.Reason.TARGET_NOT_FOUND);
+        }
+        if (!aclDao.checkPermission(targetDocumentId, PermType.WRITE, aclTargetIdList)) {
+            throw new FileMoveException(FileMoveException.Reason.TARGET_FORBIDDEN);
+        }
+
+        moveFile(fileId, targetDocumentId, userId);
     }
 
     /**

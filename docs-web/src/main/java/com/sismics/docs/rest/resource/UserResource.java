@@ -21,6 +21,9 @@ import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.authentication.AuthenticationUtil;
 import com.sismics.docs.core.util.PasswordRecoveryUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
+import com.sismics.docs.core.util.TotpEnrollment;
+import com.sismics.docs.core.util.TotpException;
+import com.sismics.docs.core.util.TotpService;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.docs.rest.util.LoginThrottleStore;
@@ -36,7 +39,6 @@ import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.csrf.CsrfTokenUtil;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import com.sismics.util.totp.GoogleAuthenticator;
-import com.sismics.util.totp.GoogleAuthenticatorKey;
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
@@ -923,17 +925,13 @@ public class UserResource extends BaseResource {
         }
         checkBaseFunction(BaseFunction.ADMIN);
 
-        // Get the user
-        UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(username);
-        if (user == null) {
-            throw new ForbiddenClientException();
-        }
-
         // Clear both the active and any pending key (admin recovery for a user locked out of their
-        // authenticator). Uses the dedicated compare-and-swap writer; the generic update path no longer
-        // copies the TOTP columns.
-        userDao.clearTotpKeys(user.getId(), principal.getId());
+        // authenticator). An unknown user stays a forbidden, as before.
+        try {
+            TotpService.clearTotpForUsername(username, principal.getId());
+        } catch (TotpException e) {
+            throw toClientError(e);
+        }
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -1333,31 +1331,23 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(principal.getName());
-        // Enrolling while an active key already exists is rejected: the existing second factor must be
-        // disabled (password-confirmed) first, so a hijacked live session cannot silently rotate the key.
-        if (user.getTotpKey() != null) {
-            throw new ClientException("TotpAlreadyEnabled", "Two-factor authentication is already enabled");
-        }
-
-        // Generate a fresh secret into the PENDING slot. Called again while a pending enrollment exists,
-        // this simply replaces it with a new secret (invalidating any earlier QR code). The secret becomes
-        // the active login factor only once a valid code is confirmed via /user/totp/activate.
-        GoogleAuthenticator gAuth = new GoogleAuthenticator();
-        final GoogleAuthenticatorKey key = gAuth.createCredentials();
-        if (userDao.setPendingTotpKey(user.getId(), key.getKey(), principal.getId()) != 1) {
-            // A concurrent activation set an active key between the check above and this write.
-            throw new ClientException("TotpAlreadyEnabled", "Two-factor authentication is already enabled");
+        // Begin enrollment: generate a fresh pending secret (replacing any earlier pending one), rejecting
+        // the case where an active key already exists so a hijacked live session cannot rotate the key. The
+        // secret becomes the active login factor only once a code is confirmed via /user/totp/activate.
+        TotpEnrollment enrollment;
+        try {
+            enrollment = TotpService.beginEnrollment(principal.getName(), principal.getId());
+        } catch (TotpException e) {
+            throw toClientError(e);
         }
 
         // The client builds the otpauth:// URI from these fields. The verifier uses the default
         // GoogleAuthenticatorConfig (HMAC-SHA1, 6 digits, 30-second period), so the URI the client renders
         // MUST declare those same parameters for the generated codes to validate.
         JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("secret", key.getKey())
+                .add("secret", enrollment.secret())
                 .add("issuer", resolveTotpIssuer())
-                .add("account", user.getUsername());
+                .add("account", enrollment.account());
         return Response.ok().entity(response.build()).build();
     }
 
@@ -1408,24 +1398,13 @@ public class UserResource extends BaseResource {
 
         int validationCode = ValidationUtil.validateInteger(validationCodeStr, "code");
 
-        UserDao userDao = new UserDao();
-        User user = userDao.getActiveByUsername(principal.getName());
-        String pendingKey = user.getTotpKeyPending();
-        if (pendingKey == null) {
-            // Nothing to activate: no enrollment in progress, or it was already activated/cleared.
-            throw new ClientException("NoPendingTotp", "There is no pending two-factor enrollment to activate");
-        }
-
-        GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
-        if (!googleAuthenticator.authorize(pendingKey, validationCode)) {
-            // The reservation above already counted this failed attempt toward lockout.
-            throw new ForbiddenClientException();
-        }
-
-        // Promote under a compare-and-swap: a concurrent admin recovery that cleared the pending key wins,
-        // and this activation then affects 0 rows and fails closed rather than resurrecting the cleared key.
-        if (userDao.activateTotpKey(user.getId(), pendingKey, principal.getId()) != 1) {
-            throw new ClientException("NoPendingTotp", "There is no pending two-factor enrollment to activate");
+        // Verify the code against the pending secret and promote it under a compare-and-swap. A wrong code
+        // or a lost promotion race leaves the reservation counted (no recordLoginSuccess below); only a full
+        // success credits it back.
+        try {
+            TotpService.activateEnrollment(principal.getName(), validationCode, principal.getId());
+        } catch (TotpException e) {
+            throw toClientError(e);
         }
 
         // Full success: credit the reservation back so a legitimate enrollment does not leave lockout state.
@@ -1456,6 +1435,22 @@ public class UserResource extends BaseResource {
             }
         }
         return "Teedy";
+    }
+
+    /**
+     * Maps a {@link TotpException} raised by {@link TotpService} back to the exact edge error contract: the
+     * {@code TotpAlreadyEnabled} / {@code NoPendingTotp} client errors, and a forbidden for an invalid code
+     * or an unknown user. The wire-facing type and message strings live here, not in the core service.
+     *
+     * @param e The service exception
+     * @return the edge exception to throw
+     */
+    private RuntimeException toClientError(TotpException e) {
+        return switch (e.getReason()) {
+            case ALREADY_ENABLED -> new ClientException("TotpAlreadyEnabled", "Two-factor authentication is already enabled");
+            case NO_PENDING -> new ClientException("NoPendingTotp", "There is no pending two-factor enrollment to activate");
+            case CODE_INVALID, USER_NOT_FOUND -> new ForbiddenClientException();
+        };
     }
 
     /**
@@ -1528,7 +1523,6 @@ public class UserResource extends BaseResource {
         // Check the password and get the user through the origin-aware handler chain (NOT the raw
         // origin-blind UserDao.authenticate): the chain refuses an external-origin account, so a
         // password planted on an OIDC/LDAP account through recovery cannot be used to disable TOTP.
-        UserDao userDao = new UserDao();
         User user = AuthenticationUtil.authenticate(principal.getName(), password);
         if (user == null) {
             throw new ForbiddenClientException();
@@ -1536,7 +1530,7 @@ public class UserResource extends BaseResource {
 
         // Clear both the active and any pending key under a compare-and-swap. The generic update path no
         // longer copies the TOTP columns, so the key is cleared only through this dedicated writer.
-        userDao.clearTotpKeys(user.getId(), principal.getId());
+        TotpService.clearTotp(user.getId(), principal.getId());
         
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

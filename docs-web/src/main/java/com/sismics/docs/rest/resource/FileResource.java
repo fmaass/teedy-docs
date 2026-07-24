@@ -45,6 +45,7 @@ import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
 import com.sismics.docs.core.util.FileCreatedResult;
 import com.sismics.docs.core.util.FileMoveConflictException;
+import com.sismics.docs.core.util.FileMoveException;
 import com.sismics.docs.core.util.FileMoveService;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.PreviousVersionMismatchException;
@@ -366,43 +367,20 @@ public class FileResource extends BaseResource {
 
         ValidationUtil.validateRequired(targetDocumentId, "targetDocumentId");
 
-        // Resolve the file and its source document.
-        FileDao fileDao = new FileDao();
-        File file = fileDao.getFile(id);
-        if (file == null) {
-            throw new NotFoundException();
-        }
-        String sourceDocumentId = file.getDocumentId();
-        if (sourceDocumentId == null) {
-            throw new ClientException("IllegalFile", MessageFormat.format("File is not attached to a document: {0}", id));
-        }
-
-        // WRITE on the source document is required to move a file out of it.
-        AclDao aclDao = new AclDao();
-        if (!aclDao.checkPermission(sourceDocumentId, PermType.WRITE, getTargetIdList(null))) {
-            throw new ForbiddenClientException();
-        }
-
-        // Moving to the same document is a no-op error.
-        if (sourceDocumentId.equals(targetDocumentId)) {
-            throw new ClientException("SameDocument", "The file already belongs to this document");
-        }
-
-        // The target must exist (unknown -> 404) and be writable (no permission -> 403). The picker sends no
-        // writable flag; the server is the sole authority, so a chosen but unwritable target is a clean 403.
-        DocumentDao documentDao = new DocumentDao();
-        if (documentDao.getById(targetDocumentId) == null) {
-            throw new NotFoundException();
-        }
-        if (!aclDao.checkPermission(targetDocumentId, PermType.WRITE, getTargetIdList(null))) {
-            throw new ForbiddenClientException();
-        }
-
-        // The move locks both documents, re-parents the chain, re-keys the content MACs, reconciles both
-        // covers, audits both documents, and queues the post-commit index re-point. A lost race under the
-        // locks rolls the whole move back as a retryable conflict.
+        // Resolve, authorize, and move within this request transaction. The service owns the file/document
+        // lookups and both ACL checks (keeping this legacy resource off core.dao); the move itself locks
+        // both documents, re-parents the chain, re-keys the content MACs, reconciles both covers, audits
+        // both documents, and queues the post-commit index re-point. The edge maps each rejection back to
+        // its status and error type, and a lost race under the locks is a retryable conflict.
         try {
-            FileMoveService.moveFile(id, targetDocumentId, principal.getId());
+            FileMoveService.authorizeAndMove(id, targetDocumentId, principal.getId(), getTargetIdList(null));
+        } catch (FileMoveException e) {
+            switch (e.getReason()) {
+                case FILE_NOT_FOUND, TARGET_NOT_FOUND -> throw new NotFoundException();
+                case FILE_NOT_ATTACHED -> throw new ClientException("IllegalFile", MessageFormat.format("File is not attached to a document: {0}", id));
+                case SOURCE_FORBIDDEN, TARGET_FORBIDDEN -> throw new ForbiddenClientException();
+                case SAME_DOCUMENT -> throw new ClientException("SameDocument", "The file already belongs to this document");
+            }
         } catch (FileMoveConflictException e) {
             throw new ConflictException("MoveConflict", e.getMessage());
         }
