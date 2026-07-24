@@ -2,16 +2,13 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getFileContent, getFileList, reprocessFile } from '../../api/file'
-import { shouldPoll } from '../../utils/fileProcessing'
+import { shouldPoll, createProcessingPoller } from '../../utils/fileProcessing'
 import { displayName } from '../../utils/fileName'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
 import EmptyState from '../../components/EmptyState.vue'
 import { useToast } from 'primevue/usetoast'
 import { injectDocument } from './documentKey'
-
-/** How often to re-poll /file/list while any file is still processing. */
-const POLL_INTERVAL_MS = 2500
 
 const { t } = useI18n()
 const doc = injectDocument()
@@ -29,20 +26,6 @@ interface FileText {
 const fileTexts = ref<FileText[]>([])
 const reprocessingId = ref<string | null>(null)
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null
-// Set once in onUnmounted. An in-flight pollProcessing() awaiting getFileList can
-// resolve AFTER the component is gone and re-arm the timer on a dead component
-// (OCR of a large PDF keeps processing=true for minutes). Every re-arm path checks
-// this first so a late resolution cannot resurrect the poll loop.
-let disposed = false
-
-function stopPolling() {
-  if (pollTimer !== null) {
-    clearTimeout(pollTimer)
-    pollTimer = null
-  }
-}
-
 async function loadContent(ft: FileText) {
   ft.loading = true
   try {
@@ -55,28 +38,25 @@ async function loadContent(ft: FileText) {
 }
 
 /**
- * Poll GET /file/list once, update each file's live processing flag, reload the
- * content of any file that just finished processing, and re-arm the timer only
- * while something is still processing. This replaces the previous fixed 3s
+ * One poll: read the live processing flags from GET /file/list, update each
+ * file, reload the content of any file that just finished processing, and report
+ * whether another poll is warranted. This replaces the previous fixed 3s
  * setTimeout guess with the backend's real `processing` signal.
  */
-async function pollProcessing() {
-  if (disposed) return
+const poller = createProcessingPoller(async (isDisposed) => {
   const documentId = doc.value?.id
-  if (!documentId) return
+  if (!documentId) return false
 
   let items
   try {
     items = await getFileList(documentId)
   } catch {
-    // Transient failure — try again on the next tick if we were polling and the
-    // component is still alive.
-    if (!disposed && shouldPoll(fileTexts.value)) armPoll()
-    return
+    // Transient failure — keep polling while local state still says processing.
+    return shouldPoll(fileTexts.value)
   }
 
   // The await above may have resolved after unmount; bail before touching state.
-  if (disposed) return
+  if (isDisposed()) return false
 
   const byId = new Map(items.map((f) => [f.id, f]))
   for (const ft of fileTexts.value) {
@@ -90,22 +70,16 @@ async function pollProcessing() {
     }
   }
 
-  if (shouldPoll(fileTexts.value)) armPoll()
-}
-
-function armPoll() {
-  if (disposed) return
-  stopPolling()
-  pollTimer = setTimeout(pollProcessing, POLL_INTERVAL_MS)
-}
+  return shouldPoll(fileTexts.value)
+})
 
 /** Start polling now if any file is processing and no timer is armed. */
 function ensurePolling() {
-  if (pollTimer === null && shouldPoll(fileTexts.value)) armPoll()
+  poller.ensurePolling(shouldPoll(fileTexts.value))
 }
 
 watch(() => doc.value?.files, (files) => {
-  stopPolling()
+  poller.stop()
   if (!files?.length) {
     fileTexts.value = []
     return
@@ -126,8 +100,7 @@ watch(() => doc.value?.files, (files) => {
 }, { immediate: true })
 
 onUnmounted(() => {
-  disposed = true
-  stopPolling()
+  poller.dispose()
 })
 
 async function handleReprocess(ft: FileText) {

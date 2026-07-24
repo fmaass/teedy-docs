@@ -3,8 +3,9 @@ import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } fro
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
-import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles } from '../../api/file'
+import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles, getFileList } from '../../api/file'
 import { partitionByNameConflict, type FileConflict, type ConflictAction } from '../../utils/fileConflicts'
+import { shouldPoll, createProcessingPoller } from '../../utils/fileProcessing'
 import { displayName } from '../../utils/fileName'
 import {
   listDocuments,
@@ -520,7 +521,14 @@ function loadPreview(fileId: string, rotation: number | undefined, priority: num
   previewQueue
     .enqueue(fileId, 'web', priority, undefined, rotation)
     .then((blob) => {
-      if (blob) previewObjectUrls.value[fileId] = URL.createObjectURL(blob)
+      if (!blob) return
+      // Replace any blob URL already held for this file — the processing-time
+      // placeholder the data endpoint served (HTTP 200 for a not-yet-generated
+      // raster) when re-enqueued after processing finishes — revoking the stale
+      // one first so a re-enqueue never leaks an object URL.
+      const prev = previewObjectUrls.value[fileId]
+      if (prev) URL.revokeObjectURL(prev)
+      previewObjectUrls.value[fileId] = URL.createObjectURL(blob)
     })
 }
 
@@ -556,10 +564,67 @@ function loadAllImagePreviews() {
   }
 }
 
+// --- Processing poll -------------------------------------------------------------
+// A freshly uploaded (or reprocessed) file has its web/thumb rasters generated
+// asynchronously. Until they exist the data endpoint answers with a bundled
+// placeholder image at HTTP 200, so the first preview fetch caches the placeholder
+// blob and nothing would ever refresh it. While any file is still processing we
+// poll /file/list, and when a file flips processing -> done we re-enqueue that
+// file's preview so the real raster replaces the cached placeholder. Non-image
+// files carry no queued raster preview, so a flip only re-enqueues images.
+const processingByFile = new Map<string, boolean>()
+
+const poller = createProcessingPoller(async (isDisposed) => {
+  const documentId = doc.value?.id
+  if (!documentId) return false
+
+  let items
+  try {
+    items = await getFileList(documentId)
+  } catch {
+    // Transient failure — keep polling while local state still says processing.
+    return [...processingByFile.values()].some(Boolean)
+  }
+
+  // The await above may have resolved after unmount; bail before re-enqueuing.
+  if (isDisposed()) return false
+
+  const fileById = new Map((doc.value?.files ?? []).map((f) => [f.id, f]))
+  for (const item of items) {
+    const wasProcessing = processingByFile.get(item.id) === true
+    const nowProcessing = item.processing === true
+    processingByFile.set(item.id, nowProcessing)
+    if (wasProcessing && !nowProcessing) {
+      const file = fileById.get(item.id)
+      if (file && isImage(file.mimetype)) {
+        // Foreground priority — the user is looking at this document now.
+        loadPreview(item.id, effectiveRotation(file), 0)
+      }
+    }
+  }
+
+  return shouldPoll(items)
+})
+
+// Seed the per-file processing state from the current document detail (its files
+// carry the same live `processing` flag) and start polling if anything is still
+// processing. Runs on every file-set change so a new upload re-seeds and re-arms.
+function syncProcessing() {
+  const files = doc.value?.files ?? []
+  processingByFile.clear()
+  for (const file of files) {
+    processingByFile.set(file.id, (file as { processing?: boolean }).processing === true)
+  }
+  poller.ensurePolling([...processingByFile.values()].some(Boolean))
+}
+
 watch(
   () => doc.value?.id,
   () => {
-    nextTick(() => loadAllImagePreviews())
+    nextTick(() => {
+      loadAllImagePreviews()
+      syncProcessing()
+    })
   },
   { immediate: true },
 )
@@ -567,11 +632,16 @@ watch(
 watch(
   () => doc.value?.files?.map((f) => `${f.id}:${effectiveRotation(f)}`).join(','),
   (next, prev) => {
-    if (next !== prev) nextTick(() => loadAllImagePreviews())
+    if (next !== prev)
+      nextTick(() => {
+        loadAllImagePreviews()
+        syncProcessing()
+      })
   },
 )
 
 onUnmounted(() => {
+  poller.dispose()
   previewQueue.cancel()
   revokeAllObjectUrls()
   observer?.disconnect()
