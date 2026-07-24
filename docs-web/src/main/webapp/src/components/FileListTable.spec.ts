@@ -63,6 +63,17 @@ describe('FileListTable', () => {
     expect(heads).not.toContain('ui.file_view.col_uploader')
   })
 
+  it('bounds the name column cells so a long unbreakable filename cannot force horizontal scroll (#170)', () => {
+    // The header + every body cell of the name column carry the bounding class. Paired with
+    // its scoped `max-width: 0` rule, this caps the column's preferred width so the ellipsis
+    // engages instead of the column expanding and hiding the actions column. jsdom cannot
+    // measure layout, so this asserts the structural hook is present; the geometric proof
+    // (no horizontal scroll, actions visible) lives in the file-panel e2e spec.
+    const wrapper = mountTable(twoFiles)
+    expect(wrapper.findAll('th.file-name-col').length).toBe(1)
+    expect(wrapper.findAll('td.file-name-col').length).toBe(twoFiles.length)
+  })
+
   it('shows the Uploader column once it is enabled (optional columns)', async () => {
     const wrapper = mountTable(twoFiles)
     ;(wrapper.vm as unknown as { columns: Record<string, boolean> }).columns.uploader = true

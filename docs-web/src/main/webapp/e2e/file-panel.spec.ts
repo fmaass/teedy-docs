@@ -302,3 +302,65 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await deleteDoc(page, id)
   }
 })
+
+// #170 — a long unbreakable filename must not expand the name column and push the row's
+// action buttons off the visible area behind a horizontal scrollbar. The name column is
+// bounded so its ellipsis engages while the actions column keeps its place on-screen. This
+// SHARED spec runs under BOTH the desktop and mobile projects: the actions must stay within
+// the viewport at the narrow mobile width too (the acceptance floor is ≥360px). It fails on
+// the pre-fix layout, where the 120-char name expands the table far past the viewport.
+test('a long unbreakable filename keeps the row actions on-screen with no horizontal scroll (#170)', async ({ page }) => {
+  // 120 chars, no space/hyphen/underscore the browser could break on — the exact shape that
+  // broke the layout (a breakable name would wrap and never trigger the overflow).
+  const longName = 'x'.repeat(116) + '.txt'
+  const id = await seedDoc(page.request, unique('overflow'), [txtFile(longName)])
+  try {
+    await page.goto(`/#/document/view/${id}/content`)
+    await openFileList(page)
+
+    const table = page.locator('.file-data-table')
+    await expect(table).toBeVisible()
+    const row = table.locator('tbody tr').first()
+    // The always-present, read-only-safe per-row action button.
+    const versions = row.getByRole('button', { name: 'Version history' })
+    await expect(versions).toBeVisible()
+
+    // ONE atomic geometry read taken BEFORE any click (a click auto-scrolls its target into
+    // view, which would mask a real horizontal overflow). Everything is measured against the
+    // visible content viewport (documentElement.clientWidth) — the true "no horizontal
+    // scroll" reference, immune to a flex ancestor that might expand to the overflowing
+    // table's width.
+    const geom = await table.evaluate((root) => {
+      const right = (el: Element) => el.getBoundingClientRect().right
+      const nameSpan = root.querySelector('tbody tr .file-name-text') as HTMLElement
+      return {
+        viewportWidth: document.documentElement.clientWidth,
+        tableRight: right(root.querySelector('.p-datatable-table')!),
+        actionsRight: right(root.querySelector('tbody tr .file-action-menu')!),
+        nameScrollWidth: nameSpan.scrollWidth,
+        nameClientWidth: nameSpan.clientWidth,
+      }
+    })
+
+    // No horizontal scroll: the rendered table stays within the visible viewport.
+    expect(geom.tableRight, 'table right edge within the viewport').toBeLessThanOrEqual(
+      geom.viewportWidth + 1,
+    )
+    // The row's action menu stays on-screen (not pushed out behind a horizontal scrollbar).
+    expect(geom.actionsRight, 'row action menu right edge within the viewport').toBeLessThanOrEqual(
+      geom.viewportWidth + 1,
+    )
+    // The name-cell ellipsis actually engages: the text is wider than its bounded cell.
+    expect(geom.nameScrollWidth, 'name text clipped by its bounded cell').toBeGreaterThan(
+      geom.nameClientWidth,
+    )
+
+    // The action button is genuinely clickable (not occluded) — it opens the versions dialog.
+    await versions.click()
+    await expect(page.getByRole('dialog', { name: /Version history/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  } finally {
+    await deleteDoc(page, id)
+  }
+})

@@ -317,7 +317,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
         </template>
       </Column>
 
-      <Column field="name" :header="t('ui.file_view.col_name')" sortable>
+      <Column field="name" :header="t('ui.file_view.col_name')" sortable headerClass="file-name-col" bodyClass="file-name-col">
         <template #body="{ data }">
           <InputText
             v-if="renamingId === data.id"
@@ -456,6 +456,18 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 }
 .file-open-link:hover {
   color: var(--teedy-brand);
+}
+
+/* Cap the name column's preferred width to nothing so the auto table-layout hands it
+   only the slack the fixed-width columns leave, rather than letting a long unbreakable
+   filename expand the column and push the ~8rem actions column off-screen behind a
+   horizontal scrollbar (#170). This is what makes the .file-name-text ellipsis engage —
+   its max-width: 100% now resolves against a bounded cell. Deliberately kept on the
+   default `table-layout: auto`: a fixed layout would hard-pin the metadata columns' rem
+   widths and overflow the narrow mobile viewport instead. */
+.file-data-table :deep(th.file-name-col),
+.file-data-table :deep(td.file-name-col) {
+  max-width: 0;
 }
 
 .file-name-text {
