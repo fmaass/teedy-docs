@@ -15,6 +15,7 @@ import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.DocumentUtil;
 import com.sismics.docs.core.util.EncryptionUtil;
@@ -138,11 +139,14 @@ public class DocumentDuplicationService {
             throw new IOException("QuotaReached");
         }
 
-        // Source description is already sanitized; the create date is reset to now, not inherited.
+        // The source description is defensively re-sanitized rather than trusted from the DB row:
+        // DescriptionSanitizer.sanitize is idempotent (TestDescriptionSanitizer#isIdempotent), so this
+        // costs nothing on already-clean content and keeps the copy path routed through the same
+        // chokepoint as every other entity writer. The create date is reset to now, not inherited.
         Document copy = new Document();
         copy.setUserId(requesterUserId);
         copy.setTitle(buildCopyTitle(source.getTitle()));
-        copy.setDescription(source.getDescription());
+        copy.setDescription(DescriptionSanitizer.sanitize(source.getDescription()));
         copy.setSubject(source.getSubject());
         copy.setIdentifier(source.getIdentifier());
         copy.setPublisher(source.getPublisher());
