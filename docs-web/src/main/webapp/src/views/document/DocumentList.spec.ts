@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h, computed, reactive, watch as vueWatch } from 'vue'
+import { defineComponent, h, computed, reactive, ref, watch as vueWatch } from 'vue'
 
 // --- Router under mock: assert the dblclick navigation target + history state ---
 const routerPush = vi.hoisted(() => vi.fn())
@@ -90,7 +90,7 @@ vi.mock('../../api/document', () => ({
   listDocuments: vi.fn(() => Promise.resolve({ data: { documents: [doc, docB], total: 2 } })),
   getDocument: vi.fn((id: string) => Promise.resolve({ data: makeDoc(id) })),
   updateDocument: vi.fn(),
-  deleteDocument: vi.fn(),
+  deleteDocument: vi.fn(() => Promise.resolve()),
 }))
 
 // --- Tag filter store: minimal surface the view reads ---
@@ -140,11 +140,21 @@ const menuHideSpy = vi.hoisted(() => vi.fn())
 vi.mock('../../composables/useDocumentTags', () => ({
   useDocumentTags: () => ({ addTag: addTagSpy, removeTag: removeTagSpy }),
 }))
+// Capture the danger-confirm options so a test can drive the accept() callback (the
+// real ConfirmDialog would render + await the user's click; here we invoke it directly).
+const confirmDangerSpy = vi.hoisted(() => vi.fn())
 vi.mock('../../composables/useConfirmDanger', () => ({
-  useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
+  useConfirmDanger: () => ({ confirmDanger: confirmDangerSpy }),
 }))
 vi.mock('../../composables/useClampedOffset', () => ({ useClampedOffset: vi.fn() }))
-vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: vi.fn() }) }))
+const toastAddSpy = vi.hoisted(() => vi.fn())
+vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAddSpy }) }))
+
+const invalidateQueriesSpy = vi.hoisted(() => vi.fn())
+// cancelQueries is awaited in the delete handler, so the spy must resolve.
+const cancelQueriesSpy = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+const removeQueriesSpy = vi.hoisted(() => vi.fn())
+const slideOverErrorHolder = vi.hoisted(() => ({ ref: null as { value: unknown } | null }))
 
 // --- vue-query: return the mocked list synchronously ---
 vi.mock('@tanstack/vue-query', () => ({
@@ -163,11 +173,14 @@ vi.mock('@tanstack/vue-query', () => ({
         const id = key?.[1]
         return id ? makeDoc(id) : null
       })
+      // A real ref (not an inert { value } literal) so the error watcher reacts when set.
+      const error = ref<unknown>(null)
+      slideOverErrorHolder.ref = error
       return {
         data,
         isLoading: { value: false },
         isError: { value: false },
-        error: { value: null },
+        error,
         refetch: vi.fn(),
       }
     }
@@ -192,7 +205,11 @@ vi.mock('@tanstack/vue-query', () => ({
       refetch: vi.fn(),
     }
   },
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({
+    invalidateQueries: invalidateQueriesSpy,
+    cancelQueries: cancelQueriesSpy,
+    removeQueries: removeQueriesSpy,
+  }),
   keepPreviousData: undefined,
 }))
 
@@ -341,8 +358,9 @@ const PaginatorStub = defineComponent({
 })
 
 import DocumentList from './DocumentList.vue'
-import { listDocuments } from '../../api/document'
+import { listDocuments, deleteDocument } from '../../api/document'
 const listDocumentsMock = listDocuments as unknown as ReturnType<typeof vi.fn>
+const deleteDocumentMock = deleteDocument as unknown as ReturnType<typeof vi.fn>
 
 // InputText stub: a native input that re-emits update:modelValue so a test can drive
 // the client-side quick filter (#53) exactly as a user typing would.
@@ -375,7 +393,10 @@ function mountView() {
         Paginator: PaginatorStub,
         DocumentSlideOver: {
           props: ['visible', 'document'],
-          template: '<div class="slide-over" v-if="visible">{{ document?.id }}</div>',
+          emits: ['deleteDocument'],
+          // Keep the id in its own `.slide-over` node so the existing text assertions stay clean.
+          template:
+            '<div v-if="visible"><span class="slide-over">{{ document?.id }}</span><button class="slide-delete" @click="$emit(\'deleteDocument\', document?.id)">del</button></div>',
         },
         DocumentSearchBar: passthrough,
         SavedFilters: passthrough,
@@ -1097,5 +1118,96 @@ describe('DocumentList — quick-tag menu binds to the live document (#142)', ()
 
     expect(menuHideSpy).toHaveBeenCalled()
     expect(wrapper.find('.tag-quick-menu-stub').attributes('data-doc-id')).toBe('')
+  })
+})
+
+// #172: the slide-over delete uses a dedicated single-document handler, not the
+// selection-bound bulk path.
+describe('DocumentList — single-document delete from slide-over (#172)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    confirmDangerSpy.mockReset()
+    deleteDocumentMock.mockClear()
+    cancelQueriesSpy.mockClear()
+    removeQueriesSpy.mockClear()
+    toastAddSpy.mockClear()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listResult.docs = [doc, docB]
+    localStorage.clear()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  async function openSlideOver(wrapper: ReturnType<typeof mountView>) {
+    await wrapper.find('button.single').trigger('click')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+  }
+
+  it('emits through to confirmDanger with the delete-document copy', async () => {
+    const wrapper = mountView()
+    await openSlideOver(wrapper)
+    expect(wrapper.find('.slide-over').text()).toBe('doc-42')
+
+    await wrapper.find('.slide-delete').trigger('click')
+    expect(confirmDangerSpy).toHaveBeenCalledTimes(1)
+    const opts = confirmDangerSpy.mock.calls.at(-1)![0] as {
+      header: string
+      message: string
+      accept: () => Promise<void>
+    }
+    expect(opts.header).toBe('ui.delete_document')
+    expect(opts.message).toBe('ui.delete_document_confirm')
+  })
+
+  it('on confirm, deletes exactly the open document and closes the pane', async () => {
+    const wrapper = mountView()
+    await openSlideOver(wrapper)
+    expect(wrapper.find('.slide-over').exists()).toBe(true)
+
+    await wrapper.find('.slide-delete').trigger('click')
+    const opts = confirmDangerSpy.mock.calls.at(-1)![0] as { accept: () => Promise<void> }
+    await opts.accept()
+    await flushPromises()
+
+    expect(deleteDocumentMock).toHaveBeenCalledTimes(1)
+    expect(deleteDocumentMock).toHaveBeenCalledWith('doc-42')
+    expect(wrapper.find('.slide-over').exists()).toBe(false)
+  })
+
+  it('does NOT delete when the confirm is dismissed (accept never runs)', async () => {
+    const wrapper = mountView()
+    await openSlideOver(wrapper)
+    await wrapper.find('.slide-delete').trigger('click')
+    expect(confirmDangerSpy).toHaveBeenCalledTimes(1)
+    expect(deleteDocumentMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.slide-over').exists()).toBe(true)
+  })
+
+  it('a detail 404 resolving after the delete fires no failed-to-load toast', async () => {
+    const wrapper = mountView()
+    await openSlideOver(wrapper)
+
+    await wrapper.find('.slide-delete').trigger('click')
+    const opts = confirmDangerSpy.mock.calls.at(-1)![0] as { accept: () => Promise<void> }
+    await opts.accept()
+    await flushPromises()
+
+    expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey: ['document', 'doc-42'] })
+    expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey: ['document', 'doc-42'] })
+    expect(wrapper.find('.slide-over').exists()).toBe(false)
+
+    // Clear the delete's success toast so the final assertion only sees the late-404 path.
+    toastAddSpy.mockClear()
+    slideOverErrorHolder.ref!.value = new Error('Request failed with status code 404')
+    await flushPromises()
+    expect(toastAddSpy).not.toHaveBeenCalled()
   })
 })

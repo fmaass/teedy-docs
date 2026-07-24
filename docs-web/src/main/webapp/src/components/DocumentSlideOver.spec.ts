@@ -25,22 +25,23 @@ beforeAll(() => {
 const LONG_TITLE =
   'A very very long document title that would otherwise run straight into the close button and get cut off mid-word'
 
-function makeDoc(): DocumentDetail {
+function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
   return {
     id: 'doc-1',
     title: LONG_TITLE,
     tags: [],
     files: [],
     create_date: 0,
+    ...overrides,
   } as unknown as DocumentDetail
 }
 
-function mountSlideOver() {
+function mountSlideOver(doc: DocumentDetail = makeDoc()) {
   return mount(DocumentSlideOver, {
     props: {
       visible: true,
       loading: false,
-      document: makeDoc(),
+      document: doc,
       availableTags: [],
     },
     attachTo: document.body,
@@ -151,5 +152,45 @@ describe('DocumentSlideOver — drag-resizable width (#68)', () => {
     handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
     await flushPromises()
     expect(localStorage.getItem('teedy_slide_over_width')).toBe('516')
+  })
+})
+
+describe('DocumentSlideOver — delete action (#172)', () => {
+  beforeEach(() => {
+    forceDesktop()
+  })
+
+  it('renders the Delete button only when the document is writable', async () => {
+    const wrapper = mountSlideOver(makeDoc({ writable: true }))
+    await flushPromises()
+    const delBtn = document.querySelector('.slide-delete-btn')
+    expect(delBtn).not.toBeNull()
+    expect(delBtn?.textContent).toContain('delete')
+    wrapper.unmount()
+  })
+
+  it('omits the Delete button for a read-only document', async () => {
+    // writable: false is the read-only-ACL case; undefined (the field absent) must
+    // also hide it — a document is never deletable unless writable is explicitly true.
+    const wrapperRO = mountSlideOver(makeDoc({ writable: false }))
+    await flushPromises()
+    expect(document.querySelector('.slide-delete-btn')).toBeNull()
+    wrapperRO.unmount()
+
+    const wrapperAbsent = mountSlideOver(makeDoc())
+    await flushPromises()
+    expect(document.querySelector('.slide-delete-btn')).toBeNull()
+    wrapperAbsent.unmount()
+  })
+
+  it('emits deleteDocument with the document id when clicked', async () => {
+    const wrapper = mountSlideOver(makeDoc({ id: 'doc-42', writable: true }))
+    await flushPromises()
+    const delBtn = document.querySelector('.slide-delete-btn') as HTMLElement
+    expect(delBtn).not.toBeNull()
+    delBtn.click()
+    await flushPromises()
+    expect(wrapper.emitted('deleteDocument')).toEqual([['doc-42']])
+    wrapper.unmount()
   })
 })

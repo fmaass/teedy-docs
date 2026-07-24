@@ -297,10 +297,12 @@ const { data: slideOverDoc, isLoading: slideOverLoading, error: slideOverError }
 })
 
 watch(slideOverError, (err) => {
-  if (err) {
-    slideOverOpen.value = false
-    toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: t('ui.item_document') }), life: 3000 })
-  }
+  // Only an OPEN pane's load can fail meaningfully. A late error — e.g. a
+  // focus/reconnect detail refetch resolving 404 after we deleted the document and
+  // closed the pane — must not turn a successful delete into a failed-to-load toast.
+  if (!err || !slideOverOpen.value) return
+  slideOverOpen.value = false
+  toast.add({ severity: 'error', summary: t('ui.failed_to_load', { item: t('ui.item_document') }), life: 3000 })
 })
 
 function openSlideOver(doc: DocumentListItem) {
@@ -361,6 +363,37 @@ function openFullView() {
       state: buildDocumentViewState(),
     })
   }
+}
+
+// Single-document delete from the slide-over. Deliberately NOT the bulk path
+// (runBulkOp is bound to the multi-select `selectedDocs`); this deletes exactly
+// the open document.
+function deleteSlideOverDocument(id: string) {
+  confirmDanger({
+    message: t('ui.delete_document_confirm'),
+    header: t('ui.delete_document'),
+    accept: async () => {
+      // Tear down this document's detail query BEFORE deleting so an in-flight
+      // focus/reconnect refetch cannot resolve 404 afterwards: close the pane
+      // (enabled → false, so no new fetch starts), cancel any in-flight fetch, then
+      // drop the cached observer. Ordered so no window survives in which a late
+      // response could land and fire the failed-to-load toast.
+      slideOverOpen.value = false
+      slideOverDocId.value = null
+      await queryClient.cancelQueries({ queryKey: queryKeys.document(id) })
+      queryClient.removeQueries({ queryKey: queryKeys.document(id) })
+      try {
+        await deleteDocument(id)
+        queryClient.invalidateQueries({ queryKey: queryKeys.documents() })
+        queryClient.invalidateQueries({ queryKey: queryKeys.trash() })
+        // A deleted document drops its tags off the sidebar/facet counts too.
+        for (const key of tagCountKeys) queryClient.invalidateQueries({ queryKey: key })
+        toast.add({ severity: 'success', summary: t('ui.document_deleted'), life: 2000 })
+      } catch {
+        toast.add({ severity: 'error', summary: t('ui.failed_delete_document'), life: 3000 })
+      }
+    },
+  })
 }
 
 // Single- vs double-click: a native double-click fires two row-clicks first, so a
@@ -702,6 +735,7 @@ async function bulkDownload() {
       @remove-tag="removeTagFromSlideOver"
       @open-full-view="openFullView"
       @edit-document="(id: string) => router.push({ name: 'document-edit', params: { id } })"
+      @delete-document="deleteSlideOverDocument"
     />
   </div>
 </template>

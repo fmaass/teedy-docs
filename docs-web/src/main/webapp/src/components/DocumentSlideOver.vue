@@ -35,6 +35,7 @@ const emit = defineEmits<{
   removeTag: [tagId: string]
   openFullView: []
   editDocument: [id: string]
+  deleteDocument: [id: string]
 }>()
 
 const slideOverTab = ref<'overview' | 'files'>('overview')
@@ -225,6 +226,9 @@ const drawerStyle = computed(() =>
       <div class="slide-actions">
         <Button :label="t('open')" icon="pi pi-external-link" outlined size="small" @click="emit('openFullView')" />
         <Button :label="t('edit')" icon="pi pi-pencil" text size="small" @click="emit('editDocument', document.id)" />
+        <!-- Delete is only offered when the caller may write the document (WRITE ACL);
+             it lives on the right so the destructive action is separated from Open/Edit. -->
+        <Button v-if="document.writable" :label="t('delete')" icon="pi pi-trash" severity="danger" text size="small" class="slide-delete-btn" @click="emit('deleteDocument', document.id)" />
       </div>
     </div>
   </Drawer>
@@ -306,4 +310,5 @@ const drawerStyle = computed(() =>
 .slide-empty-files { padding: 1rem; text-align: center; }
 .meta { font-size: 0.8125rem; color: var(--p-text-muted-color); }
 .slide-actions { display: flex; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--p-content-border-color); }
+.slide-delete-btn { margin-left: auto; }
 </style>
