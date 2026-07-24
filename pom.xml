@@ -183,11 +183,36 @@
                change it, so the temps would silently keep landing in the shared system tmpdir. Passing
                -Djava.io.tmpdir on the launch command line sets the cached value correctly. @{argLine}
                preserves the JaCoCo agent that prepare-agent injects into the argLine property. The leaf
-               dir is pre-created by the antrun execution above because the JVM needs it at bootstrap. -->
-          <argLine>@{argLine} -Djava.io.tmpdir=${project.build.directory}/teedy-it/${maven.build.timestamp}-${teedy.run.nonce}/tmp/f${surefire.forkNumber}</argLine>
+               dir is pre-created by the antrun execution above because the JVM needs it at bootstrap.
+
+               file.encoding is pinned here for the same reason as java.io.tmpdir above: it is a plain
+               system property, so -Dfile.encoding=UTF-8 on the launch line takes effect (verified) and
+               guards the JVM's default charset regardless of host locale.
+
+               sun.jnu.encoding is different: it is NOT a settable system property despite looking like
+               one. Native platform-property initialization derives it from the process locale via
+               setlocale() (java.base/unix/native/libjava/java_props_md.c), and
+               jdk.internal.util.SystemProps.initProperties() then unconditionally replaces any
+               command-line-supplied sun.jnu.encoding with that platform value — so a
+               -Dsun.jnu.encoding=UTF-8 argLine entry is silently discarded (verified: System.getProperty
+               still reports the locale-derived value with the flag present). sun.jnu.encoding governs how
+               java.nio.file.Path encodes filenames for the native filesystem calls, so under a non-UTF-8
+               host locale (e.g. LC_ALL=C, as CI/cron/minimal-container environments commonly export) it
+               degrades to ANSI_X3.4-1968 and Files.createTempFile throws InvalidPathException for any
+               non-ASCII filename (Körperschaftsteuererklärung.pdf, 文档.pdf). The only lever that actually
+               changes it is the forked process's own environment locale, which is why the fix is
+               environmentVariables (LC_ALL), not argLine, and why it has to be LC_ALL specifically —
+               glibc resolves the locale category precedence LC_ALL, then LC_CTYPE, then LANG (verified:
+               with LC_ALL unset, LC_CTYPE=C wins over LANG=C.UTF-8 and still degrades sun.jnu.encoding),
+               so LC_ALL is the only category that reliably overrides whatever LC_CTYPE/LANG the invoking
+               shell exports; setting LANG or LC_CTYPE here would not. -->
+          <argLine>@{argLine} -Djava.io.tmpdir=${project.build.directory}/teedy-it/${maven.build.timestamp}-${teedy.run.nonce}/tmp/f${surefire.forkNumber} -Dfile.encoding=UTF-8</argLine>
           <systemPropertyVariables>
             <docs.home>${project.build.directory}/teedy-it/${maven.build.timestamp}-${teedy.run.nonce}/home/f${surefire.forkNumber}</docs.home>
           </systemPropertyVariables>
+          <environmentVariables>
+            <LC_ALL>C.UTF-8</LC_ALL>
+          </environmentVariables>
         </configuration>
       </plugin>
 
