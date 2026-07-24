@@ -23,7 +23,7 @@ const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
-const { data: usersData, isLoading: loading, isError, refetch } = useQuery({
+const { data: usersData, isLoading: loading, isError, isFetching: usersFetching, refetch } = useQuery({
   queryKey: ['users'],
   queryFn: () => listUsers().then((r) => r.data.users),
 })
@@ -137,13 +137,18 @@ async function handleEdit() {
   }
 }
 
-// Delete user dialog. Deleting a user reassigns all their documents to a required target
-// user (their content is preserved), so the admin must pick a surviving, distinct, active
-// user before the departing account is removed.
+// Delete user dialog. Deleting a user reassigns their documents and tags to a target user (their
+// content is preserved), so the admin picks a surviving, distinct, active user before the departing
+// account is removed. #180: that prompt appears only when the account actually owns something —
+// `requires_reassign` from /user/list — otherwise the dialog is a plain confirmation.
 const showDeleteDialog = ref(false)
 const deleteTarget = ref<UserListItem | null>(null)
 const reassignToUsername = ref<string | null>(null)
 const deleteLoading = ref(false)
+// Set when the server refuses a target-less delete (the account gained a document or tag after the
+// list was fetched). It forces the reassignment prompt for the rest of this dialog, independently of
+// when the refreshed list arrives.
+const reassignForcedByServer = ref(false)
 
 // Candidate reassignment targets: every active user except the one being deleted (a user
 // cannot be reassigned to itself, and the backend rejects it too).
@@ -151,25 +156,52 @@ const reassignCandidates = computed(() =>
   users.value.filter((u) => u.username !== deleteTarget.value?.username),
 )
 
+// Read the flag off the LIVE list row rather than the captured object, so a refetch while the dialog
+// is open is reflected. An absent flag means "required" — the server is the authority and refuses a
+// target-less delete it disagrees with.
+const deleteNeedsReassign = computed(() => {
+  if (reassignForcedByServer.value) return true
+  const username = deleteTarget.value?.username
+  if (!username) return true
+  const live = users.value.find((u) => u.username === username) ?? deleteTarget.value
+  return live?.requires_reassign !== false
+})
+
 function openDeleteDialog(user: UserListItem) {
   deleteTarget.value = user
   reassignToUsername.value = null
+  reassignForcedByServer.value = false
   showDeleteDialog.value = true
+  // The cached list decides the SHAPE of a destructive dialog, and it can be arbitrarily old: this
+  // view is not remounted while the admin stays on it, so a user who acquired a document or tag in
+  // the meantime would still show a plain confirm. Re-read the list on every open, and keep the
+  // confirm button busy until it lands (below) so nothing can be acted on from the stale shape.
+  void refetch()
 }
 
 async function handleDelete() {
-  if (!deleteTarget.value || !reassignToUsername.value) {
+  if (!deleteTarget.value) return
+  const needsReassign = deleteNeedsReassign.value
+  if (needsReassign && !reassignToUsername.value) {
     toast.add({ severity: 'warn', summary: t('ui.users.reassign_required'), life: 2500 })
     return
   }
   deleteLoading.value = true
   try {
-    await deleteUser(deleteTarget.value.username, reassignToUsername.value)
+    await deleteUser(deleteTarget.value.username, needsReassign ? reassignToUsername.value! : undefined)
     queryClient.invalidateQueries({ queryKey: ['users'] })
     showDeleteDialog.value = false
     toast.add({ severity: 'success', summary: t('ui.users.user_deleted'), life: 2000 })
-  } catch {
-    toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
+  } catch (error: unknown) {
+    if (getErrorType(error) === 'ReassignRequired') {
+      // The account acquired a document or tag since the list was fetched. Keep the dialog open,
+      // switch it to the reassignment prompt and refresh the list behind it.
+      reassignForcedByServer.value = true
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.add({ severity: 'error', summary: t('ui.users.reassign_required'), life: 3000 })
+    } else {
+      toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
+    }
   } finally {
     deleteLoading.value = false
   }
@@ -226,9 +258,14 @@ function confirmDisableTotp(user: UserListItem) {
   })
 }
 
+function getErrorType(error: unknown): string | undefined {
+  return (error as { response?: { data?: { type?: string } } })?.response?.data?.type
+}
+
 function getCreateUserErrorMessage(error: unknown): string {
-  const maybeType = (error as { response?: { data?: { type?: string } } })?.response?.data?.type
-  return maybeType === 'AlreadyExistingUsername' ? t('ui.users.username_taken') : t('ui.users.failed_create')
+  return getErrorType(error) === 'AlreadyExistingUsername'
+    ? t('ui.users.username_taken')
+    : t('ui.users.failed_create')
 }
 
 function userRowClass(data: UserListItem): string {
@@ -363,13 +400,15 @@ function canToggleDisabled(data: UserListItem): boolean {
       </template>
     </Dialog>
 
-    <!-- Delete user dialog: reassign the departing user's documents to a required target -->
+    <!-- Delete user dialog: the reassignment prompt appears only for a user that still owns content -->
     <Dialog v-model:visible="showDeleteDialog" :header="t('ui.users.delete_user')" :style="{ width: '440px' }" modal>
       <div class="dialog-form">
         <Message severity="warn" :closable="false" class="delete-warning">
-          {{ t('ui.users.delete_reassign_intro', { username: deleteTarget?.username }) }}
+          {{ deleteNeedsReassign
+            ? t('ui.users.delete_reassign_intro', { username: deleteTarget?.username })
+            : t('ui.users.delete_confirm', { username: deleteTarget?.username }) }}
         </Message>
-        <div class="form-field">
+        <div v-if="deleteNeedsReassign" class="form-field">
           <label for="reassign-target">{{ t('ui.users.reassign_to') }} *</label>
           <Select
             v-model="reassignToUsername"
@@ -390,8 +429,8 @@ function canToggleDisabled(data: UserListItem): boolean {
           :label="t('delete')"
           icon="pi pi-trash"
           severity="danger"
-          :loading="deleteLoading"
-          :disabled="!reassignToUsername"
+          :loading="deleteLoading || usersFetching"
+          :disabled="deleteNeedsReassign && !reassignToUsername"
           @click="handleDelete"
         />
       </template>

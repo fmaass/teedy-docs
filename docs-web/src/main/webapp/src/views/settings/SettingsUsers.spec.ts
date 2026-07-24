@@ -218,6 +218,134 @@ describe('SettingsUsers — delete with document reassignment (#55)', () => {
   })
 })
 
+// #180: the reassignment prompt is shown only when the server says this account still owns documents
+// or tags (`requires_reassign`). The fixtures above deliberately omit the flag, which must keep the
+// old, safe behaviour (prompt shown) — those cases are covered by the block above.
+describe('SettingsUsers — delete without reassignment (#180)', () => {
+  const EMPTY_USER: UserListItem = { ...ENABLED_USER, requires_reassign: false }
+  const OWNER_USER: UserListItem = { ...DISABLED_USER, requires_reassign: true }
+
+  type DeleteVm = {
+    openDeleteDialog: (u: UserListItem) => void
+    handleDelete: () => Promise<void>
+    deleteNeedsReassign: boolean
+    reassignToUsername: string | null
+    showDeleteDialog: boolean
+  }
+
+  beforeEach(() => {
+    apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [EMPTY_USER, OWNER_USER] } })
+    apiMock.deleteUser.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+    confirmDangerSpy.mockReset()
+  })
+
+  it('deletes a user that owns nothing with no reassignment target at all', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DeleteVm
+    vm.openDeleteDialog(EMPTY_USER)
+    await flushPromises()
+    expect(vm.deleteNeedsReassign).toBe(false)
+
+    await vm.handleDelete()
+    await flushPromises()
+
+    // No target argument: the API call must omit reassign_to_username entirely.
+    expect(apiMock.deleteUser).toHaveBeenCalledTimes(1)
+    expect(apiMock.deleteUser).toHaveBeenCalledWith('alice', undefined)
+    expect(vm.showDeleteDialog).toBe(false)
+  })
+
+  it('still requires a target for a user flagged as owning content', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DeleteVm
+    vm.openDeleteDialog(OWNER_USER)
+    await flushPromises()
+    expect(vm.deleteNeedsReassign).toBe(true)
+
+    await vm.handleDelete()
+    await flushPromises()
+
+    expect(apiMock.deleteUser).not.toHaveBeenCalled()
+  })
+
+  it('renders the reassignment select only for a user that owns content', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DeleteVm
+    vm.openDeleteDialog(EMPTY_USER)
+    await flushPromises()
+    expect(document.querySelector('#reassign-target')).toBeNull()
+
+    vm.showDeleteDialog = false
+    await flushPromises()
+    vm.openDeleteDialog(OWNER_USER)
+    await flushPromises()
+    expect(document.querySelector('#reassign-target')).not.toBeNull()
+  })
+
+  it('re-reads the user list when the delete dialog opens', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(apiMock.listUsers).toHaveBeenCalledTimes(1)
+
+    ;(wrapper.vm as unknown as DeleteVm).openDeleteDialog(EMPTY_USER)
+    await flushPromises()
+
+    expect(apiMock.listUsers).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the reassignment prompt when the flag changed since the list was cached', async () => {
+    // The list was cached while the account still owned nothing; by the time the admin opens the
+    // delete dialog it owns a document. The re-read on open must flip the dialog to the prompt —
+    // otherwise a destructive dialog is shaped by arbitrarily old data.
+    apiMock.listUsers
+      .mockReset()
+      .mockResolvedValueOnce({ data: { users: [EMPTY_USER, OWNER_USER] } })
+      .mockResolvedValue({ data: { users: [{ ...EMPTY_USER, requires_reassign: true }, OWNER_USER] } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DeleteVm
+    vm.openDeleteDialog(EMPTY_USER)
+    await flushPromises()
+
+    expect(vm.deleteNeedsReassign).toBe(true)
+    expect(document.querySelector('#reassign-target')).not.toBeNull()
+  })
+
+  it('re-prompts for a target when the server refuses with ReassignRequired (race)', async () => {
+    // The account acquired a document between the list fetch and the delete: the delete is refused
+    // with the typed error, and the dialog must switch to the reassignment prompt rather than close.
+    apiMock.deleteUser.mockReset().mockRejectedValue({ response: { data: { type: 'ReassignRequired' } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DeleteVm
+    vm.openDeleteDialog(EMPTY_USER)
+    await flushPromises()
+    await vm.handleDelete()
+    await flushPromises()
+
+    expect(apiMock.deleteUser).toHaveBeenCalledWith('alice', undefined)
+    expect(vm.showDeleteDialog).toBe(true)
+    expect(vm.deleteNeedsReassign).toBe(true)
+
+    // With a target chosen, the retry sends it.
+    apiMock.deleteUser.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+    vm.reassignToUsername = 'bob'
+    await vm.handleDelete()
+    await flushPromises()
+
+    expect(apiMock.deleteUser).toHaveBeenCalledWith('alice', 'bob')
+    expect(vm.showDeleteDialog).toBe(false)
+  })
+})
+
 describe('SettingsUsers — storage quota field', () => {
   beforeEach(() => {
     apiMock.listUsers.mockReset().mockResolvedValue({ data: { users: [ENABLED_USER] } })

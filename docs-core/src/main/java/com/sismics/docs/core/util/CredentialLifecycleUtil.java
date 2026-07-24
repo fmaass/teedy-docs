@@ -10,6 +10,11 @@ import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 /**
  * Application-facing facade over the credential-lifecycle DAO primitives: the uniform epoch bump, the
  * conditional self password-change, and the #111 owner-row lock / self-delete guard. REST resources call
@@ -154,6 +159,48 @@ public final class CredentialLifecycleUtil {
      */
     public static boolean hasSoleWriteTagLinkedToSurvivingDocument(String userId) {
         return new AclDao().hasSoleWriteTagLinkedToForeignDocument(userId);
+    }
+
+    /**
+     * #180 reassignment gate: of the given users, those whose deletion REQUIRES a reassignment target
+     * because {@link UserDao#reassignOwnedDocuments(String, String)} would actually have something to
+     * move — the user still owns an ACTIVE document or an ACTIVE tag.
+     *
+     * <p>The tag arm is not redundant with the document arm: a tag the departing user solely owns can
+     * sit on ANOTHER user's document even when the departing user owns no documents at all. Deleting
+     * without reassigning would leave that tag with a soft-deleted owner, which clean_storage's
+     * orphan-tag purge later removes — stripping the tag from the surviving owner's document (the #122
+     * / #54 tag-loss class). So "owns no documents" alone must never waive the target.</p>
+     *
+     * <p>Both the admin UI's per-user flag and the DELETE endpoint's under-lock decision resolve through
+     * THIS method, so the advertised requirement and the enforced one cannot diverge.</p>
+     *
+     * @param userIds User IDs to test
+     * @return the subset that cannot be deleted without a reassignment target (never null)
+     */
+    public static Set<String> findUserIdsRequiringReassignment(Collection<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        Set<String> requiring = new HashSet<>(new DocumentDao().findUserIdsWithActiveDocuments(userIds));
+        requiring.addAll(new TagDao().findUserIdsWithActiveTags(userIds));
+        return requiring;
+    }
+
+    /**
+     * #180 reassignment gate for a single user; see
+     * {@link #findUserIdsRequiringReassignment(Collection)} for the predicate and why it also covers
+     * tags. Evaluate this AFTER the departing user's owner row is locked, so the decision is made on
+     * the state the deletion will act on and is serialized against the writers that take the same
+     * owner-row lock (share/ACL grants, other principal deletions). It does NOT serialize against
+     * document/tag creation, which takes no owner-row lock — that window is the same one the
+     * always-reassign path has (issue #185).
+     *
+     * @param userId Departing user ID
+     * @return true when deleting this user requires a reassignment target
+     */
+    public static boolean requiresReassignment(String userId) {
+        return findUserIdsRequiringReassignment(List.of(userId)).contains(userId);
     }
 
     /**

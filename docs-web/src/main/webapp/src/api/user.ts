@@ -45,6 +45,10 @@ export interface UserListItem {
   // admin (or the guest) user, so the UI hides the disable/enable toggle for them.
   admin: boolean
   disabled: boolean
+  // #180 True when deleting this user requires a reassignment target because they still own active
+  // documents or tags. Sent to admin callers only (they are the only ones who may delete a user), so
+  // an ABSENT value must be read as "a target is required" — the fail-safe direction.
+  requires_reassign?: boolean
 }
 
 export function getCurrentUser() {
@@ -94,13 +98,14 @@ export function updateUser(
   return api.post(`/user/${username}`, params)
 }
 
-// Deleting a user reassigns all their documents to `reassignToUsername` (a required,
-// distinct, active user) before the departing account is removed — the documents' content
-// is preserved and stays decryptable. The target is passed as a query parameter because a
-// DELETE request carries no body.
-export function deleteUser(username: string, reassignToUsername: string) {
+// Deleting a user reassigns all their documents and tags to `reassignToUsername` (a distinct,
+// active user) before the departing account is removed — the documents' content is preserved and
+// stays decryptable. The target is passed as a query parameter because a DELETE request carries no
+// body. #180: it is omitted for a user that owns nothing; the backend then answers 400 with type
+// "ReassignRequired" if the account acquired content in the meantime.
+export function deleteUser(username: string, reassignToUsername?: string) {
   return api.delete(`/user/${username}`, {
-    params: { reassign_to_username: reassignToUsername },
+    params: reassignToUsername ? { reassign_to_username: reassignToUsername } : undefined,
   })
 }
 

@@ -3685,8 +3685,8 @@
           {
             "name": "reassign_to_username",
             "in": "query",
-            "required": true,
-            "description": "Username of the surviving user to reassign this user's documents to",
+            "required": false,
+            "description": "Username of the surviving user to reassign this user's documents and tags to. Required only when the departing user still owns an active document or tag; the request is refused with the ReassignRequired error otherwise.",
             "schema": {
               "type": "string"
             }
@@ -3695,6 +3695,12 @@
         "responses": {
           "200": {
             "description": "Success"
+          },
+          "400": {
+            "description": "ReassignRequired when the departing user still owns documents or tags and no target was supplied; ValidationError when the supplied target is empty, inactive, unknown, or is the departing user itself; UserNotFound when no active user has this username; ForbiddenError when the target of the deletion is the guest user or an administrator"
+          },
+          "403": {
+            "description": "Not authenticated, or the caller does not have the ADMIN base function"
           }
         }
       },
@@ -3716,7 +3722,46 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "username": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "totp_enabled": {
+                      "type": "boolean"
+                    },
+                    "storage_quota": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "storage_current": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "disabled": {
+                      "type": "boolean"
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires_reassign": {
+                      "type": "boolean",
+                      "description": "True when deleting this user requires a reassignment target because they still own active documents or tags; present for admin callers only (#180)"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3832,7 +3877,58 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "username": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "totp_enabled": {
+                            "type": "boolean"
+                          },
+                          "storage_quota": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "storage_current": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "create_date": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "admin": {
+                            "type": "boolean"
+                          },
+                          "disabled": {
+                            "type": "boolean"
+                          },
+                          "requires_reassign": {
+                            "type": "boolean",
+                            "description": "True when deleting this user requires a reassignment target because they still own active documents or tags; present for admin callers only (#180)"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

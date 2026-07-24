@@ -744,17 +744,20 @@ public class UserResource extends BaseResource {
      * Deletes a user.
      *
      * @api {delete} /user/:username Delete a user
-     * @apiDescription The departing user's documents are reassigned to the required target user
-     * (their content is preserved, decryption keeps using the departing user's retained key), then
-     * the departing user is soft-deleted along with their remaining associated entities.
+     * @apiDescription The departing user's documents are reassigned to the target user (their content is
+     * preserved, decryption keeps using the departing user's retained key), then the departing user is
+     * soft-deleted along with their remaining associated entities. The target is required only when the
+     * departing user still owns content to move (an active document or an active tag); an account that
+     * owns nothing is deleted without one.
      * @apiName DeleteUserUsername
      * @apiGroup User
      * @apiParam {String} username Username
-     * @apiParam {String} reassign_to_username Query parameter: username of the surviving user to reassign this user's documents to (required)
+     * @apiParam {String} [reassign_to_username] Query parameter: username of the surviving user to reassign this user's documents and tags to. Required only when the departing user still owns an active document or tag.
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied or the user cannot be deleted
      * @apiError (client) UserNotFound The user does not exist
-     * @apiError (client) ValidationError The reassignment target is missing, inactive, or the departing user itself
+     * @apiError (client) ReassignRequired The departing user still owns documents or tags, so a reassignment target must be supplied
+     * @apiError (client) ValidationError The supplied reassignment target is inactive or the departing user itself
      * @apiPermission admin
      * @apiVersion 1.5.0
      *
@@ -790,16 +793,23 @@ public class UserResource extends BaseResource {
             throw new ClientException("ForbiddenError", "The admin user cannot be deleted");
         }
 
-        // Validate the reassignment target: it must be provided, resolve to an active (non-deleted)
-        // user, and be DISTINCT from the departing user. The departing user's documents are reassigned
-        // to it, so an absent/inactive/self target is rejected before any mutation.
-        reassignToUsername = ValidationUtil.validateLength(reassignToUsername, "reassign_to_username", 1, 50, false);
-        User reassignTarget = userDao.getActiveByUsername(reassignToUsername);
-        if (reassignTarget == null) {
-            throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
-        }
-        if (reassignTarget.getId().equals(user.getId())) {
-            throw new ClientException("ValidationError", "Cannot reassign a user's documents to the user being deleted");
+        // #180: the reassignment target is OPTIONAL. "Not supplied" means the query parameter is
+        // ABSENT (null) — an explicitly EMPTY or blank value is a supplied-but-invalid target and
+        // still fails ValidationError exactly as it did before this endpoint accepted omission, so a
+        // client sending `?reassign_to_username=` never silently gets the target-less path. When one
+        // IS supplied it must resolve to an active (non-deleted) user DISTINCT from the departing
+        // user, rejected before any mutation. WHETHER a target is required at all is decided further
+        // down, once the departing user's owner row is locked.
+        User reassignTarget = null;
+        if (reassignToUsername != null) {
+            reassignToUsername = ValidationUtil.validateLength(reassignToUsername, "reassign_to_username", 1, 50, false);
+            reassignTarget = userDao.getActiveByUsername(reassignToUsername);
+            if (reassignTarget == null) {
+                throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
+            }
+            if (reassignTarget.getId().equals(user.getId())) {
+                throw new ClientException("ValidationError", "Cannot reassign a user's documents to the user being deleted");
+            }
         }
 
         // Collect affected route models for the response payload (a read; takes no lock). The actual route
@@ -807,24 +817,58 @@ public class UserResource extends BaseResource {
         // user-row locks below, so this path acquires USER before DOCUMENT (see the ordering note there).
         List<String> affectedRouteModels = PrincipalDeletionUtil.findAffectedRouteModelNames(user.getId());
 
-        // Lock BOTH the departing and the target owner rows FOR UPDATE, in a deterministic id order so
-        // every multi-owner locker uses the same order (deadlock-safe). Each lock is eligibility-scoped, so
+        // Lock the departing owner row FOR UPDATE — and, when a reassignment target was supplied, the
+        // target's row as well, in a deterministic id order so every multi-owner locker uses the same
+        // order (deadlock-safe). Each lock is eligibility-scoped, so
         // a concurrently-deleted participant yields null and the delete fails cleanly with no reassignment
         // (closes the TOCTOU between the active-check above and the reassignment below — documents must not
         // land on a now-soft-deleted owner). Held to commit, these locks serialize the reassignment against
         // any concurrent direct share/ACL grant on either owner's documents (which take the same owner-row
         // lock), so a grant can never ride a stale owner past the transfer into the new owner's lifecycle.
         User lockedDeparting;
-        User lockedTarget;
-        if (user.getId().compareTo(reassignTarget.getId()) <= 0) {
+        User lockedTarget = null;
+        if (reassignTarget == null) {
+            // No target supplied: only the departing owner row is locked. It still spans the
+            // requires-reassignment decision below and the owner-scoped trash, so every writer that
+            // takes the SAME owner-row lock is serialized against both.
             lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
-            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+            if (lockedDeparting == null) {
+                throw new ClientException("UserNotFound", "The user does not exist");
+            }
         } else {
-            lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
-            lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            if (user.getId().compareTo(reassignTarget.getId()) <= 0) {
+                lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+                lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+            } else {
+                lockedTarget = CredentialLifecycleUtil.lockActiveUser(reassignTarget.getId());
+                lockedDeparting = CredentialLifecycleUtil.lockActiveUser(user.getId());
+            }
+            if (lockedDeparting == null || lockedTarget == null) {
+                throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
+            }
         }
-        if (lockedDeparting == null || lockedTarget == null) {
-            throw new ClientException("ValidationError", "The reassignment target user does not exist or is not active");
+
+        // #180: decide UNDER the departing owner-row lock whether a reassignment target is REQUIRED —
+        // it is exactly when reassignOwnedDocuments would have something to move (an active owned
+        // document, or an active owned tag that may sit on another user's document and would otherwise
+        // be purged as orphaned). Refuse with a distinct, client-recognizable type so the admin UI can
+        // re-prompt for a target instead of reporting a generic failure. This runs before any mutation
+        // below, and it is evaluated after the lock rather than at parameter-validation time so it sees
+        // the state the deletion will actually act on.
+        //
+        // SCOPE OF THE LOCK (do not over-read it): the owner-row lock serializes this decision only
+        // against writers that take the SAME row lock — a direct share/ACL grant on this owner's
+        // documents, another principal deletion, the self-delete path. Document and tag CREATION takes
+        // no owner-row lock: an FK check against the locked user row can make the insert WAIT, but once
+        // this transaction commits the insert proceeds and commits under a now-soft-deleted owner. So a
+        // document or tag created concurrently with this delete can still be missed. That window is NOT
+        // introduced here — it exists identically on the always-reassign path, where reassignOwnedDocuments
+        // snapshots the active documents and tags and anything created after the snapshot is not moved
+        // (see the RESIDUAL note in UserDao.reassignOwnedDocuments). Tracked as issue #185; closing it
+        // needs serialization against the hot create path, which is out of scope for this change.
+        if (lockedTarget == null && CredentialLifecycleUtil.requiresReassignment(user.getId())) {
+            throw new ClientException("ReassignRequired",
+                    "This user still owns documents or tags; a reassignment target is required to delete it");
         }
 
         // Cancel active routes with an open step targeting the departing user. This locks each affected
@@ -839,10 +883,14 @@ public class UserResource extends BaseResource {
         // Reassign the departing user's ACTIVE documents (and the departing user's tags linked to them)
         // to the target, then grant the target READ+WRITE access on each reassigned document. This must
         // run BEFORE the user soft-delete and BEFORE the deletion events so the reassigned documents and
-        // their files are excluded from destruction.
-        Set<String> reassignedDocumentIds = new java.util.HashSet<>(
-                userDao.reassignOwnedDocuments(user.getId(), lockedTarget.getId()));
-        grantOwnershipAcls(reassignedDocumentIds, lockedTarget.getId());
+        // their files are excluded from destruction. Skipped entirely when no target was supplied, which
+        // the guard above allows only for a user with nothing to reassign — so the skip is equivalent to
+        // running it, not a shortcut past it.
+        Set<String> reassignedDocumentIds = new java.util.HashSet<>();
+        if (lockedTarget != null) {
+            reassignedDocumentIds.addAll(userDao.reassignOwnedDocuments(user.getId(), lockedTarget.getId()));
+            grantOwnershipAcls(reassignedDocumentIds, lockedTarget.getId());
+        }
 
         // Find linked data, EXCLUDING the reassigned documents and their files: firing
         // DocumentDeletedAsyncEvent would remove a now-live document from Lucene, and
@@ -1050,6 +1098,7 @@ public class UserResource extends BaseResource {
      * @apiSuccess {Number} storage_current Quota used (in bytes)
      * @apiSuccess {String[]} groups Groups
      * @apiSuccess {Boolean} disabled True if the user is disabled
+     * @apiSuccess {Boolean} requires_reassign True if deleting this user requires a reassignment target (admin callers only)
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) UserNotFound The user does not exist
      * @apiPermission user
@@ -1090,6 +1139,13 @@ public class UserResource extends BaseResource {
                 .add("storage_quota", user.getStorageQuota())
                 .add("storage_current", user.getStorageCurrent())
                 .add("disabled", user.getDisableDate() != null);
+
+        // #180: whether deleting this user would require a reassignment target. Only an admin can delete
+        // a user, so the flag — which discloses that the account still owns content — is emitted for
+        // admin callers only; any other caller sees the response unchanged.
+        if (hasBaseFunction(BaseFunction.ADMIN)) {
+            response.add("requires_reassign", CredentialLifecycleUtil.requiresReassignment(user.getId()));
+        }
         return Response.ok().entity(response.build()).build();
     }
 
@@ -1111,6 +1167,7 @@ public class UserResource extends BaseResource {
      * @apiSuccess {Number} users.storage_current Quota used (in bytes)
      * @apiSuccess {Number} users.create_date Create date (timestamp)
      * @apiSuccess {Number} users.disabled True if the user is disabled
+     * @apiSuccess {Boolean} users.requires_reassign True if deleting this user requires a reassignment target (admin callers only)
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission user
      * @apiVersion 1.5.0
@@ -1157,9 +1214,20 @@ public class UserResource extends BaseResource {
                 .collect(Collectors.toSet());
         Set<String> adminRoleIds = roleBaseFunctionDao.getRoleIdsWithBaseFunction(BaseFunction.ADMIN.name(), roleIdSet);
 
+        // #180: resolve, for the WHOLE page in two grouped queries (never per row — that would be an
+        // N+1), which users cannot be deleted without a reassignment target. Only an admin can delete a
+        // user, so the flag — which discloses that an account still owns content — is computed and
+        // emitted for admin callers only; a non-admin caller gets the response unchanged and pays
+        // nothing for it. A client that does not see the flag must assume a target is required.
+        boolean adminCaller = hasBaseFunction(BaseFunction.ADMIN);
+        Set<String> userIdsRequiringReassign = adminCaller
+                ? CredentialLifecycleUtil.findUserIdsRequiringReassignment(
+                        userDtoList.stream().map(UserDto::getId).collect(Collectors.toSet()))
+                : Set.of();
+
         for (UserDto userDto : userDtoList) {
             boolean admin = adminRoleIds.contains(userDto.getRoleId());
-            users.add(Json.createObjectBuilder()
+            JsonObjectBuilder userBuilder = Json.createObjectBuilder()
                     .add("id", userDto.getId())
                     .add("username", userDto.getUsername())
                     .add("email", userDto.getEmail())
@@ -1168,7 +1236,11 @@ public class UserResource extends BaseResource {
                     .add("storage_current", userDto.getStorageCurrent())
                     .add("create_date", userDto.getCreateTimestamp())
                     .add("admin", admin)
-                    .add("disabled", userDto.getDisableTimestamp() != null));
+                    .add("disabled", userDto.getDisableTimestamp() != null);
+            if (adminCaller) {
+                userBuilder.add("requires_reassign", userIdsRequiringReassign.contains(userDto.getId()));
+            }
+            users.add(userBuilder);
         }
         
         JsonObjectBuilder response = Json.createObjectBuilder()

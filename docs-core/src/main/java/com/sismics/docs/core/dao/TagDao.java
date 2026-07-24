@@ -17,6 +17,7 @@ import com.sismics.util.context.ThreadLocalContext;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
+import jakarta.persistence.TypedQuery;
 import java.util.*;
 
 /**
@@ -122,8 +123,32 @@ public class TagDao {
     }
 
     /**
+     * Of the given user IDs, those that still own at least one ACTIVE (non-soft-deleted) tag.
+     *
+     * <p>Ownership, not access: a tag a user merely holds an ACL on belongs to its creator and is not
+     * counted here. This mirrors the tag snapshot
+     * {@link com.sismics.docs.core.dao.UserDao#reassignOwnedDocuments(String, String)} moves on a
+     * reassign-delete, so the two cannot diverge. Answered with ONE grouped query for the whole set;
+     * an empty input is answered without querying (an {@code in ()} bind is unsafe on some
+     * dialects).</p>
+     *
+     * @param userIds User IDs to test
+     * @return the subset owning at least one active tag (never null)
+     */
+    public Set<String> findUserIdsWithActiveTags(Collection<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<String> q = em.createQuery("select distinct t.userId from Tag t"
+                + " where t.userId in :userIds and t.deleteDate is null", String.class);
+        q.setParameter("userIds", userIds);
+        return new HashSet<>(q.getResultList());
+    }
+
+    /**
      * Gets a tag by its ID.
-     * 
+     *
      * @param id Tag ID
      * @return Tag
      */

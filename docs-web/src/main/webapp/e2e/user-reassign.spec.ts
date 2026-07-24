@@ -18,6 +18,39 @@ const sampleFile = resolve(here, 'fixtures/sample.txt')
 // they are non-empty and match the uploaded content — if reassignment had trashed the
 // file (physical delete) or failed to grant admin access, this download would 404/403
 // or return empty, failing the test.
+// #180: the mirror case — a user who owns nothing is deleted straight from the dialog. No owner
+// picker is rendered and the confirm button is live without one, so an admin cleaning up an unused
+// account is not forced to nominate a recipient for documents that do not exist.
+test('deleting a user who owns nothing needs no reassignment target', async ({ page }) => {
+  const username = unique('emptyuser').replace(/[^a-z0-9]/gi, '').toLowerCase()
+
+  await page.goto('/#/settings/users')
+  await page.getByRole('button', { name: 'Add user' }).click()
+  const userDialog = page.getByRole('dialog', { name: 'Add user' })
+  await userDialog.locator('#add-user-name').fill(username)
+  await userDialog.locator('#add-user-email').fill(`${username}@example.com`)
+  await userDialog.locator('#add-user-pass').fill('Password1e2e')
+  await userDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('User created')).toBeVisible()
+
+  const userRow = page.getByRole('row', { name: new RegExp(username) })
+  await expect(userRow).toBeVisible()
+  // Opening the dialog re-reads /user/list; wait for it so the assertion below is made on the
+  // settled shape rather than on pre-refresh state.
+  const listRefresh = page.waitForResponse((r) => r.url().includes('/api/user/list'))
+  await userRow.getByRole('button', { name: 'Delete' }).click()
+
+  const deleteDialog = page.getByRole('dialog', { name: 'Delete user' })
+  await expect(deleteDialog).toBeVisible()
+  await listRefresh
+  // The account owns no documents and no tags: the reassignment Select is not rendered at all.
+  await expect(deleteDialog.locator('#reassign-target')).toHaveCount(0)
+
+  await deleteDialog.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('User deleted')).toBeVisible()
+  await expect(page.getByRole('row', { name: new RegExp(username) })).toHaveCount(0)
+})
+
 test('deleting a user reassigns their document to a chosen target, whose file still opens', async ({
   page,
   browser,

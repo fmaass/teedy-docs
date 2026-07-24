@@ -198,11 +198,12 @@ export async function confirmDanger(page: Page): Promise<void> {
   await expect(dialog).toBeHidden()
 }
 
-// Delete a user via Settings › Users. Since #55, deleting a user reassigns all of
-// their documents to a REQUIRED target and opens a real (non-danger) Dialog with a
-// reassign-target Select — it is NOT the old alertdialog danger-confirm. The row's
-// trash button opens the "Delete user" dialog; a target must be picked before the
-// dialog's own "Delete" button fires. Lands with a "User deleted" toast.
+// Delete a user via Settings › Users. Since #55, deleting a user reassigns their documents to a
+// target and opens a real (non-danger) Dialog — it is NOT the old alertdialog danger-confirm. Since
+// #180 the reassign-target Select is rendered ONLY when the departing user still owns active
+// documents or tags; an account that owns nothing shows a plain confirmation. This helper handles
+// both shapes, so it works for the many specs that create a throwaway user and delete it again.
+// Lands with a "User deleted" toast.
 // `reassignTo` defaults to admin (always present, distinct from any test-created user).
 export async function deleteUser(page: Page, username: string, reassignTo = 'admin'): Promise<void> {
   await page.goto('/#/settings/users')
@@ -214,12 +215,20 @@ export async function deleteUser(page: Page, username: string, reassignTo = 'adm
   // detached) at mobile width. Harmless on desktop (already in view).
   const delBtn = row.getByRole('button', { name: 'Delete' })
   await delBtn.scrollIntoViewIfNeeded()
+  // Opening the dialog re-reads /user/list so its shape is decided on fresh ownership data. Wait for
+  // THAT response before probing for the Select: checking earlier could read the pre-refresh shape
+  // and delete without a target the server then demands.
+  const listRefresh = page.waitForResponse((r) => r.url().includes('/api/user/list'))
   await delBtn.click()
 
   const dialog = page.getByRole('dialog', { name: 'Delete user' })
   await expect(dialog).toBeVisible()
-  await dialog.locator('#reassign-target').click()
-  await page.getByRole('option', { name: reassignTo, exact: true }).click()
+  await listRefresh
+  const reassignSelect = dialog.locator('#reassign-target')
+  if ((await reassignSelect.count()) > 0) {
+    await reassignSelect.click()
+    await page.getByRole('option', { name: reassignTo, exact: true }).click()
+  }
   await dialog.getByRole('button', { name: 'Delete' }).click()
   await expect(page.getByText('User deleted')).toBeVisible()
 }

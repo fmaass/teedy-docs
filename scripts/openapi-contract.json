@@ -5,6 +5,10 @@
       "responses": ["200", "400", "403", "404", "409", "429", "500"],
       "requestBodyRequired": true,
       "requiredFields": ["manifest"]
+    },
+    "DELETE /user/{username}": {
+      "responses": ["200", "400", "403"],
+      "requestBodyRequired": false
     }
   }
 }

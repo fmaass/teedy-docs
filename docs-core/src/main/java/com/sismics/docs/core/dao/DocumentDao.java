@@ -18,8 +18,11 @@ import jakarta.persistence.NoResultException;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 import java.sql.Timestamp;
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -198,6 +201,27 @@ public class DocumentDao {
         TypedQuery<Long> q = em.createQuery("select count(d) from Document d where d.userId = :userId and d.deleteDate is null", Long.class);
         q.setParameter("userId", userId);
         return q.getSingleResult();
+    }
+
+    /**
+     * Of the given user IDs, those that still own at least one ACTIVE (non-trashed) document.
+     *
+     * <p>Answered with ONE grouped query for the whole set: a per-user count over a user list would be
+     * an N+1 on the admin user list. An empty input is answered without querying — an {@code in ()}
+     * bind is both pointless and unsafe on some dialects.</p>
+     *
+     * @param userIds User IDs to test
+     * @return the subset owning at least one active document (never null)
+     */
+    public Set<String> findUserIdsWithActiveDocuments(Collection<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<String> q = em.createQuery("select distinct d.userId from Document d"
+                + " where d.userId in :userIds and d.deleteDate is null", String.class);
+        q.setParameter("userIds", userIds);
+        return new HashSet<>(q.getResultList());
     }
 
     /**
