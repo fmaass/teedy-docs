@@ -3858,8 +3858,36 @@
         "tags": [
           "user"
         ],
-        "summary": "Enable TOTP authentication",
+        "summary": "Begin TOTP enrollment",
         "operationId": "post_user_enable_totp",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/user/totp/activate": {
+      "post": {
+        "tags": [
+          "user"
+        ],
+        "summary": "Activate a pending TOTP enrollment",
+        "operationId": "post_user_totp_activate",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Success"

@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Uwierzytelnienie dwuskładnikowe (M2F)",
     "menu_opened_sessions": "Otwarte sesje",
     "menu_inbox": "Skanowanie skrzynki wejściowej",
-    "security": {
-      "enable_totp": "Aktywuj uwierzytelnienie dwuskładnikowe",
-      "enable_totp_message": "Upewnij się, że masz w telefonie aplikację kompatybilną z TOTP, gotową do dodania nowego konta",
-      "title": "Uwierzytelnienie dwuskładnikowe",
-      "message_1": "Uwierzytelnienie dwuskładnikowe pozwala na dodanie warstwy zabezpieczeń do konta <strong>{appName}</strong>.<br/>Przed aktywacją tej funkcji upewnij się, że masz w telefonie aplikację zgodną z TOTP:",
-      "message_google_authenticator": "Na Androida, iOS i Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Na Androida i iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Na Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Te aplikacje automatycznie generują kod weryfikacyjny, który zmienia się po pewnym czasie. <br/> Będziesz musiał wprowadzić ten kod weryfikacyjny przy każdym logowaniu <strong>{appName}</strong>.",
-      "secret_key": "Twój tajny klucz to: <strong>{secret}</strong>",
-      "secret_key_warning": "Skonfiguruj teraz swoją aplikację TOTP na telefonie za pomocą tego tajnego klucza, później nie będziesz mieć do niego dostępu.",
-      "totp_enabled_message": "Na Twoim koncie jest włączone uwierzytelnianie dwuskładnikowe. <br/> Za każdym razem, gdy logujesz się w <strong>{appName}</strong>, pojawi się prośba o kod weryfikacyjny ze skonfigurowanej aplikacji telefonu. <br/> Jeśli zgubisz telefon, nie będziesz mógł zalogować się na swoje konto, ale aktywne sesje pozwolą Ci zregenerować tajny klucz.",
-      "disable_totp": {
-        "disable_totp": "Wyłącz uwierzytelnienie wduskładnikowe",
-        "message": "Twoje konto nie będzie już chronione przez uwierzytelnianie dwuskładnikowe.",
-        "confirm_password": "Powtórz swoje hasło",
-        "submit": "Wyłącz uwierzytelnienie dwuskładnikowe"
-      },
-      "test_totp": "Wprowadź kod weryfikacyjny wyświetlony w telefonie:",
-      "test_code_success": "Kod weryfikacyjny jest poprawny",
-      "test_code_fail": "Ten kod jest nieprawidłowy. Sprawdź dokładnie, czy Twój telefon jest poprawnie skonfigurowany lub wyłącz uwierzytelnianie dwuskładnikowe"
-    },
     "inbox": {
       "title": "Skanowanie poczty przychodzącej",
       "message": "Po włączeniu tej funkcji system będzie skanować określoną skrzynkę odbiorczą co minutę w poszukiwaniu <strong>nieprzeczytanych</strong> wiadomości e-mail i automatycznie je importować. <br/> Po zaimportowaniu wiadomości e-mail zostanie oznaczona jako przeczytana. <br/> Konfiguracja ustawienia dla <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Eksportuj moje dokumenty",
         "started": "Trwa pobieranie eksportu",
         "failed": "Eksport nie powiódł się"
+      },
+      "two_factor": {
+        "title": "Uwierzytelnianie dwuskładnikowe",
+        "description": "Chroń swoje konto dodatkowym krokiem podczas logowania, używając jednorazowego kodu z aplikacji uwierzytelniającej w telefonie.",
+        "status_enabled": "Uwierzytelnianie dwuskładnikowe jest aktywne. Przy każdym logowaniu trzeba będzie podać kod.",
+        "enable": "Włącz uwierzytelnianie dwuskładnikowe",
+        "scan_hint": "Zeskanuj ten kod QR aplikacją uwierzytelniającą (na przykład Google Authenticator, Aegis lub 1Password).",
+        "manual_hint": "Nie możesz zeskanować? Wprowadź zamiast tego ten tajny klucz w swojej aplikacji:",
+        "secret_warning": "Zapisz teraz ten klucz. Po zakończeniu aktywacji nie zostanie już wyświetlony.",
+        "code_label": "Wprowadź 6-cyfrowy kod z aplikacji",
+        "code_required": "Wprowadź kod z aplikacji uwierzytelniającej",
+        "activate": "Aktywuj",
+        "cancel": "Anuluj",
+        "disable": "Wyłącz uwierzytelnianie dwuskładnikowe",
+        "disable_password": "Potwierdź hasło, aby wyłączyć",
+        "disable_password_required": "Wprowadź hasło, aby wyłączyć uwierzytelnianie dwuskładnikowe",
+        "qr_alt": "Kod QR do konfiguracji uwierzytelniania dwuskładnikowego",
+        "activated_toast": "Uwierzytelnianie dwuskładnikowe włączone",
+        "disabled_toast": "Uwierzytelnianie dwuskładnikowe wyłączone",
+        "enable_failed": "Nie udało się rozpocząć konfiguracji uwierzytelniania dwuskładnikowego",
+        "activate_failed": "Ten kod jest nieprawidłowy. Sprawdź aplikację uwierzytelniającą i spróbuj ponownie.",
+        "disable_failed": "Nie udało się wyłączyć uwierzytelniania dwuskładnikowego"
       }
     },
     "default_password_banner": {

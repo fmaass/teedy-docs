@@ -65,6 +65,37 @@ public class TestLoginThrottleStore {
     }
 
     @Test
+    public void admitAttemptRefusesLockedAccountAfterCounterEviction() {
+        // A tiny counter cache stands in for the real high-cardinality churn.
+        LoginThrottleStore store = store(3, new AtomicLong(), 100, 50, 10, 5, 8);
+
+        for (int i = 0; i < 3; i++) {
+            store.recordLoginFailure("victim", "10.0.0.1");
+        }
+        // Evict the evictable counter, leaving only the eviction-resistant lockout hold.
+        store.evictLoginAccountCounterForTest("victim");
+        Assertions.assertFalse(store.loginAccountCounterPresent("victim"),
+                "the evictable account counter should be gone");
+
+        // From a FRESH network (so the network/pair gates cannot be what blocks), admitAttempt must still
+        // refuse via the eviction-resistant hold — the bug was resurrecting a null counter and admitting a
+        // whole fresh set of activation guesses before the lockout deadline.
+        Assertions.assertTrue(store.admitAttempt("victim", "203.0.113.9").isBlocked(),
+                "admitAttempt must refuse a locked account even after its counter was evicted");
+        // The block re-seeds the counter so subsequent computes stay consistent with the hold.
+        Assertions.assertTrue(store.loginAccountCounterPresent("victim"),
+                "the block must re-seed the evicted counter");
+
+        // Once the lockout deadline has passed (a fresh account with an already-expired hold, no counter),
+        // admitAttempt admits again rather than staying stuck blocked.
+        store.installExpiredAccountLockoutForTest("survivor");
+        Assertions.assertFalse(store.loginAccountCounterPresent("survivor"),
+                "the expired-lockout fixture has no evictable counter");
+        Assertions.assertFalse(store.admitAttempt("survivor", "198.51.100.7").isBlocked(),
+                "an expired lockout deadline must let admitAttempt admit again");
+    }
+
+    @Test
     public void counterCacheIsBounded() {
         long maxSize = 8;
         LoginThrottleStore store = store(3, new AtomicLong(), 100, 50, 10, 5, maxSize);

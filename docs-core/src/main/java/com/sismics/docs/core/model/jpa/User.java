@@ -68,7 +68,18 @@ public class User implements Loggable {
      */
     @Column(name = "USE_TOTPKEY_C", length = 100)
     private String totpKey;
-    
+
+    /**
+     * Pending TOTP secret key: a secret generated for self-service enrollment that has not yet been
+     * confirmed with a valid code. It is promoted to {@link #totpKey} only by the activation path
+     * ({@code POST /user/totp/activate}); login never challenges against it. Like {@code totpKey}, this
+     * column is deliberately absent from {@link com.sismics.docs.core.dao.UserDao#update}'s field-copy
+     * list — both are written ONLY through the dedicated compare-and-swap DAO writers, so a concurrent
+     * profile/OIDC update carrying a stale in-memory value can never resurrect a cleared key.
+     */
+    @Column(name = "USE_TOTPKEYPENDING_C", length = 100)
+    private String totpKeyPending;
+
     /**
      * Email address.
      */
@@ -277,6 +288,15 @@ public class User implements Loggable {
 
     public User setTotpKey(String totpKey) {
         this.totpKey = totpKey;
+        return this;
+    }
+
+    public String getTotpKeyPending() {
+        return totpKeyPending;
+    }
+
+    public User setTotpKeyPending(String totpKeyPending) {
+        this.totpKeyPending = totpKeyPending;
         return this;
     }
 

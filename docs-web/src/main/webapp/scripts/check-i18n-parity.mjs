@@ -52,7 +52,6 @@ const DYNAMIC_KEY_PREFIXES = [
 // reference-only, so the unused scan must not flag them. Remove a prefix here when
 // the feature ships and its keys gain real consumers.
 const AWAITING_PREFIXES = [
-  'settings.security.',           // user self-enroll 2FA/TOTP (secret_key, QR, test) — not ported
   'settings.session.',            // opened-sessions management — not ported
   'settings.menu_opened_sessions',
   'settings.menu_two_factor_auth',

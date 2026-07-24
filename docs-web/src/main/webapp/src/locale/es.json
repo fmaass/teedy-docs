@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Autenticación en dos pasos",
     "menu_opened_sessions": "Sesiones abiertas",
     "menu_inbox": "Escaneo bandeja de entrada",
-    "security": {
-      "enable_totp": "Activar autenticación en dos pasos",
-      "enable_totp_message": "Asegúrese de tener una aplicación compatible con TOTP en su teléfono lista para agregar una nueva cuenta",
-      "title": "Autenticación en dos pasos",
-      "message_1": "La autenticación en dos pasos le permite añadir una capa de seguridad en su <strong>{appName}</strong> cuenta.<br/>Antes de activar esta característica, compruebe que disponga de una app compatible con TOTP en su teléfono:",
-      "message_google_authenticator": "Para Android, iOS, y Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Para Android y iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Para Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Estas aplicaciones generan automaticamente un código de validación que cambia cada cirto tiempo.<br/>Necesitará introducir el código cada vez que acceda a <strong>{appName}</strong>.",
-      "secret_key": "Su clave secreta es: <strong>{secret}</strong>",
-      "secret_key_warning": "Configure ahora la app TOTP de su teléfono con esta clave secreta; no podrá acceder a ella más tarde.",
-      "totp_enabled_message": "La autenticación en dos pasos esta habilitada par su cuenta.<br/>Cada vez que inicie sesión en <strong>{appName}</strong>, se le pedirá el código de su teléfono.<br/>Si pierde su teléfono, no podrá volver a iniciar sesión, pero sesiones activas le permitirán regenerar la clave secreta.",
-      "disable_totp": {
-        "disable_totp": "Desactivar autenticación en dos pasos",
-        "message": "Su cuenta dejará de estar protegida con la autenticación en dos pasos.",
-        "confirm_password": "Confirme su contraseña",
-        "submit": "Desactivar autenticación en dos pasos"
-      },
-      "test_totp": "Por favor, introduzca el código mostrado en su teléfono :",
-      "test_code_success": "Código CORRECTO",
-      "test_code_fail": "El código no es válido, por favor, asegúrerse de que su teléfono esté debidamente configurado, o desactive la autenticación en dos pasos"
-    },
     "inbox": {
       "title": "Escaneo bandeja de entrada",
       "message": "Al activar esta opción, el sistema escaneará la bandeja especificada cada minuto buscando correos <strong>no leidos</strong>, y los importará automaticamente.<br/>Después de importar un correo, éste será marcado como leido.<br/>Ajustes de configuración para <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Exportar mis documentos",
         "started": "Su exportación se está descargando",
         "failed": "La exportación falló"
+      },
+      "two_factor": {
+        "title": "Autenticación en dos pasos",
+        "description": "Proteja su cuenta con un segundo paso al iniciar sesión, mediante un código de un solo uso de una aplicación de autenticación en su teléfono.",
+        "status_enabled": "La autenticación en dos pasos está activa. Se le pedirá un código cada vez que inicie sesión.",
+        "enable": "Activar la autenticación en dos pasos",
+        "scan_hint": "Escanee este código QR con una aplicación de autenticación (por ejemplo Google Authenticator, Aegis o 1Password).",
+        "manual_hint": "¿No puede escanear? Introduzca esta clave secreta en su aplicación:",
+        "secret_warning": "Guarde esta clave ahora. No se volverá a mostrar una vez completada la activación.",
+        "code_label": "Introduzca el código de 6 dígitos de su aplicación",
+        "code_required": "Introduzca el código de su aplicación de autenticación",
+        "activate": "Activar",
+        "cancel": "Cancelar",
+        "disable": "Desactivar la autenticación en dos pasos",
+        "disable_password": "Confirme su contraseña para desactivarla",
+        "disable_password_required": "Introduzca su contraseña para desactivar la autenticación en dos pasos",
+        "qr_alt": "Código QR para configurar la autenticación en dos pasos",
+        "activated_toast": "Autenticación en dos pasos activada",
+        "disabled_toast": "Autenticación en dos pasos desactivada",
+        "enable_failed": "No se pudo iniciar la configuración de la autenticación en dos pasos",
+        "activate_failed": "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
+        "disable_failed": "No se pudo desactivar la autenticación en dos pasos"
       }
     },
     "default_password_banner": {

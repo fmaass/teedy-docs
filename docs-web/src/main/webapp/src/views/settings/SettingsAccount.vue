@@ -11,10 +11,20 @@ import Card from 'primevue/card'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Tag from 'primevue/tag'
+import InputText from 'primevue/inputtext'
 import { useToast } from 'primevue/usetoast'
 import api from '../../api/client'
-import { listSessions, deleteOtherSessions, type UserSession } from '../../api/user'
+import {
+  listSessions,
+  deleteOtherSessions,
+  enableTotp,
+  activateTotp,
+  disableTotp,
+  type UserSession,
+  type TotpEnrollment,
+} from '../../api/user'
 import { exportAccountBlob } from '../../api/document'
+import TotpQrCode from '../../components/TotpQrCode.vue'
 import { triggerBlobDownload } from '../../utils/download'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 
@@ -172,6 +182,76 @@ function onLocaleSelect(event: SelectChangeEvent) {
   handleLocaleChange(event.value)
 }
 
+// --- Two-factor authentication (#169; self-service TOTP enrollment) ---
+// The section is hidden for external-origin accounts (OIDC/LDAP), which delegate MFA to their identity
+// provider — the server also rejects enrollment for them, so this is defence in depth, not the only guard.
+const twoFactorEnabled = computed(() => auth.user?.totp_enabled ?? false)
+const showTwoFactor = computed(() => !(auth.user?.external_origin ?? false))
+
+// A non-null enrollment means "pending": a secret has been generated but not yet confirmed with a code.
+const enrollment = ref<TotpEnrollment | null>(null)
+const activationCode = ref('')
+const disablePassword = ref('')
+const enrolling = ref(false)
+const activating = ref(false)
+const disabling = ref(false)
+
+async function startEnroll() {
+  enrolling.value = true
+  try {
+    const { data } = await enableTotp()
+    enrollment.value = data
+    activationCode.value = ''
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.account.two_factor.enable_failed'), life: 3000 })
+  } finally {
+    enrolling.value = false
+  }
+}
+
+function cancelEnroll() {
+  enrollment.value = null
+  activationCode.value = ''
+}
+
+async function confirmActivate() {
+  if (!activationCode.value.trim()) {
+    toast.add({ severity: 'warn', summary: t('ui.account.two_factor.code_required'), life: 2000 })
+    return
+  }
+  activating.value = true
+  try {
+    await activateTotp(activationCode.value.trim())
+    enrollment.value = null
+    activationCode.value = ''
+    // Refresh the user so totp_enabled flips and the section re-renders in its active state.
+    await auth.fetchCurrentUser()
+    toast.add({ severity: 'success', summary: t('ui.account.two_factor.activated_toast'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.account.two_factor.activate_failed'), life: 4000 })
+  } finally {
+    activating.value = false
+  }
+}
+
+async function confirmDisable() {
+  if (!disablePassword.value) {
+    toast.add({ severity: 'warn', summary: t('ui.account.two_factor.disable_password_required'), life: 2000 })
+    return
+  }
+  disabling.value = true
+  try {
+    await disableTotp(disablePassword.value)
+    disablePassword.value = ''
+    await auth.fetchCurrentUser()
+    toast.add({ severity: 'success', summary: t('ui.account.two_factor.disabled_toast'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.account.two_factor.disable_failed'), life: 3000 })
+  } finally {
+    disabling.value = false
+  }
+}
+
 // --- Export my documents (#89c) ---
 // Downloads a ZIP of the user's own documents + files via GET /document/export. It is an
 // EXPORT, not a backup (it omits ACLs/tags/comments/relations/users/config). The endpoint's
@@ -261,6 +341,50 @@ async function handleExport() {
         </div>
         <Button type="submit" :label="t('save')" icon="pi pi-check" :loading="saving" />
       </form>
+    </template></Card>
+
+    <!-- Two-factor authentication (#169) — hidden for external-origin accounts (their IdP owns MFA) -->
+    <Card v-if="showTwoFactor" class="mt-3" style="max-width: 400px" data-test="two-factor-card"><template #content>
+      <h3 class="section-title">{{ t('ui.account.two_factor.title') }}</h3>
+
+      <!-- Active: status + password-confirmed disable -->
+      <template v-if="twoFactorEnabled">
+        <p class="text-sm text-muted mb-3">{{ t('ui.account.two_factor.status_enabled') }}</p>
+        <div class="form-field">
+          <label for="totp-disable-pass">{{ t('ui.account.two_factor.disable_password') }}</label>
+          <Password v-model="disablePassword" inputId="totp-disable-pass" :feedback="false" toggleMask :inputProps="{ autocomplete: 'current-password', name: 'totp-disable-password' }" inputClass="w-full" class="w-full" />
+        </div>
+        <Button :label="t('ui.account.two_factor.disable')" icon="pi pi-shield" severity="danger" outlined :loading="disabling" data-test="totp-disable" @click="confirmDisable" />
+      </template>
+
+      <!-- Pending enrollment: QR + manual secret + code entry -->
+      <template v-else-if="enrollment">
+        <p class="text-sm text-muted mb-2">{{ t('ui.account.two_factor.scan_hint') }}</p>
+        <TotpQrCode
+          :secret="enrollment.secret"
+          :issuer="enrollment.issuer"
+          :account="enrollment.account"
+          :alt="t('ui.account.two_factor.qr_alt')"
+          data-test="totp-qr"
+        />
+        <p class="text-sm text-muted mt-2 mb-1">{{ t('ui.account.two_factor.manual_hint') }}</p>
+        <code class="totp-secret" data-test="totp-secret">{{ enrollment.secret }}</code>
+        <p class="text-sm text-muted mt-1 mb-3">{{ t('ui.account.two_factor.secret_warning') }}</p>
+        <div class="form-field">
+          <label for="totp-code">{{ t('ui.account.two_factor.code_label') }}</label>
+          <InputText v-model="activationCode" id="totp-code" inputmode="numeric" autocomplete="one-time-code" class="w-full" data-test="totp-code" />
+        </div>
+        <div class="totp-actions">
+          <Button :label="t('ui.account.two_factor.activate')" icon="pi pi-check" :loading="activating" data-test="totp-activate" @click="confirmActivate" />
+          <Button :label="t('ui.account.two_factor.cancel')" severity="secondary" text :disabled="activating" @click="cancelEnroll" />
+        </div>
+      </template>
+
+      <!-- Disabled: description + enable -->
+      <template v-else>
+        <p class="text-sm text-muted mb-3">{{ t('ui.account.two_factor.description') }}</p>
+        <Button :label="t('ui.account.two_factor.enable')" icon="pi pi-shield" :loading="enrolling" data-test="totp-enable" @click="startEnroll" />
+      </template>
     </template></Card>
 
     <!-- Active sessions -->
@@ -353,5 +477,20 @@ async function handleExport() {
 .session-ip {
   font-family: monospace;
   font-size: 0.75rem;
+}
+.totp-secret {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  word-break: break-all;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: var(--p-surface-100, rgba(0, 0, 0, 0.05));
+}
+.totp-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>

@@ -40,6 +40,7 @@ import com.sismics.util.totp.GoogleAuthenticatorKey;
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
+import jakarta.json.JsonReader;
 import jakarta.servlet.http.Cookie;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -47,6 +48,7 @@ import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.StringReader;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -928,9 +930,10 @@ public class UserResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
-        // Remove the TOTP key
-        user.setTotpKey(null);
-        userDao.update(user, principal.getId());
+        // Clear both the active and any pending key (admin recovery for a user locked out of their
+        // authenticator). Uses the dedicated compare-and-swap writer; the generic update path no longer
+        // copies the TOTP columns.
+        userDao.clearTotpKeys(user.getId(), principal.getId());
 
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
@@ -952,6 +955,7 @@ public class UserResource extends BaseResource {
      * @apiSuccess {Number} storage_quota Storage quota (in bytes)
      * @apiSuccess {Number} storage_current Quota used (in bytes)
      * @apiSuccess {Boolean} totp_enabled True if TOTP authentication is enabled
+     * @apiSuccess {Boolean} external_origin True if the account is provisioned by an external identity provider (OIDC or LDAP)
      * @apiSuccess {String[]} base_functions Base functions
      * @apiSuccess {String[]} groups Groups
      * @apiPermission none
@@ -995,6 +999,10 @@ public class UserResource extends BaseResource {
                     .add("storage_quota", user.getStorageQuota())
                     .add("storage_current", user.getStorageCurrent())
                     .add("totp_enabled", user.getTotpKey() != null)
+                    // Whether this account authenticates through an external identity provider. The SPA
+                    // hides the self-service two-factor enrollment section for such accounts, which delegate
+                    // MFA to their IdP and are rejected server-side by the enable/activate origin guards.
+                    .add("external_origin", AuthenticationUtil.isExternalOrigin(user))
                     .add("onboarding", user.isOnboarding());
 
             // #82 preferred UI locale — emitted only when the user has set one (never pass null to
@@ -1293,15 +1301,20 @@ public class UserResource extends BaseResource {
     }
     
     /**
-     * Enable time-based one-time password.
+     * Begin time-based one-time password enrollment.
      *
-     * @api {post} /user/enable_totp Enable TOTP authentication
-     * @apiDescription This resource enables the Time-based One-time Password authentication.
-     * All following login will need a validation code generated from the given secret seed.
+     * @api {post} /user/enable_totp Begin TOTP enrollment
+     * @apiDescription Generates a pending TOTP secret for the current user and returns the fields needed to
+     * build an otpauth:// URI. The secret only becomes the active login factor once a code generated from it
+     * is confirmed via POST /user/totp/activate. Calling this again while an enrollment is still pending
+     * replaces the pending secret; calling it while TOTP is already active is rejected.
      * @apiName PostUserEnableTotp
      * @apiGroup User
-     * @apiSuccess {String} secret Secret TOTP seed to initiate the algorithm
-     * @apiError (client) ForbiddenError Access denied or connected as guest
+     * @apiSuccess {String} secret Pending secret TOTP seed to initiate the algorithm
+     * @apiSuccess {String} issuer Issuer label for the otpauth:// URI (the application name)
+     * @apiSuccess {String} account Account label for the otpauth:// URI (the username)
+     * @apiError (client) ForbiddenError Access denied, connected as guest, or an external-origin account
+     * @apiError (client) TotpAlreadyEnabled TOTP is already active; disable it first
      * @apiPermission user
      * @apiVersion 1.5.0
      *
@@ -1313,20 +1326,136 @@ public class UserResource extends BaseResource {
         if (!authenticate() || principal.isGuest()) {
             throw new ForbiddenClientException();
         }
-        
-        // Create a new TOTP key
-        GoogleAuthenticator gAuth = new GoogleAuthenticator();
-        final GoogleAuthenticatorKey key = gAuth.createCredentials();
-        
-        // Save it
+        // An external-origin account delegates MFA to its identity provider and must never hold a native
+        // TOTP key: an OIDC account can never present it at native login, and neither origin self-manages
+        // one here. Reject enrollment server-side, independent of what the client may show.
+        if (AuthenticationUtil.isExternalOrigin(principal.getId())) {
+            throw new ForbiddenClientException();
+        }
+
         UserDao userDao = new UserDao();
         User user = userDao.getActiveByUsername(principal.getName());
-        user.setTotpKey(key.getKey());
-        userDao.update(user, principal.getId());
-        
+        // Enrolling while an active key already exists is rejected: the existing second factor must be
+        // disabled (password-confirmed) first, so a hijacked live session cannot silently rotate the key.
+        if (user.getTotpKey() != null) {
+            throw new ClientException("TotpAlreadyEnabled", "Two-factor authentication is already enabled");
+        }
+
+        // Generate a fresh secret into the PENDING slot. Called again while a pending enrollment exists,
+        // this simply replaces it with a new secret (invalidating any earlier QR code). The secret becomes
+        // the active login factor only once a valid code is confirmed via /user/totp/activate.
+        GoogleAuthenticator gAuth = new GoogleAuthenticator();
+        final GoogleAuthenticatorKey key = gAuth.createCredentials();
+        if (userDao.setPendingTotpKey(user.getId(), key.getKey(), principal.getId()) != 1) {
+            // A concurrent activation set an active key between the check above and this write.
+            throw new ClientException("TotpAlreadyEnabled", "Two-factor authentication is already enabled");
+        }
+
+        // The client builds the otpauth:// URI from these fields. The verifier uses the default
+        // GoogleAuthenticatorConfig (HMAC-SHA1, 6 digits, 30-second period), so the URI the client renders
+        // MUST declare those same parameters for the generated codes to validate.
         JsonObjectBuilder response = Json.createObjectBuilder()
-                .add("secret", key.getKey());
+                .add("secret", key.getKey())
+                .add("issuer", resolveTotpIssuer())
+                .add("account", user.getUsername());
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Activate a pending time-based one-time password enrollment.
+     *
+     * @api {post} /user/totp/activate Activate a pending TOTP enrollment
+     * @apiDescription Confirms the pending enrollment started by POST /user/enable_totp by verifying a code
+     * generated from the pending secret, then promotes it to the active login factor.
+     * @apiName PostUserTotpActivate
+     * @apiParam {String} code TOTP validation code
+     * @apiGroup User
+     * @apiSuccess {String} status Status OK
+     * @apiError (client) ForbiddenError The validation code is not valid, access denied, guest, or external-origin
+     * @apiError (client) RateLimited Too many attempts
+     * @apiError (client) NoPendingTotp There is no pending enrollment to activate
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param validationCodeStr TOTP validation code
+     * @return Response
+     */
+    @POST
+    @Path("totp/activate")
+    public Response activateTotp(@FormParam("code") String validationCodeStr) {
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+        if (AuthenticationUtil.isExternalOrigin(principal.getId())) {
+            throw new ForbiddenClientException();
+        }
+
+        // The attempt is reserved through an ATOMIC check-and-count BEFORE the code is verified, so a
+        // concurrent burst cannot pass a stale blocked-check en masse and brute-force the 6-digit code:
+        // admitAttempt increments and decides in one operation, admitting at most maxAttempts before the
+        // account locks. It deliberately does NOT consume the login bcrypt bulkhead (no password hashing
+        // happens here). A successful activation credits the reservation back (recordLoginSuccess below).
+        String clientIp = ClientAddressResolver.getInstance().resolve(request);
+        LoginThrottleStore throttle = LoginThrottleStore.getInstance();
+        LoginThrottleStore.ThrottleDecision decision = throttle.admitAttempt(principal.getName(), clientIp);
+        if (decision.isBlocked()) {
+            return Response.status(429)
+                    .header("Retry-After", decision.getRetryAfterSeconds())
+                    .entity(Json.createObjectBuilder().add("type", "RateLimited")
+                            .add("message", "Too many attempts. Try again later.").build())
+                    .build();
+        }
+
+        int validationCode = ValidationUtil.validateInteger(validationCodeStr, "code");
+
+        UserDao userDao = new UserDao();
+        User user = userDao.getActiveByUsername(principal.getName());
+        String pendingKey = user.getTotpKeyPending();
+        if (pendingKey == null) {
+            // Nothing to activate: no enrollment in progress, or it was already activated/cleared.
+            throw new ClientException("NoPendingTotp", "There is no pending two-factor enrollment to activate");
+        }
+
+        GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
+        if (!googleAuthenticator.authorize(pendingKey, validationCode)) {
+            // The reservation above already counted this failed attempt toward lockout.
+            throw new ForbiddenClientException();
+        }
+
+        // Promote under a compare-and-swap: a concurrent admin recovery that cleared the pending key wins,
+        // and this activation then affects 0 rows and fails closed rather than resurrecting the cleared key.
+        if (userDao.activateTotpKey(user.getId(), pendingKey, principal.getId()) != 1) {
+            throw new ClientException("NoPendingTotp", "There is no pending two-factor enrollment to activate");
+        }
+
+        // Full success: credit the reservation back so a legitimate enrollment does not leave lockout state.
+        throttle.recordLoginSuccess(principal.getName(), clientIp);
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("status", "ok");
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * Resolves the issuer label placed on the otpauth:// URI: the configured application (theme) name,
+     * falling back to the built-in default. Purely a display label for the authenticator app entry — it
+     * does not affect code generation — so any malformed theme config falls back rather than failing.
+     *
+     * @return the issuer label
+     */
+    private String resolveTotpIssuer() {
+        String raw = ConfigUtil.getConfigStringValue(ConfigType.THEME, null);
+        if (raw != null) {
+            try (JsonReader reader = Json.createReader(new StringReader(raw))) {
+                String name = reader.readObject().getString("name", null);
+                if (name != null && !name.isBlank()) {
+                    return name;
+                }
+            } catch (RuntimeException e) {
+                // Malformed theme config: fall back to the default label below.
+            }
+        }
+        return "Teedy";
     }
 
     /**
@@ -1404,10 +1533,10 @@ public class UserResource extends BaseResource {
         if (user == null) {
             throw new ForbiddenClientException();
         }
-        
-        // Remove the TOTP key
-        user.setTotpKey(null);
-        userDao.update(user, principal.getId());
+
+        // Clear both the active and any pending key under a compare-and-swap. The generic update path no
+        // longer copies the TOTP columns, so the key is cleared only through this dedicated writer.
+        userDao.clearTotpKeys(user.getId(), principal.getId());
         
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()

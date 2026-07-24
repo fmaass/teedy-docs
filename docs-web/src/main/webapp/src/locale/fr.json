@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Authentification en deux étapes",
     "menu_opened_sessions": "Sessions ouvertes",
     "menu_inbox": "Scanning de boîte de réception",
-    "security": {
-      "enable_totp": "Activer l'authentification en deux étapes",
-      "enable_totp_message": "Assurez-vous d'avoir une application compatible TOTP sur votre téléphone prête à être configurée",
-      "title": "Authentification en deux étapes",
-      "message_1": "L'authentification en deux étapes vous permet d'ajouter une couche de sécurité supplémentaire sur votre compte <strong>{appName}</strong>.<br/>Avant d'activer cette fonctionnalité, assurez-vous d'avoir une application compatible TOTP sur votre téléphone :",
-      "message_google_authenticator": "Pour Android, iOS, et Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Pour Android et iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Pour Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Ces applications génèrent automatique un code de validation changeant après un intervalle de temps donné.<br/>Il sera nécessaire d'entrer ce code de validation à chaque connexion à <strong>{appName}</strong>.",
-      "secret_key": "Votre clé secrète est : <strong>{secret}</strong>",
-      "secret_key_warning": "Configurez votre application TOTP sur votre téléphone avec cette clé secrète maintenant, elle ne sera plus disponible ensuite.",
-      "totp_enabled_message": "L'authentification en deux étapes est activée sur votre compte.<br/>A chaque connexion sur <strong>{appName}</strong>, un code de validation provenant de votre application mobile vous sera demandé.<br/>Si vous perdez votre téléphone, il ne sera plus possible de vous connecter à votre compte, mais les sessions actives vous permettront de générer une nouvelle clé secrète.",
-      "disable_totp": {
-        "disable_totp": "Désactiver l'authentification en deux étapes",
-        "message": "Votre compte ne sera plus protégé par l'authentification en deux étapes.",
-        "confirm_password": "Confirmez votre mot de passe",
-        "submit": "Désactiver l'authentification en deux étapes"
-      },
-      "test_totp": "Veuillez saisir le code de validation affiché sur votre téléphone :",
-      "test_code_success": "Code de validation OK",
-      "test_code_fail": "Ce code n'est pas valide. Vérifiez que votre téléphone est correctement configuré ou désactivez l'authentification en deux étapes."
-    },
     "inbox": {
       "title": "Scanning de boîte de réception",
       "message": "Lorsque vous activez cette fonctionnalité, le système analyse chaque minute la boîte de réception indiquée afin d’y rechercher les e-mails <strong>non lus</strong> et de les importer automatiquement.<br/>Après l’importation d’un e-mail, celui-ci est marqué comme lu.<br/>Paramètres de configuration pour <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Exporter mes documents",
         "started": "Votre export est en cours de téléchargement",
         "failed": "Échec de l'export"
+      },
+      "two_factor": {
+        "title": "Authentification en deux étapes",
+        "description": "Protégez votre compte avec une seconde étape à la connexion, à l'aide d'un code à usage unique généré par une application d'authentification sur votre téléphone.",
+        "status_enabled": "L'authentification en deux étapes est active. Un code vous sera demandé à chaque connexion.",
+        "enable": "Activer l'authentification en deux étapes",
+        "scan_hint": "Scannez ce code QR avec une application d'authentification (par exemple Google Authenticator, Aegis ou 1Password).",
+        "manual_hint": "Impossible de scanner ? Saisissez plutôt cette clé secrète dans votre application :",
+        "secret_warning": "Enregistrez cette clé dès maintenant. Elle ne sera plus affichée une fois l'activation terminée.",
+        "code_label": "Saisissez le code à 6 chiffres de votre application",
+        "code_required": "Saisissez le code de votre application d'authentification",
+        "activate": "Activer",
+        "cancel": "Annuler",
+        "disable": "Désactiver l'authentification en deux étapes",
+        "disable_password": "Confirmez votre mot de passe pour désactiver",
+        "disable_password_required": "Saisissez votre mot de passe pour désactiver l'authentification en deux étapes",
+        "qr_alt": "Code QR pour la configuration de l'authentification en deux étapes",
+        "activated_toast": "Authentification en deux étapes activée",
+        "disabled_toast": "Authentification en deux étapes désactivée",
+        "enable_failed": "Impossible de démarrer la configuration de l'authentification en deux étapes",
+        "activate_failed": "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
+        "disable_failed": "Impossible de désactiver l'authentification en deux étapes"
       }
     },
     "default_password_banner": {

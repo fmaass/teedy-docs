@@ -95,6 +95,9 @@ test.describe('TOTP login (behavior A)', () => {
     expect(enableRes.ok(), 'enable_totp').toBeTruthy()
     const secret = (await enableRes.json()).secret as string
     expect(secret, 'enable_totp returned a secret').toBeTruthy()
+    // enable_totp only stages a PENDING secret; activate it so it becomes the active login factor.
+    const activateRes = await asUser.post('/api/user/totp/activate', { form: { code: totpCode(secret) } })
+    expect(activateRes.ok(), 'activate totp').toBeTruthy()
     await asUser.dispose()
 
     return { username, password, secret }

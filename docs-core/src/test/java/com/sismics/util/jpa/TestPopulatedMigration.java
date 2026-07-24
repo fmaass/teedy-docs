@@ -32,7 +32,7 @@ import java.util.List;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==55, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==61, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -41,8 +41,8 @@ import java.util.List;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060). */
-    private static final int TARGET_VERSION = 60;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061). */
+    private static final int TARGET_VERSION = 61;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -1207,7 +1207,111 @@ public class TestPopulatedMigration {
         Assertions.assertEquals(1, count(connection, "T_DOCUMENT", "DOC_ID_C = 'doc-1' and DOC_IDFILECOVER_C is null"),
                 "060 column must be nullable");
 
+        // 5n. Migration 061 added the nullable pending-TOTP-key column (USE_TOTPKEYPENDING_C). Prove on
+        //     BOTH dialects that the column exists and round-trips a value and back to null on the retained
+        //     internal user (whose active key is untouched by 061's OIDC-only clear — u-alice has neither an
+        //     active key nor an OIDC subject). The key-CLEARING behaviour of 061 (OIDC cleared vs LDAP /
+        //     internal preserved) is proven separately in runTotpKeyClearingScenario.
         connection.commit();
+        Assertions.assertEquals(1, scalarCount(connection,
+                        "select count(*) from information_schema.columns where upper(table_name) = upper('T_USER') and upper(column_name) = upper('USE_TOTPKEYPENDING_C')"),
+                "061 must add the USE_TOTPKEYPENDING_C column to T_USER");
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'u-alice' and USE_TOTPKEYPENDING_C is null"),
+                "061 ADD COLUMN must default the existing user row's pending key to null");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_USER set USE_TOTPKEYPENDING_C = 'PENDINGSECRET123' where USE_ID_C = 'u-alice'");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'u-alice' and USE_TOTPKEYPENDING_C = 'PENDINGSECRET123'"),
+                "061 column: a pending secret must round-trip");
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_USER set USE_TOTPKEYPENDING_C = null where USE_ID_C = 'u-alice'");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'u-alice' and USE_TOTPKEYPENDING_C is null"),
+                "061 column must be nullable");
+
+        connection.commit();
+    }
+
+    // --- migration 061 TOTP-key clearing: OIDC cleared, LDAP + internal preserved (both dialects) -------
+
+    @Test
+    public void migration061ClearsOidcKeysPreservesOthersH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration061totp;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runTotpKeyClearingScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration061ClearsOidcKeysPreservesOthersPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-061 TOTP-clearing test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runTotpKeyClearingScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Build the schema to v60 (all origin columns present, but before 061), seed three ACTIVE users each
+     * holding an active TOTP key — an OIDC-subject account, an LDAP account, and a plain internal account —
+     * then run ONLY the 061 step. Assert: the OIDC account's key is CLEARED (dead state: it can never pass
+     * native login), while the LDAP and internal accounts' keys are PRESERVED (both DO use native login),
+     * and the new pending column is present and null for all three.
+     */
+    private static void runTotpKeyClearingScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 60);
+        Assertions.assertEquals(60, dbVersion(connection), "fixture must be at db.version 60 before 061");
+
+        try (Statement s = connection.createStatement()) {
+            // OIDC-subject account (issuer+subject both set to satisfy the 055 all-or-none constraint).
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C, USE_TOTPKEY_C, USE_OIDC_ISSUER_C, USE_OIDC_SUBJECT_C) "
+                    + "values ('totp-oidc','user','totp_oidc','x','oidc@localhost',NOW(),'pk-o','OIDCACTIVEKEY111','https://idp.example.com','sub-oidc')");
+            // LDAP account (USE_LDAP_B true, no OIDC subject).
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C, USE_TOTPKEY_C, USE_LDAP_B) "
+                    + "values ('totp-ldap','user','totp_ldap','x','ldap@localhost',NOW(),'pk-l','LDAPACTIVEKEY222',true)");
+            // Plain internal account.
+            s.executeUpdate("insert into T_USER (USE_ID_C, USE_IDROLE_C, USE_USERNAME_C, USE_PASSWORD_C, USE_EMAIL_C, USE_CREATEDATE_D, USE_PRIVATEKEY_C, USE_TOTPKEY_C) "
+                    + "values ('totp-int','user','totp_int','x','int@localhost',NOW(),'pk-i','INTERNALACTIVEKEY333')");
+        }
+        connection.commit();
+
+        // Run ONLY the 061 step (open() passes newVersion = configured db.version; run just 061).
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=60 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(61);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(), "061 must run cleanly on a populated database");
+        Assertions.assertEquals(61, dbVersion(connection), "061 must advance DB_VERSION to 61");
+
+        // OIDC-subject account: active key CLEARED (dead state removed).
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'totp-oidc' and USE_TOTPKEY_C is null"),
+                "061 must clear the active TOTP key on an OIDC-subject account");
+        // LDAP account: active key PRESERVED (LDAP accounts pass native login and are challenged for TOTP).
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'totp-ldap' and USE_TOTPKEY_C = 'LDAPACTIVEKEY222'"),
+                "061 must PRESERVE the active TOTP key on an LDAP account");
+        // Internal account: active key PRESERVED.
+        Assertions.assertEquals(1, count(connection, "T_USER", "USE_ID_C = 'totp-int' and USE_TOTPKEY_C = 'INTERNALACTIVEKEY333'"),
+                "061 must PRESERVE the active TOTP key on an internal account");
+        // The new pending column exists and is null for every seeded user.
+        Assertions.assertEquals(3, count(connection, "T_USER",
+                        "USE_ID_C in ('totp-oidc','totp-ldap','totp-int') and USE_TOTPKEYPENDING_C is null"),
+                "061 pending column must be present and null for all seeded users");
     }
 
     /**

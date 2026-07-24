@@ -235,6 +235,91 @@ public class LoginThrottleStore {
         }
     }
 
+    /**
+     * Atomically registers one abuse-throttled attempt and reports whether it is admitted, for a path that
+     * must NOT consume the login bcrypt bulkhead (TOTP activation). The per-account decision AND its counter
+     * increment happen inside a single atomic compute, so a concurrent burst cannot slip past the limit the
+     * way the separate {@link #checkLoginBlocked} + {@link #recordLoginFailure} pair can — their gap lets N
+     * callers all read "not blocked" before any increment lands. Across N concurrent callers exactly the
+     * first {@code maxAttempts} are admitted (each incrementing the account counter); once the counter
+     * crosses the threshold the account is locked and the rest are blocked. The attempt is charged up front
+     * like a failure, so a caller that then verifies successfully MUST call {@link #recordLoginSuccess} to
+     * credit it back. The account's eviction-resistant lockout hold is AUTHORITATIVE and consulted first, so
+     * a live lockout blocks even when the evictable per-account counter was size-evicted under churn; a live
+     * network/pair lockout also blocks read-only, never extending its deadline. Network/pair are bumped only
+     * for an admitted attempt (a blocked attempt never re-arms a lockout).
+     *
+     * @param account account identifier (username), may be null
+     * @param network client network address, may be null
+     * @return the throttle decision (bounded Retry-After when blocked)
+     */
+    public ThrottleDecision admitAttempt(String account, String network) {
+        long now = System.currentTimeMillis();
+
+        // The eviction-resistant hold is authoritative for the account: a live lockout must block even when
+        // the evictable per-account counter was size-evicted under high-cardinality churn — otherwise the
+        // atomic compute below would see a null (evicted) counter and admit a fresh set of guesses before the
+        // real deadline. Re-seed the counter from the hold (only if absent) so subsequent computes stay
+        // consistent with it.
+        String accountHash = account == null ? null : hash("login:acct", canonicalAccount(account));
+        if (accountHash != null) {
+            Long heldUntil = activeLockoutCache.getIfPresent(accountHash);
+            if (heldUntil != null && heldUntil > now) {
+                accountCache.asMap().putIfAbsent(accountHash, new Attempt(maxAttempts, heldUntil));
+                return new ThrottleDecision(true, boundedRetryAfterSeconds(heldUntil - now));
+            }
+        }
+
+        // A live network/pair lockout blocks read-only, without charging the account or extending any
+        // deadline (so a locked source cannot keep itself locked by retrying).
+        long secondaryRetryMs = Math.max(remainingLockMs(networkCache, networkHash(network), now),
+                remainingLockMs(pairCache, pairHash("login", account, network), now));
+        if (secondaryRetryMs > 0) {
+            return new ThrottleDecision(true, boundedRetryAfterSeconds(secondaryRetryMs));
+        }
+
+        // Per-account gate: the decision and the counter increment happen in one atomic compute, closing the
+        // check-then-count race. The lockedUntil branch also catches a lock a concurrent caller armed after
+        // the hold read above.
+        boolean[] admitted = { true };
+        long[] blockedRetryMs = { 0 };
+        if (accountHash != null) {
+            Attempt after = accountCache.asMap().compute(accountHash, (k, existing) -> {
+                int count = existing == null ? 0 : existing.failCount;
+                long lockedUntil = existing == null ? 0 : existing.lockedUntilMs;
+                if (lockedUntil > now) {
+                    // Live lockout: block, and DO NOT extend the deadline (fixed at write time).
+                    admitted[0] = false;
+                    return existing;
+                }
+                int newCount = saturatingIncrement(count);
+                long newLockedUntil = newCount >= maxAttempts ? now + lockoutMs(newCount) : 0;
+                return new Attempt(newCount, newLockedUntil);
+            });
+            if (!admitted[0]) {
+                blockedRetryMs[0] = after == null ? 0 : Math.max(0, after.lockedUntilMs - now);
+            } else if (after != null && after.lockedUntilMs > now) {
+                // This admitted attempt armed the lock: pin it in the eviction-resistant hold so a later
+                // blocked check (here or on the shared login path) still observes it under churn.
+                activeLockoutCache.put(accountHash, after.lockedUntilMs);
+            }
+        }
+        if (!admitted[0]) {
+            return new ThrottleDecision(true, boundedRetryAfterSeconds(blockedRetryMs[0]));
+        }
+
+        // Admitted: charge the coarse network/pair telemetry for this attempt (credited back with the
+        // account counter on a successful verification via recordLoginSuccess).
+        String networkHash = networkHash(network);
+        if (networkHash != null) {
+            bumpFailure(networkCache, networkHash, now);
+        }
+        if (account != null && network != null) {
+            bumpFailure(pairCache, pairHash("login", account, network), now);
+        }
+        return ThrottleDecision.ADMITTED;
+    }
+
     // ---------------------------------------------------------------------------------------------------
     // Recovery path (password_lost)
     // ---------------------------------------------------------------------------------------------------
@@ -412,6 +497,15 @@ public class LoginThrottleStore {
      */
     void evictLoginAccountCounterForTest(String account) {
         accountCache.invalidate(hash("login:acct", canonicalAccount(account)));
+    }
+
+    /**
+     * Installs an ALREADY-EXPIRED account lockout in the eviction-resistant hold with NO evictable-counter
+     * entry. Test support only: lets a test prove admission resumes once a lockout deadline has passed
+     * without waiting real time (the lockout clock is the system clock, not the injectable token-bucket one).
+     */
+    void installExpiredAccountLockoutForTest(String account) {
+        activeLockoutCache.put(hash("login:acct", canonicalAccount(account)), System.currentTimeMillis() - 1_000);
     }
 
     /**

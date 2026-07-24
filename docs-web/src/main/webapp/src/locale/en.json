@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Two-factor authentication",
     "menu_opened_sessions": "Opened sessions",
     "menu_inbox": "Inbox scanning",
-    "security": {
-      "enable_totp": "Enable two-factor authentication",
-      "enable_totp_message": "Make sure you have a TOTP-compatible application on your phone ready to add a new account",
-      "title": "Two-factor authentication",
-      "message_1": "Two-factor authentication allows you to add a layer of security on your <strong>{appName}</strong> account.<br/>Before activating this feature, make sure you have a TOTP-compatible app on your phone:",
-      "message_google_authenticator": "For Android, iOS, and Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "For Android and iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "For Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Those applications automatically generate a validation code that changes after a certain period of time.<br/>You will be required to enter this validation code each time you login on <strong>{appName}</strong>.",
-      "secret_key": "Your secret key is: <strong>{secret}</strong>",
-      "secret_key_warning": "Configure your TOTP app on your phone with this secret key now, you will not be able to access it later.",
-      "totp_enabled_message": "Two-factor authentication is enabled on your account.<br/>Each time you login on <strong>{appName}</strong>, you will be asked for a validation code from your configured phone app.<br/>If you lose your phone, you will not be able to login into your account but active sessions will allow you to regenerate a secrey key.",
-      "disable_totp": {
-        "disable_totp": "Disable two-factor authentication",
-        "message": "Your account will not be protected by the two-factor authentication anymore.",
-        "confirm_password": "Confirm your password",
-        "submit": "Disable two-factor authentication"
-      },
-      "test_totp": "Please enter the validation code displayed on your phone :",
-      "test_code_success": "Validation code OK",
-      "test_code_fail": "This code is not valid, please double check that your phone is properly configured or disable Two-factor authentication"
-    },
     "inbox": {
       "title": "Inbox scanning",
       "message": "By enabling this feature, the system will scan the specified inbox every minute for <strong>unread</strong> emails and automatically import them.<br/>After importing an email, it will be marked as read.<br/>Configuration settings for <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Export my documents",
         "started": "Your export is downloading",
         "failed": "Export failed"
+      },
+      "two_factor": {
+        "title": "Two-factor authentication",
+        "description": "Protect your account with a second step at sign-in, using a one-time code from an authenticator app on your phone.",
+        "status_enabled": "Two-factor authentication is active. You will be asked for a code each time you sign in.",
+        "enable": "Enable two-factor authentication",
+        "scan_hint": "Scan this QR code with an authenticator app (for example Google Authenticator, Aegis or 1Password).",
+        "manual_hint": "Can't scan? Enter this secret key in your app instead:",
+        "secret_warning": "Save this secret now. It will not be shown again once activation is complete.",
+        "code_label": "Enter the 6-digit code from your app",
+        "code_required": "Enter the code from your authenticator app",
+        "activate": "Activate",
+        "cancel": "Cancel",
+        "disable": "Disable two-factor authentication",
+        "disable_password": "Confirm your password to disable",
+        "disable_password_required": "Enter your password to disable two-factor authentication",
+        "qr_alt": "QR code for two-factor authentication setup",
+        "activated_toast": "Two-factor authentication activated",
+        "disabled_toast": "Two-factor authentication disabled",
+        "enable_failed": "Could not start two-factor setup",
+        "activate_failed": "That code is not valid. Check your authenticator app and try again.",
+        "disable_failed": "Could not disable two-factor authentication"
       }
     },
     "default_password_banner": {

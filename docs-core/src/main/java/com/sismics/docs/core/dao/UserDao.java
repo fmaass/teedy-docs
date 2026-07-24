@@ -196,7 +196,12 @@ public class UserDao {
         // (combined with @DynamicUpdate on User, which keeps the untouched column out of the UPDATE).
         userDb.setEmail(user.getEmail());
         userDb.setStorageQuota(user.getStorageQuota());
-        userDb.setTotpKey(user.getTotpKey());
+        // BOTH TOTP columns (totpKey and totpKeyPending) are DELIBERATELY not written here. They carry a
+        // security state that must never be resurrected by a stale in-memory copy: a generic profile/OIDC
+        // update loads the row, and a totpKey a compare-and-swap disable cleared concurrently would be
+        // bound back from the caller's pre-read entity (an @DynamicUpdate full-column rebind). They are
+        // writable ONLY through the dedicated CAS writers below (setPendingTotpKey / activateTotpKey /
+        // clearTotpKeys), each of which carries its own affected-row-count guard and audit event.
         // disableDate is DELIBERATELY not written here (same exclusion rationale as password/storageCurrent
         // above): the account's enabled/disabled state is owned solely by the admin disable/enable transition,
         // which decides and applies it under a FOR UPDATE row lock on the target
@@ -547,6 +552,86 @@ public class UserDao {
                         + " where USE_ID_C = :userId and USE_DELETEDATE_D is null");
         q.setParameter("userId", userId);
         return q.executeUpdate();
+    }
+
+    /**
+     * Stores a freshly generated TOTP secret as the account's PENDING enrollment key, as a compare-and-swap
+     * conditioned on the account still having NO active key. A returned 1 means the pending key was written
+     * (a first enrollment, or a fresh secret replacing an earlier un-activated pending one); a returned 0
+     * means an active key already exists (or the user is gone), so the caller rejects the enable as
+     * already-enabled rather than letting a second enrollment coexist with an active key. The single
+     * bulk UPDATE takes the row write lock, so this cannot straddle a concurrent activation. On success the
+     * user-update audit event is preserved (the same event {@link #update} recorded for a TOTP change).
+     *
+     * @param userId User ID
+     * @param pendingKey New pending TOTP secret to store
+     * @param actingUserId Acting user ID (for the update audit log)
+     * @return the number of rows updated: 1 when the pending key was stored, 0 when an active key already exists
+     */
+    public int setPendingTotpKey(String userId, String pendingKey, String actingUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update User u set u.totpKeyPending = :pendingKey"
+                + " where u.id = :id and u.totpKey is null and u.deleteDate is null");
+        q.setParameter("pendingKey", pendingKey);
+        q.setParameter("id", userId);
+        int updated = q.executeUpdate();
+        if (updated == 1) {
+            AuditLogUtil.create(getById(userId), AuditLogType.UPDATE, actingUserId);
+        }
+        return updated;
+    }
+
+    /**
+     * Promotes a pending TOTP enrollment to the active key as a compare-and-swap: it sets the active key to
+     * {@code expectedPendingKey} and clears the pending column ONLY while the pending column still equals
+     * {@code expectedPendingKey} AND no active key exists. A returned 0 is the fail-closed signal — a
+     * concurrent admin recovery ({@link #clearTotpKeys}) cleared the pending key, or the enrollment was
+     * already activated, in between the caller verifying the code and this write — so the caller aborts
+     * activation and never resurrects a cleared key. The single bulk UPDATE takes the row write lock, so
+     * exactly one of two concurrent activations of the same pending key observes 1. On success the
+     * user-update audit event is preserved.
+     *
+     * @param userId User ID
+     * @param expectedPendingKey The pending secret the caller verified the submitted code against
+     * @param actingUserId Acting user ID (for the update audit log)
+     * @return the number of rows updated: 1 when the pending key was promoted, 0 when it was stale/cleared
+     */
+    public int activateTotpKey(String userId, String expectedPendingKey, String actingUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update User u set u.totpKey = :expected, u.totpKeyPending = null"
+                + " where u.id = :id and u.totpKeyPending = :expected and u.totpKey is null and u.deleteDate is null");
+        q.setParameter("expected", expectedPendingKey);
+        q.setParameter("id", userId);
+        int updated = q.executeUpdate();
+        if (updated == 1) {
+            AuditLogUtil.create(getById(userId), AuditLogType.UPDATE, actingUserId);
+        }
+        return updated;
+    }
+
+    /**
+     * Clears BOTH TOTP columns (active and pending) atomically in one bulk UPDATE — the sole disable path,
+     * shared by the self-service disable and the admin recovery disable. Clearing both in a single statement
+     * means an in-flight activation racing this disable resolves deterministically: the activation's own
+     * compare-and-swap ({@link #activateTotpKey}) will observe 0 rows once this has cleared the pending key,
+     * so a disabled account can never be silently re-armed by a straggling activation. Idempotent: a
+     * returned 0 (nothing to clear, or user gone) is not an error. On a real clear the user-update audit
+     * event is preserved.
+     *
+     * @param userId User ID
+     * @param actingUserId Acting user ID (for the update audit log)
+     * @return the number of rows updated (1 when a row was cleared, 0 when absent/soft-deleted)
+     */
+    public int clearTotpKeys(String userId, String actingUserId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update User u set u.totpKey = null, u.totpKeyPending = null"
+                + " where u.id = :id and u.deleteDate is null");
+        q.setParameter("id", userId);
+        int updated = q.executeUpdate();
+        if (updated == 1) {
+            AuditLogUtil.create(getById(userId), AuditLogType.UPDATE, actingUserId);
+        }
+        return updated;
     }
 
     /**

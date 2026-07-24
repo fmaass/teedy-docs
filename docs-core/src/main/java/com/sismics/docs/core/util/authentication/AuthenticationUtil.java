@@ -54,7 +54,18 @@ public class AuthenticationUtil {
      * @return true if the account is OIDC- or LDAP-origin
      */
     public static boolean isExternalOrigin(String userId) {
-        User user = new UserDao().getById(userId);
+        return isExternalOrigin(new UserDao().getById(userId));
+    }
+
+    /**
+     * Whether an already-loaded account is external-origin — OIDC- or LDAP-provisioned. The value overload
+     * lets a caller that already holds the {@link User} answer the origin question without a second lookup.
+     * A null account is treated as non-external (the caller's own existence checks apply).
+     *
+     * @param user User (may be null)
+     * @return true if the account is OIDC- or LDAP-origin
+     */
+    public static boolean isExternalOrigin(User user) {
         return user != null && (user.isLdap() || user.getOidcIssuer() != null || user.getOidcSubject() != null);
     }
 }

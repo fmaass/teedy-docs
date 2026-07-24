@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Autenticazione a due fattori",
     "menu_opened_sessions": "Sessioni aperte",
     "menu_inbox": "Scansione posta in arrivo",
-    "security": {
-      "enable_totp": "Abilita autenticazione a due fattori",
-      "enable_totp_message": "Assicurati di avere un'applicazione compatibile con TOTP sul tuo smartphone in grado di aggiungere un nuovo profilo",
-      "title": "Autenticazione a due fattori",
-      "message_1": "L'autenticazione a due fattori ti permette di aggiungere un livello di sicurezza al tuo profilo <strong>{appName}</strong> .<br/>Prima di attivare questa funzionalità, assicurati di avere un'applicazione compatibile con TOTP sul tuo smartphone:",
-      "message_google_authenticator": "Per Android, iOS, e Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Per Android ed iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Per Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Queste applicazioni generano automaticamente un codice di validazione che cambia dopo un certo periodo di tempo.<br/>Ti sarà richiesto di inserire questo codice ogni volta che effettuerai l'accesso ad <strong>{appName}</strong>.",
-      "secret_key": "La tua chiave segreta è: <strong>{secret}</strong>",
-      "secret_key_warning": "Configura la tua applicazione TOTP sul tuo smartphone con questa chiave segreta ora, non sarai in grado di farlo in futuro.",
-      "totp_enabled_message": "L'autenticazione a due fattori è abilitata sul tuo profilo.<br/>Ogni volta che effettui l'accesso ad <strong>{appName}</strong>, ti sarà richiesto un codice di validazione dall'app configurata sul tuo smartphone.<br/>Se perdi il tuo smartphone, non sarai in grado di effettuare l'accesso, ma le tue sessioni attive ti permetteranno di rigenerare una chiave segreta.",
-      "disable_totp": {
-        "disable_totp": "Disabilita autenticazione a due fattori",
-        "message": "Il tuo profilo non sarà protetto più dall'autenticazione a due fattori.",
-        "confirm_password": "Conferma password",
-        "submit": "Disabilita autenticazione a due fattori"
-      },
-      "test_totp": "Per favore inserisci il codice di validazione mostrato sul tuo smartphone:",
-      "test_code_success": "Codice di validazione OK",
-      "test_code_fail": "Questo codice non è valido, per favore controlla nuovamente che il tuo smartphone è correttamente configurato oppure disabilita l'autenticazione a due fattori"
-    },
     "inbox": {
       "title": "Scansione posta in ingresso",
       "message": "Abilitando questa funzionalità, il sistema scansionerà la casella specifica ogni minuto per trovare email <strong>non lette</strong> ed importarle automaticamente.<br/>Dopo aver importato una email, verrà segnata come letta.<br/>Impostazioni di configurazione per <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Esporta i miei documenti",
         "started": "Il download del tuo export è in corso",
         "failed": "Esportazione non riuscita"
+      },
+      "two_factor": {
+        "title": "Autenticazione a due fattori",
+        "description": "Proteggi il tuo account con un secondo passaggio all'accesso, usando un codice monouso di un'app di autenticazione sul tuo telefono.",
+        "status_enabled": "L'autenticazione a due fattori è attiva. Ti verrà chiesto un codice a ogni accesso.",
+        "enable": "Attiva l'autenticazione a due fattori",
+        "scan_hint": "Scansiona questo codice QR con un'app di autenticazione (per esempio Google Authenticator, Aegis o 1Password).",
+        "manual_hint": "Non riesci a scansionare? Inserisci invece questa chiave segreta nella tua app:",
+        "secret_warning": "Salva subito questa chiave. Non verrà più mostrata una volta completata l'attivazione.",
+        "code_label": "Inserisci il codice a 6 cifre della tua app",
+        "code_required": "Inserisci il codice della tua app di autenticazione",
+        "activate": "Attiva",
+        "cancel": "Annulla",
+        "disable": "Disattiva l'autenticazione a due fattori",
+        "disable_password": "Conferma la tua password per disattivare",
+        "disable_password_required": "Inserisci la tua password per disattivare l'autenticazione a due fattori",
+        "qr_alt": "Codice QR per la configurazione dell'autenticazione a due fattori",
+        "activated_toast": "Autenticazione a due fattori attivata",
+        "disabled_toast": "Autenticazione a due fattori disattivata",
+        "enable_failed": "Impossibile avviare la configurazione dell'autenticazione a due fattori",
+        "activate_failed": "Questo codice non è valido. Controlla la tua app di autenticazione e riprova.",
+        "disable_failed": "Impossibile disattivare l'autenticazione a due fattori"
       }
     },
     "default_password_banner": {

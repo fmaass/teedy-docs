@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Autentifikimi me dy faktorë",
     "menu_opened_sessions": "Seancat e hapura",
     "menu_inbox": "Skanimi i kutisë hyrëse",
-    "security": {
-      "enable_totp": "Aktivizo vërtetimin me dy faktorë",
-      "enable_totp_message": "Sigurohuni që të keni një aplikacion të përputhshëm me TOTP në telefonin tuaj gati për të shtuar një llogari të re",
-      "title": "Autentifikimi me dy faktorë",
-      "message_1": "Autentifikimi me dy faktorë ju lejon të shtoni një shtresë sigurie në tuaj <strong>{appName}</strong> llogari.<br/>Përpara se të aktivizoni këtë veçori, sigurohuni që të keni një aplikacion të pajtueshëm me TOTP në telefonin tuaj:",
-      "message_google_authenticator": "Për Android, iOS dhe Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Për Android dhe iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Për Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Vërtetuesi</a>",
-      "message_2": "Këto aplikacione gjenerojnë automatikisht një kod verifikimi që ndryshon pas një periudhe të caktuar kohe.<br/>Do t'ju kërkohet të vendosni këtë kod verifikimi sa herë që identifikoheni <strong>{appName}</strong>.",
-      "secret_key": "Çelësi juaj sekret është: <strong>{secret}</strong>",
-      "secret_key_warning": "Konfiguro aplikacionin tënd TOTP në telefonin tënd me këtë çelës sekret tani, nuk do të mund ta qasesh më vonë.",
-      "totp_enabled_message": "Autentifikimi me dy faktorë është aktivizuar në llogarinë tuaj.<br/>Sa herë që identifikoheni <strong>{appName}</strong>, do t'ju kërkohet një kod verifikimi nga aplikacioni i telefonit tuaj të konfiguruar.<br/>Nëse e humbni telefonin, nuk do të jeni në gjendje të identifikoheni në llogarinë tuaj, por seancat aktive do t'ju lejojnë të rigjeneroni një çelës sekret.",
-      "disable_totp": {
-        "disable_totp": "Çaktivizo vërtetimin me dy faktorë",
-        "message": "Llogaria juaj nuk do të mbrohet më nga vërtetimi me dy faktorë.",
-        "confirm_password": "Konfirmoni fjalëkalimin tuaj",
-        "submit": "Çaktivizo vërtetimin me dy faktorë"
-      },
-      "test_totp": "Ju lutemi shkruani kodin e vërtetimit të shfaqur në telefonin tuaj:",
-      "test_code_success": "Kodi i verifikimit në rregull",
-      "test_code_fail": "Ky kod nuk është i vlefshëm, ju lutemi kontrolloni dy herë nëse telefoni juaj është i konfiguruar siç duhet ose çaktivizoni vërtetimin me dy faktorë"
-    },
     "inbox": {
       "title": "Skanimi i kutisë hyrëse",
       "message": "Duke aktivizuar këtë veçori, sistemi do të skanojë kutinë hyrëse të specifikuar çdo minutë <strong>i palexuar</strong> emailet dhe i importoni automatikisht.<br/>Pas importimit të një emaili, ai do të shënohet si i lexuar.<br/>Cilësimet e konfigurimit për <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>, <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Eksporto dokumentet e mia",
         "started": "Eksporti juaj po shkarkohet",
         "failed": "Eksporti dështoi"
+      },
+      "two_factor": {
+        "title": "Autentifikimi me dy faktorë",
+        "description": "Mbroni llogarinë tuaj me një hap të dytë gjatë hyrjes, duke përdorur një kod njëpërdorimësh nga një aplikacion autentifikimi në telefonin tuaj.",
+        "status_enabled": "Autentifikimi me dy faktorë është aktiv. Do t'ju kërkohet një kod sa herë që hyni.",
+        "enable": "Aktivizo autentifikimin me dy faktorë",
+        "scan_hint": "Skanoni këtë kod QR me një aplikacion autentifikimi (për shembull Google Authenticator, Aegis ose 1Password).",
+        "manual_hint": "Nuk mund të skanoni? Fusni në vend të tij këtë çelës sekret në aplikacionin tuaj:",
+        "secret_warning": "Ruajeni tani këtë çelës. Nuk do të shfaqet më pasi të përfundojë aktivizimi.",
+        "code_label": "Shkruani kodin 6-shifror nga aplikacioni juaj",
+        "code_required": "Shkruani kodin nga aplikacioni juaj i autentifikimit",
+        "activate": "Aktivizo",
+        "cancel": "Anulo",
+        "disable": "Çaktivizo autentifikimin me dy faktorë",
+        "disable_password": "Konfirmoni fjalëkalimin tuaj për ta çaktivizuar",
+        "disable_password_required": "Shkruani fjalëkalimin tuaj për të çaktivizuar autentifikimin me dy faktorë",
+        "qr_alt": "Kod QR për konfigurimin e autentifikimit me dy faktorë",
+        "activated_toast": "Autentifikimi me dy faktorë u aktivizua",
+        "disabled_toast": "Autentifikimi me dy faktorë u çaktivizua",
+        "enable_failed": "Nuk u arrit të nisej konfigurimi i autentifikimit me dy faktorë",
+        "activate_failed": "Ky kod nuk është i vlefshëm. Kontrolloni aplikacionin tuaj të autentifikimit dhe provoni sërish.",
+        "disable_failed": "Nuk u arrit të çaktivizohej autentifikimi me dy faktorë"
       }
     },
     "default_password_banner": {

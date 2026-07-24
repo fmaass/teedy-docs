@@ -14,6 +14,8 @@ import com.sismics.docs.core.model.jpa.Route;
 import com.sismics.docs.core.model.jpa.RouteModel;
 import com.sismics.docs.core.model.jpa.RouteStep;
 import com.sismics.docs.core.model.jpa.User;
+import com.sismics.docs.core.util.TransactionUtil;
+import com.sismics.docs.rest.util.LoginThrottleStore;
 import com.sismics.util.context.ThreadLocalContext;
 import com.sismics.util.filter.HeaderBasedSecurityFilter;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -372,6 +374,41 @@ public class TestUserResource extends BaseJerseyTest {
         Assertions.assertEquals("UserNotFound", json.getString("type"));
     }
     
+    /** Begins TOTP enrollment for the token's user, returning the enable response (secret + otpauth fields). */
+    private JsonObject totpEnable(String token) {
+        return target().path("/user/enable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()), JsonObject.class);
+    }
+
+    /** Activates a pending TOTP enrollment with the given code (raw response so status can be asserted). */
+    private Response totpActivate(String token, String code) {
+        return target().path("/user/totp/activate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("code", code)));
+    }
+
+    /** Posts a login (password always Test1234); the TOTP code is appended only when non-null. */
+    private Response totpLogin(String username, String code) {
+        Form form = new Form().param("username", username).param("password", "Test1234").param("remember", "false");
+        if (code != null) {
+            form.param("code", code);
+        }
+        return target().path("/user/login").request().post(Entity.form(form));
+    }
+
+    /** The current-user "totp_enabled" flag for the given session. */
+    private boolean totpEnabled(String token) {
+        return target().path("/user").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class).getBoolean("totp_enabled");
+    }
+
+    /** A valid code for a secret at the current time window. */
+    private int totpCode(String secret) {
+        return new GoogleAuthenticator().calculateCode(secret, new Date().getTime() / 30000);
+    }
+
     @Test
     public void testTotp() {
         // Login admin
@@ -380,92 +417,327 @@ public class TestUserResource extends BaseJerseyTest {
         // Create totp1 user
         clientUtil.createUser("totp1");
         String totp1Token = clientUtil.login("totp1");
-        
-        // Check TOTP enablement
+
+        // Check TOTP enablement (and the new external_origin flag for an internal account)
         JsonObject json = target().path("/user").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
                 .get(JsonObject.class);
         Assertions.assertFalse(json.getBoolean("totp_enabled"));
-        
-        // Enable TOTP for totp1
-        json = target().path("/user/enable_totp").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .post(Entity.form(new Form()), JsonObject.class);
+        Assertions.assertFalse(json.getBoolean("external_origin"));
+
+        // Begin enrollment: a pending secret plus the otpauth issuer/account fields
+        json = totpEnable(totp1Token);
         String secret = json.getString("secret");
         Assertions.assertNotNull(secret);
-        
-        // Try to login with totp1 without a validation code
-        Response response = target().path("/user/login").request()
-                .post(Entity.form(new Form()
-                        .param("username", "totp1")
-                        .param("password", "Test1234")
-                        .param("remember", "false")));
-        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
-        json = response.readEntity(JsonObject.class);
-        Assertions.assertEquals("ValidationCodeRequired", json.getString("type"));
-        
-        // Generate a OTP
-        GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
-        int validationCode = googleAuthenticator.calculateCode(secret, new Date().getTime() / 30000);
-        
-        // Login with totp1 with a validation code
-        target().path("/user/login").request()
-                .post(Entity.form(new Form()
-                        .param("username", "totp1")
-                        .param("password", "Test1234")
-                        .param("code", Integer.toString(validationCode))
-                        .param("remember", "false")), JsonObject.class);
-        
-        // Check TOTP enablement
-        json = target().path("/user").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .get(JsonObject.class);
-        Assertions.assertTrue(json.getBoolean("totp_enabled"));
+        Assertions.assertEquals("Teedy", json.getString("issuer"));
+        Assertions.assertEquals("totp1", json.getString("account"));
 
-        // Generate a OTP
-        validationCode = googleAuthenticator.calculateCode(secret, new Date().getTime() / 30000);
+        // A pending (un-activated) enrollment must NOT report TOTP enabled and must NOT challenge login
+        Assertions.assertFalse(totpEnabled(totp1Token), "a pending enrollment must not report TOTP enabled");
+        Assertions.assertEquals(Status.OK.getStatusCode(), totpLogin("totp1", null).getStatus(),
+                "a pending enrollment must not challenge login");
 
-        // Test a validation code
+        // Activate with a correct code
+        Response activate = totpActivate(totp1Token, Integer.toString(totpCode(secret)));
+        Assertions.assertEquals(Status.OK.getStatusCode(), activate.getStatus());
+
+        // Now enabled, and login IS challenged
+        Assertions.assertTrue(totpEnabled(totp1Token));
+        Response challenged = totpLogin("totp1", null);
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), challenged.getStatus());
+        Assertions.assertEquals("ValidationCodeRequired", challenged.readEntity(JsonObject.class).getString("type"));
+
+        // Login with a valid code succeeds
+        Assertions.assertEquals(Status.OK.getStatusCode(),
+                totpLogin("totp1", Integer.toString(totpCode(secret))).getStatus());
+
+        // test_totp with a valid code succeeds (behavior retained: active-key-only)
         target().path("/user/test_totp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .post(Entity.form(new Form()
-                        .param("code", Integer.toString(validationCode))), JsonObject.class);
+                .post(Entity.form(new Form().param("code", Integer.toString(totpCode(secret)))), JsonObject.class);
 
-        // Disable TOTP for totp1
+        // Self-disable with password clears the key
         target().path("/user/disable_totp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .post(Entity.form(new Form()
-                        .param("password", "Test1234")), JsonObject.class);
+                .post(Entity.form(new Form().param("password", "Test1234")), JsonObject.class);
+        Assertions.assertFalse(totpEnabled(totp1Token));
+        assertTotpColumnsCleared("totp1");
 
-        // Enable TOTP for totp1
-        target().path("/user/enable_totp").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .post(Entity.form(new Form()), JsonObject.class);
-
-        // Disable TOTP for totp1 with admin
+        // Re-enable and activate, then admin recovery disables it
+        json = totpEnable(totp1Token);
+        secret = json.getString("secret");
+        Assertions.assertEquals(Status.OK.getStatusCode(),
+                totpActivate(totp1Token, Integer.toString(totpCode(secret))).getStatus());
         target().path("/user/totp1/disable_totp").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .post(Entity.form(new Form()), JsonObject.class);
 
-        // Login with totp1 without a validation code
-        target().path("/user/login").request()
-                .post(Entity.form(new Form()
-                        .param("username", "totp1")
-                        .param("password", "Test1234")
-                        .param("remember", "false")), JsonObject.class);
-        
-        // Check TOTP enablement
-        json = target().path("/user").request()
-                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, totp1Token)
-                .get(JsonObject.class);
-        Assertions.assertFalse(json.getBoolean("totp_enabled"));
+        // Login no longer challenged; both TOTP columns cleared
+        Assertions.assertEquals(Status.OK.getStatusCode(), totpLogin("totp1", null).getStatus());
+        Assertions.assertFalse(totpEnabled(totp1Token));
+        assertTotpColumnsCleared("totp1");
 
         // Delete totp1
-        response = target().path("/user/totp1")
+        Response response = target().path("/user/totp1")
                 .queryParam("reassign_to_username", "admin").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
         Assertions.assertEquals(Response.Status.OK, Response.Status.fromStatusCode(response.getStatus()));
+    }
+
+    /** Asserts (authoritative DB read-back) that BOTH the active and pending TOTP columns are null. */
+    private void assertTotpColumnsCleared(String username) {
+        TransactionUtil.handle(() -> {
+            User user = new UserDao().getActiveByUsername(username);
+            Assertions.assertNull(user.getTotpKey(), "active TOTP key must be null for " + username);
+            Assertions.assertNull(user.getTotpKeyPending(), "pending TOTP key must be null for " + username);
+        });
+    }
+
+    @Test
+    public void testTotpEnableWhileActiveRejected() {
+        clientUtil.createUser("totpactive");
+        String token = clientUtil.login("totpactive");
+
+        JsonObject json = totpEnable(token);
+        Assertions.assertEquals(Status.OK.getStatusCode(),
+                totpActivate(token, Integer.toString(totpCode(json.getString("secret")))).getStatus());
+
+        // Enrolling again while an active key exists is rejected with 400 TotpAlreadyEnabled
+        Response second = target().path("/user/enable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), second.getStatus());
+        Assertions.assertEquals("TotpAlreadyEnabled", second.readEntity(JsonObject.class).getString("type"));
+    }
+
+    @Test
+    public void testTotpReEnableReplacesPendingSecret() {
+        LoginThrottleStore.getInstance().reset();
+        try {
+            clientUtil.createUser("totpreenable");
+            String token = clientUtil.login("totpreenable");
+
+            String secret1 = totpEnable(token).getString("secret");
+            String secret2 = totpEnable(token).getString("secret");
+            Assertions.assertNotEquals(secret1, secret2, "re-enabling must mint a fresh pending secret");
+
+            // A code from the SUPERSEDED secret must not activate (the old QR is invalid)
+            Response staleActivate = totpActivate(token, Integer.toString(totpCode(secret1)));
+            Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), staleActivate.getStatus());
+
+            // A code from the CURRENT pending secret activates
+            Assertions.assertEquals(Status.OK.getStatusCode(),
+                    totpActivate(token, Integer.toString(totpCode(secret2))).getStatus());
+        } finally {
+            LoginThrottleStore.getInstance().reset();
+        }
+    }
+
+    @Test
+    public void testTotpActivateWrongCodeIsThrottled() {
+        int maxAttempts = Integer.parseInt(System.getenv().getOrDefault("DOCS_LOGIN_MAX_ATTEMPTS", "5"));
+        LoginThrottleStore.getInstance().reset();
+        try {
+            clientUtil.createUser("totpthrottle");
+            String token = clientUtil.login("totpthrottle");
+            String secret = totpEnable(token).getString("secret");
+
+            // A pending enrollment must not challenge login
+            Assertions.assertEquals(Status.OK.getStatusCode(), totpLogin("totpthrottle", null).getStatus());
+
+            // Wrong codes do not activate (403) and are recorded; after maxAttempts the account is blocked
+            for (int i = 0; i < maxAttempts; i++) {
+                Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(),
+                        totpActivate(token, "000000").getStatus(), "a wrong activation code must be refused");
+            }
+            // Blocked-check honored: a further attempt is rate-limited (429), even with a CORRECT code
+            Response blocked = totpActivate(token, "000000");
+            Assertions.assertEquals(429, blocked.getStatus());
+            Assertions.assertEquals("RateLimited", blocked.readEntity(JsonObject.class).getString("type"));
+            Response blockedGood = totpActivate(token, Integer.toString(totpCode(secret)));
+            Assertions.assertEquals(429, blockedGood.getStatus(),
+                    "the blocked check must refuse even a correct code while locked out");
+
+            // Still not activated
+            Assertions.assertFalse(totpEnabled(token));
+        } finally {
+            LoginThrottleStore.getInstance().reset();
+        }
+    }
+
+    @Test
+    public void testTotpActivateConcurrentAttemptsCappedAtLimit() throws Exception {
+        int maxAttempts = Integer.parseInt(System.getenv().getOrDefault("DOCS_LOGIN_MAX_ATTEMPTS", "5"));
+        LoginThrottleStore.getInstance().reset();
+        try {
+            clientUtil.createUser("totpconc");
+            String token = clientUtil.login("totpconc");
+            totpEnable(token);
+
+            final int n = maxAttempts + 3;
+            final java.util.concurrent.CyclicBarrier barrier = new java.util.concurrent.CyclicBarrier(n);
+            final java.util.concurrent.atomic.AtomicInteger reachedVerification = new java.util.concurrent.atomic.AtomicInteger();
+            final java.util.concurrent.atomic.AtomicInteger blocked = new java.util.concurrent.atomic.AtomicInteger();
+
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+            try {
+                java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+                for (int i = 0; i < n; i++) {
+                    futures.add(pool.submit(() -> {
+                        try {
+                            barrier.await();
+                            int status = totpActivate(token, "000000").getStatus();
+                            if (status == Status.FORBIDDEN.getStatusCode()) {
+                                reachedVerification.incrementAndGet();
+                            } else if (status == 429) {
+                                blocked.incrementAndGet();
+                            } else {
+                                throw new IllegalStateException("unexpected activation status " + status);
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }));
+                }
+                for (java.util.concurrent.Future<?> f : futures) {
+                    f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+
+            // The atomic reservation caps how many wrong-code attempts reach verification (a 403) at the
+            // configured limit; every attempt beyond it is blocked (429). Under the old check-then-record
+            // pair a parallel burst would let all n reach verification, so this fails closed on the race.
+            Assertions.assertEquals(n, reachedVerification.get() + blocked.get(),
+                    "every attempt is either verified-and-rejected or blocked");
+            Assertions.assertTrue(reachedVerification.get() <= maxAttempts,
+                    "at most maxAttempts wrong-code attempts may reach verification; was " + reachedVerification.get());
+            Assertions.assertTrue(blocked.get() >= n - maxAttempts,
+                    "the attempts beyond the limit must be blocked; blocked=" + blocked.get());
+            // None of the wrong codes activated TOTP.
+            Assertions.assertFalse(totpEnabled(token));
+        } finally {
+            LoginThrottleStore.getInstance().reset();
+        }
+    }
+
+    @Test
+    public void testTotpActivateAfterAdminDisableFailsClosed() {
+        String adminToken = adminToken();
+        clientUtil.createUser("totpracerest");
+        String token = clientUtil.login("totpracerest");
+
+        String secret = totpEnable(token).getString("secret");
+
+        // Admin recovery disables (clears the pending key) between enrollment and activation
+        target().path("/user/totpracerest/disable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()), JsonObject.class);
+
+        // Activation with an otherwise-valid code fails closed and resurrects nothing
+        Response activate = totpActivate(token, Integer.toString(totpCode(secret)));
+        Assertions.assertEquals(Status.BAD_REQUEST.getStatusCode(), activate.getStatus());
+        Assertions.assertEquals("NoPendingTotp", activate.readEntity(JsonObject.class).getString("type"));
+        Assertions.assertFalse(totpEnabled(token));
+        assertTotpColumnsCleared("totpracerest");
+    }
+
+    @Test
+    public void testActivateTotpKeyCasFailsClosedOnConcurrentClear() {
+        clientUtil.createUser("totpcas");
+        final String[] userId = new String[1];
+
+        // Enroll a pending key.
+        TransactionUtil.handle(() -> {
+            UserDao userDao = new UserDao();
+            User user = userDao.getActiveByUsername("totpcas");
+            userId[0] = user.getId();
+            Assertions.assertEquals(1, userDao.setPendingTotpKey(user.getId(), "PENDINGSECRETX", user.getId()),
+                    "setPendingTotpKey must store the pending key on a fresh account");
+        });
+
+        // Model the race: an admin recovery clears the pending key (committed) before activation runs.
+        TransactionUtil.handle(() -> new UserDao().clearTotpKeys(userId[0], userId[0]));
+
+        // The activation compare-and-swap must now affect 0 rows and NOT set an active key.
+        final int[] rows = new int[1];
+        TransactionUtil.handle(() -> rows[0] = new UserDao().activateTotpKey(userId[0], "PENDINGSECRETX", userId[0]));
+        Assertions.assertEquals(0, rows[0],
+                "activateTotpKey must affect 0 rows once the pending key was cleared (CAS fail-closed)");
+
+        TransactionUtil.handle(() -> {
+            User user = new UserDao().getActiveByUsername("totpcas");
+            Assertions.assertNull(user.getTotpKey(), "the CAS must not resurrect an active key");
+            Assertions.assertNull(user.getTotpKeyPending(), "pending must stay cleared");
+        });
+    }
+
+    @Test
+    public void testGenericUpdateDoesNotResurrectClearedTotpKey() {
+        clientUtil.createUser("totpexcl");
+        final String[] userId = new String[1];
+
+        // Enroll and activate an active key.
+        TransactionUtil.handle(() -> {
+            UserDao userDao = new UserDao();
+            User user = userDao.getActiveByUsername("totpexcl");
+            userId[0] = user.getId();
+            userDao.setPendingTotpKey(user.getId(), "ACTIVEKEYOLD", user.getId());
+            userDao.activateTotpKey(user.getId(), "ACTIVEKEYOLD", user.getId());
+        });
+        TransactionUtil.handle(() -> Assertions.assertEquals("ACTIVEKEYOLD",
+                new UserDao().getActiveByUsername("totpexcl").getTotpKey(), "precondition: active key set"));
+
+        // Clear it (the disable path).
+        TransactionUtil.handle(() -> new UserDao().clearTotpKeys(userId[0], userId[0]));
+
+        // A generic profile update carrying a STALE detached entity that still holds the old key must NOT
+        // resurrect it: the generic update path deliberately does not copy the TOTP columns.
+        TransactionUtil.handle(() -> {
+            User stale = new User();
+            stale.setId(userId[0]);
+            stale.setEmail("totpexcl-new@localhost");
+            stale.setStorageQuota(5_000_000L);
+            stale.setTotpKey("ACTIVEKEYOLD");
+            new UserDao().update(stale, userId[0]);
+        });
+
+        TransactionUtil.handle(() -> {
+            User user = new UserDao().getActiveByUsername("totpexcl");
+            Assertions.assertNull(user.getTotpKey(), "a generic update must not resurrect a cleared TOTP key");
+            Assertions.assertEquals("totpexcl-new@localhost", user.getEmail(),
+                    "the generic update's own fields must still apply");
+        });
+    }
+
+    @Test
+    public void testTotpGuestRejected() {
+        String adminToken = adminToken();
+
+        // Enable guest login and obtain a guest session.
+        target().path("/app/guest_login").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("enabled", "true")), JsonObject.class);
+        String guestToken = clientUtil.login("guest", "", false);
+
+        Response enable = target().path("/user/enable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, guestToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), enable.getStatus(),
+                "a guest must not begin TOTP enrollment");
+
+        Response activate = target().path("/user/totp/activate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, guestToken)
+                .post(Entity.form(new Form().param("code", "123456")));
+        Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), activate.getStatus(),
+                "a guest must not activate TOTP");
+
+        // Disable guest login again so the shared instance is left as found.
+        target().path("/app/guest_login").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form().param("enabled", "false")), JsonObject.class);
     }
 
     /**
@@ -493,6 +765,11 @@ public class TestUserResource extends BaseJerseyTest {
             Assertions.assertNotNull(secret);
 
             GoogleAuthenticator googleAuthenticator = new GoogleAuthenticator();
+
+            // Activate the enrollment so the active key exists and login is actually challenged for a code.
+            int activateCode = googleAuthenticator.calculateCode(secret, new Date().getTime() / 30000);
+            Assertions.assertEquals(Response.Status.OK.getStatusCode(),
+                    totpActivate(totplockToken, Integer.toString(activateCode)).getStatus());
 
             // A CORRECT code below the threshold logs in AND clears the counter. We
             // first burn (maxAttempts - 1) wrong codes, then a correct one, and prove

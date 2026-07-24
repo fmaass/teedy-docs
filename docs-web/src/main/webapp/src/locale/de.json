@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "Zwei-Faktor-Authentifizierung",
     "menu_opened_sessions": "Geöffnete Sitzungen",
     "menu_inbox": "Posteingang durchsuchen",
-    "security": {
-      "enable_totp": "Zwei-Faktor-Authentifizierung aktivieren",
-      "enable_totp_message": "Halte auf deinem Telefon eine TOTP-kompatible App bereit, in der du ein neues Konto einrichten kannst.",
-      "title": "Zwei-Faktor-Authentifizierung",
-      "message_1": "Mit der Zwei-Faktor-Authentifizierung schützt du dein Konto bei <strong>{appName}</strong> zusätzlich.<br/>Halte vor der Aktivierung eine TOTP-kompatible App auf deinem Telefon bereit:",
-      "message_google_authenticator": "Für Android, iOS, und Blackberry: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">Google Authenticator</a>",
-      "message_duo_mobile": "Für Android und iOS: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "Für Windows Phone: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">Authenticator</a>",
-      "message_2": "Diese Apps erzeugen automatisch einen Bestätigungscode, der sich in regelmäßigen Abständen ändert.<br/>Gib diesen Code jedes Mal ein, wenn du dich bei <strong>{appName}</strong> anmeldest.",
-      "secret_key": "Dein geheimer Schlüssel lautet: <strong>{secret}</strong>",
-      "secret_key_warning": "Richte deine TOTP-App auf deinem Telefon jetzt mit diesem geheimen Schlüssel ein. Später kannst du den Schlüssel nicht mehr abrufen.",
-      "totp_enabled_message": "Die Zwei-Faktor-Authentifizierung ist für dein Konto aktiviert.<br/>Wenn du dich bei <strong>{appName}</strong> anmeldest, musst du jedes Mal einen Bestätigungscode aus deiner eingerichteten TOTP-App eingeben.<br/>Wenn du dein Telefon verlierst, kannst du dich nicht mehr anmelden. Über eine noch aktive Sitzung kannst du jedoch einen neuen geheimen Schlüssel erzeugen.",
-      "disable_totp": {
-        "disable_totp": "Deaktivieren der Zwei-Faktor-Authentifizierung",
-        "message": "Dein Konto ist dann nicht mehr durch die Zwei-Faktor-Authentifizierung geschützt.",
-        "confirm_password": "Bestätige dein Passwort",
-        "submit": "Deaktivieren der Zwei-Faktor-Authentifizierung"
-      },
-      "test_totp": "Gib den Bestätigungscode ein, der auf deinem Telefon angezeigt wird:",
-      "test_code_success": "Validierungscode OK",
-      "test_code_fail": "Dieser Code ist ungültig. Prüfe, ob deine TOTP-App richtig eingerichtet ist. Du kannst die Zwei-Faktor-Authentifizierung auch deaktivieren."
-    },
     "inbox": {
       "title": "Posteingang durchsuchen",
       "message": "Wenn du diese Funktion aktivierst, durchsucht teedy den angegebenen Posteingang jede Minute nach <strong>ungelesenen</strong> E-Mails und importiert sie automatisch.<br/>Importierte E-Mails markiert teedy anschließend als gelesen.<br/>Hinweise zur Konfiguration von <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a> und <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
@@ -449,6 +427,28 @@
         "button": "Meine Dokumente exportieren",
         "started": "Dein Export wird heruntergeladen",
         "failed": "Export fehlgeschlagen"
+      },
+      "two_factor": {
+        "title": "Zwei-Faktor-Authentifizierung",
+        "description": "Schütze dein Konto mit einem zweiten Schritt bei der Anmeldung – über einen Einmalcode aus einer Authenticator-App auf deinem Telefon.",
+        "status_enabled": "Die Zwei-Faktor-Authentifizierung ist aktiv. Du wirst bei jeder Anmeldung nach einem Code gefragt.",
+        "enable": "Zwei-Faktor-Authentifizierung aktivieren",
+        "scan_hint": "Scanne diesen QR-Code mit einer Authenticator-App (zum Beispiel Google Authenticator, Aegis oder 1Password).",
+        "manual_hint": "Kannst du nicht scannen? Gib diesen geheimen Schlüssel stattdessen in deiner App ein:",
+        "secret_warning": "Sichere diesen Schlüssel jetzt. Nach dem Aktivieren wird er nicht mehr angezeigt.",
+        "code_label": "Gib den 6-stelligen Code aus deiner App ein",
+        "code_required": "Gib den Code aus deiner Authenticator-App ein",
+        "activate": "Aktivieren",
+        "cancel": "Abbrechen",
+        "disable": "Zwei-Faktor-Authentifizierung deaktivieren",
+        "disable_password": "Bestätige zum Deaktivieren dein Passwort",
+        "disable_password_required": "Gib dein Passwort ein, um die Zwei-Faktor-Authentifizierung zu deaktivieren",
+        "qr_alt": "QR-Code zur Einrichtung der Zwei-Faktor-Authentifizierung",
+        "activated_toast": "Zwei-Faktor-Authentifizierung aktiviert",
+        "disabled_toast": "Zwei-Faktor-Authentifizierung deaktiviert",
+        "enable_failed": "Die Einrichtung der Zwei-Faktor-Authentifizierung konnte nicht gestartet werden",
+        "activate_failed": "Dieser Code ist ungültig. Prüfe deine Authenticator-App und versuche es erneut.",
+        "disable_failed": "Die Zwei-Faktor-Authentifizierung konnte nicht deaktiviert werden"
       }
     },
     "default_password_banner": {

@@ -84,28 +84,6 @@
     "menu_two_factor_auth": "双重身份验证",
     "menu_opened_sessions": "已打开会话",
     "menu_inbox": "收件箱扫描",
-    "security": {
-      "enable_totp": "激活双重身份验证",
-      "enable_totp_message": "请确保您的手机上已经拥有一个TOTP兼容的应用程序方可添加新账户",
-      "title": "双重身份 验证",
-      "message_1": "双重身份验证将让您的<strong>{appName}</strong> 帐号获得多一层的安全保障.<br/>在启用该功能前, 请确保在您的手机上拥有一个与TOTP兼容的应用程序:",
-      "message_google_authenticator": "给安卓, 苹果, and 黑莓系统: <a href=\"https://support.google.com/accounts/answer/1066447\" target=\"_blank\">谷歌认证</a>",
-      "message_duo_mobile": "给 安卓 和 苹果系统: <a href=\"https://guide.duo.com/third-party-accounts\" target=\"_blank\">Duo Mobile</a>",
-      "message_authenticator": "给 Windows 系统手机: <a href=\"https://www.microsoft.com/en-US/store/apps/Authenticator/9WZDNCRFJ3RJ\" target=\"_blank\">认证</a>",
-      "message_2": "这些应用程序会自动生成一个验证码，且该验证码在一段时间内会变化.<br/>每次登录 <strong>{appName}</strong>时您都需要输入该验证码.",
-      "secret_key": "您的秘钥是: <strong>{secret}</strong>",
-      "secret_key_warning": "现在用该秘钥配置您的手机应用程序上的TOTP, 您之后将无获取权限.",
-      "totp_enabled_message": "双重身份验证将确保您的帐号.<br/>每次您登录 <strong>{appName}</strong>时, 您都需要从您配置的手机应用程序的验证码.<br/>如果您丢失您的手机, 您将无法登录您的帐号但有效会话将允许您重新生成密钥.",
-      "disable_totp": {
-        "disable_totp": "不激活双重身份验证",
-        "message": "您的帐户将不再受双重身份验证保护.",
-        "confirm_password": "确认您的密码",
-        "submit": "不激活双重身份验证"
-      },
-      "test_totp": "请输入您手机上显示的验证码：",
-      "test_code_success": "验证码正确",
-      "test_code_fail": "此验证码无效，请仔细检查您的手机是否配置正确，或停用双重身份验证"
-    },
     "inbox": {
       "title": "收件箱扫描",
       "message": "启用此功能后，系统将每分钟扫描一次指定的收件箱，查找<strong>未读</strong>邮件并自动导入。<br/>邮件导入后将被标记为已读。<br/>请参阅<a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>、<a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a>和<a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>的配置说明。",
@@ -449,6 +427,28 @@
         "button": "导出我的文档",
         "started": "您的导出正在下载",
         "failed": "导出失败"
+      },
+      "two_factor": {
+        "title": "双重身份验证",
+        "description": "在登录时通过第二步来保护您的账户，使用手机上身份验证器应用生成的一次性验证码。",
+        "status_enabled": "双重身份验证已启用。每次登录时都会要求您输入验证码。",
+        "enable": "启用双重身份验证",
+        "scan_hint": "使用身份验证器应用（例如 Google Authenticator、Aegis 或 1Password）扫描此二维码。",
+        "manual_hint": "无法扫描？请改为在应用中输入此密钥：",
+        "secret_warning": "请立即保存此密钥。激活完成后将不再显示。",
+        "code_label": "请输入应用中的 6 位验证码",
+        "code_required": "请输入身份验证器应用中的验证码",
+        "activate": "激活",
+        "cancel": "取消",
+        "disable": "停用双重身份验证",
+        "disable_password": "确认您的密码以停用",
+        "disable_password_required": "请输入您的密码以停用双重身份验证",
+        "qr_alt": "用于设置双重身份验证的二维码",
+        "activated_toast": "双重身份验证已激活",
+        "disabled_toast": "双重身份验证已停用",
+        "enable_failed": "无法开始双重身份验证的设置",
+        "activate_failed": "该验证码无效。请检查您的身份验证器应用后重试。",
+        "disable_failed": "无法停用双重身份验证"
       }
     },
     "default_password_banner": {

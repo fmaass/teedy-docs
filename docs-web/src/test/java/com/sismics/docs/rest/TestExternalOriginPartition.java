@@ -110,6 +110,53 @@ public class TestExternalOriginPartition extends BaseJerseyTest {
                 "a refused mint must leave no API key row");
     }
 
+    /** Asserts (authoritative DB read-back) that neither TOTP column is set for an account. */
+    private void assertNoTotpKeyState(String username) {
+        TransactionUtil.handle(() -> {
+            User user = new UserDao().getActiveByUsername(username);
+            Assertions.assertNull(user.getTotpKey(), "no active TOTP key must be set for " + username);
+            Assertions.assertNull(user.getTotpKeyPending(), "no pending TOTP key must be set for " + username);
+        });
+    }
+
+    @Test
+    public void oidcOriginAccountCannotEnrollOrActivateTotp() {
+        clientUtil.createUser("origin_oidc_totp");
+        String token = clientUtil.login("origin_oidc_totp");
+        makeOidcOrigin("origin_oidc_totp");
+
+        Response enable = target().path("/user/enable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(403, enable.getStatus(), "an OIDC-origin account must not begin TOTP enrollment");
+
+        Response activate = target().path("/user/totp/activate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("code", "123456")));
+        Assertions.assertEquals(403, activate.getStatus(), "an OIDC-origin account must not activate TOTP");
+
+        assertNoTotpKeyState("origin_oidc_totp");
+    }
+
+    @Test
+    public void ldapOriginAccountCannotEnrollOrActivateTotp() {
+        clientUtil.createUser("origin_ldap_totp");
+        String token = clientUtil.login("origin_ldap_totp");
+        makeLdapOrigin("origin_ldap_totp");
+
+        Response enable = target().path("/user/enable_totp").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(403, enable.getStatus(), "an LDAP-origin account must not begin TOTP enrollment");
+
+        Response activate = target().path("/user/totp/activate").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("code", "123456")));
+        Assertions.assertEquals(403, activate.getStatus(), "an LDAP-origin account must not activate TOTP");
+
+        assertNoTotpKeyState("origin_ldap_totp");
+    }
+
     @Test
     public void internalAccountCanStillMintApiKey() {
         clientUtil.createUser("origin_internal_apikey_user");

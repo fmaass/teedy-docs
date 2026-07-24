@@ -17,6 +17,20 @@ export interface UserInfo {
   // (no preference) stays distinguishable from an explicit false. The SPA seeds a fresh device's dark
   // mode from this at login when no explicit on-device choice exists (a local choice always wins).
   dark_mode?: boolean
+  // #169 True once the current user has an ACTIVE TOTP second factor (a pending, un-activated enrollment
+  // does not set this). Absent for the anonymous response.
+  totp_enabled?: boolean
+  // #169 True if the account is provisioned by an external identity provider (OIDC or LDAP). Such accounts
+  // delegate MFA to their IdP, so the self-service two-factor section is hidden for them.
+  external_origin?: boolean
+}
+
+// #169 Response of POST /user/enable_totp: the pending secret plus the labels the client needs to build the
+// otpauth:// URI. The secret becomes the active login factor only after POST /user/totp/activate confirms it.
+export interface TotpEnrollment {
+  secret: string
+  issuer: string
+  account: string
 }
 
 export interface UserListItem {
@@ -94,6 +108,25 @@ export function deleteUser(username: string, reassignToUsername: string) {
 // log in again (Authelia owns 2FA; Teedy only provides admin recovery).
 export function disableUserTotp(username: string) {
   return api.post(`/user/${username}/disable_totp`)
+}
+
+// #169 Self-service TOTP enrollment. enableTotp generates a PENDING secret (returned with the otpauth
+// issuer/account labels); it becomes the active login factor only once activateTotp confirms a code
+// generated from it. disableTotp turns it off again (the current password re-authenticates the change).
+export function enableTotp() {
+  return api.post<TotpEnrollment>('/user/enable_totp')
+}
+
+export function activateTotp(code: string) {
+  const params = new URLSearchParams()
+  params.set('code', code)
+  return api.post('/user/totp/activate', params)
+}
+
+export function disableTotp(password: string) {
+  const params = new URLSearchParams()
+  params.set('password', password)
+  return api.post('/user/disable_totp', params)
 }
 
 /**
