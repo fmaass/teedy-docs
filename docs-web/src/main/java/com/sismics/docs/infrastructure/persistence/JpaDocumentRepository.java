@@ -1,5 +1,6 @@
 package com.sismics.docs.infrastructure.persistence;
 
+import com.sismics.docs.application.document.ClearDocumentCoverCommand;
 import com.sismics.docs.application.document.Clock;
 import com.sismics.docs.application.document.DocumentFileAccessException;
 import com.sismics.docs.application.document.DocumentNotFoundException;
@@ -15,6 +16,7 @@ import com.sismics.docs.application.document.DocumentView.RelationView;
 import com.sismics.docs.application.document.DocumentView.RouteStepView;
 import com.sismics.docs.application.document.DocumentView.TagView;
 import com.sismics.docs.application.document.GetDocumentQuery;
+import com.sismics.docs.application.document.SetDocumentCoverCommand;
 import com.sismics.docs.application.document.UpdateDocumentCommand;
 import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.PermType;
@@ -359,5 +361,35 @@ public class JpaDocumentRepository implements DocumentRepository {
             }
         }
         relationDao.updateRelationList(documentId, documentIdSet);
+    }
+
+    @Override
+    public void setCover(SetDocumentCoverCommand command) {
+        String documentId = command.documentId();
+        String fileId = command.fileId();
+
+        // The chosen file must be attached to THIS document (latest version, not deleted). Setting a
+        // cover to a file that does not belong to the document is a client error, not a silent no-op.
+        boolean attached = new FileDao().getByDocumentId(null, documentId).stream()
+                .anyMatch(file -> file.getId().equals(fileId));
+        if (!attached) {
+            throw new DocumentValidationException("ValidationError", MessageFormat.format("File not found: {0}", fileId));
+        }
+
+        // Reconcile the served pointer synchronously in the caller's transaction so an immediate
+        // read-back reflects the new cover without waiting for the async event; the row lock inside
+        // reconcileServingCover keeps this atomic against concurrent file operations.
+        DocumentDao documentDao = new DocumentDao();
+        documentDao.updateCoverFileId(documentId, fileId);
+        documentDao.reconcileServingCover(documentId);
+    }
+
+    @Override
+    public void clearCover(ClearDocumentCoverCommand command) {
+        // Re-derive the served pointer synchronously in the caller's transaction (under the row lock)
+        // so an immediate read-back shows the restored first-file cover.
+        DocumentDao documentDao = new DocumentDao();
+        documentDao.updateCoverFileId(command.documentId(), null);
+        documentDao.reconcileServingCover(command.documentId());
     }
 }

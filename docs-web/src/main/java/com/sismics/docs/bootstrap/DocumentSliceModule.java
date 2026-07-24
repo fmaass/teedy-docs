@@ -2,6 +2,7 @@ package com.sismics.docs.bootstrap;
 
 import com.sismics.docs.application.document.Clock;
 import com.sismics.docs.application.document.DocumentAuthorizationService;
+import com.sismics.docs.application.document.DocumentCoverHandler;
 import com.sismics.docs.application.document.DocumentEventPublisher;
 import com.sismics.docs.application.document.DocumentRepository;
 import com.sismics.docs.application.document.GetDocumentHandler;
@@ -29,6 +30,7 @@ public final class DocumentSliceModule {
     private final UnitOfWork unitOfWork;
     private final GetDocumentHandler getDocumentHandler;
     private final UpdateDocumentHandler updateDocumentHandler;
+    private final DocumentCoverHandler documentCoverHandler;
 
     private DocumentSliceModule() {
         Clock clock = new DefaultClock();
@@ -40,6 +42,7 @@ public final class DocumentSliceModule {
         this.unitOfWork = transactionRunner;
         this.getDocumentHandler = new GetDocumentHandler(documentRepository);
         this.updateDocumentHandler = new UpdateDocumentHandler(documentRepository, authorizationService, eventPublisher);
+        this.documentCoverHandler = new DocumentCoverHandler(documentRepository, authorizationService, eventPublisher);
     }
 
     private static final class Holder {
@@ -63,5 +66,9 @@ public final class DocumentSliceModule {
 
     public UpdateDocumentHandler updateDocumentHandler() {
         return updateDocumentHandler;
+    }
+
+    public DocumentCoverHandler documentCoverHandler() {
+        return documentCoverHandler;
     }
 }

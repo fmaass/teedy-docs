@@ -161,6 +161,15 @@ public final class LegacyDocumentResponseMapper {
                 .build()).build();
     }
 
+    /**
+     * @return The 200 {@code {"status":"ok"}} acknowledgement shared by the cover set/clear endpoints
+     */
+    public static Response statusOk() {
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok")
+                .build()).build();
+    }
+
     private static JsonObjectBuilder routeStep(RouteStepView step) {
         JsonObjectBuilder target = Json.createObjectBuilder()
                 .add("id", step.targetId())

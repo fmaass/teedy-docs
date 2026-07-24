@@ -29,4 +29,22 @@ public interface DocumentRepository {
      * @throws DocumentValidationException on an invalid tag/metadata value (mapped to a 400)
      */
     void update(UpdateDocumentCommand command);
+
+    /**
+     * Sets the document's explicit cover file and reconciles the served pointer synchronously. The
+     * chosen file must be attached to this document (latest version, not deleted); an unattached file
+     * is a client error. The WRITE authorization is checked by the handler BEFORE this call.
+     *
+     * @param command The set-cover instructions
+     * @throws DocumentValidationException when the file is not attached to the document (mapped to a 400)
+     */
+    void setCover(SetDocumentCoverCommand command);
+
+    /**
+     * Clears the document's explicit cover file and re-derives the served pointer synchronously. The
+     * WRITE authorization is checked by the handler BEFORE this call.
+     *
+     * @param command The clear-cover instructions
+     */
+    void clearCover(ClearDocumentCoverCommand command);
 }
