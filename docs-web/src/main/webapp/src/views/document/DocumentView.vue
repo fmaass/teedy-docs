@@ -3,7 +3,7 @@ import { computed, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { getDocument, deleteDocument, type DocumentDetail } from '../../api/document'
+import { getDocument, deleteDocument, duplicateDocument, type DocumentDetail } from '../../api/document'
 import { getFileUrl, getDocumentZipUrl } from '../../api/file'
 import { languageLabel } from '../../constants/languages'
 import Button from 'primevue/button'
@@ -89,6 +89,17 @@ function formatDate(ts: number) {
   })
 }
 
+async function handleDuplicate() {
+  try {
+    const { data } = await duplicateDocument(props.id)
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
+    toast.add({ severity: 'success', summary: t('ui.document_duplicated'), life: 2000 })
+    router.push({ name: 'document-view', params: { id: data.id } })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.failed_duplicate_document'), life: 3000 })
+  }
+}
+
 function handleDelete() {
   confirmDanger({
     message: t('ui.delete_document_confirm'),
@@ -169,6 +180,14 @@ function handleDelete() {
             outlined
             size="small"
             @click="router.push({ name: 'document-edit', params: { id } })"
+          />
+          <Button
+            icon="pi pi-copy"
+            :label="t('duplicate')"
+            severity="secondary"
+            outlined
+            size="small"
+            @click="handleDuplicate"
           />
           <Button
             icon="pi pi-trash"

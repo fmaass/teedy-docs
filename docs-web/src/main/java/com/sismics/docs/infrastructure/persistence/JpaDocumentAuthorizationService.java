@@ -17,4 +17,9 @@ public class JpaDocumentAuthorizationService implements DocumentAuthorizationSer
     public boolean canWrite(String documentId, List<String> targetIds) {
         return new AclDao().checkPermission(documentId, PermType.WRITE, targetIds);
     }
+
+    @Override
+    public boolean canRead(String documentId, List<String> targetIds) {
+        return new AclDao().checkPermission(documentId, PermType.READ, targetIds);
+    }
 }

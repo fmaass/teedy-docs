@@ -6,6 +6,7 @@ import com.sismics.docs.application.document.DocumentFileAccessException;
 import com.sismics.docs.application.document.DocumentNotFoundException;
 import com.sismics.docs.application.document.DocumentValidationException;
 import com.sismics.docs.application.document.DocumentView;
+import com.sismics.docs.application.document.DuplicateDocumentCommand;
 import com.sismics.docs.application.document.GetDocumentQuery;
 import com.sismics.docs.application.document.SetDocumentCoverCommand;
 import com.sismics.docs.application.document.UpdateDocumentCommand;
@@ -19,6 +20,7 @@ import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.ValidationUtil;
 
+import jakarta.json.Json;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.FormParam;
@@ -276,5 +278,41 @@ public class LegacyDocumentResource extends BaseResource {
         }
 
         return LegacyDocumentResponseMapper.statusOk();
+    }
+    /**
+     * Duplicates a document into a new document owned by the requester.
+     *
+     * @param documentId Document ID to duplicate
+     * @return Response carrying the new document id
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/duplicate")
+    public Response duplicate(@PathParam("id") String documentId) {
+        // Guests and share-token sessions are read-only, even where a READ ACL would resolve for them.
+        if (!authenticate() || principal.isGuest()) {
+            throw new ForbiddenClientException();
+        }
+
+        DuplicateDocumentCommand command = new DuplicateDocumentCommand(
+                documentId, principal.getId(), getTargetIdList(null));
+
+        String newDocumentId;
+        try {
+            // Block-bodied lambda: value-compatible only, so it resolves to the result-bearing
+            // required(Supplier) overload rather than required(Runnable).
+            newDocumentId = module.unitOfWork().required(() -> {
+                return module.duplicateDocumentHandler().handle(command);
+            });
+        } catch (DocumentAccessDeniedException e) {
+            throw new ForbiddenClientException();
+        } catch (DocumentNotFoundException e) {
+            throw new NotFoundException();
+        } catch (DocumentValidationException e) {
+            throw new ClientException(e.getType(), e.getMessage());
+        } catch (DocumentFileAccessException e) {
+            throw new ServerException("FileError", e.getMessage());
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder().add("id", newDocumentId).build()).build();
     }
 }

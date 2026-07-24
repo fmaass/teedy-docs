@@ -216,6 +216,10 @@ export function listTrash(params?: { limit?: number; offset?: number }) {
   return api.get<TrashListResponse>('/document/trash', { params })
 }
 
+export function duplicateDocument(id: string) {
+  return api.post<{ id: string }>(`/document/${id}/duplicate`)
+}
+
 export function restoreDocument(id: string) {
   return api.post(`/document/${id}/restore`)
 }

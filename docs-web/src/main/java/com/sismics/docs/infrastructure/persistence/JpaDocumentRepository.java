@@ -7,6 +7,7 @@ import com.sismics.docs.application.document.DocumentNotFoundException;
 import com.sismics.docs.application.document.DocumentRepository;
 import com.sismics.docs.application.document.DocumentValidationException;
 import com.sismics.docs.application.document.DocumentView;
+import com.sismics.docs.application.document.DuplicateDocumentCommand;
 import com.sismics.docs.application.document.DocumentView.AclView;
 import com.sismics.docs.application.document.DocumentView.ContributorView;
 import com.sismics.docs.application.document.DocumentView.FileView;
@@ -43,6 +44,7 @@ import com.sismics.docs.core.dao.dto.RouteStepDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
+import com.sismics.docs.core.service.DocumentDuplicationService;
 import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.DirectoryUtil;
 import com.sismics.docs.core.util.FileUtil;
@@ -322,6 +324,28 @@ public class JpaDocumentRepository implements DocumentRepository {
             }
         } else if (command.metadataReset()) {
             MetadataUtil.clearMetadata(command.id());
+        }
+    }
+
+    @Override
+    public String duplicate(DuplicateDocumentCommand command) {
+        try {
+            return DocumentDuplicationService.duplicate(
+                    command.sourceId(), command.actorUserId(), command.readTargetIds());
+        } catch (IOException e) {
+            // The core service cannot reference the slice's exception types, so it signals its
+            // client-visible outcomes by message; translate them at this boundary.
+            if ("QuotaReached".equals(e.getMessage())) {
+                throw new DocumentValidationException("QuotaReached", e.getMessage());
+            }
+            if ("SourceNotFound".equals(e.getMessage())) {
+                throw new DocumentNotFoundException();
+            }
+            throw new DocumentFileAccessException("Unable to duplicate the document", e);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new DocumentFileAccessException("Unable to duplicate the document", e);
         }
     }
 

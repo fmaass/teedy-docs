@@ -14,4 +14,11 @@ public interface DocumentAuthorizationService {
      * @return True when the caller may write the document
      */
     boolean canWrite(String documentId, List<String> targetIds);
+
+    /**
+     * @param documentId Document ID
+     * @param targetIds  Caller's ACL target set (user + groups)
+     * @return True when the caller may read the document
+     */
+    boolean canRead(String documentId, List<String> targetIds);
 }

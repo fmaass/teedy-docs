@@ -8,6 +8,7 @@ import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
+import { duplicateDocument } from '../../api/document'
 import type { Tag } from '../../api/tag'
 import { useTagFilterStore } from '../../stores/tagFilter'
 
@@ -41,6 +42,7 @@ const DOC = {
 vi.mock('../../api/document', () => ({
   getDocument: vi.fn(() => Promise.resolve({ data: DOC })),
   deleteDocument: vi.fn(),
+  duplicateDocument: vi.fn(() => Promise.resolve({ data: { id: 'copy-1' } })),
 }))
 
 vi.mock('../../api/file', () => ({
@@ -102,6 +104,7 @@ beforeEach(() => {
         name: 'document-view-content',
         component: { template: '<div />' },
       },
+      { path: '/document/copy/:id', name: 'document-view', component: { template: '<div />' } },
     ],
   })
 })
@@ -160,5 +163,21 @@ describe('DocumentView — clickable header tag chips (#34)', () => {
     // Navigation still lands on the filtered documents list.
     expect(router.currentRoute.value.name).toBe('documents')
     expect(router.currentRoute.value.query.tags).toBe(DOC_TAG.id)
+  })
+})
+
+describe('DocumentView — duplicate action (#184)', () => {
+  it('renders a Duplicate action that calls the API and navigates to the copy', async () => {
+    const wrapper = await mountView()
+
+    const dup = wrapper.findAll('.doc-header-actions button').find((b) => b.text().includes('Duplicate'))
+    expect(dup?.exists()).toBe(true)
+
+    await dup!.trigger('click')
+    await flushPromises()
+
+    expect(vi.mocked(duplicateDocument)).toHaveBeenCalledWith('doc1')
+    expect(router.currentRoute.value.name).toBe('document-view')
+    expect(router.currentRoute.value.params.id).toBe('copy-1')
   })
 })

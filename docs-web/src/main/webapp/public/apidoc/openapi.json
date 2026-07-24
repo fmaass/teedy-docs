@@ -1683,6 +1683,30 @@
         }
       }
     },
+    "/document/{id}/duplicate": {
+      "post": {
+        "tags": [
+          "document"
+        ],
+        "summary": "Duplicate a document",
+        "operationId": "post_document_id_duplicate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/document/{id}/permanent": {
       "delete": {
         "tags": [

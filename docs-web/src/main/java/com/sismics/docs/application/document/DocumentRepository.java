@@ -47,4 +47,18 @@ public interface DocumentRepository {
      * @param command The clear-cover instructions
      */
     void clearCover(ClearDocumentCoverCommand command);
+
+    /**
+     * Duplicates the source document into a fresh copy owned by the caller: the scalar fields and the
+     * eight metadata fields, the readable tags, the custom metadata, and the files (re-encrypted under
+     * the caller's key). The READ authorization is checked by the handler BEFORE this call. All-or-
+     * nothing: a failure rolls the whole copy back and compensates any blob already written.
+     *
+     * @param command The duplication request
+     * @return The new document id
+     * @throws DocumentNotFoundException   when the source vanished before the copy could start
+     * @throws DocumentValidationException when the copy would exceed the requester's quota (mapped to a 400)
+     * @throws DocumentFileAccessException when a source file's content cannot be read (mapped to a 500)
+     */
+    String duplicate(DuplicateDocumentCommand command);
 }

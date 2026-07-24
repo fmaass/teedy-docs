@@ -5,6 +5,7 @@ import com.sismics.docs.application.document.DocumentAuthorizationService;
 import com.sismics.docs.application.document.DocumentCoverHandler;
 import com.sismics.docs.application.document.DocumentEventPublisher;
 import com.sismics.docs.application.document.DocumentRepository;
+import com.sismics.docs.application.document.DuplicateDocumentHandler;
 import com.sismics.docs.application.document.GetDocumentHandler;
 import com.sismics.docs.application.document.UnitOfWork;
 import com.sismics.docs.application.document.UpdateDocumentHandler;
@@ -31,6 +32,7 @@ public final class DocumentSliceModule {
     private final GetDocumentHandler getDocumentHandler;
     private final UpdateDocumentHandler updateDocumentHandler;
     private final DocumentCoverHandler documentCoverHandler;
+    private final DuplicateDocumentHandler duplicateDocumentHandler;
 
     private DocumentSliceModule() {
         Clock clock = new DefaultClock();
@@ -43,6 +45,7 @@ public final class DocumentSliceModule {
         this.getDocumentHandler = new GetDocumentHandler(documentRepository);
         this.updateDocumentHandler = new UpdateDocumentHandler(documentRepository, authorizationService, eventPublisher);
         this.documentCoverHandler = new DocumentCoverHandler(documentRepository, authorizationService, eventPublisher);
+        this.duplicateDocumentHandler = new DuplicateDocumentHandler(documentRepository, authorizationService);
     }
 
     private static final class Holder {
@@ -70,5 +73,9 @@ public final class DocumentSliceModule {
 
     public DocumentCoverHandler documentCoverHandler() {
         return documentCoverHandler;
+    }
+
+    public DuplicateDocumentHandler duplicateDocumentHandler() {
+        return duplicateDocumentHandler;
     }
 }
