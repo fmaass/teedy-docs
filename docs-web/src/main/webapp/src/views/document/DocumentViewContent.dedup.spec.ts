@@ -33,7 +33,10 @@ vi.mock('../../components/PdfViewer.vue', () => ({
 }))
 const invalidateMock = vi.fn()
 vi.mock('@tanstack/vue-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: invalidateMock }),
+  // getQueryData is part of the client surface the view uses: after an upload it reads the
+  // refetched document back to decide whether the served-file pointer still needs settling
+  // (#199). A mock without it rejects out of a detached promise instead of failing a test.
+  useQueryClient: () => ({ invalidateQueries: invalidateMock, getQueryData: () => undefined }),
 }))
 vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),

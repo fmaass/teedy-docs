@@ -14,6 +14,7 @@ import {
   clearDocumentCover,
   buildRelationsParams,
   type DocumentListItem,
+  type DocumentDetail,
 } from '../../api/document'
 import { queryKeys } from '../../api/queryKeys'
 // pdf.js (~pulled in by PdfViewer) is heavy and only needed when a PDF file is
@@ -295,13 +296,87 @@ async function runUploads(documentId: string, jobs: UploadJob[]) {
       life: staleBase ? 4000 : 3000,
     })
   } finally {
-    // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
-    // and skipping the refetch would leave them invisible (users re-upload dupes).
-    queryClient.invalidateQueries({ queryKey: ['document', documentId] })
     uploading.value = false
     uploadProgress.value = {}
     uploadingNames.value = []
     fileUploadRef.value?.clear()
+    // Invalidate unconditionally: a mid-batch failure still uploaded earlier files,
+    // and skipping the refetch would leave them invisible (users re-upload dupes).
+    // Detached (not awaited) so the reconciliation never holds `busy` — the add-file
+    // affordances and the conflict prompt must not wait on a background pointer write.
+    schedulePointerSettle(documentId)
+  }
+}
+
+// How many times an upload-complete invalidation is repeated while the document still
+// reports files but no served-file pointer, and how long to wait between attempts.
+const POINTER_SETTLE_ATTEMPTS = 3
+const POINTER_SETTLE_DELAY_MS = 500
+
+// Lifecycle token for the pointer reconciliation, owned by this component instance.
+// Every scheduled settle captures the generation it was started with and abandons itself
+// as soon as the live value moves on, which makes the loop both SINGLE-FLIGHT and
+// cancellable with one primitive.
+let pointerSettleGeneration = 0
+
+/**
+ * Start a pointer reconciliation, superseding any settle still in flight.
+ *
+ * SINGLE-FLIGHT WITH RESTART, not coalesce: `runUploads` fires once per batch (the
+ * conflict path runs a second batch after the fresh one) and a new drop can start once
+ * `busy` clears, so overlapping settles are reachable. Two live settlers would invalidate
+ * the same exact key concurrently and cancel each other's refetch (vue-query's default
+ * `cancelRefetch: true`), so at most one may run. Restart rather than coalesce because the
+ * later wave is the one whose files still need a pointer: a settle already running for an
+ * earlier batch can exit on ITS observation (e.g. the fresh batch's pointer landed) and
+ * would leave a later batch — the one that actually added the first file — unreconciled.
+ */
+function schedulePointerSettle(documentId: string) {
+  pointerSettleGeneration += 1
+  void settleServingPointer(documentId, pointerSettleGeneration)
+}
+
+/**
+ * Refetch the document until its served-file pointer catches up with the upload (#199).
+ *
+ * `file_id` is NOT written by PUT /file: DocumentUpdatedAsyncEvent →
+ * DocumentUpdatedAsyncListener fills DOC_IDFILE_C after the request returns, so a single
+ * invalidation has no happens-after relation to that write. Losing that race caches a
+ * null pointer as fresh for the query's staleTime, and every consumer of the pointer (the
+ * header Download link, list/gallery thumbnails) stays empty until something else
+ * refetches. Re-invalidate a bounded number of times while the refetched document says it
+ * HAS files but still carries no pointer.
+ *
+ * Gated on `file_count > 0`: after a total upload failure a null pointer is the truth, and
+ * looping on it would refetch three times for nothing. Scope is the first-file /
+ * null-pointer case only — a version replace (non-null → non-null pointer) is not covered
+ * here and is tracked separately (see useVersionUpload).
+ *
+ * Only ever entered through `schedulePointerSettle`, which owns the generation token. Each
+ * step re-checks that token after every await, so a superseding schedule or an unmount
+ * stops the loop at its next checkpoint: nothing is invalidated, and the last armed timer
+ * fires into a stale generation and returns without touching anything.
+ */
+async function settleServingPointer(documentId: string, generation: number) {
+  // exact: ['document', id] is a leaf key; a prefix match would also invalidate unrelated
+  // ['document', id, …] queries a future feature may add.
+  const key = ['document', documentId]
+  const isCurrent = () => generation === pointerSettleGeneration
+  for (let attempt = 0; attempt < POINTER_SETTLE_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, POINTER_SETTLE_DELAY_MS))
+    }
+    if (!isCurrent()) return
+    // Awaited: invalidateQueries resolves once the active refetch has settled, so the
+    // cache read below sees the response this attempt asked for, not the previous one.
+    await queryClient.invalidateQueries({ queryKey: key, exact: true })
+    // The await above can span an unmount or a newer batch; re-check before deciding
+    // whether another round is warranted off data that is no longer this loop's concern.
+    if (!isCurrent()) return
+    const fresh = queryClient.getQueryData<DocumentDetail>(key)
+    // No cached document (navigated away, or nothing observing it) — nothing to settle.
+    if (!fresh) return
+    if (!(fresh.file_count > 0 && !fresh.file_id)) return
   }
 }
 
@@ -755,6 +830,10 @@ onUnmounted(() => {
   revokeAllObjectUrls()
   observer?.disconnect()
   observer = null
+  // Retire any in-flight pointer reconciliation: its remaining steps see a stale
+  // generation and return without invalidating (an upload started seconds before a
+  // navigation would otherwise keep refetching a document nobody is looking at).
+  pointerSettleGeneration += 1
 })
 
 </script>

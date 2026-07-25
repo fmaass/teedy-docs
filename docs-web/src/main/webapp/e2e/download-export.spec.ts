@@ -53,6 +53,29 @@ async function seedDoc(
   return { id, fileIds }
 }
 
+/**
+ * Wait for the document's SERVED-FILE POINTER (#199).
+ *
+ * `file_id` is not written by PUT /file: DocumentUpdatedAsyncListener fills it after the
+ * request returns, so a page loaded immediately after seeding can read a document that has
+ * files but no pointer — and the client caches that (staleTime 30 s) well past this spec's
+ * expect window. The single-file Download href is derived from the pointer, so the seed is
+ * not complete until the server reports it. This awaits the AUTHORITATIVE state; it is a
+ * seed barrier, not a widened timeout on the assertion under test.
+ */
+async function awaitServingPointer(request: APIRequestContext, id: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const res = await request.get(`/api/document/${id}`)
+        expect(res.ok(), `read document ${id}`).toBeTruthy()
+        return ((await res.json()).file_id as string | null) ?? null
+      },
+      { message: `served-file pointer written for document ${id}` },
+    )
+    .not.toBeNull()
+}
+
 test('89a: multi-file document Download links to the whole-document ZIP', async ({ page, cleanup }) => {
   const title = unique('dl-multi')
   const { id } = await seedDoc(page.request, title, [
@@ -84,6 +107,8 @@ test('89a: single-file document keeps the direct file download (unchanged)', asy
     { name: 'notes.txt', mimeType: 'text/plain', path: txt },
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+  // The single-file href IS the served pointer, so the seed must have one before the view loads.
+  await awaitServingPointer(page.request, id)
 
   await page.goto(`/#/document/view/${id}`)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()

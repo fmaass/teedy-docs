@@ -1,9 +1,52 @@
 import { test, expect } from './fixtures'
+import type { Locator } from '@playwright/test'
 import { unique, createDocument, confirmDanger, deleteDocApi, deleteTagByNameApi } from './helpers'
 
 // Bulk operations over a multi-selection: add a tag, set a language, delete.
 // Teedy has no bulk endpoint — each action fans out over single-doc endpoints and
 // reports a per-document success/failure summary (see utils/bulkOps.ts).
+
+/**
+ * #199/1 — REGRESSION GUARD: nothing may cover the bulk Apply button when it is clicked.
+ *
+ * The reported failure was a pointer interception at the mobile viewport, named against
+ * the picker inside `.bulk-select` and the `.bulk-bar` toolbar. Playwright's own
+ * actionability retry turns that into a bare 10 s timeout, so the mechanism only ever
+ * showed up in an error tail. This hit-tests the button's centre and NAMES whatever
+ * receives the click instead. A beat while an overlay unmounts is retried away by the
+ * poll; a genuine layout overlap never resolves and reports the offending element.
+ *
+ * Asserted at BOTH viewports: the interception was mobile-only, but the invariant ("the
+ * Apply button is the topmost element at its own centre") holds everywhere.
+ */
+async function clickApplyUnobstructed(popover: Locator): Promise<void> {
+  const apply = popover.getByRole('button', { name: 'Apply' })
+  await expect(apply).toBeVisible()
+  await apply.scrollIntoViewIfNeeded()
+  await expect
+    .poll(
+      () =>
+        apply.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          if (!hit) return 'nothing (the Apply button is outside the viewport)'
+          if (el.contains(hit)) return 'self'
+          const known = [
+            '.p-multiselect-overlay',
+            '.p-select-overlay',
+            '.tag-multiselect',
+            '.bulk-select',
+            '.bulk-bar',
+            '.p-toast',
+          ]
+          const owner = known.find((selector) => hit.closest(selector))
+          return owner ?? `${hit.tagName.toLowerCase()}[class="${hit.getAttribute('class') ?? ''}"]`
+        }),
+      { message: 'what receives a click at the centre of the bulk Apply button' },
+    )
+    .toBe('self')
+  await apply.click()
+}
 
 test('bulk add tag, set language, then delete a multi-selection', async ({ page, cleanup }) => {
   // Seed a tag and two documents so we have a selection to act on.
@@ -70,7 +113,7 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
     await page.keyboard.press('Escape')
     await expect(page.getByRole('listbox')).toBeHidden()
     await expect(popover).toBeVisible()
-    await popover.getByRole('button', { name: 'Apply' }).click()
+    await clickApplyUnobstructed(popover)
   }
 
   // Open a bulk action's PrimeVue Popover, pick an option from its Select, and Apply.
@@ -95,7 +138,7 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
       await expect(page.getByRole('listbox')).toBeVisible({ timeout: 1500 })
     }).toPass({ timeout: 20000 })
     await page.getByRole('option', { name: optionName }).click()
-    await popover.getByRole('button', { name: 'Apply' }).click()
+    await clickApplyUnobstructed(popover)
   }
 
   // Bulk add tag: open the popover, pick the tag, apply. Success surfaces the
@@ -225,7 +268,7 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   await page.keyboard.press('Escape')
   await expect(page.getByRole('listbox')).toBeHidden()
   await expect(popover).toBeVisible()
-  await popover.getByRole('button', { name: 'Apply' }).click()
+  await clickApplyUnobstructed(popover)
 
   await expect(page.getByText('Bulk action complete').first()).toBeVisible()
   await expect(bar).toBeHidden()

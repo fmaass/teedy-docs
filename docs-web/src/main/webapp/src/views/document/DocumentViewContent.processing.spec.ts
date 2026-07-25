@@ -46,7 +46,10 @@ vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
 }))
 vi.mock('@tanstack/vue-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  // getQueryData is part of the client surface the view uses: after an upload it reads the
+  // refetched document back to decide whether the served-file pointer still needs settling
+  // (#199). A mock without it rejects out of a detached promise instead of failing a test.
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryData: () => undefined }),
 }))
 
 // Distinct, ordered object URLs (blob:1, blob:2, …) so a re-enqueue's revoke can be asserted

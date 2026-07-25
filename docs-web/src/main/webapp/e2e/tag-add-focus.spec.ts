@@ -37,8 +37,14 @@ async function expectFilterFocused(page: import('@playwright/test').Page): Promi
 
 async function keyboardAddTag(page: import('@playwright/test').Page, name: string): Promise<void> {
   await page.keyboard.type(name)
-  const option = page.locator('.p-select-overlay .p-select-option', { hasText: name })
-  await expect(option.first()).toBeVisible()
+  // SETTLE BEFORE COMMITTING: the typed filter re-renders the option list, and the
+  // highlight ArrowDown/Enter commits is computed against whatever list is mounted at that
+  // instant. Asserting on the TARGET option alone is satisfied by the still-unfiltered
+  // list (it is count-1 there too), so the barrier is the whole list collapsing to the
+  // single survivor — only the post-filter render can satisfy that.
+  const options = page.locator('.p-select-overlay .p-select-option')
+  await expect(options, 'the filtered option list has settled to one survivor').toHaveCount(1)
+  await expect(options.first()).toContainText(name)
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
 }

@@ -39,6 +39,11 @@ export function useVersionUpload(onUploaded?: () => void) {
     uploading.value = true
     try {
       await uploadFile(documentId, chosen, undefined, previousFileId)
+      // One invalidation only. A version replace moves the served pointer from one file
+      // id to another (non-null → non-null), so the "no pointer yet" test that bounds
+      // DocumentViewContent's settleServingPointer cannot detect a stale value here —
+      // telling the two apart needs the pre-upload id, which is a separate change. The
+      // visible symptom is a briefly stale preview until the next refetch (#199 scope-out).
       await queryClient.invalidateQueries({ queryKey: ['document', documentId] })
       toast.add({ severity: 'success', summary: t('ui.versions.uploaded_new'), life: 2000 })
       onUploaded?.()
