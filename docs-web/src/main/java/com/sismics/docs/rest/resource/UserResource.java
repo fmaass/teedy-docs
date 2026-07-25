@@ -698,6 +698,20 @@ public class UserResource extends BaseResource {
                     "This account owns documents shared with other users and cannot be deleted");
         }
 
+        // #189: acquire this deletion's ENTIRE document set — the documents of the routes it will cancel
+        // UNIONED with this account's own active documents — FOR UPDATE, in one globally-sorted-by-id
+        // sequence, BEFORE the tag lock below. That restores the canonical USER -> DOCUMENT -> TAG order
+        // for the whole transaction: previously the tag lock came first and the document locks followed
+        // (in cancelRoutesTargetingPrincipal and UserDao.delete), so a self-delete held tags while
+        // waiting on a document — the opposite direction to a document write that links a tag, which
+        // holds the document row and then waits on the tag row through the T_DOCUMENT_TAG foreign key.
+        // A genuine cycle (PostgreSQL 40P01). Locking the union as ONE sorted sequence (rather than each
+        // phase locking its own set) also removes the DOCUMENT-vs-DOCUMENT cycle between two concurrent
+        // user deletions with overlapping sets. No fixpoint re-scan is needed: the owner-row lock held
+        // above freezes both sets (no new owned document, no new route step targeting this user), so the
+        // later per-phase acquisitions are re-locks of rows already held here.
+        PrincipalDeletionUtil.lockDeletionDocumentSet(principal.getId());
+
         // #133: lock all tags where this user has WRITE and the tag is linked to a surviving foreign
         // document, FOR UPDATE. AclDao.delete takes the same tag-row lock, so a concurrent ACL revoke
         // on one of these tags blocks until this transaction commits — closing the write-skew where both
@@ -867,6 +881,15 @@ public class UserResource extends BaseResource {
             throw new ClientException("ReassignRequired",
                     "This user still owns documents or tags; a reassignment target is required to delete it");
         }
+
+        // #189: same union document lock the self-delete path takes — the routes-to-cancel documents
+        // UNIONED with the departing user's own active documents, FOR UPDATE in one globally-sorted-by-id
+        // sequence. Both deletion paths must use the SAME global order over the SAME union, or two
+        // concurrent deletions with overlapping sets (A's owned document carrying a route that targets B,
+        // and vice versa) could still acquire the shared pair in opposite orders and deadlock. The later
+        // acquisitions in cancelRoutesTargetingPrincipal, reassignOwnedDocuments and UserDao.delete then
+        // only re-lock rows already held here.
+        PrincipalDeletionUtil.lockDeletionDocumentSet(user.getId());
 
         // Cancel active routes with an open step targeting the departing user. This locks each affected
         // route's DOCUMENT row FOR UPDATE, so it MUST run AFTER the user-row locks above: this path then

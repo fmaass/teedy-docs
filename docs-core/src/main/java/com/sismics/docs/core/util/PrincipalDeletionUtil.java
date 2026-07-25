@@ -17,6 +17,8 @@ import jakarta.persistence.Query;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /**
  * Graceful handling of workflow references when a principal (user or group) is deleted or renamed.
@@ -83,7 +85,8 @@ public class PrincipalDeletionUtil {
                 " join T_ROUTE_STEP rs on rs.RTP_IDROUTE_C = r.RTE_ID_C " +
                 " where rs.RTP_IDTARGET_C = :principalId " +
                 " and rs.RTP_ENDDATE_D is null and rs.RTP_DELETEDATE_D is null " +
-                " and r.RTE_STATUS_C = :activeStatus and r.RTE_DELETEDATE_D is null");
+                " and r.RTE_STATUS_C = :activeStatus and r.RTE_DELETEDATE_D is null" +
+                " order by r.RTE_IDDOCUMENT_C");
         q.setParameter("principalId", principalId);
         q.setParameter("activeStatus", RouteStatus.ACTIVE.name());
         @SuppressWarnings("unchecked")
@@ -103,7 +106,9 @@ public class PrincipalDeletionUtil {
             // routes), so no path can hold a route lock while waiting on a document lock — the
             // deadlock cycle is eliminated. lockByIdForUpdate (not getActiveByIdForUpdate) is used
             // because the route's document may already be trashed in the target-cancel scenario, and
-            // the row must be locked regardless of its deleteDate.
+            // the row must be locked regardless of its deleteDate. The rows are iterated in ascending
+            // document id (the query's ORDER BY), so two concurrent principal deletions with
+            // overlapping route documents cannot acquire them in opposite orders.
             documentDao.lockByIdForUpdate(documentId);
 
             // Halt the route and close its open steps with a system comment. The NULL transition
@@ -130,6 +135,67 @@ public class PrincipalDeletionUtil {
             cancelled++;
         }
         return cancelled;
+    }
+
+    /**
+     * Locks FOR UPDATE, as ONE globally-sorted-by-id sequence, every document row a user deletion will
+     * touch: the documents of the ACTIVE routes that have an OPEN step targeting the user
+     * ({@link #cancelRoutesTargetingPrincipal}) UNIONED with the user's own active documents
+     * ({@code UserDao.delete}). Scans both sets without mutating anything, deduplicates them, and takes
+     * the locks in ascending document id.
+     *
+     * <p>Why the union has to be locked as ONE sorted sequence rather than letting each phase lock its
+     * own set: the two sets overlap across users (A's owned document can be the document of a route
+     * targeting B, and vice versa), so two deletions that each locked "route documents, then owned
+     * documents" — even with each set internally sorted — could still acquire a shared pair in opposite
+     * orders and deadlock (PostgreSQL 40P01). One global order over the union removes that cycle; the
+     * later per-phase acquisitions then only re-lock rows this transaction already holds.</p>
+     *
+     * <p>Call this AFTER the departing user's row is locked (USER -> DOCUMENT) and BEFORE any tag lock
+     * (DOCUMENT -> TAG). The snapshot it takes is stable for the rest of the transaction by
+     * construction, not by a re-scan fixpoint: with the departing user's row held FOR UPDATE, no new
+     * document can be created for that owner ({@code DocumentUtil.createDocument} takes the same owner
+     * row first) and no new route step can be assigned to that user ({@code RouteResource.start} takes
+     * its USER targets' rows first).</p>
+     *
+     * @param userId Departing user ID
+     * @return the deletion's document set, ascending — the ids it attempted to lock; an id whose row has
+     *         since been purged is simply skipped by the lock (may be empty, never null)
+     */
+    public static List<String> lockDeletionDocumentSet(String userId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        // Documents of the routes the deletion will cancel — mirrors cancelRoutesTargetingPrincipal's
+        // selection exactly. Read-only: no route or step is touched here.
+        Query routeDocQuery = em.createNativeQuery("select distinct r.RTE_IDDOCUMENT_C from T_ROUTE r " +
+                " join T_ROUTE_STEP rs on rs.RTP_IDROUTE_C = r.RTE_ID_C " +
+                " where rs.RTP_IDTARGET_C = :principalId " +
+                " and rs.RTP_ENDDATE_D is null and rs.RTP_DELETEDATE_D is null " +
+                " and r.RTE_STATUS_C = :activeStatus and r.RTE_DELETEDATE_D is null");
+        routeDocQuery.setParameter("principalId", userId);
+        routeDocQuery.setParameter("activeStatus", RouteStatus.ACTIVE.name());
+
+        // The departing user's own active documents — mirrors DocumentDao.findByUserId, which is what
+        // UserDao.delete iterates and trashes.
+        Query ownedDocQuery = em.createNativeQuery(
+                "select d.DOC_ID_C from T_DOCUMENT d where d.DOC_IDUSER_C = :userId and d.DOC_DELETEDATE_D is null");
+        ownedDocQuery.setParameter("userId", userId);
+
+        SortedSet<String> documentIds = new TreeSet<>();
+        for (Object id : routeDocQuery.getResultList()) {
+            documentIds.add((String) id);
+        }
+        for (Object id : ownedDocQuery.getResultList()) {
+            documentIds.add((String) id);
+        }
+
+        // lockByIdForUpdate (not getActiveByIdForUpdate): a route's document may already be trashed and
+        // must still be locked, and a row that vanished is simply skipped.
+        DocumentDao documentDao = new DocumentDao();
+        for (String documentId : documentIds) {
+            documentDao.lockByIdForUpdate(documentId);
+        }
+        return new ArrayList<>(documentIds);
     }
 
     /**

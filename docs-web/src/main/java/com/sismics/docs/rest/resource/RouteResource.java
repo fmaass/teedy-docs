@@ -14,6 +14,7 @@ import com.sismics.docs.core.model.jpa.Route;
 import com.sismics.docs.core.model.jpa.RouteModel;
 import com.sismics.docs.core.model.jpa.RouteStep;
 import com.sismics.docs.core.util.ActionUtil;
+import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.PrincipalDeletionUtil;
 import com.sismics.docs.core.util.RoutingUtil;
 import com.sismics.docs.core.util.SecurityUtil;
@@ -28,7 +29,10 @@ import jakarta.json.*;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
 import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /**
  * Route REST resources.
@@ -69,6 +73,33 @@ public class RouteResource extends BaseResource {
             throw new NotFoundException();
         }
 
+        // Get the route model
+        RouteModelDao routeModelDao = new RouteModelDao();
+        RouteModel routeModel = routeModelDao.getActiveById(routeModelId);
+        if (routeModel == null) {
+            throw new NotFoundException();
+        }
+
+        // Check permission on this route model
+        if (!aclDao.checkPermission(routeModelId, PermType.READ, getTargetIdList(null))) {
+            throw new ForbiddenClientException();
+        }
+
+        // Resolve every step target from ONE snapshot of the model's step blob, BEFORE any row lock is
+        // taken, so the whole start runs off a single consistent target set (#189).
+        List<ResolvedStep> resolvedSteps = resolveSteps(routeModel);
+
+        // #189 GLOBAL LOCK ORDER: USER before DOCUMENT. Lock the USER-typed step targets' active rows
+        // FOR UPDATE (deduplicated, ascending id) before the document row below. Principal deletion
+        // acquires USER (the departing owner row) and then DOCUMENT; before this reorder, start
+        // acquired DOCUMENT first, so adding a target lock afterwards would have closed a
+        // DOCUMENT->USER / USER->DOCUMENT cycle. Taking the user locks first instead makes both paths
+        // USER -> DOCUMENT. The ascending-id order makes concurrent starts deadlock-free against each
+        // other. Each lock is eligibility-scoped (CredentialLifecycleUtil.lockActiveUser), so a start
+        // that parks on a concurrent deletion of one of its targets re-reads the now soft-deleted row
+        // and FAILS CLOSED — no step is ever assigned to a user whose deletion has committed.
+        lockUserStepTargets(resolvedSteps);
+
         // Lock the document row FOR UPDATE before the "no active route" check, making the whole
         // check-and-create atomic per document: two concurrent starts serialize on this lock so the
         // second sees the first's ACTIVE route and is rejected RunningRoute (below), instead of both
@@ -81,18 +112,6 @@ public class RouteResource extends BaseResource {
         DocumentDao documentDao = new DocumentDao();
         if (documentDao.getActiveByIdForUpdate(documentId) == null) {
             throw new NotFoundException();
-        }
-
-        // Get the route model
-        RouteModelDao routeModelDao = new RouteModelDao();
-        RouteModel routeModel = routeModelDao.getActiveById(routeModelId);
-        if (routeModel == null) {
-            throw new NotFoundException();
-        }
-
-        // Check permission on this route model
-        if (!aclDao.checkPermission(routeModelId, PermType.READ, getTargetIdList(null))) {
-            throw new ForbiddenClientException();
         }
 
         // Avoid creating 2 running routes on the same document. Safe against concurrent starts: the
@@ -109,33 +128,16 @@ public class RouteResource extends BaseResource {
         RouteDao routeDao = new RouteDao();
         routeDao.create(route, principal.getId());
 
-        // Create the steps
-        try (JsonReader reader = Json.createReader(new StringReader(routeModel.getSteps()))) {
-            JsonArray stepsJson = reader.readArray();
-            for (int order = 0; order < stepsJson.size(); order++) {
-                JsonObject step = stepsJson.getJsonObject(order);
-                JsonObject target = step.getJsonObject("target");
-                AclTargetType targetType = AclTargetType.valueOf(target.getString("type"));
-                String targetName = target.getString("name");
-                String transitions = null;
-                if (step.containsKey("transitions")) {
-                    transitions = step.getJsonArray("transitions").toString();
-                }
-
-                RouteStep routeStep = new RouteStep()
-                        .setRouteId(route.getId())
-                        .setName(step.getString("name"))
-                        .setOrder(order)
-                        .setType(RouteStepType.valueOf(step.getString("type")))
-                        .setTransitions(transitions)
-                        .setTargetId(SecurityUtil.getTargetIdFromName(targetName, targetType));
-
-                if (routeStep.getTargetId() == null) {
-                    throw new ClientException("InvalidRouteModel", "A step has an invalid target");
-                }
-
-                routeStepDao.create(routeStep);
-            }
+        // Create the steps from the resolved snapshot (no re-resolution: the targets were validated and,
+        // for USER targets, locked above)
+        for (ResolvedStep resolvedStep : resolvedSteps) {
+            routeStepDao.create(new RouteStep()
+                    .setRouteId(route.getId())
+                    .setName(resolvedStep.name)
+                    .setOrder(resolvedStep.order)
+                    .setType(resolvedStep.type)
+                    .setTransitions(resolvedStep.transitions)
+                    .setTargetId(resolvedStep.targetId));
         }
 
         // Initialize ACLs on the first step
@@ -156,6 +158,93 @@ public class RouteResource extends BaseResource {
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("route_step", step);
         return Response.ok().entity(response.build()).build();
+    }
+
+    /**
+     * One route step of a route model, with its target already resolved to a principal id. Produced by
+     * {@link #resolveSteps(RouteModel)} so the whole start runs off ONE snapshot of the model blob: the
+     * targets that get locked are exactly the targets the created steps carry.
+     */
+    private static final class ResolvedStep {
+        private final String name;
+        private final int order;
+        private final RouteStepType type;
+        private final String transitions;
+        private final String targetId;
+        private final AclTargetType targetType;
+
+        private ResolvedStep(String name, int order, RouteStepType type, String transitions,
+                             String targetId, AclTargetType targetType) {
+            this.name = name;
+            this.order = order;
+            this.type = type;
+            this.transitions = transitions;
+            this.targetId = targetId;
+            this.targetType = targetType;
+        }
+    }
+
+    /**
+     * Parse the route model's step blob and resolve every step's target name to a principal id, rejecting
+     * the whole start with InvalidRouteModel if any target no longer resolves. Takes no lock.
+     *
+     * @param routeModel Route model to start
+     * @return the model's steps in order, targets resolved
+     */
+    private List<ResolvedStep> resolveSteps(RouteModel routeModel) {
+        List<ResolvedStep> resolvedSteps = new ArrayList<>();
+        try (JsonReader reader = Json.createReader(new StringReader(routeModel.getSteps()))) {
+            JsonArray stepsJson = reader.readArray();
+            for (int order = 0; order < stepsJson.size(); order++) {
+                JsonObject step = stepsJson.getJsonObject(order);
+                JsonObject target = step.getJsonObject("target");
+                AclTargetType targetType = AclTargetType.valueOf(target.getString("type"));
+                String targetName = target.getString("name");
+                String transitions = null;
+                if (step.containsKey("transitions")) {
+                    transitions = step.getJsonArray("transitions").toString();
+                }
+
+                String targetId = SecurityUtil.getTargetIdFromName(targetName, targetType);
+                if (targetId == null) {
+                    throw new ClientException("InvalidRouteModel", "A step has an invalid target");
+                }
+
+                resolvedSteps.add(new ResolvedStep(step.getString("name"), order,
+                        RouteStepType.valueOf(step.getString("type")), transitions, targetId, targetType));
+            }
+        }
+        return resolvedSteps;
+    }
+
+    /**
+     * Lock the ACTIVE user row of every USER-typed step target FOR UPDATE, deduplicated and in ascending
+     * id order, failing closed (InvalidRouteModel) on a target that is no longer active — via the same
+     * {@link CredentialLifecycleUtil#lockActiveUser} owner-row primitive {@code DocumentUtil.createDocument},
+     * {@code TagCreationUtil.createTag} and both user-deletion paths take.
+     * Held to commit, these locks serialize a start against the deletion of any of its user targets:
+     * a deletion that commits first leaves this start to re-read a soft-deleted row and abort, and a start
+     * that commits first blocks the deletion until its steps exist (so the deletion's route-cancel scan
+     * sees them).
+     *
+     * <p>GROUP targets are deliberately NOT locked: they are a different principal table, and resolving
+     * them as users would reject every group-targeted model (including the seeded administrators-group
+     * workflow). Group deletion is a separate lock site and is out of scope here.</p>
+     *
+     * @param resolvedSteps Resolved steps of the model being started
+     */
+    private void lockUserStepTargets(List<ResolvedStep> resolvedSteps) {
+        SortedSet<String> userTargetIds = new TreeSet<>();
+        for (ResolvedStep resolvedStep : resolvedSteps) {
+            if (resolvedStep.targetType == AclTargetType.USER) {
+                userTargetIds.add(resolvedStep.targetId);
+            }
+        }
+        for (String userTargetId : userTargetIds) {
+            if (CredentialLifecycleUtil.lockActiveUser(userTargetId) == null) {
+                throw new ClientException("InvalidRouteModel", "A step has an invalid target");
+            }
+        }
     }
 
     /**
