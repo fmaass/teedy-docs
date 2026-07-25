@@ -322,6 +322,8 @@ describe('FileListTable', () => {
   // #196 — the list flows with the page at EVERY length: no inner scroll container, no
   // windowing. The ~100-file threshold survives for one purpose only, the drag-reorder
   // guard (a drag over a partially-rendered list emitted an incomplete id order).
+  // 20s ceiling: this case mounts 101 rows, which is minutes-slow under jsdom on CI's shared
+  // runners and overran vitest's 5s default there while passing locally.
   it('never inner-scrolls or windows, at any length — the threshold survives only as the reorder guard', () => {
     const small = mountTable(twoFiles)
     const smallTable = small.findComponent(DataTable)
@@ -351,5 +353,5 @@ describe('FileListTable', () => {
     expect(big.findAll('tbody tr').length).toBe(101)
     // The threshold still disables the drag handle above 100 files.
     expect((big.vm as unknown as { reorderEnabled: boolean }).reorderEnabled).toBe(false)
-  })
+  }, 20_000)
 })
