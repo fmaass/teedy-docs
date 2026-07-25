@@ -292,9 +292,11 @@ test.describe('German layout — no overflow (functional)', () => {
     await page.goto('/#/document')
     await setLocale(page, 'de')
     const vw = page.viewportSize()!.width
-    // The always-visible header actions in German (Papierkorb=Trash, Über=About;
-    // Logout stays "Logout" — untranslated). Each must render inside the viewport.
-    for (const name of ['Papierkorb', 'Über', 'Logout']) {
+    // The always-visible header actions in German (Aktivitätsverlauf=Activity history,
+    // Papierkorb=Trash, Über=About; Logout stays "Logout" — untranslated). Each must render
+    // inside the viewport. Every control added to this bar belongs in this list — a 5th icon
+    // button is exactly the pressure this gate exists for (#177).
+    for (const name of ['Aktivitätsverlauf', 'Papierkorb', 'Über', 'Logout']) {
       const btn = page.getByRole('button', { name, exact: true })
       await expect(btn, `German header action "${name}" visible`).toBeVisible()
       const box = await btn.boundingBox()

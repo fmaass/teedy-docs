@@ -844,6 +844,63 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Narrow to one audit type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CREATE",
+                "UPDATE",
+                "DELETE",
+                "AUTHENTICATION"
+              ]
+            }
+          },
+          {
+            "name": "class",
+            "in": "query",
+            "required": false,
+            "description": "Narrow to one loggable entity type",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Acl",
+                "Comment",
+                "Document",
+                "Export",
+                "File",
+                "Group",
+                "Metadata",
+                "Route",
+                "RouteModel",
+                "Tag",
+                "User",
+                "Webhook"
+              ]
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "description": "Narrow to the rows authored by this username",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after_date",
+            "in": "query",
+            "required": false,
+            "description": "Narrow to rows created at or after this instant (epoch millis, inclusive). A filter, not the keyset cursor",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
           }
         ],
         "responses": {

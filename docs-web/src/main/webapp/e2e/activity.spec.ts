@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { unique, createDocument, deleteDocApi, fillDescription, isMobileViewport } from './helpers'
+
+const fileFixture = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample.txt')
 
 // Per-document activity (DocumentViewActivity -> GET /auditlog?document=<id>). The
 // Activity tab renders audit rows in a table (date / user / message columns, where the
@@ -209,4 +213,35 @@ test('#113 empty activity response renders the empty state', async ({ page, clea
   await expect(page.locator('.p-datatable')).toBeVisible()
   await expect(page.getByText('No activity recorded')).toBeVisible()
   await expect(page.locator('.p-datatable tbody tr .activity-type')).toHaveCount(0)
+})
+
+// #195: a File audit row's message is the 36-char parent-document id CONCATENATED with the file
+// name (docs-core File.toMessage()), and the Activity tab used to render it verbatim — producing
+// "645c4756-…-07431a1a7fb4Sachspende.xml" in the Action cell. The tab must show the bare file name
+// and link it to the parent document's Files tab.
+test('#195 a File activity row shows the bare file name, not the id-prefixed message', async ({ page, cleanup }) => {
+  const { id: docId } = await createDocument(page, unique('act-file'))
+  // Registered at creation: the uploaded file is purged with its parent document.
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, docId))
+
+  // Upload a file — this writes the File audit row whose message carries the id prefix.
+  await page.goto(`/#/document/view/${docId}/content`)
+  await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(fileFixture)
+  // WAIT for the upload to land before navigating away: the audit row is written by the upload
+  // request, so leaving the tab first races the very row this test asserts on (it passed only by
+  // timing luck until the desktop project caught it).
+  await expect(page.getByText('Files uploaded').first()).toBeVisible()
+
+  await page.goto(`/#/document/view/${docId}/activity`)
+  await page.reload()
+  await expect(page.locator('.p-datatable')).toBeVisible()
+
+  // The file name is shown on its own...
+  const fileCell = page.getByText('sample.txt', { exact: true })
+  await expect(fileCell).toBeVisible()
+  // ...and the raw 36-char document id never appears glued to it (the defect signature).
+  await expect(page.getByText(`${docId}sample.txt`)).toHaveCount(0)
+  // The name is a link to the parent document's Files tab.
+  const link = page.locator('.activity-target-link', { hasText: 'sample.txt' })
+  await expect(link).toHaveAttribute('href', new RegExp(`#/document/view/${docId}/content`))
 })

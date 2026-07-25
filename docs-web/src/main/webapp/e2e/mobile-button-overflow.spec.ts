@@ -1,4 +1,5 @@
 import { test, expect, type Page } from './fixtures'
+import { login, deleteUser } from './helpers'
 
 // Regression gate for issue #86 (two buttons broken at the mobile viewport in German):
 //   1. Tag create button ("Erstellen") is squeezed by its flex row and clips its label.
@@ -209,4 +210,67 @@ test.describe('mobile button label overflow (#86)', () => {
       'button does not overlap the heading/description',
     ).toBe(true)
   })
+})
+
+// #177 regression gate (same failure class as #86/#67, different control): the header action row
+// holds five icon-only buttons plus the username. Every icon button is pinned `flex-shrink: 0`, so
+// the username is the only elastic item — and a flex item's default `min-width: auto` made BOTH the
+// username and its container refuse to shrink. A long username then painted over the Logout button
+// and swallowed its clicks (Logout was unclickable at 393px; first caught by two-factor.spec, whose
+// generated usernames are long).
+//
+// The username must be REAL: it is rendered from the auth store, so overwriting the text node from
+// the page is reverted on the next Vue render and the assertion would pass vacuously. So this
+// creates a genuinely long-named user and drives the header as that user.
+//
+// Measured against the pre-fix CSS, the condition this trips first is the VIEWPORT bound, not the
+// overlap: the username claimed its full intrinsic width and pushed Logout's right edge to 429.8px
+// in a 393px viewport. The click at the end is the user-visible consequence (Playwright then
+// reports the username span intercepting the button's pointer events).
+test('#177 a long username never overlaps the header Logout button', async ({ page, browser, cleanup }) => {
+  // 30 chars — comfortably longer than the bar can fit beside five icon buttons at 393px.
+  const username = `longname${Date.now()}`.slice(0, 30).toLowerCase()
+  const password = 'LongNamePass123'
+
+  await page.goto('/#/settings/users')
+  await page.getByRole('button', { name: 'Add user' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('#add-user-name').fill(username)
+  await dialog.locator('#add-user-email').fill(`${username}@example.com`)
+  await dialog.locator('#add-user-pass').fill(password)
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('User created')).toBeVisible()
+
+  const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const userPage = await ctx.newPage()
+  // FIFO, in the order the original teardown ran. This user seeds no documents — only the
+  // account and its context need purging.
+  cleanup.defer('close the long-username context', () => ctx.close())
+  cleanup.defer('delete the long-username user', () => deleteUser(page, username))
+
+  await login(userPage, username, password)
+
+  const nameLocator = userPage.locator('.user-name')
+  // The rendered name really is the long one (guards against a vacuous pass).
+  await expect(nameLocator).toHaveText(username)
+
+  const logout = userPage.getByRole('button', { name: 'Logout' })
+  await expect(logout).toBeVisible()
+
+  const nameBox = await nameLocator.boundingBox()
+  const logoutBox = await logout.boundingBox()
+  expect(nameBox, 'username has a box').not.toBeNull()
+  expect(logoutBox, 'logout has a box').not.toBeNull()
+
+  // No overlap — an overlapping span intercepts the button's pointer events.
+  expect(disjoint(nameBox!, logoutBox!), 'username must not overlap Logout').toBe(true)
+
+  // The button stays on screen...
+  const vw = userPage.viewportSize()!.width
+  expect(logoutBox!.x, 'logout not off-screen left').toBeGreaterThanOrEqual(-TOL)
+  expect(logoutBox!.x + logoutBox!.width, 'logout right edge within viewport').toBeLessThanOrEqual(vw + TOL)
+
+  // ...and is genuinely clickable, which is the user-visible property that broke.
+  await logout.click()
+  await expect(userPage).toHaveURL(/#\/login/)
 })

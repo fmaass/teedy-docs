@@ -10,8 +10,9 @@ import { setActivePinia, createPinia } from 'pinia'
 const apiPost = vi.hoisted(() => vi.fn())
 vi.mock('../api/client', () => ({ default: { post: apiPost } }))
 
-// Mock vue-router: the header pushes routes on logout, irrelevant to the toggle.
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+// Mock vue-router: the header pushes routes on logout and on the history button.
+const routerPush = vi.hoisted(() => vi.fn())
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: routerPush }) }))
 
 // Mock vue-i18n: return the key so button aria-labels are stable to target.
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
@@ -97,5 +98,36 @@ describe('AppHeader dark-mode toggle (#147)', () => {
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(localStorage.getItem('teedy-dark-mode')).toBe('true')
     expect(document.documentElement.classList.contains('dark-mode')).toBe(true)
+  })
+})
+
+describe('AppHeader global history entry (#177)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('navigates to the history route', async () => {
+    const auth = useAuthStore()
+    auth.user = userInfo() as never
+    const wrapper = mountHeader()
+
+    await wrapper.get('button[aria-label="ui.history.title"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({ name: 'history' })
+  })
+
+  it('is offered to a NON-admin too — the backend scopes the feed, not the nav', async () => {
+    const auth = useAuthStore()
+    // No ADMIN base function: a regular user still gets their own audit feed.
+    auth.user = userInfo({ base_functions: [] }) as never
+    const wrapper = mountHeader()
+
+    expect(wrapper.find('button[aria-label="ui.history.title"]').exists()).toBe(true)
+  })
+
+  it('is hidden for an anonymous visitor along with the rest of the header', () => {
+    const wrapper = mountHeader()
+    expect(wrapper.find('button[aria-label="ui.history.title"]').exists()).toBe(false)
   })
 })

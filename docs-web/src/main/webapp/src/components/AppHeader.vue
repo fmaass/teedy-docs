@@ -62,6 +62,18 @@ async function handleLogout() {
     <div class="action-spacer" />
 
     <div class="action-items">
+      <!-- Icon-only, like every other header action: the German label ("Aktivitätsverlauf") is
+           long enough that a labelled 5th control would eat into the narrow mobile bar, which the
+           German-overflow gate (visual.spec.ts) asserts against. -->
+      <Button
+        icon="pi pi-history"
+        text
+        rounded
+        size="small"
+        @click="router.push({ name: 'history' })"
+        :aria-label="t('ui.history.title')"
+        v-tooltip.bottom="t('ui.history.title')"
+      />
       <Button
         icon="pi pi-trash"
         text
@@ -121,10 +133,15 @@ async function handleLogout() {
   flex: 1;
 }
 
+/* `min-width: 0` is required on the CONTAINER as well as on the username below: a flex item
+   defaults to `min-width: auto`, so without it `.action-items` refuses to shrink below the
+   combined intrinsic width of its children and overflows the bar instead — and the username
+   inside it never gets the chance to truncate. */
 .action-items {
   display: flex;
   align-items: center;
   gap: 0.125rem;
+  min-width: 0;
 }
 
 /* Header icon buttons already get an intrinsic square size from PrimeVue
@@ -136,9 +153,19 @@ async function handleLogout() {
   flex-shrink: 0;
 }
 
+/* The username is the ONLY elastic item in the action row: every icon button is pinned
+   `flex-shrink: 0` (#67). Without `min-width: 0` a flex item refuses to shrink below its
+   content width (the `min-width: auto` default), so a long username overflowed the narrow
+   mobile bar and painted OVER the Logout button — which then swallowed its clicks
+   (caught adding the 5th header control in #177; a 24-char username made Logout
+   unclickable at 393px). Truncating with an ellipsis keeps every control reachable. */
 .user-name {
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
   padding: 0 0.375rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

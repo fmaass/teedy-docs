@@ -117,6 +117,13 @@ const router = createRouter({
             },
           ],
         },
+        // Global activity history (#177). NOT admin-only: every authenticated user gets their
+        // own feed, and the backend decides the scope (own rows, or everyone's for an admin).
+        {
+          path: 'history',
+          name: 'history',
+          component: () => import('../views/HistoryView.vue'),
+        },
         // Tags
         {
           path: 'tag',

@@ -148,17 +148,52 @@ public class AuditLogDao {
             }
         }
 
-        // Un-cursored total: the full result count for this scope, INDEPENDENT of the cursor, so
-        // the total the resource emits keeps its historical "all matching rows" meaning.
-        String countSql = "select count(*) as result_count from (" + buildUnion(baseQuery, whereClauses, "") + ") as t1";
-        Query countQuery = QueryUtil.getNativeQuery(new QueryParam(countSql, scopeParams));
+        // Optional narrowing filters (#177). Every whereClauses entry above is a UNION BRANCH, so
+        // the entries compose with OR: appending a filter there would make it its own unscoped
+        // branch and LEAK rows outside the caller's authorization scope (a non-admin ?type=CREATE
+        // would see every user's CREATE rows, Acl rows included, with total inflated to match).
+        // Filters are therefore AND-composed into EVERY branch, of BOTH the count and the fetch.
+        // Each branch body above is a pure conjunction, so appending " and <predicate>" needs no
+        // parenthesisation. Bound parameter names are all prefixed so none can collide with the
+        // :userId / :documentId SCOPE bindings or the cursor bindings.
+        StringBuilder filter = new StringBuilder();
+        Map<String, Object> filterParams = new HashMap<>();
+        if (criteria.getType() != null) {
+            filter.append(" and l.LOG_TYPE_C = :filterType ");
+            filterParams.put("filterType", criteria.getType().name());
+        }
+        if (criteria.getEntityClass() != null) {
+            filter.append(" and l.LOG_CLASSENTITY_C = :filterClass ");
+            filterParams.put("filterClass", criteria.getEntityClass());
+        }
+        if (criteria.getUsername() != null) {
+            // Matched through the T_USER join the base query already carries, so no extra subselect
+            // is needed. Deliberately NOT :userId — that name binds the authorization scope, and
+            // reusing it would silently rewrite the scope predicate instead of narrowing it.
+            filter.append(" and u.USE_USERNAME_C = :filterUsername ");
+            filterParams.put("filterUsername", criteria.getUsername());
+        }
+        if (criteria.getAfterDate() != null) {
+            filter.append(" and l.LOG_CREATEDATE_D >= :filterAfterDate ");
+            filterParams.put("filterAfterDate", new Timestamp(criteria.getAfterDate()));
+        }
+        String filterClause = filter.toString();
+
+        // Un-cursored total: the full result count for this FILTERED scope, INDEPENDENT of the
+        // cursor, so the total the resource emits keeps its historical "all matching rows" meaning
+        // while reflecting the narrowing the caller asked for.
+        Map<String, Object> countParams = new HashMap<>(scopeParams);
+        countParams.putAll(filterParams);
+        String countSql = "select count(*) as result_count from ("
+                + buildUnion(baseQuery, whereClauses, filterClause, "") + ") as t1";
+        Query countQuery = QueryUtil.getNativeQuery(new QueryParam(countSql, countParams));
         int total = ((Number) countQuery.getSingleResult()).intValue();
 
         // Keyset predicate on the DESC order: only rows strictly older than the cursor tuple.
         // Applied to EVERY branch of the UNION. Both parts of the cursor must be present (the
         // caller rejects a half cursor); absent => first page.
         String cursorClause = "";
-        Map<String, Object> fetchParams = new HashMap<>(scopeParams);
+        Map<String, Object> fetchParams = new HashMap<>(countParams);
         if (criteria.getBeforeDate() != null && criteria.getBeforeId() != null) {
             cursorClause = " and (l.LOG_CREATEDATE_D < :beforeDate or (l.LOG_CREATEDATE_D = :beforeDate and l.LOG_ID_C < :beforeId)) ";
             fetchParams.put("beforeDate", new Timestamp(criteria.getBeforeDate()));
@@ -167,7 +202,8 @@ public class AuditLogDao {
 
         // Fetch limit+1 rows: the extra row (if any) proves a further page exists without a second
         // (cursored) count. total cannot drive termination — it counts rows above the cursor too.
-        String fetchSql = buildUnion(baseQuery, whereClauses, cursorClause) + " order by c1 desc, c0 desc";
+        String fetchSql = buildUnion(baseQuery, whereClauses, filterClause, cursorClause)
+                + " order by c1 desc, c0 desc";
         Query fetchQuery = QueryUtil.getNativeQuery(new QueryParam(fetchSql, fetchParams));
         fetchQuery.setMaxResults(limit + 1);
         @SuppressWarnings("unchecked")
@@ -194,18 +230,25 @@ public class AuditLogDao {
     }
 
     /**
-     * Joins the per-source WHERE bodies into a UNION, appending {@code extra} (the cursor
-     * predicate, or empty) to EVERY branch so the cursor applies uniformly across sources.
+     * Joins the per-source WHERE bodies into a UNION, appending {@code filterClause} (the caller's
+     * narrowing filters, or empty) and {@code extra} (the cursor predicate, or empty) to EVERY
+     * branch, so both apply uniformly across sources.
+     *
+     * <p>Both are appended rather than added to {@code whereClauses} on purpose: entries of that
+     * list become SEPARATE union branches (they compose with OR), so a predicate placed there
+     * would widen the result instead of narrowing it — for a filter that means leaking rows the
+     * scope predicate exists to hide. Everything appended here is AND-ed inside each branch.
      *
      * @param baseQuery Shared select/from/join prefix
-     * @param whereClauses Per-source WHERE bodies
+     * @param whereClauses Per-source WHERE bodies (each a pure conjunction)
+     * @param filterClause Narrowing filter predicate AND-ed into each branch (or empty)
      * @param extra Extra predicate appended to each branch (cursor clause, or empty)
      * @return The joined UNION query string
      */
-    private static String buildUnion(String baseQuery, List<String> whereClauses, String extra) {
+    private static String buildUnion(String baseQuery, List<String> whereClauses, String filterClause, String extra) {
         List<String> branches = Lists.newArrayList();
         for (String where : whereClauses) {
-            branches.add(baseQuery + " where " + where + extra);
+            branches.add(baseQuery + " where " + where + filterClause + extra);
         }
         return Joiner.on(" union ").join(branches);
     }

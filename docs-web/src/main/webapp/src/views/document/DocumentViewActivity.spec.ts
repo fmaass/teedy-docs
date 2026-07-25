@@ -72,9 +72,12 @@ function mountActivity() {
     global: {
       plugins: [i18n, PrimeVue, [VueQueryPlugin, { queryClient }]],
       provide: { [DocumentKey as symbol]: doc },
+      stubs: { RouterLink: RouterLinkStub },
     },
   })
 }
+
+const RouterLinkStub = { props: ['to'], template: '<a><slot /></a>' }
 
 const typeCells = (wrapper: ReturnType<typeof mountActivity>) => wrapper.findAll('.activity-type')
 
@@ -193,5 +196,41 @@ describe('DocumentViewActivity — load older (#139)', () => {
     releaseStale?.()
     await flushPromises()
     expect(typeCells(wrapper).length).toBe(1)
+  })
+})
+
+// #195: the Activity tab rendered a File row's RAW audit message, which is the 36-char parent
+// document id CONCATENATED with the file name. This asserts the WIRING — that this view enables
+// link targets on the shared table — not the label helper itself (covered in ActivityTable.spec).
+describe('DocumentViewActivity — File row labels (#195)', () => {
+  it('shows the bare file name, linked to the parent document, not the raw id+name message', async () => {
+    const parentId = '645c4756-1111-4222-8333-07431a1a7fb4'
+    getMock.mockReset()
+    getMock.mockResolvedValue({
+      data: {
+        logs: [
+          {
+            id: 'f1',
+            create_date: 300,
+            username: 'admin',
+            type: 'CREATE',
+            class: 'File',
+            target: 'file-1',
+            message: `${parentId}Sachspende.xml`,
+          },
+        ],
+        total: 1,
+        has_more: false,
+      },
+    })
+
+    const wrapper = mountActivity()
+    await flushPromises()
+
+    const link = wrapper.findComponent(RouterLinkStub)
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('Sachspende.xml')
+    expect(link.props('to')).toEqual({ name: 'document-view-content', params: { id: parentId } })
+    expect(wrapper.text()).not.toContain(parentId)
   })
 })
