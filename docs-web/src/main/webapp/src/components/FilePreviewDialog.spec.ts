@@ -33,8 +33,14 @@ function mountDialog(file: PreviewFile | null, shareId?: string) {
     global: {
       stubs: {
         // Dialog teleports to <body>; render its slots inline so the test can query the
-        // body + footer without chasing the teleport target.
-        Dialog: { props: ['visible'], template: '<div class="dlg"><slot /><slot name="footer" /></div>' },
+        // body + footer without chasing the teleport target. The two slots are kept in
+        // SEPARATE wrappers so a test can tell a body-rendered control from a footer one
+        // (#181: the surviving Download must be the footer's).
+        Dialog: {
+          props: ['visible'],
+          template:
+            '<div class="dlg"><div class="dlg-body"><slot /></div><div class="dlg-footer"><slot name="footer" /></div></div>',
+        },
         // pdf.js is heavy and async-loaded; a light stub stands in for the branch check.
         // It exposes `downloadable` (the dialog must pass false so the viewer renders no
         // original-URL control) and can emit `error` to drive the failure-degrade path.
@@ -52,6 +58,14 @@ function mountDialog(file: PreviewFile | null, shareId?: string) {
 // The Download control is the ONLY thing allowed to point at the original attachment URL.
 function downloadLink(wrapper: ReturnType<typeof mountDialog>) {
   return wrapper.find('a.file-preview-download')
+}
+
+// #181 — the dialog must offer exactly ONE Download anchor. `find()` returns the first
+// match and is blind to duplicates, which is why the original tests passed while the
+// unavailable state rendered a second, inline anchor beside the footer one. Every
+// assertion about the affordance's uniqueness therefore counts, never finds.
+function downloadLinkCount(wrapper: ReturnType<typeof mountDialog>) {
+  return wrapper.findAll('a.file-preview-download').length
 }
 
 describe('FilePreviewDialog (#144)', () => {
@@ -103,6 +117,7 @@ describe('FilePreviewDialog (#144)', () => {
     const wrapper = mountDialog({ id: 'bin1', name: 'archive.zip', mimetype: 'application/zip' })
     expect(wrapper.text()).toContain('ui.file_view.preview_unavailable')
     expect(downloadLink(wrapper).attributes('href')).toBe('api/file/bin1/data')
+    expect(downloadLinkCount(wrapper)).toBe(1)
   })
 
   it('text fetch failure falls back to the unavailable state (still offering Download)', async () => {
@@ -113,6 +128,7 @@ describe('FilePreviewDialog (#144)', () => {
     expect(wrapper.find('pre.file-preview-text').exists()).toBe(false)
     expect(wrapper.text()).toContain('ui.file_view.preview_unavailable')
     expect(downloadLink(wrapper).attributes('href')).toBe('api/file/txt2/data')
+    expect(downloadLinkCount(wrapper)).toBe(1)
   })
 
   it('threads the share credential through preview and Download URLs', () => {
@@ -152,6 +168,7 @@ describe('FilePreviewDialog (#144)', () => {
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.text()).toContain('ui.file_view.preview_unavailable')
     expect(downloadLink(wrapper).attributes('href')).toBe('api/file/img9/data')
+    expect(downloadLinkCount(wrapper)).toBe(1)
   })
 
   it('pdf load failure degrades to preview-unavailable + Download (never an unlabelled open control)', async () => {
@@ -162,5 +179,65 @@ describe('FilePreviewDialog (#144)', () => {
     expect(wrapper.find('.pdf-stub').exists()).toBe(false)
     expect(wrapper.text()).toContain('ui.file_view.preview_unavailable')
     expect(downloadLink(wrapper).attributes('href')).toBe('api/file/pdf9/data')
+    expect(downloadLinkCount(wrapper)).toBe(1)
+  })
+
+  // #181 — the unavailable state used to render its OWN inline Download beside the
+  // footer's, so the dialog showed two identical controls. Every route into
+  // previewMode === 'unavailable' is walked here and counted: the footer is the single
+  // affordance, and the body carries none.
+  describe('#181: exactly one Download anchor in every unavailable state', () => {
+    async function unsupported() {
+      return mountDialog({ id: 'u1', name: 'archive.zip', mimetype: 'application/zip' })
+    }
+
+    async function imageError() {
+      const wrapper = mountDialog({ id: 'u2', name: 'broken.png', mimetype: 'image/png' })
+      await wrapper.find('img').trigger('error')
+      return wrapper
+    }
+
+    async function pdfError() {
+      const wrapper = mountDialog({ id: 'u3', name: 'broken.pdf', mimetype: 'application/pdf' })
+      await wrapper.findComponent('.pdf-stub').vm.$emit('error')
+      await wrapper.vm.$nextTick()
+      return wrapper
+    }
+
+    async function textError() {
+      getFileContentMock.mockReset()
+      getFileContentMock.mockRejectedValue(new Error('403'))
+      const wrapper = mountDialog({ id: 'u4', name: 'secret.txt', mimetype: 'text/plain' })
+      await flushPromises()
+      return wrapper
+    }
+
+    for (const [mode, make] of [
+      ['unsupported mimetype', unsupported],
+      ['image load error', imageError],
+      ['pdf load error', pdfError],
+      ['text fetch error', textError],
+    ] as const) {
+      it(`${mode}: one Download, and it is the footer's`, async () => {
+        const wrapper = await make()
+        // Precondition — this really is the unavailable state, so the count below is
+        // not passing vacuously on some other branch.
+        expect(wrapper.text()).toContain('ui.file_view.preview_unavailable')
+        expect(wrapper.findAll('a.file-preview-download')).toHaveLength(1)
+        // The survivor is the footer control; the body offers no Download of its own.
+        expect(wrapper.findAll('.dlg-footer a.file-preview-download')).toHaveLength(1)
+        expect(wrapper.findAll('.dlg-body a.file-preview-download')).toHaveLength(0)
+      })
+    }
+
+    it('every previewable mode also renders exactly one Download', async () => {
+      getFileContentMock.mockReset()
+      getFileContentMock.mockResolvedValue('body text')
+      for (const mime of ['image/png', 'application/pdf', 'text/plain']) {
+        const wrapper = mountDialog({ id: 'p1', name: 'f', mimetype: mime })
+        await flushPromises()
+        expect(downloadLinkCount(wrapper), mime).toBe(1)
+      }
+    })
   })
 })

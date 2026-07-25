@@ -13,6 +13,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const txt = resolve(here, 'fixtures/sample.txt')
 const png = resolve(here, 'fixtures/pixel.png')
 const pdf = resolve(here, 'fixtures/sample.pdf')
+// A REAL zip archive. application/zip is the genuinely unsupported case: the preview
+// dialog can render no safe representation of it, so it is the only seed that actually
+// drives previewMode === 'unavailable'. text/plain does NOT — it previews as extracted
+// text — so an assertion made against a .txt seed would pass without exercising the
+// state under test (#181).
+const zip = resolve(here, 'fixtures/placeholder.zip')
 
 async function seedDoc(
   request: APIRequestContext,
@@ -51,6 +57,10 @@ function pngFile(name: string) {
 
 function pdfFile(name: string) {
   return { name, mimeType: 'application/pdf', path: pdf }
+}
+
+function zipFile(name: string) {
+  return { name, mimeType: 'application/zip', path: zip }
 }
 
 test('grid is the default file view; the toggle switches to list and persists per user', async ({ page }) => {
@@ -244,6 +254,7 @@ test('opening a file previews it in-app; only Download targets the original (#14
     pngFile('photo.png'),
     txtFile('readme.txt'),
     pdfFile('report.pdf'),
+    zipFile('archive.zip'),
   ])
   try {
     await page.goto(`/#/document/view/${id}/content`)
@@ -253,7 +264,9 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await expect(page.locator('.file-preview-card img').first()).toHaveAttribute('src', /^blob:/)
 
     // The generic (non-image/non-PDF) card is a BUTTON, not a link to the original /data URL.
-    const genericCard = page.locator('.file-preview-generic .generic-open')
+    // Named explicitly: two files here are generic (readme.txt and archive.zip), so a bare
+    // class locator would be ambiguous.
+    const genericCard = page.getByRole('button', { name: 'Open readme.txt', exact: true })
     await expect(genericCard).toBeVisible()
     await expect(genericCard).toHaveJSProperty('tagName', 'BUTTON')
 
@@ -265,14 +278,21 @@ test('opening a file previews it in-app; only Download targets the original (#14
       page.locator('.file-preview-grid a[href*="/data"]:not([aria-label="Download"])'),
     ).toHaveCount(0)
 
-    // Clicking the generic card opens the in-app preview dialog (it does NOT download).
-    await genericCard.click()
+    // Clicking a generic card opens the in-app preview dialog (it does NOT download).
+    // The ZIP card is picked deliberately: application/zip has no safe representation,
+    // so the dialog opens in the "preview unavailable" state — the one state that used
+    // to render a SECOND, inline Download beside the footer's (#181). Picking the .txt
+    // card instead would open the text preview and the count below would prove nothing.
+    await page.getByRole('button', { name: 'Open archive.zip', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
+    await expect(dialog.getByText("Preview isn't available for this file type.")).toBeVisible()
 
-    // The ONLY control that targets the original file is a labelled Download, pointing at the
-    // original (no size=… derived variant).
-    const download = page.locator('.file-preview-download').first()
+    // EXACTLY ONE control targets the original file: a single labelled Download in the
+    // dialog footer, pointing at the original (no size=… derived variant). Counted, not
+    // found — `.first()` is blind to a duplicate.
+    const download = dialog.locator('a.file-preview-download')
+    await expect(download).toHaveCount(1)
     await expect(download).toBeVisible()
     let href = await download.getAttribute('href')
     expect(href).toMatch(/\/file\/[^/]+\/data/)
@@ -289,7 +309,8 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await expect(page.getByRole('dialog')).toBeVisible()
     await expect(page.locator('.pdf-viewer')).toBeVisible()
     await expect(page.getByRole('dialog').getByText('Open in new tab')).toHaveCount(0)
-    const dialogDownload = page.locator('.file-preview-download').first()
+    const dialogDownload = page.getByRole('dialog').locator('a.file-preview-download')
+    await expect(dialogDownload).toHaveCount(1)
     await expect(dialogDownload).toBeVisible()
     href = await dialogDownload.getAttribute('href')
     expect(href).toMatch(/\/file\/[^/]+\/data/)
@@ -299,6 +320,56 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)
   } finally {
+    // A body failure leaves the dialog open, and its modal mask then intercepts
+    // deleteDoc's click — the teardown error would REPLACE the real one.
+    await page.keyboard.press('Escape').catch(() => {})
+    await deleteDoc(page, id)
+  }
+})
+
+// #181 — the footer Download is now the SINGLE affordance, so it has to be operable
+// with the keyboard alone: if Tab could not reach it, or Enter did not fire it, removing
+// the inline duplicate would have taken the only reachable control away from
+// keyboard-only and screen-reader users. This runs under both Playwright projects, so
+// the mobile (Pixel 5) viewport is covered as well as desktop.
+test('the single Download is reachable AND activatable by keyboard alone (#181)', async ({ page }) => {
+  const id = await seedDoc(page.request, unique('kbd-dl'), [zipFile('archive.zip')])
+  try {
+    await page.goto(`/#/document/view/${id}/content`)
+    await page.getByRole('button', { name: 'Open archive.zip', exact: true }).click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText("Preview isn't available for this file type.")).toBeVisible()
+
+    const download = dialog.locator('a.file-preview-download')
+    await expect(download).toHaveCount(1)
+
+    // Tab through the dialog's focus trap until focus lands on the Download anchor.
+    let focused = false
+    for (let i = 0; i < 10 && !focused; i++) {
+      await page.keyboard.press('Tab')
+      focused = await download.evaluate((el) => el === document.activeElement)
+    }
+    expect(focused, 'Tab reaches the footer Download link').toBe(true)
+    expect(await download.getAttribute('href')).toMatch(/\/file\/[^/]+\/data/)
+
+    // ACTIVATION, not merely reachability: Enter on the focused anchor must actually
+    // start the download of the original file. Focus + a correct href would still pass
+    // if the control were inert.
+    const [downloadEvent] = await Promise.all([
+      page.waitForEvent('download'),
+      page.keyboard.press('Enter'),
+    ])
+    expect(downloadEvent.suggestedFilename()).toBe('archive.zip')
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  } finally {
+    // Dismiss the dialog before teardown navigates: if the body failed with the dialog
+    // still open, its modal mask intercepts deleteDoc's click and the teardown error
+    // would REPLACE the real failure.
+    await page.keyboard.press('Escape').catch(() => {})
     await deleteDoc(page, id)
   }
 })

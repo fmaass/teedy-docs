@@ -53,9 +53,10 @@ const imageUrl = computed(() =>
 )
 const pdfUrl = computed(() => (props.file ? getFileUrl(props.file.id, undefined, props.shareId) : ''))
 
-// Every failure mode degrades to the SAME "preview unavailable + Download" state, so no
-// preview path can ever leave a broken raster, a partial viewer, or an unlabelled
-// original-URL control on screen.
+// Every failure mode degrades to the SAME "preview unavailable" state, so no preview path
+// can ever leave a broken raster, a partial viewer, or an unlabelled original-URL control
+// on screen. That state offers no Download of its own — the footer's is the dialog's
+// single Download affordance in every mode (#181).
 //   - text: extracted content (size=content); a failed/forbidden fetch → unavailable.
 //   - image: the size=web raster; an <img> load error → unavailable.
 //   - pdf : the pdf.js viewer; a load/render error (emitted by PdfViewer) → unavailable.
@@ -165,14 +166,12 @@ onUnmounted(() => {
       <pre v-else-if="previewMode === 'text'" class="file-preview-text">{{ textContent }}</pre>
 
       <!-- Any other case — unsupported type, a failed text/image/pdf load: nothing safe to
-           render inline, so the only action offered is an explicit Download of the original. -->
+           render inline, so this states the fact and stops. It deliberately renders NO
+           Download of its own: the footer's is always present, and a second copy here put
+           two identical controls on screen at once (#181). -->
       <div v-else class="file-preview-status file-preview-unavailable">
         <i class="pi pi-file" aria-hidden="true" />
         <span>{{ t('ui.file_view.preview_unavailable') }}</span>
-        <a class="file-preview-download file-preview-download-inline" :href="downloadUrl" :download="file.name ?? ''">
-          <i class="pi pi-download" aria-hidden="true" />
-          <span>{{ t('download') }}</span>
-        </a>
       </div>
     </div>
 
@@ -241,8 +240,8 @@ onUnmounted(() => {
   font-size: 2rem;
 }
 
-/* Download control: the sole affordance that targets the original attachment URL. Styled
-   to read as a secondary button in both the footer and the unavailable state. */
+/* Download control: the dialog's single footer affordance, and the sole thing that targets
+   the original attachment URL. Styled to read as a secondary button. */
 .file-preview-download {
   display: inline-flex;
   align-items: center;
@@ -261,8 +260,5 @@ onUnmounted(() => {
   border-color: var(--p-primary-color);
   color: var(--p-primary-color);
   background: var(--p-content-hover-background);
-}
-.file-preview-download-inline {
-  margin-top: 0.25rem;
 }
 </style>
