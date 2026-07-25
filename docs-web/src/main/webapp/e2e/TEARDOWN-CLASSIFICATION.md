@@ -196,16 +196,20 @@ to `guardedTeardown`. `e2e/lint-fixtures/teardown-in-finally.ts` is a file that 
 ## Measured effect on the corpus
 
 A clean-start container, full functional suite (desktop + mobile), counted through the admin API
-before and after. Every run starts from **0 documents, 0 tags, 2 users (admin, guest), 0 trashed**.
+before and after. Every run starts from **0 documents, 0 tags, 2 users (admin, guest), 0 trashed**, so
+each row below is what that run LEFT BEHIND.
 
 | run | active documents | trashed | tags | users | failures |
 |---|---|---|---|---|---|
-| baseline (`main` @ `9946787d`) | 40 | 10 | 10 | 3 | 4 |
+| pre-fixture baseline (`main` @ `9946787d`) | 40 | 10 | 10 | 3 | 4 |
 | after this phase, pass 1 | 31 | 1 | 9 | 3 | 3 |
 | after this phase, pass 2 | 31 | 1 | 9 | 3 | 1 |
 
-The two post-phase passes produce **identical** counts despite failing different tests — which is the
-property the phase is really after: teardown no longer depends on the body succeeding.
+What the table asserts is run-to-run **equality**, not agreement with the baseline row: the two
+post-phase passes finish on **identical** counts despite failing different tests, and that equality is
+the no-leak proof — teardown no longer depends on the body succeeding. The absolute level is *expected*
+to differ from the pre-fixture baseline, and it drops (40/10/10/3 → 31/1/9/3) precisely because the
+fixture now cleans up what `finally`-based teardown used to leak.
 
 The residual 31 documents / 9 tags / 1 user are **not** from migrated blocks. They come from specs
 that never had a `finally` and therefore never had teardown to migrate — `comments`, `confirm-locale`,

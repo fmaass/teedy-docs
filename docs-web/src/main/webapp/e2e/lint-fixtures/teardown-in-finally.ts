@@ -10,13 +10,14 @@
 // stops reporting every case below. Nothing imports it and Playwright never collects it
 // (it is not a `*.spec.ts`).
 //
-// EXPECTED: 6 `no-restricted-syntax` errors — one per numbered case, none for `ok()`.
+// EXPECTED: 11 `no-restricted-syntax` errors — one per numbered case, none for `ok()`.
 
 declare const page: { request: { delete(url: string): Promise<unknown> } }
 declare const request: { post(url: string, init: unknown): Promise<unknown> }
 declare const expect: (actual: unknown) => { toBe(v: unknown): Promise<void> }
 declare const ids: string[]
 declare const id: string
+declare const other: string
 declare function guardedTeardown(label: string, fn: () => unknown): Promise<void>
 
 // 1. The plain awaited inline cleanup call.
@@ -70,6 +71,54 @@ export async function configRestoreInFinally(): Promise<void> {
     /* body */
   } finally {
     await request.post('/api/app/guest_login', { form: { enabled: false } })
+  }
+}
+
+// --- Expression wrappers. Each of these is a real cleanup call that an earlier form of the
+// --- rule let through, because the call was no longer a DIRECT child of the statement.
+
+// 7. Short-circuit guard — the idiomatic one-line replacement for case 3's `if`.
+export async function logicalGuardCleanup(): Promise<void> {
+  try {
+    /* body */
+  } finally {
+    id && page.request.delete(`/api/document/${id}`)
+  }
+}
+
+// 8. The same guard, awaited: the wrapper sits between the `await` and the call.
+export async function awaitedLogicalGuardCleanup(): Promise<void> {
+  try {
+    /* body */
+  } finally {
+    await (id && page.request.delete(`/api/document/${id}`))
+  }
+}
+
+// 9. Ternary — teardown chosen between two branches.
+export async function conditionalExpressionCleanup(): Promise<void> {
+  try {
+    /* body */
+  } finally {
+    await (id ? page.request.delete(`/api/document/${id}`) : Promise.resolve())
+  }
+}
+
+// 10. Comma operator — two cleanups packed into one statement.
+export async function sequenceCleanup(): Promise<void> {
+  try {
+    /* body */
+  } finally {
+    page.request.delete(`/api/document/${id}`), page.request.delete(`/api/document/${other}`)
+  }
+}
+
+// 11. `void` — the "I know it floats" spelling of case 2.
+export async function voidedCleanup(): Promise<void> {
+  try {
+    /* body */
+  } finally {
+    void page.request.delete(`/api/document/${id}`)
   }
 }
 

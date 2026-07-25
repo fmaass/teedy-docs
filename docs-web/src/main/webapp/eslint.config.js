@@ -44,6 +44,19 @@ export default [
   //
   // e2e/lint-fixtures/** is excluded from `npm run lint` and asserted the other way round
   // by `npm run lint:teardown-rule`, which fails if this rule stops firing.
+  //
+  // The three selectors below are a WHITELIST INVERSION, not an enumeration of bad shapes.
+  // An earlier form matched only the finalizer's direct `ExpressionStatement > CallExpression`
+  // (optionally through one `AwaitExpression`), so every expression wrapper slipped through —
+  // `id && request.delete(...)`, `id ? a() : b()`, `a(), b()`, `void a()`, `await (id && a())`.
+  // Rather than chase each wrapper, the rule now permits exactly two statement shapes in a
+  // finalizer — `guardedTeardown(...)` and `await guardedTeardown(...)` — and rejects everything
+  // else at the TOP of the expression, which covers wrappers of any depth or kind (including
+  // TS-only ones) and reports each offending statement exactly once.
+  //
+  // Out of static reach, accepted: a locally-shadowed `guardedTeardown` (a same-named local
+  // binding that is not the real helper) passes the name check — ESLint has no scope/type
+  // resolution here, and code review is the control for that counterfeit.
   {
     files: ['e2e/**/*.ts'],
     languageOptions: {
@@ -55,15 +68,15 @@ export default [
         'error',
         {
           selector:
-            "TryStatement > BlockStatement.finalizer > ExpressionStatement > AwaitExpression > CallExpression:not([callee.name='guardedTeardown'])",
+            "TryStatement > BlockStatement.finalizer > ExpressionStatement > :not(CallExpression[callee.name='guardedTeardown'], AwaitExpression)",
           message:
-            'No teardown in `finally` (#187): an awaited cleanup call here supersedes the body\'s real failure. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+            'No teardown in `finally` (#187): a cleanup call here supersedes the body\'s real failure — and wrapping it in `&&`, `?:`, `,` or `void` does not change that. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
         },
         {
           selector:
-            "TryStatement > BlockStatement.finalizer > ExpressionStatement > CallExpression:not([callee.name='guardedTeardown'])",
+            "TryStatement > BlockStatement.finalizer > ExpressionStatement > AwaitExpression > :not(CallExpression[callee.name='guardedTeardown'])",
           message:
-            'No teardown in `finally` (#187): a cleanup call here supersedes the body\'s real failure. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+            'No teardown in `finally` (#187): an awaited cleanup call here supersedes the body\'s real failure — `await` of anything but a direct `guardedTeardown(...)` call is banned, including `await (cond && cleanup())`. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
         },
         {
           selector: 'TryStatement > BlockStatement.finalizer > :not(ExpressionStatement)',

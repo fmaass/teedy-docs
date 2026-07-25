@@ -1214,6 +1214,7 @@
         "summary": "Reverse the direction of a document relation",
         "operationId": "post_document_relation_swap",
         "requestBody": {
+          "required": true,
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {

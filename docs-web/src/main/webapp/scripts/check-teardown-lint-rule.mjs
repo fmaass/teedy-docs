@@ -9,7 +9,7 @@
 import { spawnSync } from 'node:child_process'
 
 const FIXTURE = 'e2e/lint-fixtures/teardown-in-finally.ts'
-const EXPECTED_CASES = 6
+const EXPECTED_CASES = 11
 
 const run = spawnSync('npx', ['eslint', '--format', 'json', FIXTURE], {
   cwd: new URL('..', import.meta.url).pathname,
