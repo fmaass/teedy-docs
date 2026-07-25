@@ -1,21 +1,27 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import FileActionMenu from './FileActionMenu.vue'
 
 // The per-file action menu is the reusable surface the file list (and, later,
 // #73 "Edit pages" / #117 "Upload new version") mount their per-file actions onto.
-// Its load-bearing contract: preview + download + version history are always available
-// (read actions), while rename + delete + the cover action are gated on `writable`, and an
-// `extra` slot lets callers inject more writable-only actions. The cover action toggles
+// Its load-bearing contract: preview + copy-link + download + version history are always
+// available (read actions), while rename + delete + the cover action are gated on `writable`,
+// and an `extra` slot lets callers inject more writable-only actions. The cover action toggles
 // between "set as cover" (when this file is not the cover) and "remove as cover" (when it is).
 // t() is stubbed to the key (with the interpolated name appended) so assertions target the
-// stable aria-label keys, not copy. getFileUrl is a dependency, stubbed deterministically.
+// stable aria-label keys, not copy. getFileUrl/buildFileLink are dependencies, stubbed
+// deterministically.
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${p.name}` : k),
   }),
 }))
-vi.mock('../api/file', () => ({ getFileUrl: (id: string) => `/api/file/${id}/data` }))
+vi.mock('../api/file', () => ({
+  getFileUrl: (id: string) => `/api/file/${id}/data`,
+  buildFileLink: (documentId: string, fileId: string) => `https://app/#/document/view/${documentId}/content?file=${fileId}`,
+}))
+const toastAdd = vi.fn()
+vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAdd }) }))
 
 const file = { id: 'f1', name: 'report.pdf', mimetype: 'application/pdf' }
 const PREVIEW_LABEL = 'ui.file_view.open_file:report.pdf'
@@ -27,10 +33,34 @@ function mountMenu(
   target: { id: string; name: string | null; mimetype: string } = file,
 ) {
   return mount(FileActionMenu, {
-    props: { file: target, writable, isCover },
+    props: { file: target, writable, isCover, documentId: 'doc-7' },
     global: { directives: { tooltip: {} } },
     slots,
   })
+}
+
+// A writeText that resolves/rejects on demand, installed on a navigator.clipboard that
+// jsdom does not provide at all. `configurable` so each test can replace it — and so the
+// "no clipboard API at all" case (an http origin, which is NOT a secure context) can
+// delete it again.
+function stubClipboard(writeText: ((text: string) => Promise<void>) | null) {
+  if (writeText === null) {
+    Reflect.deleteProperty(navigator, 'clipboard')
+    return
+  }
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText },
+    configurable: true,
+    writable: true,
+  })
+}
+
+async function clickCopyLink(wrapper: ReturnType<typeof mountMenu>) {
+  await wrapper
+    .findAll('button')
+    .find((b) => b.attributes('aria-label') === 'ui.file_view.copy_link')!
+    .trigger('click')
+  await flushPromises()
 }
 
 function labels(wrapper: ReturnType<typeof mountMenu>) {
@@ -38,11 +68,12 @@ function labels(wrapper: ReturnType<typeof mountMenu>) {
 }
 
 describe('FileActionMenu', () => {
-  it('writable, not the cover: exposes history, preview, set-as-cover, move, rename and delete', () => {
+  it('writable, not the cover: exposes history, preview, copy-link, set-as-cover, move, rename and delete', () => {
     const wrapper = mountMenu(true)
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
       PREVIEW_LABEL,
+      'ui.file_view.copy_link',
       'ui.set_as_cover',
       'ui.move_file',
       'rename',
@@ -55,6 +86,7 @@ describe('FileActionMenu', () => {
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
       PREVIEW_LABEL,
+      'ui.file_view.copy_link',
       'ui.remove_as_cover',
       'ui.move_file',
       'rename',
@@ -63,9 +95,17 @@ describe('FileActionMenu', () => {
   })
 
   it('read-only: exposes ONLY the read actions — no cover action, no rename, no delete', () => {
-    expect(labels(mountMenu(false))).toEqual(['ui.versions.title', PREVIEW_LABEL])
+    expect(labels(mountMenu(false))).toEqual([
+      'ui.versions.title',
+      PREVIEW_LABEL,
+      'ui.file_view.copy_link',
+    ])
     // Even when this file is the cover, a read-only viewer gets no cover mutation.
-    expect(labels(mountMenu(false, {}, true))).toEqual(['ui.versions.title', PREVIEW_LABEL])
+    expect(labels(mountMenu(false, {}, true))).toEqual([
+      'ui.versions.title',
+      PREVIEW_LABEL,
+      'ui.file_view.copy_link',
+    ])
   })
 
   it('emits versions/rename/delete with the file when the buttons are clicked', async () => {
@@ -136,6 +176,71 @@ describe('FileActionMenu', () => {
     const anchor = wrapper.find('a')
     expect(anchor.attributes('download')).toBe('')
     expect(anchor.attributes('href')).toBe('/api/file/f9/data')
+  })
+
+  // #192 — copy link. A READ action: it sits above the writable gate, between preview and
+  // download, so a read-only viewer can hand the exact file to a colleague. The recipient's
+  // authorization is unchanged (the document's own READ grant) — the link carries no token.
+  describe('copy link (#192)', () => {
+    beforeEach(() => {
+      toastAdd.mockReset()
+      stubClipboard(() => Promise.resolve())
+    })
+
+    it('sits between preview and download, in both writable and read-only mode', () => {
+      for (const writable of [true, false]) {
+        const wrapper = mountMenu(writable)
+        // The whole cluster in DOM order, anchors included — placement is the assertion.
+        const order = wrapper
+          .findAll('button, a')
+          .map((el) => el.attributes('aria-label'))
+        const preview = order.indexOf(PREVIEW_LABEL)
+        const copy = order.indexOf('ui.file_view.copy_link')
+        const download = order.indexOf('download')
+        expect(copy, `writable=${writable}: copy link is rendered`).toBeGreaterThan(-1)
+        expect(copy, `writable=${writable}: copy link follows preview`).toBeGreaterThan(preview)
+        expect(copy, `writable=${writable}: copy link precedes download`).toBeLessThan(download)
+      }
+    })
+
+    it('writes the buildFileLink URL for THIS document/file pair to the clipboard', async () => {
+      const writeText = vi.fn(() => Promise.resolve())
+      stubClipboard(writeText)
+      await clickCopyLink(mountMenu(true))
+      expect(writeText).toHaveBeenCalledTimes(1)
+      expect(writeText).toHaveBeenCalledWith('https://app/#/document/view/doc-7/content?file=f1')
+    })
+
+    it('toasts success once the clipboard write resolves', async () => {
+      await clickCopyLink(mountMenu(true))
+      expect(toastAdd).toHaveBeenCalledTimes(1)
+      expect(toastAdd.mock.calls[0][0]).toMatchObject({
+        severity: 'success',
+        summary: 'ui.file_view.link_copied',
+      })
+    })
+
+    it('toasts an error when the clipboard write rejects (permission denied)', async () => {
+      stubClipboard(() => Promise.reject(new Error('denied')))
+      await clickCopyLink(mountMenu(false))
+      expect(toastAdd).toHaveBeenCalledTimes(1)
+      expect(toastAdd.mock.calls[0][0]).toMatchObject({
+        severity: 'error',
+        summary: 'ui.file_view.link_copy_failed',
+      })
+    })
+
+    it('toasts an error — never throws — when the browser exposes no clipboard API at all', async () => {
+      // An insecure (plain-http, non-localhost) origin has no navigator.clipboard: the
+      // property access itself throws, and it must land in the same error toast.
+      stubClipboard(null)
+      await clickCopyLink(mountMenu(true))
+      expect(toastAdd).toHaveBeenCalledTimes(1)
+      expect(toastAdd.mock.calls[0][0]).toMatchObject({
+        severity: 'error',
+        summary: 'ui.file_view.link_copy_failed',
+      })
+    })
   })
 
   it('renders the writable-only `extra` slot for callers to mount extra actions (#73/#117)', () => {

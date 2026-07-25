@@ -7,7 +7,12 @@ import FileListTable, { type FilePanelFile } from './FileListTable.vue'
 // The enriched authenticated file list. t() is stubbed to the key so assertions target
 // stable header/aria keys. getFileUrl is a dependency (stubbed to a deterministic URL).
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k) }) }))
-vi.mock('../api/file', () => ({ getFileUrl: (id: string) => `/api/file/${id}/data` }))
+vi.mock('../api/file', () => ({
+  getFileUrl: (id: string) => `/api/file/${id}/data`,
+  buildFileLink: (d: string, fid: string) => `https://app/#/document/view/${d}/content?file=${fid}`,
+}))
+// Each row's FileActionMenu now reports the copy-link outcome through a toast (#192).
+vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: vi.fn() }) }))
 
 function makeFile(over: Partial<FilePanelFile> = {}): FilePanelFile {
   return {
@@ -34,7 +39,7 @@ function mountTable(
   coverFileId: string | null = null,
 ) {
   return mount(FileListTable, {
-    props: { files, writable, coverFileId },
+    props: { files, writable, coverFileId, documentId: 'doc-1' },
     global: {
       plugins: [[PrimeVue, { theme: 'none' }]],
       directives: { tooltip: {} },

@@ -246,7 +246,11 @@
       "order_failed_hint": "Non è stato possibile salvare il nuovo ordine ed è stato ripristinato. Riprova.",
       "no_matches": "Nessun file corrisponde al filtro",
       "reorder_saved": "Ordine dei file salvato",
-      "reorder_failed": "Impossibile salvare l'ordine dei file"
+      "reorder_failed": "Impossibile salvare l'ordine dei file",
+      "copy_link": "Copia il link al file",
+      "link_copied": "Link del file copiato negli appunti",
+      "link_copy_failed": "Impossibile copiare il link del file",
+      "link_not_found": "Questo file non fa più parte di questo documento."
     },
     "pdf_organizer": {
       "edit_pages": "Modifica pagine",

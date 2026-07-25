@@ -246,7 +246,11 @@
       "order_failed_hint": "The new order could not be saved and was reverted. Try again.",
       "no_matches": "No files match the filter",
       "reorder_saved": "File order saved",
-      "reorder_failed": "Failed to save file order"
+      "reorder_failed": "Failed to save file order",
+      "copy_link": "Copy link to file",
+      "link_copied": "File link copied to clipboard",
+      "link_copy_failed": "Could not copy the file link",
+      "link_not_found": "That file is no longer part of this document."
     },
     "pdf_organizer": {
       "edit_pages": "Edit pages",

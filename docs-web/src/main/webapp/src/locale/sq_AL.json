@@ -246,7 +246,11 @@
       "order_failed_hint": "Renditja e re nuk mund të ruhej dhe u rikthye. Provoni përsëri.",
       "no_matches": "Asnjë skedar nuk përputhet me filtrin",
       "reorder_saved": "Renditja e skedarëve u ruajt",
-      "reorder_failed": "Ruajtja e renditjes së skedarëve dështoi"
+      "reorder_failed": "Ruajtja e renditjes së skedarëve dështoi",
+      "copy_link": "Kopjo lidhjen e skedarit",
+      "link_copied": "Lidhja e skedarit u kopjua në kujtesën e fragmenteve",
+      "link_copy_failed": "Lidhja e skedarit nuk u kopjua dot",
+      "link_not_found": "Ky skedar nuk është më pjesë e këtij dokumenti."
     },
     "pdf_organizer": {
       "edit_pages": "Redakto faqet",

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // Mock the shared axios client (a dependency of file.ts). The unit under test is
 // file.ts's own path building and response unwrapping, exercised for real.
@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { getFileVersions, getFileList, getFileUrl, setRotation, uploadFile, toPercent, type FileVersion } from './file'
+import { getFileVersions, getFileList, getFileUrl, setRotation, uploadFile, toPercent, buildFileLink, type FileVersion } from './file'
 
 describe('getFileVersions', () => {
   beforeEach(() => {
@@ -210,5 +210,42 @@ describe('uploadFile (progress plumbing)', () => {
     const cfg = config as { onUploadProgress: (e: { loaded: number; total?: number }) => void }
     cfg.onUploadProgress({ loaded: 100, total: 400 })
     expect(seen).toEqual([25])
+  })
+})
+
+// #192 — the shareable deep link to one file of a document. Built exactly like
+// buildShareUrl (origin + current base path, any existing fragment stripped), but it
+// targets the AUTHENTICATED content route with ?file=<id>: the recipient's authorization
+// is the document's ordinary READ grant, never an anonymous share token.
+describe('buildFileLink', () => {
+  const original = window.location.href
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { value: new URL(original), writable: true })
+  })
+
+  function setHref(href: string) {
+    Object.defineProperty(window, 'location', { value: { href }, writable: true })
+  }
+
+  it('builds a hash-routed link to the document content route carrying ?file=', () => {
+    setHref('https://teedy.example.com/docs-web/')
+    expect(buildFileLink('doc-1', 'file-42')).toBe(
+      'https://teedy.example.com/docs-web/#/document/view/doc-1/content?file=file-42',
+    )
+  })
+
+  it('strips any existing hash fragment before appending the content route', () => {
+    setHref('https://teedy.example.com/#/document/view/doc-1/content?file=other')
+    expect(buildFileLink('doc-1', 'file-42')).toBe(
+      'https://teedy.example.com/#/document/view/doc-1/content?file=file-42',
+    )
+  })
+
+  it('percent-encodes both ids so an id with URL syntax cannot escape the link', () => {
+    setHref('https://teedy.example.com/')
+    expect(buildFileLink('doc/1?x', 'file 42&y')).toBe(
+      'https://teedy.example.com/#/document/view/doc%2F1%3Fx/content?file=file%2042%26y',
+    )
   })
 })

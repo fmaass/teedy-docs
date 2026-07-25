@@ -25,7 +25,14 @@ vi.mock('../../composables/usePreviewQueue', () => ({
     reprioritize: () => {},
   }),
 }))
+// DocumentViewContent syncs the preview to a `?file=` deep link (#192), so it now resolves
+// a route and a router. A static stand-in is enough here — this spec drives neither.
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ name: 'document-view-content', params: { id: 'doc-1' }, query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
 vi.mock('../../api/file', () => ({
+  buildFileLink: (d: string, fid: string) => `https://app/#/document/view/${d}/content?file=${fid}`,
   getFileUrl: (id: string) => `/api/file/${id}/data`,
   getFileList: (...a: unknown[]) => getFileListSpy(...a),
   setRotation: vi.fn(() => Promise.resolve({ data: { status: 'ok', rotation: 0 } })),

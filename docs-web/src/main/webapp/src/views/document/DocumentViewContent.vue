@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import DOMPurify from 'dompurify'
 import { getFileUrl, deleteFile, renameFile, uploadFile, setRotation, reorderFiles, getFileList, moveFile } from '../../api/file'
@@ -45,6 +46,8 @@ import { injectDocument } from './documentKey'
 
 const doc = injectDocument()
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
@@ -520,6 +523,148 @@ function openPreview(file: PreviewFile) {
   previewFile.value = { id: file.id, name: file.name, mimetype: file.mimetype, rotation: file.rotation }
   previewVisible.value = true
 }
+
+// --- File deep link (#192) ---------------------------------------------------------
+// `?file=<id>` on this route and the preview dialog are two views of ONE piece of state,
+// kept in sync in both directions:
+//
+//   URL → preview  a known id opens the preview on that file as soon as the document's
+//                  files have resolved; an unknown/stale id (deleted, or moved to another
+//                  document) opens nothing, is cleared out of the URL and warns once.
+//   preview → URL  opening writes the key, closing removes it — always by REPLACE, never
+//                  push, exactly like the DocumentList filter params: a preview is a view
+//                  of the current page, not a history entry of its own.
+//
+// The two directions feed each other (a replace re-fires the route watcher, which would
+// re-open the preview, which would replace again), so BOTH writers are guarded by a
+// value-equality check against the state the other side already holds. `syncFileParam` is
+// the only place the URL is written, and it returns early when the URL already says what
+// the app shows; `hydrateFromRoute` returns early when the preview already shows what the
+// URL says.
+//
+// The query is edited SURGICALLY ({...route.query} minus/plus the one key) rather than
+// rebuilt, so any other param on the route — present or future — survives untouched.
+
+// The id whose "no such file" warning has already been shown. The clearing replace is
+// asynchronous, so a document refetch can re-run the resolution while the dead id is still
+// in the URL; without this the same dead link would toast on every refetch.
+let warnedMissingId: string | null = null
+
+// The `file` value this component last reconciled with, which distinguishes "the URL never
+// carried a param" from "the URL carried one and it was taken away". Only the latter closes
+// a preview. The same asynchrony is why: a refetch landing between the user opening the
+// preview and the replace arriving would otherwise see no param yet and close the dialog
+// the user had just opened.
+let appliedFileParam: string | null = null
+
+// The scalar `file` param, or undefined when absent OR malformed. Repeated params arrive as
+// an array (?file=a&file=b) and name no single file, so they are inactive — and, like
+// DocumentList's invalid filter values, canonicalized out of the URL rather than left to sit.
+const fileParam = computed(() => {
+  const raw = route.query.file
+  return typeof raw === 'string' && raw ? raw : undefined
+})
+
+// Sentinel for a param that IS present but names no single file (repeated key, or bare
+// `?file=`). It can never equal a target id, so such a value always gets rewritten instead
+// of being mistaken for "absent" by the equality guard below and left in the URL forever.
+const MALFORMED_FILE_PARAM = Symbol('malformed file param')
+
+function currentFileParam(): string | undefined | typeof MALFORMED_FILE_PARAM {
+  const raw = route.query.file
+  if (raw === undefined) return undefined
+  return typeof raw === 'string' && raw ? raw : MALFORMED_FILE_PARAM
+}
+
+// The target of a replace that has been issued but is not yet visible in `route`. Two
+// distinct writers can ask for the SAME replacement in one tick — the missing-file branch
+// clears the param and, by closing the stale preview, makes the preview watcher ask to
+// clear it too — and a refetch arriving before the navigation settles re-runs the whole
+// resolution against a URL that still holds the old value. Both would re-issue an identical
+// replace. `undefined` means nothing is in flight; `null` is a real target ("remove the
+// key"), which is why absence cannot be spelled as null here.
+let pendingFileParam: string | null | undefined = undefined
+
+function syncFileParam(fileId: string | null) {
+  const current = currentFileParam()
+  const target = fileId ?? undefined
+  // Loop guard AND no-op guard: the URL already carries exactly this value, and nothing
+  // this component asked for is outstanding any more.
+  if (target === current) {
+    pendingFileParam = undefined
+    return
+  }
+  // The identical write is already on its way — asking twice changes nothing.
+  if (pendingFileParam !== undefined && (pendingFileParam ?? undefined) === target) return
+  pendingFileParam = fileId
+  const query = { ...route.query }
+  if (fileId) query.file = fileId
+  else delete query.file
+  router.replace({ name: 'document-view-content', params: route.params, query })
+}
+
+function hydrateFromRoute() {
+  // A replace this component issued has landed — nothing is outstanding any more.
+  if (pendingFileParam !== undefined && currentFileParam() === (pendingFileParam ?? undefined)) {
+    pendingFileParam = undefined
+  }
+  // An unresolved document is not a missing file: wait for the detail query before judging
+  // the id. `files` is always present on a loaded document.
+  if (!doc.value) return
+  const raw = route.query.file
+  const id = fileParam.value
+  if (!id) {
+    // Malformed-but-present (array / empty) values are canonicalized away…
+    if (raw !== undefined) syncFileParam(null)
+    // …and a param this component had ALREADY applied, now gone (Back, or an in-app
+    // navigation that dropped it), closes the preview it had opened. Writing the URL back
+    // here is what the equality guard in syncFileParam prevents.
+    if (appliedFileParam !== null && previewVisible.value) {
+      previewVisible.value = false
+      previewFile.value = null
+    }
+    appliedFileParam = null
+    return
+  }
+  const file = (doc.value.files ?? []).find((f) => f.id === id)
+  if (!file) {
+    // The file the link named is gone (deleted, or moved to another document). The URL is
+    // authoritative, so ANY preview closes here — not just one of this id. A navigation to
+    // a dead link while file A is on screen must not leave A standing: the user would go on
+    // reading A while the address bar names, and then disclaims, something else.
+    if (previewVisible.value) {
+      previewVisible.value = false
+      previewFile.value = null
+    }
+    appliedFileParam = null
+    syncFileParam(null)
+    if (warnedMissingId !== id) {
+      warnedMissingId = id
+      toast.add({ severity: 'warn', summary: t('ui.file_view.link_not_found'), life: 4000 })
+    }
+    return
+  }
+  appliedFileParam = id
+  // Already showing it — this is the arm of the guard that stops open→replace→open.
+  if (previewVisible.value && previewFile.value?.id === id) return
+  openPreview(file)
+}
+
+// Re-resolve on BOTH inputs: the param itself (cold load, in-app Back, a second deep link)
+// and the document's file set (the cold-load case where the id arrives before the files,
+// and a refetch that removes the previewed file).
+watch(
+  [() => route.query.file, () => doc.value?.id, () => (doc.value?.files ?? []).map((f) => f.id).join(',')],
+  () => hydrateFromRoute(),
+  { immediate: true },
+)
+
+// The other direction. Collapsing "which file is on screen" into one value keeps open,
+// close and re-target on a single writer.
+watch(
+  () => (previewVisible.value ? (previewFile.value?.id ?? null) : null),
+  (id) => syncFileParam(id),
+)
 
 // Commit an inline rename requested by the grid tile or the list. Both edit surfaces
 // funnel through here — the single write boundary — so a read-only document (or a mid-
@@ -1070,6 +1215,7 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :document-id="doc.id"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @preview="openPreview"
@@ -1112,6 +1258,7 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :document-id="doc.id"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @preview="openPreview"
@@ -1158,6 +1305,7 @@ onUnmounted(() => {
                 v-else
                 :file="file"
                 :writable="doc.writable"
+                :document-id="doc.id"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
                 @preview="openPreview"
@@ -1185,6 +1333,7 @@ onUnmounted(() => {
         ref="fileListRef"
         :files="doc.files"
         :writable="doc.writable"
+        :document-id="doc.id"
         :cover-file-id="doc.file_id_cover"
         @open="openPreview"
         @rename="renameFileTo"
@@ -1517,6 +1666,24 @@ onUnmounted(() => {
   padding: 0.125rem 0.375rem;
   border-top: 1px solid var(--p-content-border-color);
   min-height: 2.25rem;
+}
+/* The cluster WRAPS inside the card, at every viewport (#192).
+   A grid tile is `minmax(280px, 1fr)` inside a 960px-capped page, so a tile is ~336px wide
+   on a 360px phone and no wider on a large screen — while the worst-case writable PDF
+   cluster is TEN 36px controls. They cannot share one line, and because this is a flex row
+   the consequence is not an overflow some other rule would catch: the buttons SHRINK.
+   Measured against a deliberately unwrapped build at 360px: 30px per control instead of 36,
+   so every control in the grid becomes 17% smaller than the identical control in the list,
+   and the squeeze deepens with each control added until it clips outright.
+   Wrapping has to be set on `.file-action-menu` itself, not on this row: the menu is ONE
+   inline-flex child here, so a `flex-wrap` on the row alone would never break the icons.
+   The card has no fixed height, so it simply grows by a line.
+   e2e/file-list-geometry.spec.ts measures the painted control WIDTH at 360px and 393px. */
+.file-card-actions :deep(.file-action-menu) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 0.125rem;
+  min-width: 0;
 }
 .grid-rename-input {
   width: 100%;

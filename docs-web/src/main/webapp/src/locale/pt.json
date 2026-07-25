@@ -246,7 +246,11 @@
       "order_failed_hint": "A nova ordem não pôde ser guardada e foi revertida. Tente novamente.",
       "no_matches": "Nenhum ficheiro corresponde ao filtro",
       "reorder_saved": "Ordem dos ficheiros guardada",
-      "reorder_failed": "Falha ao guardar a ordem dos ficheiros"
+      "reorder_failed": "Falha ao guardar a ordem dos ficheiros",
+      "copy_link": "Copiar ligação para o ficheiro",
+      "link_copied": "Ligação do ficheiro copiada para a área de transferência",
+      "link_copy_failed": "Não foi possível copiar a ligação do ficheiro",
+      "link_not_found": "Esse ficheiro já não faz parte deste documento."
     },
     "pdf_organizer": {
       "edit_pages": "Editar páginas",

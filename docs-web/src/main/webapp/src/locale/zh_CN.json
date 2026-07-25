@@ -246,7 +246,11 @@
       "order_failed_hint": "新顺序无法保存，已还原。请重试。",
       "no_matches": "没有符合筛选条件的文件",
       "reorder_saved": "文件顺序已保存",
-      "reorder_failed": "保存文件顺序失败"
+      "reorder_failed": "保存文件顺序失败",
+      "copy_link": "复制文件链接",
+      "link_copied": "文件链接已复制到剪贴板",
+      "link_copy_failed": "无法复制文件链接",
+      "link_not_found": "该文件已不在此文档中。"
     },
     "pdf_organizer": {
       "edit_pages": "编辑页面",

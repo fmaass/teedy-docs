@@ -246,7 +246,11 @@
       "order_failed_hint": "Die neue Reihenfolge konnte nicht gespeichert werden. Die vorherige Reihenfolge wurde wiederhergestellt. Versuche es erneut.",
       "no_matches": "Keine Dateien entsprechen dem Filter",
       "reorder_saved": "Dateireihenfolge gespeichert",
-      "reorder_failed": "Dateireihenfolge konnte nicht gespeichert werden"
+      "reorder_failed": "Dateireihenfolge konnte nicht gespeichert werden",
+      "copy_link": "Link zur Datei kopieren",
+      "link_copied": "Dateilink in die Zwischenablage kopiert",
+      "link_copy_failed": "Der Dateilink konnte nicht kopiert werden",
+      "link_not_found": "Diese Datei gehört nicht mehr zu diesem Dokument."
     },
     "pdf_organizer": {
       "edit_pages": "Seiten bearbeiten",

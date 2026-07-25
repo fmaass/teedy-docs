@@ -100,6 +100,22 @@ export function getFileUrl(
 }
 
 /**
+ * Build a shareable deep link to ONE file of a document (#192), modelled on
+ * buildShareUrl: origin + the app's current base path, any existing fragment stripped,
+ * then the hash route. It targets the AUTHENTICATED content route with `?file=<id>`, which
+ * opens that file's preview once the document loads.
+ *
+ * The link carries no credential of any kind: the recipient's authorization is the
+ * document's ordinary READ grant, exactly as if they had navigated there themselves. It is
+ * deliberately NOT the anonymous share URL — that is buildShareUrl's job and needs a share
+ * token. Both ids are percent-encoded so an id containing URL syntax cannot escape its slot.
+ */
+export function buildFileLink(documentId: string, fileId: string): string {
+  const base = window.location.href.split('#')[0]
+  return `${base}#/document/view/${encodeURIComponent(documentId)}/content?file=${encodeURIComponent(fileId)}`
+}
+
+/**
  * Persist an absolute clockwise rotation ({0,90,180,270}) for a file via
  * POST /api/file/:id/rotation (form-encoded). The backend regenerates the web/thumb rasters from
  * the ORIGINAL upright bytes, baking in the rotation; the original file and OCR content are

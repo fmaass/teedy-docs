@@ -37,6 +37,9 @@ export interface FilePanelFile {
 const props = defineProps<{
   files: FilePanelFile[]
   writable: boolean
+  // The document these files belong to. The rows carry no document id of their own, so it is
+  // threaded down for FileActionMenu's copy-link deep link (#192).
+  documentId: string
   // The document's explicit cover file id (#174), or null when the cover is derived from order. The
   // matching row shows a cover badge and offers "remove as cover"; every other row offers "set as
   // cover".
@@ -303,6 +306,7 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
       :rowHover="true"
       :reorderableRows="reorderEnabled"
       class="file-data-table"
+      :class="{ 'has-uploader': columns.uploader }"
       @row-reorder="onRowReorder"
       @row-dblclick="onRowDblclick"
       @sort="onSort"
@@ -416,6 +420,7 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
           <FileActionMenu
             :file="data"
             :writable="writable"
+            :document-id="documentId"
             :is-cover="!!coverFileId && data.id === coverFileId"
             @versions="emit('versions', data)"
             @preview="emit('open', data)"
@@ -572,27 +577,44 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
 }
 
 /* ---------------------------------------------------------------------------
-   Row geometry (#170). A writable PDF row carries NINE controls (the shared
-   FileActionMenu's eight plus the PDF page organizer). Measured in the running app,
-   each is 36px wide, so the cluster is 340px of icons — wider than the entire
+   Row geometry (#170, #192). A writable PDF row carries TEN controls (the shared
+   FileActionMenu's nine plus the PDF page organizer). Measured in the running app,
+   each is 36px wide, so the cluster is ~378px of icons — wider than the entire
    action area of a 360px phone, where 128px is left once the 8rem name floor and
    the handle/icon columns are paid for. A single-line cluster is therefore
    geometrically impossible on a phone, and the row is banded by measurement:
 
-     >= 1024px  Uploader shows (the widest optional column; the nine-icon cluster
-                plus all three metadata columns needs this much room)
-     >=  900px  action cluster on ONE line (it needs ~352px of column, which only
-                fits beside Created + Size from here up)
-     <=  899px  the cluster WRAPS inside its column, three icons per line
+     >= 1024px  Uploader may be enabled (the widest optional column). The page content
+                is capped at 960px by `.doc-view`, so this band has NO more room than
+                any other — a wider window buys nothing. Uploader + the ten-icon
+                cluster therefore does not fit on one line, and the cluster wraps
+                (see below) instead of the column being taken away.
+     >=  960px  the ten-icon cluster sits on ONE line — including at 960-1023px with the
+                Uploader PREFERENCE stored but the column hidden, which is the boundary
+                case the geometry gate pins
+     900-959px  the cluster takes two lines; the row is otherwise unchanged
+     <=  899px  the tightest metadata columns; the cluster wraps three per line
      <=  639px  Created + Size collapse too, and the column chooser goes with them
                 (it would otherwise offer choices that cannot take effect)
      <=  479px  the tightest cells — this is the band 360px and 393px land in, and
                 it satisfies F2's "all metadata columns collapse below 480px"
 
+   The WRAP itself is not banded — `.file-action-menu` may wrap at every width. What is
+   banded is the actions column's min-width FLOOR: 24.75rem (the whole cluster on one
+   line) from 960px up, back down to 12.5rem from 1024px up when the Uploader column is
+   RENDERING, and 8rem/7.5rem on phones. Expressing it as a floor rather than as a
+   breakpoint on the wrap is what lets the row absorb whatever combination of optional
+   columns and controls it is handed — the Uploader case in particular turns on a user
+   preference, which no media query can see. The preference outlives the width it was set
+   at, which is why its override is pinned to the band where the column is actually
+   painted (1024px+), not to the band where the one-line floor applies (960px+).
+
    NO control is ever hidden or moved behind an overlay: at every width every action
    of every row stays visible, unclipped and clickable — the cluster gets taller
-   instead of narrower. e2e/file-list-geometry.spec.ts is the standing gate, and it
-   measures the WORST-CASE row (writable PDF) at 360px, 393px and desktop.
+   instead of narrower. e2e/file-list-geometry.spec.ts is the standing gate; it
+   measures the WORST-CASE row (writable PDF) at 360px, 393px and desktop, the same
+   row with the Uploader column enabled across the 1024–1440 band, and the grid
+   card's own action row.
    --------------------------------------------------------------------------- */
 
 /* The name column absorbs the row's slack and ellipsizes. `max-width: 0` stops the
@@ -622,13 +644,70 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
 
 /* The cluster is right-aligned, so the cell's default 1rem gutters are dead space — and
    `.doc-view` caps the content at 960px, which is where a row carrying the Uploader column
-   AND the nine-icon cluster runs out of room (measured: 7px short with the default
-   gutters). Halving them is what makes that combination fit. */
+   AND the (then nine-icon) cluster ran out of room. Halving the gutters is what made that
+   combination fit; the tenth control (#192) needs another ~38px that the cap cannot supply,
+   which is what the wrap below is for.
+
+   `min-width` is the floor the auto-layout table may not squeeze past: without it the
+   wrapping cluster's min-content width is ONE icon, and the table would happily collapse
+   the column to a single vertical stack whenever another column wanted room. 12.5rem holds
+   five icons per line, so the worst case degrades to two tidy lines rather than ten. */
 .file-data-table :deep(td.file-col-actions),
 .file-data-table :deep(th.file-col-actions) {
   text-align: right;
   padding-left: 0.5rem;
   padding-right: 0.5rem;
+  min-width: 12.5rem;
+}
+
+/* Wrapping is unconditional (#192). The cluster grows DOWNWARDS when its column is tight
+   and stays on one line when it is not — no control is ever hidden, and no breakpoint has
+   to predict which combination of optional columns is active. Set on the menu itself, not
+   the cell: the menu is one inline-flex box, so a rule on the cell alone would never break
+   the icons. Rows have no fixed height, so the row simply gets taller. */
+.file-data-table :deep(td.file-col-actions .file-action-menu) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 0.125rem;
+}
+
+/* ONE LINE where the row can afford one. The name column is `width: 100%` precisely so it
+   absorbs the row's slack and ellipsizes (#170) — which means that the moment the cluster
+   became wrappable, the name column claimed everything and the cluster collapsed onto its
+   12.5rem floor even on a wide desktop (measured: three lines at 1280px). The floor is
+   therefore raised to the cluster's full one-line width in the band where that provably
+   fits: 24.75rem = ten 36px controls + nine 2px gaps + the halved 0.5rem gutters.
+
+   960px is where it fits, measured against the 960px content cap: 912px of content less
+   the handle (3rem), icon (3rem), Created (10rem), Size (7rem) and the 8rem name floor
+   leaves 20px of slack over the 396px cluster. Between 900 and 959px the base floor
+   applies and the cluster takes two lines — no control is lost either way. Nothing changes
+   above 1008px: `.doc-view` caps the content at 960px, so a wider window is not a roomier
+   row. */
+@media (min-width: 960px) {
+  .file-data-table :deep(td.file-col-actions),
+  .file-data-table :deep(th.file-col-actions) {
+    min-width: 24.75rem;
+  }
+}
+
+/* …except with the Uploader column actually SHOWING. It costs another 10rem, which the
+   content cap cannot supply at any viewport width — so that row wraps instead, and the
+   column survives. This is the one state a breakpoint could not express on its own: it
+   turns on a stored user preference.
+
+   `has-uploader` reflects that PREFERENCE, and the preference outlives the width it was set
+   at — the column itself is force-hidden below 1024px. So the override must be scoped to
+   the same band the column renders in: between 960 and 1023px a user who once enabled
+   Uploader sees no Uploader column, and must therefore keep the full one-line floor. Scoped
+   to `min-width: 960px` instead, the persisted preference would silently wrap those rows
+   for a column that is not on screen. */
+@media (min-width: 1024px) {
+  .file-data-table.has-uploader :deep(td.file-col-actions),
+  .file-data-table.has-uploader :deep(th.file-col-actions) {
+    min-width: 12.5rem;
+  }
 }
 
 @media (max-width: 1023px) {
@@ -656,20 +735,15 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
     width: 5rem;
   }
   /* Three 36px icons per line (8rem = 128px, less this band's 12px of cell padding,
-     holds 3 × 36 + 2 × 2 = 112). The cluster grows downwards, never sideways. The
-     padding is restated because the wide band's cell rule outranks the element-level
-     one above on specificity, media query or not. */
+     holds 3 × 36 + 2 × 2 = 112). It OVERRIDES the wide band's 12.5rem floor — the wrap
+     itself is unconditional and lives in the base rule above. The padding is restated
+     because the wide band's cell rule outranks the element-level one above on
+     specificity, media query or not. */
   .file-data-table :deep(td.file-col-actions),
   .file-data-table :deep(th.file-col-actions) {
     min-width: 8rem;
     padding-left: 0.375rem;
     padding-right: 0.375rem;
-  }
-  .file-data-table :deep(td.file-col-actions .file-action-menu) {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    row-gap: 0.125rem;
   }
 }
 

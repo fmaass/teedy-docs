@@ -246,7 +246,11 @@
       "order_failed_hint": "Le nouvel ordre n'a pas pu être enregistré et a été rétabli. Réessayez.",
       "no_matches": "Aucun fichier ne correspond au filtre",
       "reorder_saved": "Ordre des fichiers enregistré",
-      "reorder_failed": "Échec de l'enregistrement de l'ordre des fichiers"
+      "reorder_failed": "Échec de l'enregistrement de l'ordre des fichiers",
+      "copy_link": "Copier le lien du fichier",
+      "link_copied": "Lien du fichier copié dans le presse-papiers",
+      "link_copy_failed": "Impossible de copier le lien du fichier",
+      "link_not_found": "Ce fichier ne fait plus partie de ce document."
     },
     "pdf_organizer": {
       "edit_pages": "Modifier les pages",
