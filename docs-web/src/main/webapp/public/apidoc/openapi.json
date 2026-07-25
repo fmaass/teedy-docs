@@ -2961,6 +2961,66 @@
       }
     },
     "/savedfilter/{id}": {
+      "post": {
+        "tags": [
+          "savedfilter"
+        ],
+        "summary": "Update a saved filter (rename and/or re-capture its query)",
+        "description": "Teedy convention: PUT creates, POST /{id} updates. Only the name and the query are mutable; the owner, the id and the create date are never modified. The create path's validation applies verbatim.",
+        "operationId": "post_savedfilter_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9\\-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "query"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Canonical URL query string; keys must be a subset of tags, exclude, mode, search, workflow, with no repeated key and no empty pair"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ValidationError when the name or query is missing, empty, overlength or carries an unsupported/repeated key; AlreadyExistingFilter when another saved filter of the same user already uses the name"
+          },
+          "403": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "No saved filter with this id is owned by the calling user (a foreign id is indistinguishable from an unknown one)"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "savedfilter"

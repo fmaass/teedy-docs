@@ -1133,7 +1133,18 @@
       "delete_failed": "Nie udało się usunąć filtra",
       "delete_title": "Usuń zapisany filtr",
       "delete_button": "Usuń zapisany filtr „{name}”",
-      "delete_confirm": "Usunąć zapisany filtr „{name}”?"
+      "delete_confirm": "Usunąć zapisany filtr „{name}”?",
+      "search_placeholder": "Szukaj filtrów",
+      "no_matches": "Brak pasujących filtrów",
+      "sort_ascending": "Sortuj od A do Z",
+      "sort_descending": "Sortuj od Z do A",
+      "rename_button": "Zmień nazwę zapisanego filtra „{name}”",
+      "rename_title": "Zmień nazwę zapisanego filtra",
+      "renamed": "Zmieniono nazwę filtra",
+      "rename_failed": "Nie udało się zmienić nazwy filtra",
+      "replace_title": "Zastąp zapisany filtr",
+      "replace_confirm": "Zapisany filtr o nazwie „{name}” już istnieje. Zastąpić go bieżącym filtrem?",
+      "replaced": "Zastąpiono filtr"
     },
     "favorite": {
       "add": "Dodaj do ulubionych",

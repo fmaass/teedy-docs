@@ -1133,7 +1133,18 @@
       "delete_failed": "Fshirja e filtrit dështoi",
       "delete_title": "Fshi filtrin e ruajtur",
       "delete_button": "Fshi filtrin e ruajtur \"{name}\"",
-      "delete_confirm": "Të fshihet filtri i ruajtur \"{name}\"?"
+      "delete_confirm": "Të fshihet filtri i ruajtur \"{name}\"?",
+      "search_placeholder": "Kërko filtra",
+      "no_matches": "Asnjë filtër nuk përputhet",
+      "sort_ascending": "Rendit nga A te Z",
+      "sort_descending": "Rendit nga Z te A",
+      "rename_button": "Riemërto filtrin e ruajtur \"{name}\"",
+      "rename_title": "Riemërto filtrin e ruajtur",
+      "renamed": "Filtri u riemërtua",
+      "rename_failed": "Riemërtimi i filtrit dështoi",
+      "replace_title": "Zëvendëso filtrin e ruajtur",
+      "replace_confirm": "Një filtër i ruajtur me emrin \"{name}\" ekziston tashmë. Të zëvendësohet me filtrin aktual?",
+      "replaced": "Filtri u zëvendësua"
     },
     "favorite": {
       "add": "Shto te të preferuarat",

@@ -32,11 +32,15 @@ vi.mock('../composables/useConfirmDanger', () => ({
 const createMock = vi.hoisted(() =>
   vi.fn((_name: string, _query: string) => Promise.resolve({ data: { id: 'new', name: 'n', query: 'q' } })),
 )
+const updateMock = vi.hoisted(() =>
+  vi.fn((_id: string, name: string, query: string) => Promise.resolve({ data: { id: 'f1', name, query } })),
+)
 const deleteMock = vi.hoisted(() => vi.fn((_id: string) => Promise.resolve({ data: {} })))
 const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ data: { saved_filters: [] as unknown[] } })))
 vi.mock('../api/savedfilter', () => ({
   listSavedFilters: () => listMock(),
   createSavedFilter: (name: string, query: string) => createMock(name, query),
+  updateSavedFilter: (id: string, name: string, query: string) => updateMock(id, name, query),
   deleteSavedFilter: (id: string) => deleteMock(id),
 }))
 
@@ -80,7 +84,9 @@ function mountView() {
           template: '<button :aria-label="ariaLabel" @click="$emit(\'click\', $event)">{{ label }}</button>',
         },
         InputText: {
-          props: ['modelValue'],
+          // `size` is a PrimeVue prop; declaring it here stops it falling through to
+          // the bare <input>, where "small" is not a valid HTML size attribute.
+          props: ['modelValue', 'size'],
           emits: ['update:modelValue'],
           template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
         },
@@ -89,10 +95,36 @@ function mountView() {
   })
 }
 
+type Wrapper = ReturnType<typeof mountView>
+
+function buttonByText(wrapper: Wrapper, text: string) {
+  const button = wrapper.findAll('button').find((b) => b.text() === text)
+  expect(button, `no button labelled "${text}"`).toBeTruthy()
+  return button!
+}
+
+function buttonByAria(wrapper: Wrapper, label: string) {
+  const button = wrapper.findAll('button').find((b) => b.attributes('aria-label') === label)
+  expect(button, `no button with aria-label "${label}"`).toBeTruthy()
+  return button!
+}
+
+async function openSaveDialog(wrapper: Wrapper, name: string) {
+  await buttonByText(wrapper, 'ui.saved_filters.save_current').trigger('click')
+  await wrapper.get('#saved-filter-name').setValue(name)
+  await buttonByText(wrapper, 'save').trigger('click')
+}
+
+/** The names rendered by the list, in DOM order. */
+function renderedNames(wrapper: Wrapper) {
+  return wrapper.findAll('.saved-filters-apply').map((b) => b.text())
+}
+
 describe('SavedFilters — save affordance derives from route.query (#42)', () => {
   beforeEach(() => {
     routerPush.mockReset()
     createMock.mockClear()
+    updateMock.mockClear()
     deleteMock.mockClear()
     confirmDangerMock.mockClear()
     mockRoute.query = {}
@@ -126,13 +158,7 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     await flushPromises()
 
     // Open the save dialog, name it, save.
-    await wrapper.get('button:nth-of-type(2)').trigger('click') // the "Save filter" button
-    const input = wrapper.get('input')
-    await input.setValue('My filter')
-    // Click the dialog footer Save button (label 'save').
-    const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'save')
-    expect(saveBtn).toBeTruthy()
-    await saveBtn!.trigger('click')
+    await openSaveDialog(wrapper, 'My filter')
 
     expect(createMock).toHaveBeenCalledTimes(1)
     const [name, query] = createMock.mock.calls[0]
@@ -149,10 +175,7 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('button:nth-of-type(2)').trigger('click')
-    await wrapper.get('input').setValue('Verbatim')
-    const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'save')
-    await saveBtn!.trigger('click')
+    await openSaveDialog(wrapper, 'Verbatim')
 
     expect(createMock).toHaveBeenCalledTimes(1)
     const [, query] = createMock.mock.calls[0]
@@ -176,20 +199,30 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     })
   })
 
-  it('blocks a save whose name duplicates an existing filter (case-insensitive)', async () => {
+  it('offers a confirmed OVERWRITE when the save name duplicates an existing filter (case-insensitive)', async () => {
+    // #193: the duplicate guard no longer dead-ends the save — the same
+    // case-insensitive match now routes into a confirm-replace, which UPDATES the
+    // matched filter with the CURRENT query instead of creating a second one.
     savedFiltersHolder.list = [{ id: 'f1', name: 'Invoices', query: 'search=x', create_date: 1 }]
     mockRoute.query = { search: 'y' }
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('button:nth-of-type(2)').trigger('click')
-    await wrapper.get('input').setValue('invoices')
-    const saveBtn = wrapper.findAll('button').find((b) => b.text() === 'save')
-    await saveBtn!.trigger('click')
+    await openSaveDialog(wrapper, 'invoices')
 
-    // The precheck rejects it — no API call is made.
+    // Nothing is created, and nothing is replaced before the user confirms.
     expect(createMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('ui.saved_filters.name_exists')
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(confirmDangerMock).toHaveBeenCalledTimes(1)
+    expect(confirmDangerMock.mock.calls[0][0].header).toBe('ui.saved_filters.replace_title')
+
+    confirmDangerMock.mock.calls[0][0].accept()
+    await flushPromises()
+
+    // The matched filter is overwritten with the CURRENT route query.
+    expect(createMock).not.toHaveBeenCalled()
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock).toHaveBeenCalledWith('f1', 'invoices', 'search=y')
   })
 
   it('routes delete through the danger confirm', async () => {
@@ -207,5 +240,122 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     opts.accept()
     await flushPromises()
     expect(deleteMock).toHaveBeenCalledWith('f1')
+  })
+})
+
+describe('SavedFilters — list sort, search and rename (#193)', () => {
+  // Mixed case on purpose: the server orders under a BINARY collation ("Zebra"
+  // before "apple"), so the list arrives in that order and the component must
+  // re-sort it with localeCompare.
+  const serverOrder = [
+    { id: 'f1', name: 'Zebra', query: 'search=z', create_date: 3 },
+    { id: 'f2', name: 'apple', query: 'search=a', create_date: 1 },
+    { id: 'f3', name: 'Mango', query: 'search=m', create_date: 2 },
+  ]
+
+  beforeEach(() => {
+    routerPush.mockReset()
+    createMock.mockClear()
+    updateMock.mockClear()
+    deleteMock.mockClear()
+    confirmDangerMock.mockClear()
+    mockRoute.query = {}
+    savedFiltersHolder.list = serverOrder.map((f) => ({ ...f }))
+  })
+
+  it('sorts with localeCompare and toggles the direction', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    // localeCompare — NOT the server's binary order, which would put "Zebra" first.
+    expect(renderedNames(wrapper)).toEqual(['apple', 'Mango', 'Zebra'])
+
+    await buttonByAria(wrapper, 'ui.saved_filters.sort_descending').trigger('click')
+    expect(renderedNames(wrapper)).toEqual(['Zebra', 'Mango', 'apple'])
+
+    // Toggling back restores ascending, and the control advertises the next action.
+    await buttonByAria(wrapper, 'ui.saved_filters.sort_ascending').trigger('click')
+    expect(renderedNames(wrapper)).toEqual(['apple', 'Mango', 'Zebra'])
+  })
+
+  it('never reorders the query-cache array in place', async () => {
+    // The list handed to the component IS the vue-query cache entry; sorting it
+    // directly would reorder data every other consumer shares.
+    const cached = savedFiltersHolder.list
+    const wrapper = mountView()
+    await flushPromises()
+    await buttonByAria(wrapper, 'ui.saved_filters.sort_descending').trigger('click')
+
+    expect((cached as { name: string }[]).map((f) => f.name)).toEqual(['Zebra', 'apple', 'Mango'])
+  })
+
+  it('filters the list by name, case-insensitively', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('#saved-filter-search').setValue('AN')
+    expect(renderedNames(wrapper)).toEqual(['Mango'])
+
+    // A term matching nothing shows the no-matches message, not the empty state.
+    await wrapper.get('#saved-filter-search').setValue('zzz')
+    expect(renderedNames(wrapper)).toEqual([])
+    expect(wrapper.text()).toContain('ui.saved_filters.no_matches')
+    expect(wrapper.text()).not.toContain('ui.saved_filters.empty')
+
+    // Clearing restores the full sorted list.
+    await wrapper.get('#saved-filter-search').setValue('')
+    expect(renderedNames(wrapper)).toEqual(['apple', 'Mango', 'Zebra'])
+  })
+
+  it('renames a filter, carrying its STORED query over verbatim', async () => {
+    mockRoute.query = { search: 'unrelated' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    // The dialog is seeded with the current name.
+    expect((wrapper.get('#saved-filter-rename-name').element as HTMLInputElement).value).toBe('apple')
+
+    await wrapper.get('#saved-filter-rename-name').setValue('Apricot')
+    await buttonByText(wrapper, 'rename').trigger('click')
+    await flushPromises()
+
+    // The stored query travels unchanged — a rename from an unrelated view must
+    // NOT re-capture route.query (which is search=unrelated here).
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock).toHaveBeenCalledWith('f2', 'Apricot', 'search=a')
+  })
+
+  it('blocks a rename onto another filter name but allows a case-only self-rename', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    // The first rename control belongs to the first rendered row ("apple").
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    await wrapper.get('#saved-filter-rename-name').setValue('mango')
+    await buttonByText(wrapper, 'rename').trigger('click')
+
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('ui.saved_filters.name_exists')
+
+    // Its OWN name in a different case is not a duplicate (the index is exact-case).
+    await wrapper.get('#saved-filter-rename-name').setValue('APPLE')
+    await buttonByText(wrapper, 'rename').trigger('click')
+    await flushPromises()
+
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock).toHaveBeenCalledWith('f2', 'APPLE', 'search=a')
+  })
+
+  it('rejects an empty rename without calling the API', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    await wrapper.get('#saved-filter-rename-name').setValue('   ')
+    await buttonByText(wrapper, 'rename').trigger('click')
+
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('ui.saved_filters.name_required')
   })
 })

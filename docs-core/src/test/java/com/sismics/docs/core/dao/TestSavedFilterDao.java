@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityTransaction;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -131,6 +132,110 @@ public class TestSavedFilterDao extends BaseTransactionalTest {
             ThreadLocalContext.get().setEntityManager(em1);
             em1.getTransaction().begin();
         }
+    }
+
+    /**
+     * The rename twin of {@link #duplicateNameHitsDbConstraintViaFlush()}, and the reason
+     * {@link SavedFilterDao#update} owns the mutation instead of taking a caller-mutated entity.
+     *
+     * <p>Transaction 1 commits TWO filters, so the colliding name is durable. Transaction 2 — a
+     * genuinely independent EntityManager, the shape of a second request — renames the other
+     * filter onto that committed name. The assertion is that the failure arrives as the TRANSLATED
+     * {@link SavedFilterExistsException} at the {@code update()} call, <b>before any commit</b>
+     * (the transaction is still active and is never committed here). A load-mutate-then-call
+     * arrangement instead flushes the rename during the DAO's own
+     * {@code ThreadLocalContext.getEntityManager()} access — outside every try/catch — and the
+     * constraint violation escapes as a raw PersistenceException, i.e. a 500. Deleting the
+     * guarded flush from {@code update()} makes this test fail, so it asserts the translation
+     * rather than itself.</p>
+     */
+    @Test
+    public void renameCollisionIsTranslatedNotRaw() throws Exception {
+        EntityManager em1 = ThreadLocalContext.get().getEntityManager();
+        User user = createUser("sfl_rename_dup");
+        SavedFilterDao dao = new SavedFilterDao();
+        String keptId = dao.create(filter(user.getId(), "Invoices", "search=first"));
+        String renamedId = dao.create(filter(user.getId(), "Drafts", "search=second"));
+        em1.getTransaction().commit();
+
+        EntityManager em2 = EMF.get().createEntityManager();
+        ThreadLocalContext.get().setEntityManager(em2);
+        EntityTransaction tx2 = em2.getTransaction();
+        tx2.begin();
+        try {
+            SavedFilterExistsException thrown = Assertions.assertThrows(
+                    SavedFilterExistsException.class,
+                    () -> dao.update(renamedId, user.getId(), "Invoices", "search=second"),
+                    "an exact-case rename collision must surface as the translated exists exception");
+            Assertions.assertNotNull(thrown.getCause(), "the exception must wrap the underlying DB cause");
+            Assertions.assertTrue(tx2.isActive(),
+                    "the translation must happen INSIDE the still-open transaction, not at commit");
+
+            // The unique-violation flush aborted tx2 at the DB level (PostgreSQL 25P02): roll it
+            // back and clean up the two COMMITTED rows in a fresh transaction, exactly as the
+            // create-path twin does.
+            tx2.rollback();
+            EntityTransaction cleanupTx = em2.getTransaction();
+            cleanupTx.begin();
+            Assertions.assertTrue(dao.delete(keptId, user.getId()), "cleanup of the committed row");
+            Assertions.assertTrue(dao.delete(renamedId, user.getId()), "cleanup of the committed row");
+            cleanupTx.commit();
+        } finally {
+            if (tx2.isActive()) {
+                tx2.rollback();
+            }
+            em2.close();
+            ThreadLocalContext.get().setEntityManager(em1);
+            em1.getTransaction().begin();
+        }
+    }
+
+    @Test
+    public void updateChangesOnlyNameAndQuery() throws Exception {
+        User user = createUser("sfl_update_scope");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(user.getId(), "Before", "search=before"));
+        Date createdAt = dao.getByIdAndUser(id, user.getId()).getCreateDate();
+
+        SavedFilter updated = dao.update(id, user.getId(), "After", "search=after&mode=or");
+        Assertions.assertNotNull(updated);
+        Assertions.assertEquals("After", updated.getName());
+        Assertions.assertEquals("search=after&mode=or", updated.getQuery());
+
+        SavedFilter reloaded = dao.getByIdAndUser(id, user.getId());
+        Assertions.assertEquals("After", reloaded.getName());
+        Assertions.assertEquals("search=after&mode=or", reloaded.getQuery());
+        // Identity fields are immutable across an update.
+        Assertions.assertEquals(id, reloaded.getId(), "the id is never reassigned");
+        Assertions.assertEquals(user.getId(), reloaded.getUserId(), "the owner is never reassigned");
+        Assertions.assertEquals(createdAt, reloaded.getCreateDate(), "the create date is never rewritten");
+    }
+
+    @Test
+    public void updateIsOwnerScoped() throws Exception {
+        User alice = createUser("sfl_upd_alice");
+        User bob = createUser("sfl_upd_bob");
+        SavedFilterDao dao = new SavedFilterDao();
+        String aliceId = dao.create(filter(alice.getId(), "Alice filter", "search=a"));
+
+        Assertions.assertNull(dao.update(aliceId, bob.getId(), "Stolen", "search=b"),
+                "a foreign update must report not-found, never mutate the row");
+        Assertions.assertNull(dao.update("no-such-id", alice.getId(), "Ghost", "search=b"),
+                "an unknown id must report not-found");
+
+        Assertions.assertEquals("Alice filter", dao.getByIdAndUser(aliceId, alice.getId()).getName());
+    }
+
+    @Test
+    public void caseOnlySelfRenameIsAllowed() throws Exception {
+        User user = createUser("sfl_case_rename");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(user.getId(), "Invoices", "search=a"));
+
+        // The unique index is (user, name) exact-case, so a filter may re-case its OWN name.
+        SavedFilter updated = dao.update(id, user.getId(), "INVOICES", "search=a");
+        Assertions.assertNotNull(updated);
+        Assertions.assertEquals("INVOICES", dao.getByIdAndUser(id, user.getId()).getName());
     }
 
     @Test

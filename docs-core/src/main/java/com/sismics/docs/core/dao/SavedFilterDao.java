@@ -91,6 +91,65 @@ public class SavedFilterDao {
     }
 
     /**
+     * Applies a name/query update to a saved filter owned by the given user.
+     *
+     * <p><b>The mutation is owned by this method, deliberately.</b> A caller that loaded the
+     * entity itself, renamed it, and then called into the DAO would flush the rename OUTSIDE
+     * any translation boundary: {@link ThreadLocalContext#getEntityManager()} flushes and clears
+     * on EVERY access, so the very act of the DAO obtaining its entity manager would push the
+     * dirty rename to the database, and the {@code IDX_SFL_USER_NAME} violation would escape as
+     * a raw {@link PersistenceException} — a 500, not the 400 the create path produces. So the
+     * entity manager is obtained FIRST, the entity is loaded through it, the mutation is applied,
+     * and {@code flush()} runs INSIDE the same try/catch that translates the unique violation —
+     * mirroring {@link #create(SavedFilter)}. Nothing between the mutation and the guarded flush
+     * touches {@code ThreadLocalContext}.</p>
+     *
+     * <p>Only {@code name} and {@code query} are passed in, so the owner, the id and the create
+     * date are structurally unreachable from an update.</p>
+     *
+     * @param id Saved filter ID
+     * @param userId Owner user ID (for authorization)
+     * @param name New filter name
+     * @param query New canonical URL query string
+     * @return the updated saved filter, or null if not found or not owned
+     * @throws SavedFilterExistsException if the new name collides with another filter of the same user
+     */
+    public SavedFilter update(String id, String userId, String name, String query) throws SavedFilterExistsException {
+        // FIRST: take the entity manager while nothing is dirty, so its flush-and-clear is a no-op.
+        // Every later step uses THIS reference — never ThreadLocalContext again.
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        TypedQuery<SavedFilter> q = em.createQuery(
+                "select f from SavedFilter f where f.id = :id and f.userId = :userId", SavedFilter.class);
+        q.setParameter("id", id);
+        q.setParameter("userId", userId);
+        SavedFilter savedFilter;
+        try {
+            savedFilter = q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+
+        savedFilter.setName(name);
+        savedFilter.setQuery(query);
+        try {
+            // Force the UPDATE now so the DB unique index is checked HERE, inside the
+            // translation boundary, rather than at the deferred end-of-request commit.
+            em.flush();
+        } catch (PersistenceException e) {
+            // Same reasoning as create(): the failed UPDATE is still pending on the managed
+            // entity. clear() detaches it so no later flush (nor the rollback path) re-attempts
+            // it and re-throws over the top of the 400 this translates into.
+            em.clear();
+            if (isConstraintViolation(e)) {
+                throw new SavedFilterExistsException(e);
+            }
+            throw e;
+        }
+        return savedFilter;
+    }
+
+    /**
      * Hard-deletes a saved filter owned by the given user.
      *
      * @param id Saved filter ID

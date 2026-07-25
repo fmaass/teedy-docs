@@ -1133,7 +1133,18 @@
       "delete_failed": "删除筛选器失败",
       "delete_title": "删除已保存的筛选器",
       "delete_button": "删除已保存的筛选器“{name}”",
-      "delete_confirm": "删除已保存的筛选器“{name}”？"
+      "delete_confirm": "删除已保存的筛选器“{name}”？",
+      "search_placeholder": "搜索筛选器",
+      "no_matches": "没有匹配的筛选器",
+      "sort_ascending": "按 A 到 Z 排序",
+      "sort_descending": "按 Z 到 A 排序",
+      "rename_button": "重命名已保存的筛选器“{name}”",
+      "rename_title": "重命名已保存的筛选器",
+      "renamed": "筛选器已重命名",
+      "rename_failed": "重命名筛选器失败",
+      "replace_title": "替换已保存的筛选器",
+      "replace_confirm": "已存在名为“{name}”的已保存筛选器。要用当前筛选器替换它吗？",
+      "replaced": "筛选器已替换"
     },
     "favorite": {
       "add": "添加到收藏",

@@ -12,6 +12,7 @@ import { useConfirmDanger } from '../composables/useConfirmDanger'
 import {
   listSavedFilters,
   createSavedFilter,
+  updateSavedFilter,
   deleteSavedFilter,
   type SavedFilterItem,
 } from '../api/savedfilter'
@@ -69,6 +70,31 @@ const { data: filtersData } = useQuery({
 
 const filters = computed<SavedFilterItem[]>(() => filtersData.value ?? [])
 
+// --- List presentation: name search + direction toggle ---
+
+const searchTerm = ref('')
+const sortAsc = ref(true)
+
+// The server orders by name under the DB's BINARY collation, which puts every
+// upper-case name before every lower-case one ("Zebra" before "apple"). Sorting is
+// therefore redone here with localeCompare, on a COPY: `filters` is backed by the
+// vue-query cache, and Array.prototype.sort reorders IN PLACE — sorting it directly
+// would mutate cached data shared with every other consumer of ['savedFilters'].
+// The search is case-insensitive substring matching on the name.
+const visibleFilters = computed<SavedFilterItem[]>(() => {
+  const needle = searchTerm.value.trim().toLowerCase()
+  const matched = needle
+    ? filters.value.filter((f) => f.name.toLowerCase().includes(needle))
+    : filters.value
+  return [...matched].sort((a, b) =>
+    sortAsc.value ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name),
+  )
+})
+
+function toggleSort() {
+  sortAsc.value = !sortAsc.value
+}
+
 // --- Dropdown ---
 
 const dropdown = ref<InstanceType<typeof Popover> | null>(null)
@@ -105,6 +131,23 @@ const saveMutation = useMutation({
   },
 })
 
+// Overwrite: saving under a name that already exists REPLACES that filter's stored
+// query instead of dead-ending on the duplicate guard. It reuses the same
+// case-insensitive match the guard performs — a save is only ever a create or a
+// confirmed replace, never a silent second filter with a colliding name.
+const replaceMutation = useMutation({
+  mutationFn: (vars: { id: string; name: string }) =>
+    updateSavedFilter(vars.id, vars.name, currentQueryString()),
+  onSuccess: () => {
+    showSaveDialog.value = false
+    queryClient.invalidateQueries({ queryKey: ['savedFilters'] })
+    toast.add({ severity: 'success', summary: t('ui.saved_filters.replaced'), life: 3000 })
+  },
+  onError: () => {
+    nameError.value = t('ui.saved_filters.save_failed')
+  },
+})
+
 function doSave() {
   nameError.value = ''
   const name = newName.value.trim()
@@ -112,11 +155,67 @@ function doSave() {
     nameError.value = t('ui.saved_filters.name_required')
     return
   }
-  if (filters.value.some((f) => f.name.toLowerCase() === name.toLowerCase())) {
-    nameError.value = t('ui.saved_filters.name_exists')
+  const existing = filters.value.find((f) => f.name.toLowerCase() === name.toLowerCase())
+  if (existing) {
+    confirmDanger({
+      header: t('ui.saved_filters.replace_title'),
+      message: t('ui.saved_filters.replace_confirm', { name: existing.name }),
+      icon: 'pi pi-bookmark-fill',
+      accept: () => replaceMutation.mutate({ id: existing.id, name }),
+    })
     return
   }
   saveMutation.mutate()
+}
+
+// --- Rename ---
+
+const showRenameDialog = ref(false)
+const renameTarget = ref<SavedFilterItem | null>(null)
+const renameName = ref('')
+const renameError = ref('')
+
+function openRenameDialog(filter: SavedFilterItem) {
+  dropdown.value?.hide()
+  renameTarget.value = filter
+  renameName.value = filter.name
+  renameError.value = ''
+  showRenameDialog.value = true
+}
+
+const renameMutation = useMutation({
+  mutationFn: (vars: { id: string; name: string; query: string }) =>
+    updateSavedFilter(vars.id, vars.name, vars.query),
+  onSuccess: () => {
+    showRenameDialog.value = false
+    queryClient.invalidateQueries({ queryKey: ['savedFilters'] })
+    toast.add({ severity: 'success', summary: t('ui.saved_filters.renamed'), life: 3000 })
+  },
+  onError: () => {
+    renameError.value = t('ui.saved_filters.rename_failed')
+  },
+})
+
+function doRename() {
+  renameError.value = ''
+  const target = renameTarget.value
+  if (!target) {
+    return
+  }
+  const name = renameName.value.trim()
+  if (!name) {
+    renameError.value = t('ui.saved_filters.name_required')
+    return
+  }
+  // Same duplicate guard as the save path, EXCLUDING the filter being renamed so a
+  // no-op or case-only rename is not rejected against itself.
+  if (filters.value.some((f) => f.id !== target.id && f.name.toLowerCase() === name.toLowerCase())) {
+    renameError.value = t('ui.saved_filters.name_exists')
+    return
+  }
+  // A rename carries the STORED query over verbatim — renaming from an unrelated
+  // view must never silently re-capture the current route into the filter.
+  renameMutation.mutate({ id: target.id, name, query: target.query })
 }
 
 // --- Delete ---
@@ -164,17 +263,50 @@ function confirmDelete(filter: SavedFilterItem) {
 
     <Popover ref="dropdown">
       <div class="saved-filters-list">
+        <div v-if="filters.length" class="saved-filters-toolbar">
+          <InputText
+            id="saved-filter-search"
+            v-model="searchTerm"
+            size="small"
+            class="saved-filters-search"
+            :placeholder="t('ui.saved_filters.search_placeholder')"
+            :aria-label="t('ui.saved_filters.search_placeholder')"
+          />
+          <Button
+            :icon="sortAsc ? 'pi pi-sort-alpha-down' : 'pi pi-sort-alpha-up'"
+            text
+            rounded
+            size="small"
+            severity="secondary"
+            :aria-label="
+              sortAsc ? t('ui.saved_filters.sort_descending') : t('ui.saved_filters.sort_ascending')
+            "
+            @click="toggleSort"
+          />
+        </div>
         <p v-if="!filters.length" class="saved-filters-empty">
           {{ t('ui.saved_filters.empty') }}
         </p>
+        <p v-else-if="!visibleFilters.length" class="saved-filters-empty">
+          {{ t('ui.saved_filters.no_matches') }}
+        </p>
         <ul v-else class="saved-filters-items">
-          <li v-for="filter in filters" :key="filter.id" class="saved-filters-item">
+          <li v-for="filter in visibleFilters" :key="filter.id" class="saved-filters-item">
             <Button
               :label="filter.name"
               text
               size="small"
               class="saved-filters-apply"
               @click="applyFilter(filter)"
+            />
+            <Button
+              icon="pi pi-pencil"
+              text
+              rounded
+              size="small"
+              severity="secondary"
+              :aria-label="t('ui.saved_filters.rename_button', { name: filter.name })"
+              @click="openRenameDialog(filter)"
             />
             <Button
               icon="pi pi-trash"
@@ -214,8 +346,38 @@ function confirmDelete(filter: SavedFilterItem) {
         <Button :label="t('cancel')" text severity="secondary" @click="showSaveDialog = false" />
         <Button
           :label="t('save')"
-          :loading="saveMutation.isPending.value"
+          :loading="saveMutation.isPending.value || replaceMutation.isPending.value"
           @click="doSave"
+        />
+      </template>
+    </Dialog>
+
+    <Dialog
+      v-model:visible="showRenameDialog"
+      modal
+      :header="t('ui.saved_filters.rename_title')"
+      :style="{ width: '24rem' }"
+    >
+      <div class="save-dialog-body">
+        <label for="saved-filter-rename-name" class="save-dialog-label">
+          {{ t('ui.saved_filters.name_label') }}
+        </label>
+        <InputText
+          id="saved-filter-rename-name"
+          v-model="renameName"
+          autofocus
+          :maxlength="100"
+          class="save-dialog-input"
+          @keyup.enter="doRename"
+        />
+        <small v-if="renameError" class="save-dialog-error">{{ renameError }}</small>
+      </div>
+      <template #footer>
+        <Button :label="t('cancel')" text severity="secondary" @click="showRenameDialog = false" />
+        <Button
+          :label="t('rename')"
+          :loading="renameMutation.isPending.value"
+          @click="doRename"
         />
       </template>
     </Dialog>
@@ -232,6 +394,18 @@ function confirmDelete(filter: SavedFilterItem) {
 .saved-filters-list {
   min-width: 14rem;
   max-width: 20rem;
+}
+
+.saved-filters-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.25rem 0.35rem;
+}
+
+.saved-filters-search {
+  flex: 1;
+  min-width: 0;
 }
 
 .saved-filters-empty {

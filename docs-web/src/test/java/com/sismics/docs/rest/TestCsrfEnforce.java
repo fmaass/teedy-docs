@@ -117,6 +117,51 @@ public class TestCsrfEnforce extends BaseJerseyTest {
         });
     }
 
+    /**
+     * The saved-filter update route (POST /savedfilter/{id}) is CSRF-evaluated with no per-route
+     * registration: {@link CsrfFilter#isStateChanging} classifies EVERY method outside
+     * {GET, HEAD, OPTIONS} as state-changing, so a new POST is covered the moment it exists — which
+     * is exactly why {@code TestCsrfGetInventory} only enumerates {@code @GET} routes. This test is
+     * the executable proof of that auto-coverage claim for the new endpoint: the token-less update is
+     * rejected BEFORE the handler runs, so the filter is not persisted.
+     */
+    @Test
+    public void savedFilterUpdateIsCsrfEvaluated() {
+        clientUtil.createUser("csrf_enf_savedfilter");
+        String token = clientUtil.login("csrf_enf_savedfilter");
+
+        // Arrange in the default report-only mode: a filter to attempt an update against.
+        JsonObject created = target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form().param("name", "Csrf target").param("query", "search=a")), JsonObject.class);
+        String id = created.getString("id");
+
+        withEnforcement(() -> {
+            CsrfFilter.resetEvaluationForTest();
+            Response response = target().path("/savedfilter/" + id).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .post(Entity.form(new Form().param("name", "Renamed by forgery").param("query", "search=b")));
+            Assertions.assertEquals(Status.FORBIDDEN.getStatusCode(), response.getStatus(),
+                    "a token-less saved-filter update must be rejected with 403 when enforcement is ON");
+
+            CsrfFilter.Evaluation eval = CsrfFilter.getLastEvaluationForTest();
+            Assertions.assertNotNull(eval, "the POST must have been CSRF-evaluated");
+            Assertions.assertEquals("/savedfilter/" + id, eval.path);
+            Assertions.assertEquals("POST", eval.method);
+            Assertions.assertTrue(eval.stateChanging, "a POST is state-changing without any route registration");
+            Assertions.assertTrue(eval.wouldBlock);
+            Assertions.assertEquals("token-missing", eval.reason);
+        });
+
+        // The rejection happened BEFORE the handler: the filter is unchanged.
+        JsonObject stored = target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class)
+                .getJsonArray("saved_filters").getJsonObject(0);
+        Assertions.assertEquals("Csrf target", stored.getString("name"));
+        Assertions.assertEquals("search=a", stored.getString("query"));
+    }
+
     @Test
     public void proxyTokenlessMutationRejected() {
         clientUtil.createUser("csrf_enf_proxy_block");

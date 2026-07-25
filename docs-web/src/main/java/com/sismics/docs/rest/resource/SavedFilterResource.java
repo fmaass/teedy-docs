@@ -3,6 +3,7 @@ package com.sismics.docs.rest.resource;
 import com.sismics.docs.core.dao.SavedFilterDao;
 import com.sismics.docs.core.dao.SavedFilterExistsException;
 import com.sismics.docs.core.model.jpa.SavedFilter;
+import com.sismics.docs.core.util.SavedFilterUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
@@ -105,6 +106,58 @@ public class SavedFilterResource extends BaseResource {
                 .add("id", id)
                 .add("name", filter.getName())
                 .add("query", filter.getQuery())
+                .build()).build();
+    }
+
+    /**
+     * Updates one of the current user's saved filters (rename and/or re-capture the query).
+     *
+     * <p>Teedy convention: {@code PUT} creates, {@code POST /{id}} updates. The create path's
+     * validation is applied VERBATIM — an update that accepted an empty, overlong or
+     * unsupported-key query would be a hole around the create contract, since a rename is the
+     * natural way to smuggle one in. Only the name and the query are mutable; the owner, the id
+     * and the create date are never touched (only those two values are passed on).</p>
+     *
+     * <p>The persistence conversation (ownership lookup, duplicate precheck, write) belongs to
+     * {@link SavedFilterUtil#update} — the REST layer does not open new dependencies on the DAO
+     * package. This method keeps validation, authentication and the HTTP status mapping.</p>
+     *
+     * @param id Saved filter ID
+     * @param name New filter name (1-100 chars)
+     * @param query New canonical URL query string (1-2000 chars; keys subset of the filter dimensions)
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}")
+    public Response update(@PathParam("id") String id,
+                           @FormParam("name") String name,
+                           @FormParam("query") String query) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        name = ValidationUtil.validateLength(name, "name", 1, 100, false);
+        query = ValidationUtil.validateLength(query, "query", 1, 2000, false);
+        validateQueryString(query);
+
+        SavedFilter updated;
+        try {
+            updated = SavedFilterUtil.update(id, principal.getId(), name, query);
+        } catch (SavedFilterExistsException e) {
+            // Either the case-insensitive precheck or the DB unique index rejected the name.
+            throw new ClientException("AlreadyExistingFilter",
+                    "A saved filter with this name already exists");
+        }
+        if (updated == null) {
+            // A foreign or unknown id yields 404 (never 403): the resource never confirms the
+            // existence of another user's filter.
+            throw new NotFoundException();
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("id", updated.getId())
+                .add("name", updated.getName())
+                .add("query", updated.getQuery())
                 .build()).build();
     }
 

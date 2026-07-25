@@ -1133,7 +1133,18 @@
       "delete_failed": "Échec de la suppression du filtre",
       "delete_title": "Supprimer le filtre enregistré",
       "delete_button": "Supprimer le filtre enregistré « {name} »",
-      "delete_confirm": "Supprimer le filtre enregistré « {name} » ?"
+      "delete_confirm": "Supprimer le filtre enregistré « {name} » ?",
+      "search_placeholder": "Rechercher des filtres",
+      "no_matches": "Aucun filtre correspondant",
+      "sort_ascending": "Trier de A à Z",
+      "sort_descending": "Trier de Z à A",
+      "rename_button": "Renommer le filtre enregistré \"{name}\"",
+      "rename_title": "Renommer le filtre enregistré",
+      "renamed": "Filtre renommé",
+      "rename_failed": "Échec du renommage du filtre",
+      "replace_title": "Remplacer le filtre enregistré",
+      "replace_confirm": "Un filtre enregistré nommé \"{name}\" existe déjà. Le remplacer par le filtre actuel ?",
+      "replaced": "Filtre remplacé"
     },
     "favorite": {
       "add": "Ajouter aux favoris",

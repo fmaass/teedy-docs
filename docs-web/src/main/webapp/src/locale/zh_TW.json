@@ -1133,7 +1133,18 @@
       "delete_failed": "刪除篩選條件失敗",
       "delete_title": "刪除已儲存的篩選條件",
       "delete_button": "刪除已儲存的篩選條件「{name}」",
-      "delete_confirm": "刪除已儲存的篩選條件「{name}」？"
+      "delete_confirm": "刪除已儲存的篩選條件「{name}」？",
+      "search_placeholder": "搜尋篩選條件",
+      "no_matches": "沒有符合的篩選條件",
+      "sort_ascending": "依 A 到 Z 排序",
+      "sort_descending": "依 Z 到 A 排序",
+      "rename_button": "重新命名已儲存的篩選條件「{name}」",
+      "rename_title": "重新命名已儲存的篩選條件",
+      "renamed": "已重新命名篩選條件",
+      "rename_failed": "重新命名篩選條件失敗",
+      "replace_title": "取代已儲存的篩選條件",
+      "replace_confirm": "已存在名為「{name}」的已儲存篩選條件。要用目前的篩選條件取代它嗎？",
+      "replaced": "已取代篩選條件"
     },
     "favorite": {
       "add": "加入我的最愛",
