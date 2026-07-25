@@ -222,8 +222,10 @@ test.describe('tag pickers (behavior C)', () => {
 
   test('document-edit tag MultiSelect: filter box winnows options and a selection renders as a colored chip', async ({ page, cleanup }) => {
     // Two distinctly-named tags so the filter has something to include AND exclude.
-    const keepTag = unique('cfilterkeep')
-    const dropTag = unique('cfilterdrop')
+    // Short prefixes: unique() appends ~26 chars and TagResource caps a tag name at 36,
+    // so an 11-char prefix 400s on create once the per-worker counter hits three digits.
+    const keepTag = unique('cfk')
+    const dropTag = unique('cfd')
     await createTag(page, keepTag)
     cleanup.defer('delete the kept tag', () => deleteTagByNameApi(page.request, keepTag))
     await createTag(page, dropTag)
@@ -236,6 +238,12 @@ test.describe('tag pickers (behavior C)', () => {
     await page.locator('#edit-tags').click()
     const overlay = page.locator('.p-multiselect-overlay')
     await expect(overlay).toBeVisible()
+
+    // #182: opening the picker now lands the caret in the filter box, harmonizing the
+    // edit form with the quick menu and slide-over, which got this in #171. Until the
+    // shared TagPicker the edit form had no autoFilterFocus, so typing after opening
+    // went nowhere until you clicked the filter as well.
+    await expect(overlay.locator('.p-multiselect-filter')).toBeFocused()
 
     // The filter box exists (the #14/#23 addition).
     const filterInput = overlay.locator('input.p-multiselect-filter, .p-multiselect-filter input, input[role=searchbox]').first()
@@ -263,8 +271,9 @@ test.describe('tag pickers (behavior C)', () => {
 
   test('tag-edit parent Select has a working filter box', async ({ page, cleanup }) => {
     // Need at least two candidate parents so filtering is observable.
-    const parentKeep = unique('cparentkeep')
-    const parentDrop = unique('cparentdrop')
+    // Short prefixes for the same 36-char tag-name cap as above.
+    const parentKeep = unique('cpk')
+    const parentDrop = unique('cpd')
     const child = unique('cchild')
     await createTag(page, parentKeep)
     cleanup.defer('delete the kept parent tag', () => deleteTagByNameApi(page.request, parentKeep))

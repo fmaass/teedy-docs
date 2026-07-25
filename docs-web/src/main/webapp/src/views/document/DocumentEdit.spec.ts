@@ -8,12 +8,14 @@ import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
+import TagPicker from '../../components/TagPicker.vue'
 import type { Tag } from '../../api/tag'
 
 // The document-tag picker (#14 type-to-filter, #23 colored wrapping chips) is the unit
-// under test. We mount DocumentEdit in create mode and drive its REAL tagOptions computed
-// and MultiSelect template off a seeded tag list, so the assertions exercise the shipped
-// mapping and chip slot rather than a re-derived copy.
+// under test. We mount DocumentEdit in create mode with the REAL shared TagPicker (#182)
+// off a seeded tag list, so the assertions exercise the shipped chip slot and the form's
+// binding to it rather than a re-derived copy. The option mapping itself now lives in
+// TagPicker and is asserted in TagPicker.spec.ts.
 
 const TAGS: Tag[] = [
   { id: 'tag-red', name: 'Invoice', color: '#d32f2f', parent: null },
@@ -144,14 +146,28 @@ describe('DocumentEdit — tag picker (#14 filter, #23 colored chips)', () => {
     tagApiMock.getTagCoOccurrence.mockReset().mockResolvedValue({ data: { pairs: [] } })
   })
 
-  it('#23: tagOptions retains each tag color (would drop if the mapping omits color)', async () => {
+  it('#182: hands the shared TagPicker the RAW tag list, colors intact', async () => {
+    // The {label,value,color} mapping moved into TagPicker (#182) so both tag-add
+    // surfaces derive it identically; what the form still owns is the binding. Passing
+    // a pre-mapped list here would strip the colors TagPicker needs for its chips —
+    // the derivation itself is asserted in TagPicker.spec.ts.
     const wrapper = await mountEdit()
-    const options = (wrapper.vm as unknown as { tagOptions: Array<{ label: string; value: string; color: string }> }).tagOptions
-    expect(options).toEqual([
-      { label: 'Invoice', value: 'tag-red', color: '#d32f2f' },
-      { label: 'Receipt', value: 'tag-green', color: '#2e7d32' },
-      { label: 'Contract', value: 'tag-blue', color: '#1565c0' },
-    ])
+    expect(wrapper.findComponent(TagPicker).props('tags')).toEqual(TAGS)
+  })
+
+  it('#182: forwards id="edit-tags" so the label association and e2e selectors survive', async () => {
+    // `<label for="edit-tags">` plus six e2e call sites across five specs resolve this
+    // id on the picker's root element; an extraction that dropped it would break all of
+    // them without failing a unit test.
+    const wrapper = await mountEdit()
+    expect(wrapper.findComponent(TagPicker).props('id')).toBe('edit-tags')
+    expect(wrapper.find('#edit-tags').exists()).toBe(true)
+    expect(wrapper.find('label[for="edit-tags"]').exists()).toBe(true)
+  })
+
+  it('#182: leaves the edit form multi-tag (no bulk-style selection cap)', async () => {
+    const wrapper = await mountEdit()
+    expect(wrapper.findComponent(TagPicker).props('selectionLimit')).toBeUndefined()
   })
 
   it('#14: the document-tag MultiSelect enables type-to-filter', async () => {

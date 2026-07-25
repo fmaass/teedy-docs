@@ -20,13 +20,12 @@ import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
 import ToggleSwitch from 'primevue/toggleswitch'
-import MultiSelect from 'primevue/multiselect'
 import FileUpload, { type FileUploadSelectEvent, type FileUploadRemoveEvent } from 'primevue/fileupload'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
-import TagBadge from '../../components/TagBadge.vue'
+import TagPicker from '../../components/TagPicker.vue'
 import RichDescriptionEditor from '../../components/RichDescriptionEditor.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import { useToast } from 'primevue/usetoast'
@@ -150,28 +149,6 @@ function loadMetadataVocabularies() {
 const fileUploadRef = ref()
 
 const languages = SUPPORTED_LANGUAGES
-
-const tagOptions = computed(() =>
-  tagFilter.allTags.map((t) => ({ label: t.name, value: t.id, color: t.color })),
-)
-
-// The MultiSelect chip slot's removeCallback closes over the selected value itself and its
-// runtime only reads event.stopPropagation() — the second `item` param in PrimeVue's typed
-// signature is unused at runtime. We pass a synthetic Event so the TagBadge remove button
-// (whose own remove emit carries no event) can deselect the chip.
-function removeTagChip(removeCallback: (event: Event, item?: unknown) => void) {
-  removeCallback(new Event('remove'))
-}
-
-// Resolve a selected tag id to a display chip. A tag known in the tag map renders coloured
-// with its real name; an UNKNOWN id (a selection not in the loaded tag list, or a gap
-// before the map populates) still renders a VISIBLE, REMOVABLE fallback chip — a neutral
-// grey chip labelled with the raw id — so a selected tag is never invisible/unremovable.
-const UNKNOWN_TAG_COLOR = '#9e9e9e'
-function tagChip(tagId: string): { name: string; color: string } {
-  const tag = tagFilter.tagMap.get(tagId)
-  return tag ? { name: tag.name, color: tag.color } : { name: tagId, color: UNKNOWN_TAG_COLOR }
-}
 
 // Generation counter guarding initFromRoute against out-of-order async completion:
 // on rapid add -> edit / edit -> edit navigation, a stale getDocument(oldId) (or
@@ -551,29 +528,14 @@ async function onEmlSelected(event: Event) {
 
       <div class="form-field">
         <label for="edit-tags">{{ t('document.tags') }}</label>
-        <MultiSelect
+        <TagPicker
           id="edit-tags"
           v-model="form.tags"
-          :options="tagOptions"
-          optionLabel="label"
-          optionValue="value"
+          :tags="tagFilter.allTags"
           :placeholder="t('document.tags')"
-          class="w-full tag-multiselect"
-          display="chip"
-          filter
-        >
-          <!-- Colour the selected chips from the tag map (the slot's `value` is the tag
-               id, since optionValue is the id). An id missing from the map still gets a
-               visible, removable fallback chip. Chips wrap instead of clipping. -->
-          <template #chip="{ value, removeCallback }">
-            <TagBadge
-              :name="tagChip(value).name"
-              :color="tagChip(value).color"
-              removable
-              @remove="removeTagChip(removeCallback)"
-            />
-          </template>
-        </MultiSelect>
+          :filterPlaceholder="t('ui.tag_menu.search')"
+          class="w-full"
+        />
       </div>
 
       <!-- Advanced metadata (collapsible) -->
@@ -852,14 +814,6 @@ async function onEmlSelected(event: Event) {
 .advanced-fields {
   border-top: 1px solid var(--p-content-border-color);
   padding-top: 1rem;
-}
-
-/* Tag picker: let the coloured TagBadge chips wrap onto multiple rows instead of
-   clipping in a single overflow line (#23). */
-.tag-multiselect :deep(.p-multiselect-label) {
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  white-space: normal;
 }
 
 .custom-metadata {

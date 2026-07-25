@@ -358,9 +358,10 @@ const PaginatorStub = defineComponent({
 })
 
 import DocumentList from './DocumentList.vue'
-import { listDocuments, deleteDocument } from '../../api/document'
+import { listDocuments, deleteDocument, updateDocument } from '../../api/document'
 const listDocumentsMock = listDocuments as unknown as ReturnType<typeof vi.fn>
 const deleteDocumentMock = deleteDocument as unknown as ReturnType<typeof vi.fn>
+const updateDocumentMock = updateDocument as unknown as ReturnType<typeof vi.fn>
 
 // InputText stub: a native input that re-emits update:modelValue so a test can drive
 // the client-side quick filter (#53) exactly as a user typing would.
@@ -401,7 +402,14 @@ function mountView() {
         DocumentSearchBar: passthrough,
         SavedFilters: passthrough,
         TagFilterChips: passthrough,
-        BulkActionBar: { template: '<div class="bulk-bar-stub" />' },
+        // Re-emits the bar's add-tag contract so the view's bulk wiring is covered:
+        // the stub used to be an inert div, which let any change to the emit's
+        // name/payload ship green (#182).
+        BulkActionBar: {
+          emits: ['addTag'],
+          template:
+            '<div class="bulk-bar-stub"><button class="bulk-add-tag" @click="$emit(\'addTag\', \'tag-bulk\')">t</button></div>',
+        },
         EmptyState: passthrough,
         ErrorState: passthrough,
         TagQuickMenu: TagQuickMenuStub,
@@ -834,6 +842,29 @@ describe('DocumentList — list ⇄ gallery view mode (#39)', () => {
     await wrapper.find('.to-list').trigger('click')
     await flushPromises()
     expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
+  })
+
+  it('#182: the bulk bar\'s add-tag emit fans out one add-tag update per selected document', async () => {
+    // The view is the only listener for the bar's add-tag emit, so a change to that
+    // emit's name or payload shape (e.g. one id -> a list) has to fail HERE. It also
+    // pins the params the fan-out sends: title + language + the preserved tag list,
+    // which is the partial-update contract POST /document/{id} requires.
+    updateDocumentMock.mockReset().mockResolvedValue({ data: {} })
+    const wrapper = mountView()
+    await wrapper.find('.select-one').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(true)
+
+    await wrapper.find('.bulk-add-tag').trigger('click')
+    await flushPromises()
+
+    expect(updateDocumentMock).toHaveBeenCalledTimes(1)
+    const [docId, params] = updateDocumentMock.mock.calls[0] as [string, URLSearchParams]
+    expect(docId).toBe('doc-42')
+    expect(params.getAll('tags')).toEqual(['tag-bulk'])
+    expect(params.get('title')).toBe('Doc doc-42')
+    expect(params.get('language')).toBe('eng')
+    expect(params.get('tags_reset')).toBeNull()
   })
 })
 

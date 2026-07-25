@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
 import Popover from 'primevue/popover'
 import ProgressBar from 'primevue/progressbar'
+import TagPicker from './TagPicker.vue'
 import { SUPPORTED_LANGUAGES } from '../constants/languages'
 import type { Tag } from '../api/tag'
 
@@ -31,17 +32,36 @@ const languages = SUPPORTED_LANGUAGES
 
 const tagPopover = ref()
 const langPopover = ref()
-const pendingTag = ref<string | null>(null)
+const tagPicker = ref<{ show: () => void } | null>(null)
+/**
+ * The tag to apply, held as a list because the shared TagPicker is a MultiSelect —
+ * that is what renders the coloured chips (#182). Cardinality is NOT a convention
+ * here: the picker is passed `selectionLimit=1`, so PrimeVue disables every other
+ * option once one is chosen and this array can never hold two ids. A bulk apply
+ * therefore stays exactly one tag per invocation, as `applyTag` below assumes.
+ */
+const pendingTags = ref<string[]>([])
 const pendingLang = ref<string | null>(null)
 
 function openTagPopover(event: Event) {
-  pendingTag.value = null
+  pendingTags.value = []
   tagPopover.value?.toggle(event)
 }
 
+// The picker lives inside a LAZILY-teleported Popover, so it does not exist at mount
+// and no auto-open prop can reach it — this is exactly the bug #171 fixed for the
+// quick menu. Opening its overlay once the Popover has shown (after a nextTick, so
+// the ref is assigned) is what lets autoFilterFocus put the caret in the filter,
+// giving the bulk bar the keyboard tag entry it has never had.
+async function onTagPopoverShow() {
+  await nextTick()
+  tagPicker.value?.show()
+}
+
 function applyTag() {
-  if (!pendingTag.value) return
-  emit('addTag', pendingTag.value)
+  const tagId = pendingTags.value[0]
+  if (!tagId) return
+  emit('addTag', tagId)
   tagPopover.value?.hide()
 }
 
@@ -115,18 +135,19 @@ function applyLang() {
       />
     </div>
 
-    <Popover ref="tagPopover">
+    <Popover ref="tagPopover" @show="onTagPopoverShow">
       <div class="bulk-popover">
-        <Select
-          v-model="pendingTag"
-          :options="tags"
-          optionLabel="name"
-          optionValue="id"
-          filter
+        <TagPicker
+          ref="tagPicker"
+          v-model="pendingTags"
+          :tags="tags"
+          :selectionLimit="1"
           :placeholder="t('ui.bulk.choose_tag')"
+          :filterPlaceholder="t('ui.tag_menu.search')"
+          :ariaLabel="t('ui.bulk.choose_tag')"
           class="bulk-select"
         />
-        <Button size="small" :label="t('ui.bulk.apply')" :disabled="!pendingTag" @click="applyTag" />
+        <Button size="small" :label="t('ui.bulk.apply')" :disabled="!pendingTags.length" @click="applyTag" />
       </div>
     </Popover>
 
