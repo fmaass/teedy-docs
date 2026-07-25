@@ -4,6 +4,7 @@ import com.google.common.base.Joiner;
 import com.sismics.docs.core.constant.AuditLogType;
 import com.sismics.docs.core.dao.criteria.GroupCriteria;
 import com.sismics.docs.core.dao.dto.GroupDto;
+import com.sismics.docs.core.exception.InactiveGroupException;
 import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.UserGroup;
 import com.sismics.docs.core.util.AuditLogUtil;
@@ -59,6 +60,32 @@ public class GroupDao {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
         TypedQuery<Group> q = em.createQuery("select g from Group g where g.name = :name and g.deleteDate is null", Group.class);
         q.setParameter("name", name);
+        q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Returns a group by ID, acquiring a pessimistic write lock (SELECT ... FOR UPDATE, dialect-portable
+     * via {@link LockModeType#PESSIMISTIC_WRITE} — H2 and PostgreSQL both emit FOR UPDATE) on the group
+     * row for the remainder of the caller's transaction.
+     *
+     * <p>The by-ID counterpart of {@link #getActiveByNameForUpdate(String)}, and the serialization point
+     * of the membership protocol (#190): {@link #addMember(UserGroup)} receives only a group id and a
+     * user id, so resolving a name in order to reuse the by-name lock would add a rename race of its own.
+     * Returns null (without locking anything) if no active group has the given id — callers must fail
+     * closed rather than proceed unserialized.</p>
+     *
+     * @param id Group ID
+     * @return The locked active group, or null if it does not exist or is soft-deleted
+     */
+    public Group getActiveByIdForUpdate(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Group> q = em.createQuery("select g from Group g where g.id = :id and g.deleteDate is null", Group.class);
+        q.setParameter("id", id);
         q.setLockMode(LockModeType.PESSIMISTIC_WRITE);
         try {
             return q.getSingleResult();
@@ -143,40 +170,90 @@ public class GroupDao {
     }
     
     /**
-     * Add an user to a group.
-     * 
-     * @param userGroup User group
-     * @return New ID
+     * Add an user to a group, idempotently.
+     *
+     * <p>#190: the membership contract is "already a member = OK", so this must never be an
+     * insert-and-translate. A blind insert racing another blind insert of the same pair produces two
+     * ACTIVE rows (the defect); adding a unique index and catching the violation would be worse on
+     * PostgreSQL, where a constraint violation poisons the whole transaction and turns the caller's
+     * "already a member" success into a 500 at commit.</p>
+     *
+     * <p>Instead the pair is serialized on the GROUP row: lock the group FOR UPDATE, then re-read the
+     * membership UNDER that lock. A concurrent add of the same pair either has not committed (this
+     * blocks until it does) or has committed (the re-read finds it and returns its id), so exactly one
+     * active row can ever exist and BOTH callers succeed. If the locked active group has disappeared the
+     * call fails closed with {@link InactiveGroupException} rather than inserting unserialized.</p>
+     *
+     * <p>Lock order is GROUP -&gt; USER_GROUP. No path locks a USER row before a GROUP row (user deletion
+     * does not touch T_USER_GROUP), so this introduces no cycle.</p>
+     *
+     * @param userGroup User group, with its group id and user id set
+     * @return The membership ID — the newly created one, or the id of the EXISTING active membership
+     * @throws InactiveGroupException if the group is not (or is no longer) active
      */
     public String addMember(UserGroup userGroup) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        // Serialize every add of this group's memberships on the group row.
+        if (getActiveByIdForUpdate(userGroup.getGroupId()) == null) {
+            throw new InactiveGroupException("Cannot add a member to an inactive group: " + userGroup.getGroupId());
+        }
+
+        // Re-check UNDER the lock: a competing add of the same pair has either committed (found here) or
+        // cannot commit until this transaction releases the group row.
+        List<UserGroup> existingList = findActiveMemberships(em, userGroup.getGroupId(), userGroup.getUserId());
+        if (!existingList.isEmpty()) {
+            return existingList.get(0).getId();
+        }
+
         // Create the UUID
         userGroup.setId(UUID.randomUUID().toString());
-        
+
         // Create the user group
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
         em.persist(userGroup);
-        
+
         return userGroup.getId();
     }
-    
+
     /**
      * Remove an user from a group.
-     * 
+     *
+     * <p>Soft-deletes EVERY active row for the pair, not just one (#190): a database that predates the
+     * 063 unique index may still hold duplicates, and removing one of them would leave the user a member
+     * after an operation that reported success. Removing a non-member is a no-op, matching the endpoint's
+     * documented always-OK contract (the previous single-result read raised on it).</p>
+     *
      * @param groupId Group ID
      * @param userId User ID
      */
     public void removeMember(String groupId, String userId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-            
-        // Get the user group
-        Query q = em.createQuery("select ug from UserGroup ug where ug.groupId = :groupId and ug.userId = :userId and ug.deleteDate is null");
+
+        // Get every active user group for the pair
+        List<UserGroup> userGroupDbList = findActiveMemberships(em, groupId, userId);
+
+        // Delete the user groups
+        Date dateNow = new Date();
+        for (UserGroup userGroupDb : userGroupDbList) {
+            userGroupDb.setDeleteDate(dateNow);
+        }
+    }
+
+    /**
+     * Returns every ACTIVE membership row for a (group, user) pair.
+     *
+     * @param em Entity manager
+     * @param groupId Group ID
+     * @param userId User ID
+     * @return Active memberships, empty when the user is not a member
+     */
+    private List<UserGroup> findActiveMemberships(EntityManager em, String groupId, String userId) {
+        TypedQuery<UserGroup> q = em.createQuery(
+                "select ug from UserGroup ug where ug.groupId = :groupId and ug.userId = :userId and ug.deleteDate is null",
+                UserGroup.class);
         q.setParameter("groupId", groupId);
         q.setParameter("userId", userId);
-        UserGroup userGroupDb = (UserGroup) q.getSingleResult();
-        
-        // Delete the user group
-        Date dateNow = new Date();
-        userGroupDb.setDeleteDate(dateNow);
+        return q.getResultList();
     }
     
     /**

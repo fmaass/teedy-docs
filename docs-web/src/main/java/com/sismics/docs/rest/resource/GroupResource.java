@@ -9,6 +9,7 @@ import com.sismics.docs.core.dao.criteria.GroupCriteria;
 import com.sismics.docs.core.dao.criteria.UserCriteria;
 import com.sismics.docs.core.dao.dto.GroupDto;
 import com.sismics.docs.core.dao.dto.UserDto;
+import com.sismics.docs.core.exception.InactiveGroupException;
 import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.model.jpa.UserGroup;
@@ -287,7 +288,10 @@ public class GroupResource extends BaseResource {
             throw new NotFoundException();
         }
         
-        // Avoid duplicates
+        // Avoid duplicates -- FAST PATH ONLY. This unlocked read cannot serialize anything (#190): two
+        // concurrent adds of the same pair both see "not a member" and both proceed. The authoritative
+        // recheck is GroupDao.addMember's, under the group row lock; this merely skips the lock for the
+        // common already-a-member case.
         List<GroupDto> groupDtoList = groupDao.findByCriteria(new GroupCriteria().setUserId(user.getId()), null);
         boolean found = false;
         for (GroupDto groupDto : groupDtoList) {
@@ -295,15 +299,21 @@ public class GroupResource extends BaseResource {
                 found = true;
             }
         }
-        
+
         if (!found) {
             // Add the membership
             UserGroup userGroup = new UserGroup();
             userGroup.setGroupId(group.getId());
             userGroup.setUserId(user.getId());
-            groupDao.addMember(userGroup);
+            try {
+                groupDao.addMember(userGroup);
+            } catch (InactiveGroupException e) {
+                // The group was deleted between the read above and the membership lock. Same outcome as
+                // the non-racy path: the already-declared "group not found" error, not a 500.
+                throw new NotFoundException();
+            }
         }
-        
+
         // Always return OK
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("status", "ok");

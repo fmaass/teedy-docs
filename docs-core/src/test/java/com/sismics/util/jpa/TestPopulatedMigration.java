@@ -32,7 +32,7 @@ import java.util.List;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==62, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==63, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -41,8 +41,9 @@ import java.util.List;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062). */
-    private static final int TARGET_VERSION = 62;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062
+     * + group-membership dedup & active-unique index 063). */
+    private static final int TARGET_VERSION = 63;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -1500,6 +1501,318 @@ public class TestPopulatedMigration {
         }
         Assertions.assertEquals(List.of(expectedIds), actual,
                 "the keyset order must be unchanged by the 062 indexes; query: " + sql);
+    }
+
+    // --- migration 063 group-membership dedup + active-unique index (both dialects) ---------------
+
+    @Test
+    public void migration063DedupsAndEnforcesActiveMembershipH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration063groupdedup;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runGroupMembershipDedupScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration063DedupsAndEnforcesActiveMembershipPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-063 dedup test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runGroupMembershipDedupScenario(connection);
+            }
+        }
+    }
+
+    @Test
+    public void migration063IsRetrySafeAfterPartialApplicationH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration063retry;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runGroupMembershipRetryScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration063IsRetrySafeAfterPartialApplicationPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-063 retry-safety test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runGroupMembershipRetryScenario(connection);
+            }
+        }
+    }
+
+    @Test
+    public void migration063ResidualAbortGuardIsArmedH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration063guard;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runGroupMembershipAbortGuardScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration063ResidualAbortGuardIsArmedPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-063 abort-guard test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runGroupMembershipAbortGuardScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Build the schema to v62 (immediately before 063), seed T_USER_GROUP POISONED with exactly the state
+     * the #190 defect produces — a pair carrying THREE active rows, plus soft-deleted history for the same
+     * pair, plus untouched single-membership and deleted-only pairs — then run ONLY the 063 step.
+     *
+     * <p>Asserts the whole repair contract: DB_VERSION advances to 63, the unique index exists, the
+     * LOWEST UGP_ID_C of the duplicated pair stays active while its siblings are soft-deleted, the
+     * pre-existing soft-deleted rows keep their ORIGINAL delete dates (history is never rewritten and a
+     * historical duplicate never resurfaces), unrelated memberships are untouched, a fresh duplicate
+     * ACTIVE insert is now rejected by the engine, and soft-delete-then-re-add still works under the new
+     * index.</p>
+     */
+    private static void runGroupMembershipDedupScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 62);
+        Assertions.assertEquals(62, dbVersion(connection), "fixture must be at db.version 62 before 063");
+        Assertions.assertFalse(indexExists(connection, "IDX_USER_GROUP_ACTIVE", "T_USER_GROUP"),
+                "the active-membership unique index must not exist before 063");
+
+        seedPoisonedGroupMemberships(connection);
+        Assertions.assertEquals(3, count(connection, "T_USER_GROUP",
+                        "UGP_IDUSER_C = 'u-alice' and UGP_IDGROUP_C = 'g-eng' and UGP_DELETEDATE_D is null"),
+                "the fixture must carry the defect's own state: three ACTIVE rows for one pair");
+
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=62 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(63);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(),
+                "063 must run cleanly over a table that already holds duplicate active memberships");
+        Assertions.assertEquals(63, dbVersion(connection), "063 must advance DB_VERSION to 63");
+        Assertions.assertTrue(indexExists(connection, "IDX_USER_GROUP_ACTIVE", "T_USER_GROUP"),
+                "063 must create IDX_USER_GROUP_ACTIVE on T_USER_GROUP");
+
+        // Deterministic keeper: the LOWEST UGP_ID_C stays active, its siblings are soft-deleted.
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_IDUSER_C = 'u-alice' and UGP_IDGROUP_C = 'g-eng' and UGP_DELETEDATE_D is null"),
+                "exactly one active row may survive per duplicated pair");
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_ID_C = 'ug-a1' and UGP_DELETEDATE_D is null"),
+                "the lowest UGP_ID_C of the duplicated pair must stay ACTIVE");
+        for (String softDeleted : new String[]{"ug-a2", "ug-a3"}) {
+            Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                            "UGP_ID_C = '" + softDeleted + "' and UGP_DELETEDATE_D is not null"),
+                    softDeleted + " must be soft-deleted by the dedup, not removed");
+        }
+        // No row is ever deleted: the duplicates survive as history.
+        Assertions.assertEquals(3, count(connection, "T_USER_GROUP",
+                        "UGP_IDUSER_C = 'u-alice' and UGP_IDGROUP_C = 'g-eng' and UGP_ID_C like 'ug-a%'"),
+                "the dedup must SOFT-delete, leaving all three rows in place");
+
+        // Pre-existing deleted history is untouched -- original delete dates, not the migration's.
+        assertDeleteDate(connection, "ug-h1", java.sql.Timestamp.valueOf("2020-01-01 00:00:00"));
+        assertDeleteDate(connection, "ug-h2", java.sql.Timestamp.valueOf("2020-01-02 00:00:00"));
+        assertDeleteDate(connection, "ug-b2", java.sql.Timestamp.valueOf("2021-03-04 05:06:07"));
+
+        // Unrelated memberships are untouched.
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_ID_C = 'ug-b1' and UGP_DELETEDATE_D is null"),
+                "a pair with a single active row must be left active");
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_ID_C = 'admin-administrators' and UGP_DELETEDATE_D is null"),
+                "the seeded admin membership must be left active");
+        connection.commit();
+
+        // The index now rejects a second ACTIVE row for a pair that already has one.
+        boolean rejected = false;
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-a4','u-alice','g-eng')");
+        } catch (SQLException e) {
+            rejected = e.getSQLState() != null && e.getSQLState().startsWith("23");
+            connection.rollback();
+        }
+        Assertions.assertTrue(rejected,
+                "after 063 a second ACTIVE membership for the same pair must be rejected by the engine");
+
+        // ... but soft-delete-then-re-add still works (the constraint is active-only).
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_USER_GROUP set UGP_DELETEDATE_D = CURRENT_TIMESTAMP where UGP_ID_C = 'ug-a1'");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-a5','u-alice','g-eng')");
+        }
+        connection.commit();
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_ID_C = 'ug-a5' and UGP_DELETEDATE_D is null"),
+                "removing a member and adding them again must be accepted under the active-only index");
+    }
+
+    /**
+     * The H2 hazard 056/057/059/062 guard against, applied to 063: H2 auto-commits DDL, so a run that
+     * dies partway leaves DB_VERSION at 62 with the earlier statements already committed. Seed exactly
+     * that half-applied state — the dedup UPDATE plus the dialect's FIRST enforcement statement (H2: the
+     * generated active-key column; PostgreSQL: the partial unique index, its only one) — and prove the
+     * retry completes to 63 instead of failing on "already exists" and stranding the database at 62.
+     */
+    private static void runGroupMembershipRetryScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 62);
+        seedPoisonedGroupMemberships(connection);
+
+        boolean postgres = isPostgres(connection);
+        try (Statement s = connection.createStatement()) {
+            // Statement 1 of the script: the dedup. On H2 the following DDL's implicit commit is what
+            // makes this survive the failed run; on PostgreSQL this models an operator's manual repair.
+            s.executeUpdate("update T_USER_GROUP set UGP_DELETEDATE_D = CURRENT_TIMESTAMP where UGP_DELETEDATE_D is null and UGP_ID_C > (select min(dup.UGP_ID_C) from T_USER_GROUP dup where dup.UGP_DELETEDATE_D is null and dup.UGP_IDUSER_C = T_USER_GROUP.UGP_IDUSER_C and dup.UGP_IDGROUP_C = T_USER_GROUP.UGP_IDGROUP_C)");
+            if (postgres) {
+                s.execute("create unique index IDX_USER_GROUP_ACTIVE on T_USER_GROUP (UGP_IDUSER_C, UGP_IDGROUP_C) where UGP_DELETEDATE_D is null");
+            } else {
+                s.execute("alter table T_USER_GROUP add column UGP_IDUSER_ACTIVE_C varchar(36) generated always as (case when UGP_DELETEDATE_D is null then UGP_IDUSER_C else null end)");
+            }
+        }
+        connection.commit();
+        Assertions.assertEquals(62, dbVersion(connection),
+                "a run that died mid-script leaves DB_VERSION at 62");
+        if (postgres) {
+            Assertions.assertTrue(indexExists(connection, "IDX_USER_GROUP_ACTIVE", "T_USER_GROUP"),
+                    "the half-applied PostgreSQL fixture must already carry the partial unique index");
+        } else {
+            Assertions.assertTrue(columnExists(connection, "T_USER_GROUP", "UGP_IDUSER_ACTIVE_C"),
+                    "the half-applied H2 fixture must already carry the generated active-key column");
+            Assertions.assertFalse(indexExists(connection, "IDX_USER_GROUP_ACTIVE", "T_USER_GROUP"),
+                    "the half-applied H2 fixture must NOT carry the unique index yet");
+        }
+
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=62 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(63);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(),
+                "063 must be retry-safe: re-running it over already-applied statements must not fail");
+        Assertions.assertEquals(63, dbVersion(connection),
+                "the retry must advance DB_VERSION to 63 rather than leaving the DB stuck at 62");
+        Assertions.assertTrue(indexExists(connection, "IDX_USER_GROUP_ACTIVE", "T_USER_GROUP"),
+                "the retry must leave the active-membership unique index in place");
+        Assertions.assertEquals(1, count(connection, "T_USER_GROUP",
+                        "UGP_IDUSER_C = 'u-alice' and UGP_IDGROUP_C = 'g-eng' and UGP_DELETEDATE_D is null"),
+                "the retry must not re-duplicate or over-delete the deduplicated pair");
+    }
+
+    /**
+     * The residual abort guard (statement 2, mirroring dbupdate-050-0.sql:6) must be genuinely ARMED on
+     * both dialects, not a silent no-op: run the REAL guard line — read from the shipped migration so the
+     * test cannot drift from it — against a still-duplicated table and assert it fails. In a real upgrade
+     * the dedup above it resolves everything, so this state is unreachable; the guard exists so that if it
+     * ever did not, the upgrade aborts and rolls back instead of dying halfway through the index DDL.
+     */
+    private static void runGroupMembershipAbortGuardScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 62);
+        seedPoisonedGroupMemberships(connection);
+
+        String guard = migrationLineStartingWith(63, "insert into T_CONFIG");
+        boolean aborted = false;
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate(guard);
+        } catch (SQLException expected) {
+            aborted = true;
+        }
+        connection.rollback();
+        Assertions.assertTrue(aborted,
+                "the 063 residual guard must ABORT while duplicate active memberships remain");
+
+        // And it is a harmless no-op once nothing is duplicated.
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("update T_USER_GROUP set UGP_DELETEDATE_D = CURRENT_TIMESTAMP where UGP_ID_C in ('ug-a2','ug-a3')");
+            s.executeUpdate(guard);
+        }
+        connection.commit();
+    }
+
+    /**
+     * Seed T_USER_GROUP with the #190 defect's own state: a pair with THREE active rows (ug-a1..ug-a3,
+     * so the keeper rule is exercised beyond a coin flip) plus TWO soft-deleted history rows for that same
+     * pair carrying distinct original delete dates, a pair with a single active row, and a pair with only
+     * a soft-deleted row. T_USER_GROUP carries no foreign keys, so no T_USER/T_GROUP rows are needed.
+     */
+    private static void seedPoisonedGroupMemberships(Connection connection) throws Exception {
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-a1','u-alice','g-eng')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-a2','u-alice','g-eng')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-a3','u-alice','g-eng')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C, UGP_DELETEDATE_D) values ('ug-h1','u-alice','g-eng','2020-01-01 00:00:00')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C, UGP_DELETEDATE_D) values ('ug-h2','u-alice','g-eng','2020-01-02 00:00:00')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C) values ('ug-b1','u-bob','g-eng')");
+            s.executeUpdate("insert into T_USER_GROUP (UGP_ID_C, UGP_IDUSER_C, UGP_IDGROUP_C, UGP_DELETEDATE_D) values ('ug-b2','u-bob','g-ops','2021-03-04 05:06:07')");
+        }
+        connection.commit();
+    }
+
+    /** Assert a membership row's delete date is exactly the expected instant (history must not be rewritten). */
+    private static void assertDeleteDate(Connection connection, String membershipId, java.sql.Timestamp expected)
+            throws Exception {
+        try (Statement s = connection.createStatement();
+             ResultSet rs = s.executeQuery(
+                     "select UGP_DELETEDATE_D from T_USER_GROUP where UGP_ID_C = '" + membershipId + "'")) {
+            Assertions.assertTrue(rs.next(), "membership " + membershipId + " must exist");
+            Assertions.assertEquals(expected, rs.getTimestamp(1),
+                    "063 must leave the pre-existing delete date of " + membershipId + " untouched");
+        }
+    }
+
+    /** Read the single statement line of a shipped migration script that starts with the given prefix. */
+    private static String migrationLineStartingWith(int version, String prefix) throws Exception {
+        String resource = String.format("/db/update/dbupdate-%03d-0.sql", version);
+        try (InputStream is = TestPopulatedMigration.class.getResourceAsStream(resource)) {
+            Assertions.assertNotNull(is, "migration script must be on the classpath: " + resource);
+            String script = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            for (String line : script.split("\n")) {
+                if (line.startsWith(prefix)) {
+                    return line;
+                }
+            }
+        }
+        throw new AssertionError("no statement starting with '" + prefix + "' in " + resource);
+    }
+
+    /** True when the connection targets PostgreSQL (else H2). */
+    private static boolean isPostgres(Connection connection) throws Exception {
+        String product = connection.getMetaData().getDatabaseProductName();
+        return product != null && product.toLowerCase().contains("postgres");
+    }
+
+    /** Case-insensitive column existence probe (H2 stores identifiers uppercase, PostgreSQL lowercase). */
+    private static boolean columnExists(Connection connection, String table, String column) throws Exception {
+        return scalarCount(connection,
+                "select count(*) from information_schema.columns where upper(table_name) = upper('" + table
+                        + "') and upper(column_name) = upper('" + column + "')") > 0;
     }
 
     /**
