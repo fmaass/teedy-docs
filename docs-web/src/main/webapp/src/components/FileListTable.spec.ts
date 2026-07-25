@@ -9,15 +9,6 @@ import FileListTable, { type FilePanelFile } from './FileListTable.vue'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${JSON.stringify(p)}` : k) }) }))
 vi.mock('../api/file', () => ({ getFileUrl: (id: string) => `/api/file/${id}/data` }))
 
-// jsdom lacks ResizeObserver, which PrimeVue's VirtualScroller (mounted above the
-// ~100-file threshold) requires. Stub it so the virtualized path can mount.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub
-
 function makeFile(over: Partial<FilePanelFile> = {}): FilePanelFile {
   return {
     id: 'f1',
@@ -323,16 +314,37 @@ describe('FileListTable', () => {
     expect(wrapper.findAll('.cover-badge').length).toBe(1)
   })
 
-  it('virtual-scrolls only above the ~100-file threshold', () => {
+  // #196 — the list flows with the page at EVERY length: no inner scroll container, no
+  // windowing. The ~100-file threshold survives for one purpose only, the drag-reorder
+  // guard (a drag over a partially-rendered list emitted an incomplete id order).
+  it('never inner-scrolls or windows, at any length — the threshold survives only as the reorder guard', () => {
     const small = mountTable(twoFiles)
-    expect((small.vm as unknown as { virtualize: boolean }).virtualize).toBe(false)
-    expect(small.findComponent(DataTable).props('virtualScrollerOptions')).toBeFalsy()
-    expect(small.findComponent(DataTable).props('scrollable')).toBe(false)
+    const smallTable = small.findComponent(DataTable)
+    expect(smallTable.props('scrollable')).toBeFalsy()
+    expect(smallTable.props('scrollHeight')).toBeFalsy()
+    expect(smallTable.props('virtualScrollerOptions')).toBeFalsy()
+    expect((small.vm as unknown as { reorderEnabled: boolean }).reorderEnabled).toBe(true)
 
     const many = Array.from({ length: 101 }, (_, i) => makeFile({ id: `f${i}`, name: `file-${i}.txt` }))
-    const big = mountTable(many)
-    expect((big.vm as unknown as { virtualize: boolean }).virtualize).toBe(true)
-    expect(big.findComponent(DataTable).props('virtualScrollerOptions')).toBeTruthy()
-    expect(big.findComponent(DataTable).props('scrollable')).toBe(true)
+    // The row action menu is stubbed for THIS mount only: it is not under test here, and
+    // 101 live copies of its eight buttons make the mount minutes-slow under jsdom. The
+    // table's own scroll/window behaviour — what this test asserts — is untouched by it.
+    const big = mount(FileListTable, {
+      props: { files: many, writable: true, coverFileId: null },
+      global: {
+        plugins: [[PrimeVue, { theme: 'none' }]],
+        directives: { tooltip: {} },
+        stubs: { FileActionMenu: true },
+      },
+      attachTo: document.body,
+    })
+    const bigTable = big.findComponent(DataTable)
+    expect(bigTable.props('scrollable')).toBeFalsy()
+    expect(bigTable.props('scrollHeight')).toBeFalsy()
+    expect(bigTable.props('virtualScrollerOptions')).toBeFalsy()
+    // Every row is rendered — a windowed list renders only its viewport slice.
+    expect(big.findAll('tbody tr').length).toBe(101)
+    // The threshold still disables the drag handle above 100 files.
+    expect((big.vm as unknown as { reorderEnabled: boolean }).reorderEnabled).toBe(false)
   })
 })

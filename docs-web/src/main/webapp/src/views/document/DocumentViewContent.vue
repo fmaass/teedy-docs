@@ -1126,8 +1126,9 @@ onUnmounted(() => {
       </div>
 
       <!-- LIST: enriched DataTable (optional columns, quick filter, inline rename,
-           drag-handle reorder, list virtualization). The same #file-extra mount point is
-           forwarded into each row's action menu. -->
+           drag-handle reorder). Like the grid it flows with the page — it has no inner
+           scroll container and no windowing at any length (#196). The same #file-extra
+           mount point is forwarded into each row's action menu. -->
       <FileListTable
         v-else
         ref="fileListRef"

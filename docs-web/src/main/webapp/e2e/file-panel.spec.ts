@@ -78,6 +78,20 @@ test('list shows Name+Created+Size by default with Uploader optional', async ({ 
   await openFileList(page)
 
   const heads = page.locator('.file-data-table thead')
+  // #170: the metadata columns collapse as the viewport narrows — below 640px the row has
+  // no width to spare for them beside the name and the action cluster (F2), and the column
+  // chooser goes with them rather than offering choices that cannot take effect. This spec
+  // runs under both Playwright projects, so it asserts the policy that applies to its own
+  // viewport instead of assuming the desktop one.
+  const narrow = page.viewportSize()!.width <= 639
+  if (narrow) {
+    await expect(heads.getByText('Name', { exact: true })).toBeVisible()
+    await expect(heads.getByText('Created', { exact: true })).toBeHidden()
+    await expect(heads.getByText('Size', { exact: true })).toBeHidden()
+    await expect(page.locator('.file-columns-btn')).toBeHidden()
+    return
+  }
+
   await expect(heads.getByText('Created', { exact: true })).toBeVisible()
   await expect(heads.getByText('Size', { exact: true })).toBeVisible()
   await expect(heads.getByText('Uploader', { exact: true })).toHaveCount(0)

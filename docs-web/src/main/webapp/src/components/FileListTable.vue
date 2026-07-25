@@ -14,10 +14,11 @@ import FileActionMenu from './FileActionMenu.vue'
 
 // Enriched, authenticated file LIST (the grid⇄list toggle's "list" mode). Owns the
 // list-only affordances: quick filter, optional columns, transient sort, drag-handle
-// reorder, inline rename, and virtualization for long lists. All *mutations* are
-// delegated up (the parent owns the document + query cache); this component only owns
-// presentation + local order/filter/sort/rename UI state. Every write affordance is
-// gated on `writable` so a read-only viewer sees a browse-only table.
+// reorder and inline rename. The list has NO inner scroll container and no windowing:
+// it flows with the page exactly like the grid does, however many files it holds (#196).
+// All *mutations* are delegated up (the parent owns the document + query cache); this
+// component only owns presentation + local order/filter/sort/rename UI state. Every write
+// affordance is gated on `writable` so a read-only viewer sees a browse-only table.
 export interface FilePanelFile {
   id: string
   // Nullable: the backend serializes a file name as nullable, so legacy/inbox rows can arrive
@@ -55,9 +56,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// Above this count the list virtual-scrolls (grid windowing is deferred; the list is
-// the surface that can realistically hold hundreds of rows).
-const VIRTUAL_THRESHOLD = 100
+// Above this count the drag handle is withdrawn. It is NOT a rendering cap — every row
+// always renders — it guards the reorder contract: `POST /file/reorder` needs the COMPLETE
+// id order, and a drag over a very long list is both error-prone and easy to drop rows from.
+const LARGE_LIST_THRESHOLD = 100
 
 // Optional-column visibility. Icon + Name are always shown; Created + Size default on,
 // Uploader default off (accepted decision). Persisted so a user's column choice sticks.
@@ -144,17 +146,17 @@ const filteredFiles = computed(() => {
   )
 })
 
-const virtualize = computed(() => filteredFiles.value.length > VIRTUAL_THRESHOLD)
+const largeList = computed(() => filteredFiles.value.length > LARGE_LIST_THRESHOLD)
 
-// Drag reorder is only meaningful over the full, unfiltered, unsorted, non-virtualized
-// list — reordering a filtered/sorted subset or a virtual window is ambiguous, and the
-// backend needs the complete id order. Also inherently write-gated.
+// Drag reorder is only meaningful over the full, unfiltered, unsorted list — reordering a
+// filtered/sorted subset is ambiguous, and the backend needs the complete id order. Also
+// inherently write-gated.
 const reorderEnabled = computed(
   () =>
     props.writable &&
     !filterText.value &&
     !sortField.value &&
-    !virtualize.value &&
+    !largeList.value &&
     !reorderPending.value,
 )
 
@@ -233,7 +235,7 @@ function onNameKeydown(event: KeyboardEvent, file: FilePanelFile) {
   }
 }
 
-defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPending, confirmReorder, rollbackReorder })
+defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmReorder, rollbackReorder })
 </script>
 
 <template>
@@ -260,6 +262,9 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
         {{ sortField ? t('ui.file_view.order_sorted') : reorderFailed ? t('ui.file_view.order_failed') : t('ui.file_view.order_custom') }}
       </span>
 
+      <!-- The chooser is hidden on narrow viewports, where every metadata column is
+           collapsed anyway (see the responsive block below) and it would offer choices
+           that cannot take effect. -->
       <Button
         class="file-columns-btn"
         icon="pi pi-sliders-h"
@@ -280,7 +285,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             <Checkbox v-model="columns.size" binary inputId="file-col-size" />
             <label for="file-col-size">{{ t('ui.file_view.col_size') }}</label>
           </div>
-          <div class="file-column-option">
+          <div class="file-column-option file-column-option-uploader">
             <Checkbox v-model="columns.uploader" binary inputId="file-col-uploader" />
             <label for="file-col-uploader">{{ t('ui.file_view.col_uploader') }}</label>
           </div>
@@ -297,17 +302,20 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
       stripedRows
       :rowHover="true"
       :reorderableRows="reorderEnabled"
-      :scrollable="virtualize"
-      :scrollHeight="virtualize ? '480px' : undefined"
-      :virtualScrollerOptions="virtualize ? { itemSize: 46 } : undefined"
       class="file-data-table"
       @row-reorder="onRowReorder"
       @row-dblclick="onRowDblclick"
       @sort="onSort"
     >
-      <Column v-if="reorderEnabled" rowReorder headerStyle="width: 3rem" :reorderableColumn="false" />
+      <Column
+        v-if="reorderEnabled"
+        rowReorder
+        headerClass="file-col-handle"
+        bodyClass="file-col-handle"
+        :reorderableColumn="false"
+      />
 
-      <Column headerStyle="width: 3rem">
+      <Column headerClass="file-col-icon" bodyClass="file-col-icon">
         <template #body="{ data }">
           <!-- The icon opens the in-app preview (emits `open`), it does NOT link to the
                original attachment URL — that URL is served as a download, so linking to
@@ -324,55 +332,86 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
         </template>
       </Column>
 
-      <Column field="name" :header="t('ui.file_view.col_name')" sortable>
+      <Column
+        field="name"
+        :header="t('ui.file_view.col_name')"
+        sortable
+        headerClass="file-col-name"
+        bodyClass="file-col-name"
+      >
         <template #body="{ data }">
-          <InputText
-            v-if="renamingId === data.id"
-            v-model="renameValue"
-            class="rename-input"
-            size="small"
-            autofocus
-            @keyup.enter="commitRename(data.id)"
-            @keyup.escape="cancelRename"
-            @blur="commitRename(data.id)"
-          />
-          <span
-            v-else
-            class="file-name-text"
-            tabindex="0"
-            @dblclick.stop="startRename(data)"
-            @keydown="onNameKeydown($event, data)"
-          >{{ displayName(data.name, t) }}</span>
-          <span
-            v-if="coverFileId && data.id === coverFileId"
-            class="cover-badge"
-            :aria-label="t('ui.cover_badge')"
-          >
-            <i class="pi pi-image" aria-hidden="true" />
-            {{ t('ui.cover_badge') }}
-          </span>
+          <!-- One flex line: the name shrinks (and ellipsizes) so the cover badge and the
+               action cluster keep their room instead of being pushed off-screen (#170). -->
+          <div class="file-name-cell">
+            <InputText
+              v-if="renamingId === data.id"
+              v-model="renameValue"
+              class="rename-input"
+              size="small"
+              autofocus
+              @keyup.enter="commitRename(data.id)"
+              @keyup.escape="cancelRename"
+              @blur="commitRename(data.id)"
+            />
+            <span
+              v-else
+              class="file-name-text"
+              tabindex="0"
+              @dblclick.stop="startRename(data)"
+              @keydown="onNameKeydown($event, data)"
+            >{{ displayName(data.name, t) }}</span>
+            <span
+              v-if="coverFileId && data.id === coverFileId"
+              class="cover-badge"
+              :aria-label="t('ui.cover_badge')"
+            >
+              <i class="pi pi-image" aria-hidden="true" />
+              {{ t('ui.cover_badge') }}
+            </span>
+          </div>
         </template>
       </Column>
 
-      <Column v-if="columns.created" field="create_date" :header="t('ui.file_view.col_created')" sortable headerStyle="width: 10rem">
+      <Column
+        v-if="columns.created"
+        field="create_date"
+        :header="t('ui.file_view.col_created')"
+        sortable
+        headerClass="file-col-created"
+        bodyClass="file-col-created"
+      >
         <template #body="{ data }">
           <span class="file-meta">{{ formatDate(data.create_date) }}</span>
         </template>
       </Column>
 
-      <Column v-if="columns.size" field="size" :header="t('ui.file_view.col_size')" sortable headerStyle="width: 7rem">
+      <Column
+        v-if="columns.size"
+        field="size"
+        :header="t('ui.file_view.col_size')"
+        sortable
+        headerClass="file-col-size"
+        bodyClass="file-col-size"
+      >
         <template #body="{ data }">
           <span class="file-meta">{{ formatFileSize(data.size) }}</span>
         </template>
       </Column>
 
-      <Column v-if="columns.uploader" field="creator" :header="t('ui.file_view.col_uploader')" sortable headerStyle="width: 10rem">
+      <Column
+        v-if="columns.uploader"
+        field="creator"
+        :header="t('ui.file_view.col_uploader')"
+        sortable
+        headerClass="file-col-uploader"
+        bodyClass="file-col-uploader"
+      >
         <template #body="{ data }">
           <span class="file-meta">{{ data.creator }}</span>
         </template>
       </Column>
 
-      <Column headerStyle="width: 8rem" bodyStyle="text-align: right">
+      <Column headerClass="file-col-actions" bodyClass="file-col-actions">
         <template #body="{ data }">
           <FileActionMenu
             :file="data"
@@ -411,7 +450,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  margin-left: 0.5rem;
+  flex: 0 0 auto;
   padding: 0.05rem 0.4rem;
   border-radius: 4px;
   font-size: 0.7rem;
@@ -498,9 +537,16 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
   color: var(--teedy-brand);
 }
 
+.file-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .file-name-text {
-  display: inline-block;
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -509,7 +555,8 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
 }
 
 .rename-input {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 0.875rem;
 }
 
@@ -522,5 +569,136 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
   margin: 0.5rem 0 0;
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
+}
+
+/* ---------------------------------------------------------------------------
+   Row geometry (#170). A writable PDF row carries NINE controls (the shared
+   FileActionMenu's eight plus the PDF page organizer). Measured in the running app,
+   each is 36px wide, so the cluster is 340px of icons — wider than the entire
+   action area of a 360px phone, where 128px is left once the 8rem name floor and
+   the handle/icon columns are paid for. A single-line cluster is therefore
+   geometrically impossible on a phone, and the row is banded by measurement:
+
+     >= 1024px  Uploader shows (the widest optional column; the nine-icon cluster
+                plus all three metadata columns needs this much room)
+     >=  900px  action cluster on ONE line (it needs ~352px of column, which only
+                fits beside Created + Size from here up)
+     <=  899px  the cluster WRAPS inside its column, three icons per line
+     <=  639px  Created + Size collapse too, and the column chooser goes with them
+                (it would otherwise offer choices that cannot take effect)
+     <=  479px  the tightest cells — this is the band 360px and 393px land in, and
+                it satisfies F2's "all metadata columns collapse below 480px"
+
+   NO control is ever hidden or moved behind an overlay: at every width every action
+   of every row stays visible, unclipped and clickable — the cluster gets taller
+   instead of narrower. e2e/file-list-geometry.spec.ts is the standing gate, and it
+   measures the WORST-CASE row (writable PDF) at 360px, 393px and desktop.
+   --------------------------------------------------------------------------- */
+
+/* The name column absorbs the row's slack and ellipsizes. `max-width: 0` stops the
+   file name from driving the column's preferred width (an auto-layout table otherwise
+   sizes this column to the longest name and pushes the action cluster off-screen —
+   that IS #170); `width: 100%` makes it the column that receives the leftover space;
+   `min-width` is the 8rem readability floor the redesign guarantees. */
+.file-data-table :deep(td.file-col-name) {
+  width: 100%;
+  max-width: 0;
+  min-width: 8rem;
+}
+
+.file-data-table :deep(.file-col-handle),
+.file-data-table :deep(.file-col-icon) {
+  width: 3rem;
+}
+
+.file-data-table :deep(.file-col-created),
+.file-data-table :deep(.file-col-uploader) {
+  width: 10rem;
+}
+
+.file-data-table :deep(.file-col-size) {
+  width: 7rem;
+}
+
+/* The cluster is right-aligned, so the cell's default 1rem gutters are dead space — and
+   `.doc-view` caps the content at 960px, which is where a row carrying the Uploader column
+   AND the nine-icon cluster runs out of room (measured: 7px short with the default
+   gutters). Halving them is what makes that combination fit. */
+.file-data-table :deep(td.file-col-actions),
+.file-data-table :deep(th.file-col-actions) {
+  text-align: right;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+@media (max-width: 1023px) {
+  .file-data-table :deep(.file-col-uploader) {
+    display: none;
+  }
+  .file-column-option-uploader {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .file-data-table :deep(th),
+  .file-data-table :deep(td) {
+    padding: 0.5rem 0.375rem;
+  }
+  .file-data-table :deep(.file-col-handle),
+  .file-data-table :deep(.file-col-icon) {
+    width: 2.5rem;
+  }
+  .file-data-table :deep(.file-col-created) {
+    width: 7rem;
+  }
+  .file-data-table :deep(.file-col-size) {
+    width: 5rem;
+  }
+  /* Three 36px icons per line (8rem = 128px, less this band's 12px of cell padding,
+     holds 3 × 36 + 2 × 2 = 112). The cluster grows downwards, never sideways. The
+     padding is restated because the wide band's cell rule outranks the element-level
+     one above on specificity, media query or not. */
+  .file-data-table :deep(td.file-col-actions),
+  .file-data-table :deep(th.file-col-actions) {
+    min-width: 8rem;
+    padding-left: 0.375rem;
+    padding-right: 0.375rem;
+  }
+  .file-data-table :deep(td.file-col-actions .file-action-menu) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 0.125rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .file-data-table :deep(.file-col-created),
+  .file-data-table :deep(.file-col-size) {
+    display: none;
+  }
+  .file-columns-btn {
+    display: none;
+  }
+}
+
+@media (max-width: 479px) {
+  .file-data-table :deep(th),
+  .file-data-table :deep(td) {
+    padding: 0.5rem 0.125rem;
+  }
+  .file-data-table :deep(.file-col-handle),
+  .file-data-table :deep(.file-col-icon) {
+    width: 2rem;
+  }
+  /* Same three icons per line, with only 4px of cell padding to pay for. Keeping it at
+     7.5rem leaves the name column above its floor at 360px (measured: 176px there). */
+  .file-data-table :deep(td.file-col-actions),
+  .file-data-table :deep(th.file-col-actions) {
+    min-width: 7.5rem;
+    padding-left: 0.125rem;
+    padding-right: 0.125rem;
+  }
 }
 </style>

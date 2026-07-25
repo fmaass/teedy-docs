@@ -321,6 +321,12 @@ function handleDelete() {
 }
 
 @media (max-width: 640px) {
+  /* 1.5rem of page gutter is 48px of a 360px phone — a sixth of the width. The file
+     list's row geometry (#170) needs that space for the name column and the action
+     cluster, and every other tab reads better with it too. */
+  .doc-view {
+    padding: 1rem 0.75rem;
+  }
   .doc-header {
     flex-direction: column;
   }
