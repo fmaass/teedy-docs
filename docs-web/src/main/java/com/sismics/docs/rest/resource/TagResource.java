@@ -1,15 +1,15 @@
 package com.sismics.docs.rest.resource;
 
 import com.google.common.collect.Sets;
-import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.TagCoOccurrence;
 import com.sismics.docs.core.dao.dto.TagDto;
-import com.sismics.docs.core.model.jpa.Acl;
+import com.sismics.docs.core.exception.InactiveOwnerException;
 import com.sismics.docs.core.model.jpa.Tag;
+import com.sismics.docs.core.util.TagCreationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
@@ -236,32 +236,23 @@ public class TagResource extends BaseResource {
             }
         }
 
-        // Create the tag
-        TagDao tagDao = new TagDao();
+        // Create the tag and its base ACLs. #185: TagCreationUtil takes the owner's row lock FOR UPDATE
+        // before the insert, so a tag cannot be created under an owner a concurrent deletion is about to
+        // soft-delete. Its InactiveOwnerException means the caller's own account stopped being active
+        // mid-request, so the create is refused as a client error — mapping it here is NOT a
+        // rest.resource -> core.dao dependency, so the frozen layering web is unchanged.
         Tag tag = new Tag();
         tag.setName(name);
         tag.setColor(color);
         tag.setUserId(principal.getId());
         tag.setParentId(parentId);
-        String id = tagDao.create(tag, principal.getId());
+        String id;
+        try {
+            id = TagCreationUtil.createTag(tag, principal.getId());
+        } catch (InactiveOwnerException e) {
+            throw new ForbiddenClientException();
+        }
 
-        // Create read ACL
-        AclDao aclDao = new AclDao();
-        Acl acl = new Acl();
-        acl.setPerm(PermType.READ);
-        acl.setType(AclType.USER);
-        acl.setSourceId(id);
-        acl.setTargetId(principal.getId());
-        aclDao.create(acl, principal.getId());
-
-        // Create write ACL
-        acl = new Acl();
-        acl.setPerm(PermType.WRITE);
-        acl.setType(AclType.USER);
-        acl.setSourceId(id);
-        acl.setTargetId(principal.getId());
-        aclDao.create(acl, principal.getId());
-        
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("id", id);
         return Response.ok().entity(response.build()).build();

@@ -192,9 +192,11 @@ public final class CredentialLifecycleUtil {
      * {@link #findUserIdsRequiringReassignment(Collection)} for the predicate and why it also covers
      * tags. Evaluate this AFTER the departing user's owner row is locked, so the decision is made on
      * the state the deletion will act on and is serialized against the writers that take the same
-     * owner-row lock (share/ACL grants, other principal deletions). It does NOT serialize against
-     * document/tag creation, which takes no owner-row lock — that window is the same one the
-     * always-reassign path has (issue #185).
+     * owner-row lock: share/ACL grants, other principal deletions, AND owned-entity creation —
+     * {@link DocumentUtil#createDocument} (#111) and {@link TagCreationUtil#createTag} (#185) both
+     * acquire this same owner row FOR UPDATE before inserting, so a create racing this decision either
+     * committed first (and is therefore visible to it) or blocks, then re-reads the soft-deleted owner
+     * and aborts without inserting.
      *
      * @param userId Departing user ID
      * @return true when deleting this user requires a reassignment target

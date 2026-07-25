@@ -856,16 +856,13 @@ public class UserResource extends BaseResource {
         // below, and it is evaluated after the lock rather than at parameter-validation time so it sees
         // the state the deletion will actually act on.
         //
-        // SCOPE OF THE LOCK (do not over-read it): the owner-row lock serializes this decision only
-        // against writers that take the SAME row lock — a direct share/ACL grant on this owner's
-        // documents, another principal deletion, the self-delete path. Document and tag CREATION takes
-        // no owner-row lock: an FK check against the locked user row can make the insert WAIT, but once
-        // this transaction commits the insert proceeds and commits under a now-soft-deleted owner. So a
-        // document or tag created concurrently with this delete can still be missed. That window is NOT
-        // introduced here — it exists identically on the always-reassign path, where reassignOwnedDocuments
-        // snapshots the active documents and tags and anything created after the snapshot is not moved
-        // (see the RESIDUAL note in UserDao.reassignOwnedDocuments). Tracked as issue #185; closing it
-        // needs serialization against the hot create path, which is out of scope for this change.
+        // SCOPE OF THE LOCK: the owner-row lock serializes this decision against every writer that takes
+        // the SAME row lock — a direct share/ACL grant on this owner's documents, another principal
+        // deletion, the self-delete path, AND owned-entity creation. DocumentUtil.createDocument (#111)
+        // and TagCreationUtil.createTag (#185) both acquire this owner row FOR UPDATE before inserting,
+        // so a document or tag created concurrently with this delete either committed before this
+        // decision (which is taken under the lock and therefore sees it) or blocks until this
+        // transaction commits, then re-reads the soft-deleted owner and aborts without inserting.
         if (lockedTarget == null && CredentialLifecycleUtil.requiresReassignment(user.getId())) {
             throw new ClientException("ReassignRequired",
                     "This user still owns documents or tags; a reassignment target is required to delete it");

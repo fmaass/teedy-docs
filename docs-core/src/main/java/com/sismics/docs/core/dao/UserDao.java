@@ -680,10 +680,12 @@ public class UserDao {
         // reassign path now preserves it exactly as the self-delete refusal guard would have required. Only
         // tags OWNED by the departing user are moved; a shared tag owned by someone else is untouched.
         //
-        // RESIDUAL (not closed here): a tag CREATED by the departing user AFTER this snapshot but before the
-        // delete commits is still missed — same root cause as the deferred #133 concurrent-link case. Closing
-        // it would require serializing against the hot tag-create/tag-link path (a tag-creation lock), which is
-        // out of scope for this change.
+        // #185 (closed): a tag CREATED by the departing user concurrently with this delete can no longer be
+        // missed by the snapshot. TagCreationUtil.createTag takes the owner's user row FOR UPDATE before the
+        // insert — the SAME row this deletion's caller already locked — so the creation either committed
+        // before this snapshot is taken (and is reassigned with the rest) or blocks until the delete commits,
+        // then re-reads the soft-deleted owner and aborts without inserting anything. The concurrent
+        // tag-LINK path is a different code path and is unaffected by this guard.
         Query tagSel = em.createQuery("select t.id from Tag t where t.userId = :departingUserId and t.deleteDate is null");
         tagSel.setParameter("departingUserId", departingUserId);
         List<String> reassignedTagIds = tagSel.getResultList();

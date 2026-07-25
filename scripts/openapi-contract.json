@@ -9,6 +9,10 @@
     "DELETE /user/{username}": {
       "responses": ["200", "400", "403"],
       "requestBodyRequired": false
+    },
+    "PUT /tag": {
+      "responses": ["200", "400", "403"],
+      "requestBodyRequired": false
     }
   }
 }

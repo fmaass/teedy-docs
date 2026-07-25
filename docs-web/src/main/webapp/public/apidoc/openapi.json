@@ -3269,6 +3269,12 @@
         "responses": {
           "200": {
             "description": "Success"
+          },
+          "400": {
+            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a space or a colon; ParentNotFound when the parent tag is not readable"
+          },
+          "403": {
+            "description": "Not authenticated, or the calling account stopped being active before the tag was created"
           }
         }
       }
