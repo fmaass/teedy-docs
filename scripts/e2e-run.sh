@@ -37,6 +37,14 @@
 #   E2E_TIMEOUT   seconds to wait for /api/user readiness (default 180)
 #   E2E_ALLOW_STALE_WAR   set to 1 to skip the reused-WAR/pom version match check
 #   E2E_VISUAL_ONLY       set to 1 to run ONLY the @visual pixel specs in the jammy container
+#   E2E_CPUSET      value for the app container's `--cpuset-cpus` (e.g. "0,1"). Pin the
+#                   Playwright runner to the SAME cores with `taskset -c 0,1 scripts/e2e-run.sh`
+#                   to reproduce a contended, low-core environment (#186 flake repro).
+#   E2E_DOCKER_ARGS extra, word-split arguments spliced into the app container's `docker run`
+#                   (e.g. "--memory=2g --cpus=2"). Applies to the app container only.
+#   E2E_ARTIFACT_DIR  where the run's diagnostics are written (default <repo>/e2e-artifacts,
+#                   which is git-ignored): the app container's FULL server log, and the
+#                   admin-baseline drift journal the e2e fixtures append to.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,10 +55,23 @@ host_port="${E2E_PORT:-8080}"
 max_wait="${E2E_TIMEOUT:-180}"
 container="teedy-e2e-$$"
 
+# Diagnostics survive the run (#186). The old teardown printed `docker logs | tail -n 200`
+# and then removed the container, so the SERVER side of any failure — the stack trace, the
+# 429, the request that never arrived — was destroyed seconds after the report was written.
+# The full log is now written to a file first; the console still gets the same 200-line tail.
+artifact_dir="${E2E_ARTIFACT_DIR:-${repo_root}/e2e-artifacts}"
+run_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+server_log="${artifact_dir}/server-${run_stamp}-${container}.log"
+mkdir -p "${artifact_dir}"
+# Read by e2e/fixtures.ts so the fixture-level diagnostics land beside the server log.
+export E2E_DIAG_DIR="${artifact_dir}"
+
 cleanup() {
-  echo "::group::container logs (${container})"
-  docker logs "${container}" 2>&1 | tail -n 200 || true
+  docker logs "${container}" >"${server_log}" 2>&1 || true
+  echo "::group::container logs (${container}) — last 200 of $(wc -l <"${server_log}" 2>/dev/null || echo 0) lines"
+  tail -n 200 "${server_log}" 2>/dev/null || true
   echo "::endgroup::"
+  echo "Full server log preserved at ${server_log}"
   docker rm -f "${container}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -99,10 +120,29 @@ fi
 #   is what makes the alias resolve at all.
 # DOCS_WEBHOOK_ALLOW_PRIVATE lets that same test register a webhook whose URL points at
 #   the (private) host gateway — the SSRF guard blocks private targets by default.
-echo "Starting container from ${image} (embedded H2, port ${host_port})..."
+#
+# E2E_CPUSET / E2E_DOCKER_ARGS splice extra flags into this one `docker run` so a run can be
+# constrained without editing the harness — the 2-core pin used to reproduce the #186 flake
+# cluster (`E2E_CPUSET=0,1` here plus `taskset -c 0,1` on the runner) needs no other hook.
+run_args=()
+if [ -n "${E2E_CPUSET:-}" ]; then
+  run_args+=(--cpuset-cpus="${E2E_CPUSET}")
+fi
+if [ -n "${E2E_DOCKER_ARGS:-}" ]; then
+  # Deliberate word splitting: the variable carries several flags.
+  # shellcheck disable=SC2206
+  run_args+=(${E2E_DOCKER_ARGS})
+fi
+
+extra_desc=""
+if [ ${#run_args[@]} -gt 0 ]; then
+  extra_desc=" (extra docker args: ${run_args[*]})"
+fi
+echo "Starting container from ${image} (embedded H2, port ${host_port})${extra_desc}..."
 docker run -d --name "${container}" \
   --add-host=host.docker.internal:host-gateway \
   -e DOCS_WEBHOOK_ALLOW_PRIVATE=true \
+  ${run_args[@]+"${run_args[@]}"} \
   -p "${host_port}:8080" "${image}" >/dev/null
 
 url="http://localhost:${host_port}/api/user"

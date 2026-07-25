@@ -307,6 +307,44 @@ async function describeResponse(res: APIResponse): Promise<string> {
   return `HTTP ${res.status()} ${body.slice(0, 500)}`
 }
 
+// --- API failure diagnostics (#186 instrumentation) ---------------------------
+// A bare `expect(res.ok()).toBeTruthy()` reports "expected true, received false" and
+// nothing else, so an intermittent API failure carries ZERO information about WHY the
+// call failed — the exact situation that left #186 undiagnosable across several runs.
+//
+// `Retry-After` is reported explicitly (including when ABSENT) because it is the one
+// header that distinguishes a throttle/bulkhead rejection from every other 4xx/5xx:
+// UserResource sets it on both the per-account lockout (:474) and the login-work
+// bulkhead shed (:490), and on nothing else. "Retry-After: <absent>" is therefore
+// positive evidence AGAINST the throttle hypothesis, not merely a missing field.
+
+/**
+ * Render an API failure as evidence: status line, `Retry-After` (present or absent),
+ * and the response body. Truncated at 1000 chars — Teedy's error bodies are small JSON
+ * objects, and a servlet-container HTML error page is recognisable from its first line.
+ */
+export async function describeApiFailure(res: APIResponse): Promise<string> {
+  const retryAfter = res.headers()['retry-after']
+  const body = await res.text().catch(() => '<unreadable body>')
+  return [
+    `HTTP ${res.status()} ${res.statusText()}`,
+    `Retry-After: ${retryAfter ?? '<absent>'}`,
+    `url: ${res.url()}`,
+    `body: ${body.slice(0, 1000) || '<empty>'}`,
+  ].join(' | ')
+}
+
+/**
+ * Assert an API response succeeded, reporting the real failure signal when it did not.
+ *
+ * The assertion still FAILS on a bad response — this only enriches its message. The body
+ * is read lazily (only on failure) so the success path costs nothing.
+ */
+export async function expectResponseOk(res: APIResponse, label: string): Promise<void> {
+  if (res.ok()) return
+  expect(res.ok(), `${label} — ${await describeApiFailure(res)}`).toBeTruthy()
+}
+
 /**
  * Permanently remove a document.
  *

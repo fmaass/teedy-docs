@@ -1,4 +1,12 @@
-import { test as base, expect, type TestInfo } from '@playwright/test'
+import {
+  test as base,
+  expect,
+  request as pwRequest,
+  type APIRequestContext,
+  type TestInfo,
+} from '@playwright/test'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // Re-export every other named/type export (request, type Page, type Locator,
 // type APIRequestContext, type ConsoleMessage, type Request, …) so specs can import
@@ -117,7 +125,167 @@ function bodyAlreadyFailed(testInfo: TestInfo): boolean {
   return testInfo.errors.length > 0 || testInfo.status === 'failed' || testInfo.status === 'timedOut'
 }
 
-export const test = base.extend<{ cleanup: CleanupFixture }>({
+/**
+ * Shared-admin baseline assertion (#186 instrumentation — an ASSERTION, never a restore).
+ *
+ * Almost every spec drives the UI through ENGLISH, LIGHT-MODE selectors while sharing ONE
+ * server-side account (`admin`). Two of the account's preferences are persisted SERVER-SIDE
+ * and re-seeded into any fresh browser context that carries no explicit on-device choice
+ * (`stores/auth.ts:41` for the locale, `:56` for dark mode) — and the shared storageState
+ * carries neither key. So a spec that leaves `locale=de` or `dark_mode=true` behind on the
+ * admin account silently re-themes/re-languages EVERY LATER SPEC IN THE RUN, at which point
+ * failures appear as unrelated selector timeouts in unrelated files.
+ *
+ * This fixture reads the account's authoritative state before every test and fails LOUDLY the
+ * moment it has drifted, naming the last test that completed — turning "some spec later times
+ * out on a button" into "spec X left the admin locale at de".
+ *
+ * Deliberate design points:
+ *  - A DEDICATED authenticated admin API context, never the spec's own. `two-factor.spec.ts:8`,
+ *    `auth.spec.ts` and `locale-persist.spec.ts` run on cleared storage state, where a
+ *    context-borrowed probe would simply 403 and check nothing at all.
+ *  - The probe NEVER LOGS IN. It is hydrated from the storage-state file global setup already
+ *    produced, and issues GETs only. This is load-bearing for the investigation, not a
+ *    convenience: a successful `POST /api/user/login` calls `recordLoginSuccess`, which CLEARS
+ *    the account / network / pair lockout counters in `LoginThrottleStore` — so a probe that
+ *    logged in would reset the very state #186 suspects, most visibly after a failure (a
+ *    replacement worker would start against a freshly-cleared throttle). A probe that mutates
+ *    its own subject proves nothing.
+ *  - A storage state that cannot read the account is a HARD ERROR naming the cause. There is
+ *    deliberately no login fallback: silently re-authenticating would reintroduce exactly the
+ *    perturbation above, at the least observable moment.
+ *  - The context is created ONCE per worker and reused (workers:1, fullyParallel:false), so the
+ *    probe costs one GET per test and zero logins.
+ *  - It ASSERTS and never repairs: a restore would hide the very leak being hunted, and the
+ *    plan's Do-NOT list forbids a global restore hook.
+ *  - The accepted baseline is "absent OR the English/light value": specs that restore correctly
+ *    POST `locale=en` explicitly (a pristine container has the field absent), and both states
+ *    render the same English light UI the selectors assume.
+ */
+const BASELINE_DESCRIPTION = 'locale ∈ {absent, "en"} and dark_mode ∈ {absent, false}'
+
+interface AdminPreferences {
+  locale?: string | null
+  dark_mode?: boolean | null
+}
+
+// Written next to the harness-preserved server logs so a run's diagnostics live together.
+// `e2e-artifacts/` at the repo root is already git-ignored. The harness exports E2E_DIAG_DIR;
+// the relative fallback keeps a bare `npx playwright test` working from the webapp directory.
+const DIAG_DIR = process.env.E2E_DIAG_DIR ?? resolve(process.cwd(), '../../../../e2e-artifacts')
+
+// Diagnostics must never be the reason a test fails: every write is best-effort.
+function recordDiagnostic(event: Record<string, unknown>): void {
+  try {
+    mkdirSync(DIAG_DIR, { recursive: true })
+    appendFileSync(
+      resolve(DIAG_DIR, 'admin-baseline-drift.jsonl'),
+      `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`,
+    )
+  } catch {
+    // A read-only or missing artifacts directory is not a test failure.
+  }
+}
+
+let adminProbe: APIRequestContext | null = null
+let lastCompletedTest = '<none — this is the first test of the run>'
+
+async function describeProbeFailure(res: { status(): number; headers(): Record<string, string>; text(): Promise<string> }) {
+  const body = await res.text().catch(() => '<unreadable body>')
+  return `HTTP ${res.status()} | Retry-After: ${res.headers()['retry-after'] ?? '<absent>'} | body: ${body.slice(0, 500)}`
+}
+
+// The authenticated session global setup already produced. Taken from the PROJECT-level `use`
+// so a spec-level `test.use({ storageState: … })` override (which is how the login specs clear
+// their state) can never point the probe at an unauthenticated context.
+function adminStorageStatePath(testInfo: TestInfo): string {
+  const configured = testInfo.project.use?.storageState
+  if (typeof configured !== 'string') {
+    throw new Error(
+      'admin-baseline probe needs the project-level storageState FILE produced by global setup ' +
+        `(playwright.config.ts projects[].use.storageState), but found: ${JSON.stringify(configured)}. ` +
+        'The probe must not log in — see the fixture comment.',
+    )
+  }
+  return configured
+}
+
+async function openAdminProbe(baseURL: string, storageState: string): Promise<APIRequestContext> {
+  // No login: the session is READ from disk. See the fixture comment for why this is mandatory.
+  return pwRequest.newContext({ baseURL, storageState })
+}
+
+async function readAdminPreferences(baseURL: string, storageState: string): Promise<AdminPreferences> {
+  if (!adminProbe) adminProbe = await openAdminProbe(baseURL, storageState)
+
+  const res = await adminProbe.get('/api/user')
+  if (!res.ok()) {
+    throw new Error(
+      `admin-baseline probe could not read /api/user using the stored admin session ` +
+        `(${storageState}) — ${await describeProbeFailure(res)}. The probe deliberately does NOT ` +
+        `log in (a login would clear the throttle state under investigation); re-run global setup.`,
+    )
+  }
+  const body = (await res.json()) as AdminPreferences & { anonymous?: boolean }
+  if (body?.anonymous) {
+    throw new Error(
+      `admin-baseline probe read /api/user as ANONYMOUS using the stored admin session ` +
+        `(${storageState}) — that session has expired or was never authenticated. The probe ` +
+        `deliberately does NOT log in (a login would clear the throttle state under ` +
+        `investigation); re-run global setup.`,
+    )
+  }
+  return { locale: body?.locale, dark_mode: body?.dark_mode }
+}
+
+function baselineViolation(prefs: AdminPreferences): string | null {
+  const problems: string[] = []
+  if (prefs.locale != null && prefs.locale !== 'en') {
+    problems.push(`locale = ${JSON.stringify(prefs.locale)} (expected absent or "en")`)
+  }
+  if (prefs.dark_mode != null && prefs.dark_mode !== false) {
+    problems.push(`dark_mode = ${JSON.stringify(prefs.dark_mode)} (expected absent or false)`)
+  }
+  return problems.length ? problems.join('; ') : null
+}
+
+export const test = base.extend<{ cleanup: CleanupFixture; adminBaseline: void }>({
+  // Automatic: it must guard specs that never ask for it, which is all of them.
+  adminBaseline: [
+    async ({ baseURL }, use, testInfo) => {
+      const thisTest = `[${testInfo.project.name}] ${testInfo.titlePath.filter(Boolean).join(' › ')}`
+      if (!baseURL) throw new Error('admin-baseline probe needs a baseURL (config `use.baseURL`)')
+
+      const prefs = await readAdminPreferences(baseURL, adminStorageStatePath(testInfo))
+      const violation = baselineViolation(prefs)
+      if (violation) {
+        recordDiagnostic({
+          kind: 'admin-baseline-drift',
+          detectedBefore: thisTest,
+          lastCompletedTest,
+          observed: prefs,
+          violation,
+        })
+        // Not repaired on purpose: the drift is the finding. `lastCompletedTest` is NOT advanced
+        // for a test whose body never ran, so every subsequent failure keeps naming the real culprit.
+        throw new Error(
+          `Shared-admin server-side baseline has DRIFTED (#186 instrumentation).\n` +
+            `  expected: ${BASELINE_DESCRIPTION}\n` +
+            `  observed: ${violation}\n` +
+            `  last test that completed before this one: ${lastCompletedTest}\n` +
+            `  Every later spec inherits this state: a fresh browser context with no on-device\n` +
+            `  choice re-seeds the UI locale and dark mode from the account (stores/auth.ts:41,:56),\n` +
+            `  so English/light selectors elsewhere will fail for reasons of their own.`,
+        )
+      }
+
+      await use()
+
+      lastCompletedTest = thisTest
+    },
+    { auto: true },
+  ],
+
   page: async ({ page }, use) => {
     await page.addInitScript((css: string) => {
       const inject = () => {

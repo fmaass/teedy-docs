@@ -1,5 +1,5 @@
 import { test, expect, request as pwRequest } from './fixtures'
-import { unique, totpCode, login } from './helpers'
+import { unique, totpCode, login, expectResponseOk, describeApiFailure } from './helpers'
 
 // The activation code is recomputed from the secret the page itself shows and verified by the REAL
 // server, so a regression in enrollment, activation, the login challenge, or disable fails an assertion
@@ -14,11 +14,16 @@ test.describe('Two-factor enrollment (behavior A, self-service)', () => {
     const adminLogin = await admin.post('/api/user/login', {
       form: { username: 'admin', password: 'admin', remember: false },
     })
-    expect(adminLogin.ok(), 'admin login for 2FA seed').toBeTruthy()
+    // #186 instrumentation: this assertion is the suite's most frequent intermittent
+    // failure and used to report only "expected true, received false". It still fails on
+    // a bad response — the message now carries the status, `Retry-After` (present OR
+    // absent) and the body, so the next occurrence names its own cause instead of
+    // requiring another run to guess at one.
+    await expectResponseOk(adminLogin, 'admin login for 2FA seed')
     const created = await admin.put('/api/user', {
       form: { username, password, email: `${username}@example.com`, storage_quota: 1_000_000_000 },
     })
-    expect(created.ok(), 'create 2FA seed user').toBeTruthy()
+    await expectResponseOk(created, 'create 2FA seed user')
     await admin.dispose()
     return { username, password }
   }
@@ -26,11 +31,23 @@ test.describe('Two-factor enrollment (behavior A, self-service)', () => {
   // Deletion requires a reassign target (#55) and its success is asserted, so a run never leaks its user.
   async function deleteUser(baseURL: string, username: string) {
     const admin = await pwRequest.newContext({ baseURL })
-    await admin.post('/api/user/login', { form: { username: 'admin', password: 'admin', remember: false } })
+    const adminLogin = await admin.post('/api/user/login', {
+      form: { username: 'admin', password: 'admin', remember: false },
+    })
+    // The teardown login is deliberately NOT asserted here: a new assertion point before the
+    // DELETE could abort the teardown and leak the seed user. Its diagnostics are instead
+    // carried into the delete's own (pre-existing) assertion, so a throttled/failed login stops
+    // masquerading as an unexplained 403 on the DELETE without changing what runs.
+    const loginFailure = adminLogin.ok() ? null : await describeApiFailure(adminLogin)
     const deleted = await admin.delete(`/api/user/${username}`, {
       params: { reassign_to_username: 'admin' },
     })
-    expect(deleted.ok(), `cleanup: delete ${username}`).toBeTruthy()
+    await expectResponseOk(
+      deleted,
+      loginFailure === null
+        ? `cleanup: delete ${username}`
+        : `cleanup: delete ${username} (the preceding admin login FAILED — ${loginFailure})`,
+    )
     await admin.dispose()
   }
 
