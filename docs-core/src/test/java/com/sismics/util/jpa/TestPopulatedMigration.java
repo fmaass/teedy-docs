@@ -32,7 +32,7 @@ import java.util.List;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==61, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==62, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -41,8 +41,8 @@ import java.util.List;
  */
 public class TestPopulatedMigration {
 
-    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061). */
-    private static final int TARGET_VERSION = 61;
+    /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062). */
+    private static final int TARGET_VERSION = 62;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -1312,6 +1312,194 @@ public class TestPopulatedMigration {
         Assertions.assertEquals(3, count(connection, "T_USER",
                         "USE_ID_C in ('totp-oidc','totp-ldap','totp-int') and USE_TOTPKEYPENDING_C is null"),
                 "061 pending column must be present and null for all seeded users");
+    }
+
+    // --- migration 062 audit-feed order-matching indexes (both dialects) -------------------------
+
+    @Test
+    public void migration062CreatesAuditFeedIndexesH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration062auditidx;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runAuditIndexScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration062CreatesAuditFeedIndexesPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-062 audit-index test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runAuditIndexScenario(connection);
+            }
+        }
+    }
+
+    @Test
+    public void migration062IsRetrySafeAfterPartialApplicationH2() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:migration062retry;DB_CLOSE_DELAY=-1", "sa", "")) {
+            connection.setAutoCommit(false);
+            runAuditIndexRetryScenario(connection);
+        }
+    }
+
+    @Test
+    public void migration062IsRetrySafeAfterPartialApplicationPostgres() throws Exception {
+        Assumptions.assumeTrue(DockerClientFactory.instance().isDockerAvailable(),
+                "Docker not available; skipping the PostgreSQL flavour of the migration-062 retry-safety test");
+        try (PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17")) {
+            postgres.start();
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())) {
+                connection.setAutoCommit(false);
+                runAuditIndexRetryScenario(connection);
+            }
+        }
+    }
+
+    /**
+     * Build the schema to v61 (immediately before 062), seed a populated audit table — including a
+     * LEGACY row whose LOG_CREATEDATE_D is NULL, which the base schema permits
+     * (dbupdate-000-0.sql:15) and which index creation over a DESC key must tolerate — then run ONLY
+     * the 062 step. Assert: no exception, DB_VERSION advances to 62, BOTH indexes are present in the
+     * catalog, every seeded row survives, and the keyset order the indexes exist to serve still
+     * returns the same sequence (checked over non-NULL dates only, since NULLS FIRST/LAST placement
+     * under DESC is a dialect default, not part of this migration's contract).
+     */
+    private static void runAuditIndexScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 61);
+        Assertions.assertEquals(61, dbVersion(connection), "fixture must be at db.version 61 before 062");
+        Assertions.assertFalse(indexExists(connection, "IDX_LOG_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the global-feed index must not exist before 062");
+        Assertions.assertFalse(indexExists(connection, "IDX_LOG_USER_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the per-user feed index must not exist before 062");
+
+        seedAuditRows(connection);
+
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=61 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(62);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(),
+                "062 must run cleanly on a populated audit table (including a NULL-createdate legacy row)");
+        Assertions.assertEquals(62, dbVersion(connection), "062 must advance DB_VERSION to 62");
+
+        Assertions.assertTrue(indexExists(connection, "IDX_LOG_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "062 must create IDX_LOG_CREATEDATE_ID on T_AUDIT_LOG");
+        Assertions.assertTrue(indexExists(connection, "IDX_LOG_USER_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "062 must create IDX_LOG_USER_CREATEDATE_ID on T_AUDIT_LOG");
+
+        // Index-only migration: no row may be added, removed or rewritten.
+        Assertions.assertEquals(4, count(connection, "T_AUDIT_LOG", "LOG_ID_C like 'aud-%'"),
+                "062 must not touch any audit row");
+        Assertions.assertEquals(1, count(connection, "T_AUDIT_LOG",
+                        "LOG_ID_C = 'aud-legacy' and LOG_CREATEDATE_D is null"),
+                "062 must leave the legacy NULL-createdate row intact");
+
+        assertKeysetOrder(connection, "aud-c", "aud-b", "aud-a");
+        assertUserKeysetOrder(connection, "u-alice", "aud-c", "aud-a");
+    }
+
+    /**
+     * The H2 hazard 056/057/059 guard against, applied to 062: H2 auto-commits DDL, so a run that
+     * dies between the two CREATE INDEX statements leaves DB_VERSION at 61 with the FIRST index
+     * already present. Without {@code if not exists} the operator's retry fails on "index already
+     * exists" and the database is stuck at 61 permanently. Seed exactly that half-applied state and
+     * prove the retry completes.
+     */
+    private static void runAuditIndexRetryScenario(Connection connection) throws Exception {
+        buildSchemaToVersion(connection, 61);
+        seedAuditRows(connection);
+
+        try (Statement s = connection.createStatement()) {
+            s.execute("create index IDX_LOG_CREATEDATE_ID on T_AUDIT_LOG (LOG_CREATEDATE_D desc, LOG_ID_C desc)");
+        }
+        connection.commit();
+        Assertions.assertTrue(indexExists(connection, "IDX_LOG_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the half-applied fixture must already carry the first index");
+        Assertions.assertFalse(indexExists(connection, "IDX_LOG_USER_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the half-applied fixture must NOT carry the second index");
+        Assertions.assertEquals(61, dbVersion(connection),
+                "a run that died between the two DDL statements leaves DB_VERSION at 61");
+
+        DbOpenHelper helper = new DbOpenHelper(connection) {
+            @Override
+            public void onCreate() {
+                throw new IllegalStateException("onCreate must not run; DB_VERSION=61 is present");
+            }
+
+            @Override
+            public void onUpgrade(int oldVersion, int newVersion) throws Exception {
+                executeAllScript(62);
+            }
+        };
+        helper.open();
+        Assertions.assertTrue(helper.getExceptions().isEmpty(),
+                "062 must be retry-safe: re-running it over an already-created index must not fail");
+        Assertions.assertEquals(62, dbVersion(connection),
+                "the retry must advance DB_VERSION to 62 rather than leaving the DB stuck at 61");
+        Assertions.assertTrue(indexExists(connection, "IDX_LOG_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the pre-existing index must still be present after the retry");
+        Assertions.assertTrue(indexExists(connection, "IDX_LOG_USER_CREATEDATE_ID", "T_AUDIT_LOG"),
+                "the retry must create the index the failed run never reached");
+    }
+
+    /**
+     * Seed four audit rows: two owned by alice and one by bob with explicit timestamps (two of them
+     * SHARING a timestamp, so the LOG_ID_C tie-break the composite indexes carry is genuinely
+     * exercised), plus a legacy row with a NULL LOG_CREATEDATE_D. T_AUDIT_LOG carries no foreign key
+     * on LOG_IDUSER_C, so no T_USER rows are required.
+     */
+    private static void seedAuditRows(Connection connection) throws Exception {
+        try (Statement s = connection.createStatement()) {
+            s.executeUpdate("insert into T_AUDIT_LOG (LOG_ID_C, LOG_IDUSER_C, LOG_IDENTITY_C, LOG_CLASSENTITY_C, LOG_TYPE_C, LOG_MESSAGE_C, LOG_CREATEDATE_D) values ('aud-a','u-alice','doc-1','Document','CREATE','oldest','2026-01-01 10:00:00')");
+            s.executeUpdate("insert into T_AUDIT_LOG (LOG_ID_C, LOG_IDUSER_C, LOG_IDENTITY_C, LOG_CLASSENTITY_C, LOG_TYPE_C, LOG_MESSAGE_C, LOG_CREATEDATE_D) values ('aud-b','u-bob','doc-1','Document','UPDATE','tied','2026-01-02 10:00:00')");
+            s.executeUpdate("insert into T_AUDIT_LOG (LOG_ID_C, LOG_IDUSER_C, LOG_IDENTITY_C, LOG_CLASSENTITY_C, LOG_TYPE_C, LOG_MESSAGE_C, LOG_CREATEDATE_D) values ('aud-c','u-alice','doc-2','Document','UPDATE','tied','2026-01-02 10:00:00')");
+            s.executeUpdate("insert into T_AUDIT_LOG (LOG_ID_C, LOG_IDUSER_C, LOG_IDENTITY_C, LOG_CLASSENTITY_C, LOG_TYPE_C, LOG_MESSAGE_C, LOG_CREATEDATE_D) values ('aud-legacy','u-alice','doc-1','Document','CREATE','no timestamp',null)");
+        }
+        connection.commit();
+    }
+
+    /** Assert the global keyset order (create date desc, id desc) over the dated seeded rows. */
+    private static void assertKeysetOrder(Connection connection, String... expectedIds) throws Exception {
+        assertIdSequence(connection,
+                "select LOG_ID_C from T_AUDIT_LOG where LOG_ID_C like 'aud-%' and LOG_CREATEDATE_D is not null"
+                        + " order by LOG_CREATEDATE_D desc, LOG_ID_C desc",
+                expectedIds);
+    }
+
+    /** Assert the per-user keyset order, the shape IDX_LOG_USER_CREATEDATE_ID serves. */
+    private static void assertUserKeysetOrder(Connection connection, String userId, String... expectedIds)
+            throws Exception {
+        assertIdSequence(connection,
+                "select LOG_ID_C from T_AUDIT_LOG where LOG_IDUSER_C = '" + userId + "'"
+                        + " and LOG_ID_C like 'aud-%' and LOG_CREATEDATE_D is not null"
+                        + " order by LOG_CREATEDATE_D desc, LOG_ID_C desc",
+                expectedIds);
+    }
+
+    private static void assertIdSequence(Connection connection, String sql, String... expectedIds) throws Exception {
+        List<String> actual = new java.util.ArrayList<>();
+        try (Statement s = connection.createStatement(); ResultSet rs = s.executeQuery(sql)) {
+            while (rs.next()) {
+                actual.add(rs.getString(1));
+            }
+        }
+        Assertions.assertEquals(List.of(expectedIds), actual,
+                "the keyset order must be unchanged by the 062 indexes; query: " + sql);
     }
 
     /**
