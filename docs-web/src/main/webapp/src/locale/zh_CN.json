@@ -152,6 +152,7 @@
     "item_document": "文档",
     "context_add_tag": "添加标签",
     "context_remove_tag": "移除标签",
+    "open_in_new_tab": "在新标签页中打开",
     "tag_menu": {
       "search": "搜索标签…",
       "all_assigned": "所有标签均已添加",

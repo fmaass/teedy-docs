@@ -268,6 +268,11 @@ const contextMenuDoc = computed(
 
 function onDocContextMenu(event: Event, doc: DocumentListItem) {
   if (!(event instanceof MouseEvent)) return
+  // Taking over right-click also takes away the browser's own menu — including
+  // "Open link in new tab" and "Copy link address" for the title link. Shift+right-
+  // click is the conventional escape hatch back to it, so that gesture is left
+  // completely alone: no preventDefault, no popover (#194).
+  if (event.shiftKey) return
   event.preventDefault()
   contextMenuDocId.value = doc.id
   contextMenu.value?.show(event)

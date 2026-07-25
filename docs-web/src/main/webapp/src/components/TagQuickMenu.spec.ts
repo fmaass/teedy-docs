@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import TagQuickMenu from './TagQuickMenu.vue'
 import { type Tag } from '../api/tag'
@@ -29,6 +30,18 @@ function makeDoc(tagIds: string[]): DocumentListItem {
   } as DocumentListItem
 }
 
+// The menu's "open in new tab" item is a <router-link> to the document view — the
+// route must resolve for it to render a real href (#194).
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/document', name: 'documents', component: { template: '<div />' } },
+      { path: '/document/view/:id', name: 'document-view', component: { template: '<div />' } },
+    ],
+  })
+}
+
 function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {}) {
   return mount(TagQuickMenu, {
     props: {
@@ -38,7 +51,7 @@ function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> =
       ...props,
     },
     global: {
-      plugins: [PrimeVue],
+      plugins: [PrimeVue, makeRouter()],
       stubs: {
         // Stub Popover so its content renders inline (no teleport/overlay in jsdom),
         // and expose show/hide so the component's defineExpose contract still works.
@@ -102,6 +115,27 @@ describe('TagQuickMenu', () => {
     expect(removeBtns).toHaveLength(2)
     await removeBtns[0].trigger('click')
     expect(wrapper.emitted('removeTag')).toEqual([['t1']])
+  })
+
+  it('offers an "open in new tab" link to the document view, ABOVE the tag select (#194)', () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    const link = wrapper.find('a.tqm-open-link')
+    expect(link.exists()).toBe(true)
+    // A genuine href to the document's full view, opened in a new browsing context
+    // without handing it a live window.opener reference.
+    expect(link.attributes('href')).toContain('/document/view/doc1')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+    expect(link.text()).toContain('ui.open_in_new_tab')
+    // It must precede the Select: the Select's overlay auto-opens on popover show
+    // (#171) and would otherwise cover an item placed below it.
+    const html = wrapper.html()
+    expect(html.indexOf('tqm-open-link')).toBeLessThan(html.indexOf('select-stub'))
+  })
+
+  it('renders no "open in new tab" link when there is no document bound', () => {
+    const wrapper = mountMenu({ document: null })
+    expect(wrapper.find('a.tqm-open-link').exists()).toBe(false)
   })
 
   it('shows an all-assigned notice and no chips when every tag is already on the doc', () => {

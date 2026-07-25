@@ -152,6 +152,7 @@
     "item_document": "Dokument",
     "context_add_tag": "Tag hinzufügen",
     "context_remove_tag": "Tag entfernen",
+    "open_in_new_tab": "In neuem Tab öffnen",
     "tag_menu": {
       "search": "Tags suchen…",
       "all_assigned": "Alle Tags bereits hinzugefügt",

@@ -152,6 +152,7 @@
     "item_document": "документ",
     "context_add_tag": "Добавить тег",
     "context_remove_tag": "Удалить тег",
+    "open_in_new_tab": "Открыть в новой вкладке",
     "tag_menu": {
       "search": "Поиск тегов…",
       "all_assigned": "Все теги уже добавлены",

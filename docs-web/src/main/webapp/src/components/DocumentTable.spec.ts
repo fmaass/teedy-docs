@@ -58,13 +58,17 @@ beforeEach(() => {
     history: createMemoryHistory(),
     routes: [
       { path: '/document', name: 'documents', component: { template: '<div />' } },
+      // The title cell is a <router-link> to the document view — the route must
+      // resolve for the link to render a real href (#194).
+      { path: '/document/view/:id', name: 'document-view', component: { template: '<div />' } },
     ],
   })
 })
 
 // Mount with the real PrimeVue DataTable/Column so scoped column body slots render
-// exactly as in production. selectable=false exercises the single-select table.
-async function mountTable(doc: DocumentListItem) {
+// exactly as in production. selectable=false exercises the single-select table;
+// selectable=true exercises the checkbox table DocumentList actually ships.
+async function mountTable(doc: DocumentListItem, selectable = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   router.push('/document')
   await router.isReady()
@@ -74,6 +78,7 @@ async function mountTable(doc: DocumentListItem) {
       totalRecords: 1,
       rows: 20,
       first: 0,
+      selectable,
     },
     global: {
       plugins: [[PrimeVue, { theme: 'none' }], router, [VueQueryPlugin, { queryClient }]],
@@ -145,6 +150,71 @@ describe('DocumentTable — clickable tag chips (#34)', () => {
     await chip.trigger('dblclick')
     expect(wrapper.emitted('rowClick')).toBeUndefined()
     expect(wrapper.emitted('rowDblclick')).toBeUndefined()
+  })
+})
+
+describe('DocumentTable — native open-in-new-tab affordances (#194)', () => {
+  // Dispatch a REAL MouseEvent so (a) `defaultPrevented` is observable and (b) the
+  // event bubbles into PrimeVue's own row handler exactly as it does in a browser —
+  // which is the whole point: DataTable.onRowClick bails out via isClickable() when
+  // the target is an <a>, so the anchor's handler is the ONLY source of rowClick.
+  function clickTitle(wrapper: ReturnType<typeof mount>, init: MouseEventInit = {}): MouseEvent {
+    const link = wrapper.find('a.doc-title')
+    expect(link.exists()).toBe(true)
+    const event = new MouseEvent('click', { button: 0, bubbles: true, cancelable: true, ...init })
+    link.element.dispatchEvent(event)
+    return event
+  }
+
+  it.each([[false], [true]])(
+    'renders the title as a real link to the document view (selectable=%s)',
+    async (selectable) => {
+      const wrapper = await mountTable(makeDoc(0), selectable)
+      const link = wrapper.find('a.doc-title')
+      expect(link.exists()).toBe(true)
+      expect(link.attributes('href')).toContain('/document/view/doc1')
+      expect(link.text()).toBe('Doc')
+    },
+  )
+
+  it.each([[false], [true]])(
+    'a plain left click is intercepted and emits EXACTLY ONE rowClick (selectable=%s)',
+    async (selectable) => {
+      const wrapper = await mountTable(makeDoc(0), selectable)
+      const event = clickTitle(wrapper)
+      await wrapper.vm.$nextTick()
+      // The list contract is unchanged: plain click opens the slide-over, so the
+      // navigation is suppressed and re-emitted once — never zero, never twice.
+      expect(event.defaultPrevented).toBe(true)
+      const emitted = wrapper.emitted('rowClick')
+      expect(emitted).toHaveLength(1)
+      expect((emitted as unknown[][])[0][0]).toMatchObject({ id: 'doc1' })
+    },
+  )
+
+  it.each([
+    ['ctrl', { ctrlKey: true }],
+    ['meta', { metaKey: true }],
+    ['middle button', { button: 1 }],
+  ])(
+    'a %s click falls through to the native href — no interception, no rowClick',
+    async (_label, init) => {
+      // jsdom logs "Not implemented: navigation (except hash changes)" for these three
+      // — that stderr line IS the proof the click reached a real href unimpeded.
+      const wrapper = await mountTable(makeDoc(0))
+      const event = clickTitle(wrapper, init as MouseEventInit)
+      await wrapper.vm.$nextTick()
+      expect(event.defaultPrevented).toBe(false)
+      expect(wrapper.emitted('rowClick')).toBeUndefined()
+    },
+  )
+
+  it('double-clicking the title still opens the full view (rowDblclick survives the anchor)', async () => {
+    const wrapper = await mountTable(makeDoc(0))
+    await wrapper.find('a.doc-title').trigger('dblclick')
+    const emitted = wrapper.emitted('rowDblclick')
+    expect(emitted).toHaveLength(1)
+    expect((emitted as unknown[][])[0][0]).toMatchObject({ id: 'doc1' })
   })
 })
 

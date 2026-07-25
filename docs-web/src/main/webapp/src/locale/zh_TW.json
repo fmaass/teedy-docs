@@ -152,6 +152,7 @@
     "item_document": "文件",
     "context_add_tag": "新增標籤",
     "context_remove_tag": "移除標籤",
+    "open_in_new_tab": "在新分頁中開啟",
     "tag_menu": {
       "search": "搜尋標籤…",
       "all_assigned": "所有標籤皆已加入",

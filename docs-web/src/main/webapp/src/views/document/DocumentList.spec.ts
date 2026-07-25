@@ -137,6 +137,13 @@ const removeTagSpy = vi.hoisted(() => vi.fn(() => Promise.resolve(null)))
 // The parent calls contextMenu.value?.hide() to dismiss the quick-tag menu; the stub
 // exposes this spy as its hide() so the #142 close-on-leave test can assert the call.
 const menuHideSpy = vi.hoisted(() => vi.fn())
+// The parent calls contextMenu.value?.show(event) to raise the quick-tag menu; the
+// stub exposes this spy as its show() so the #194 shift-escape test can assert the
+// popover is NOT raised when the browser's own context menu must win.
+const menuShowSpy = vi.hoisted(() => vi.fn())
+// Holds the MouseEvent the table/gallery stubs dispatch for a right-click, so a test
+// can assert whether the view called preventDefault() on it (#194).
+const contextEvent = vi.hoisted(() => ({ last: null as MouseEvent | null }))
 vi.mock('../../composables/useDocumentTags', () => ({
   useDocumentTags: () => ({ addTag: addTagSpy, removeTag: removeTagSpy }),
 }))
@@ -213,6 +220,13 @@ vi.mock('@tanstack/vue-query', () => ({
   keepPreviousData: undefined,
 }))
 
+// A cancelable right-click, recorded so a test can inspect defaultPrevented (#194).
+function rightClick(init: MouseEventInit = {}): MouseEvent {
+  const event = new MouseEvent('contextmenu', { cancelable: true, ...init })
+  contextEvent.last = event
+  return event
+}
+
 // --- Stub child components. DocumentTable re-emits row-click / row-dblclick so we
 //     can drive both interaction paths from the test without PrimeVue internals. ---
 const DocumentTableStub = defineComponent({
@@ -226,7 +240,10 @@ const DocumentTableStub = defineComponent({
         h('button', { class: 'double', onClick: () => emit('rowDblclick', props.documents[0]) }, 'double'),
         // Right-click a table row → forward a real MouseEvent + doc so the view's
         // onDocContextMenu guard (instanceof MouseEvent) accepts it (#142/#71).
-        h('button', { class: 'row-context', onClick: () => emit('rowContextMenu', new MouseEvent('contextmenu'), props.documents[0]) }, 'ctx'),
+        h('button', { class: 'row-context', onClick: () => emit('rowContextMenu', rightClick(), props.documents[0]) }, 'ctx'),
+        // SHIFT+right-click: the browser's escape hatch back to the NATIVE context
+        // menu (copy link address / open link in new tab on the title link, #194).
+        h('button', { class: 'row-context-shift', onClick: () => emit('rowContextMenu', rightClick({ shiftKey: true }), props.documents[0]) }, 'ctx-shift'),
         // Drive a real multi-selection through the v-model:selection binding so the
         // parent's selectedDocs (and thus the bulk toolbar) reflects it — used by the
         // B2 gallery-clears-selection test.
@@ -257,9 +274,17 @@ const DocumentGalleryStub = defineComponent({
           'button',
           {
             class: 'card-context',
-            onClick: () => emit('cardContextMenu', new MouseEvent('contextmenu'), props.documents[0]),
+            onClick: () => emit('cardContextMenu', rightClick(), props.documents[0]),
           },
           'ctx',
+        ),
+        h(
+          'button',
+          {
+            class: 'card-context-shift',
+            onClick: () => emit('cardContextMenu', rightClick({ shiftKey: true }), props.documents[0]),
+          },
+          'ctx-shift',
         ),
       ])
   },
@@ -274,7 +299,7 @@ const TagQuickMenuStub = defineComponent({
   props: ['document', 'allTags', 'tagCounts'],
   emits: ['addTag', 'removeTag'],
   setup(props, { expose, emit }) {
-    expose({ show: () => {}, hide: menuHideSpy })
+    expose({ show: menuShowSpy, hide: menuHideSpy })
     return () => {
       const assignedIds = new Set(
         ((props.document?.tags ?? []) as Array<{ id: string }>).map((tt) => tt.id),
@@ -1008,6 +1033,55 @@ describe('DocumentList — items-per-page selector (#52)', () => {
     expect(listParams.offset).toBe(0)
     expect(listParams.limit).toBe(10)
   })
+})
+
+// --- #194: the quick-tag popover hijacks right-click, which also removes the
+//     browser's own "Open link in new tab" / "Copy link address" entries for the
+//     title link. Shift+right-click is the standard escape hatch back to the native
+//     menu: the view must leave the event completely alone (no preventDefault, no
+//     popover) on BOTH right-click surfaces (table rows and gallery cards). ---
+describe('DocumentList — shift+right-click escapes to the native context menu (#194)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    menuShowSpy.mockClear()
+    contextEvent.last = null
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+  })
+
+  it.each([
+    ['table row', 'list', '.row-context', '.row-context-shift'],
+    ['gallery card', 'gallery', '.card-context', '.card-context-shift'],
+  ])(
+    'a plain right-click on a %s raises the quick-tag popover; shift+right-click does not',
+    async (_label, mode, plain, shifted) => {
+      localStorage.setItem('teedy_document_view_mode', mode)
+      const wrapper = mountView()
+
+      // Control: a plain right-click still owns the gesture (popover + suppressed
+      // native menu) — otherwise this test would pass on a component that never
+      // handles contextmenu at all.
+      await wrapper.find(plain).trigger('click')
+      await flushPromises()
+      expect(menuShowSpy).toHaveBeenCalledTimes(1)
+      expect(contextEvent.last!.defaultPrevented).toBe(true)
+
+      // Shift+right-click: untouched — the browser renders its own menu.
+      menuShowSpy.mockClear()
+      await wrapper.find(shifted).trigger('click')
+      await flushPromises()
+      expect(menuShowSpy).not.toHaveBeenCalled()
+      expect(contextEvent.last!.defaultPrevented).toBe(false)
+    },
+  )
 })
 
 // --- #50: right-click a GALLERY card opens the quick-tag context menu and adds /

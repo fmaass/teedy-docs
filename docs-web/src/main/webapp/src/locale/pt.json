@@ -152,6 +152,7 @@
     "item_document": "documento",
     "context_add_tag": "Adicionar etiqueta",
     "context_remove_tag": "Remover etiqueta",
+    "open_in_new_tab": "Abrir em novo separador",
     "tag_menu": {
       "search": "Pesquisar etiquetas…",
       "all_assigned": "Todas as etiquetas já foram adicionadas",

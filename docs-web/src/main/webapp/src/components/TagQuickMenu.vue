@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
 import Select from 'primevue/select'
 import { type Tag } from '../api/tag'
@@ -22,6 +23,7 @@ import { assignableTags, topUsedTags } from '../utils/tagQuickMenu'
  * this component owns no tag CRUD. Ranking/search logic lives in utils/tagQuickMenu.
  */
 const { t } = useI18n()
+const router = useRouter()
 
 const props = defineProps<{
   document: DocumentListItem | null
@@ -37,6 +39,14 @@ const emit = defineEmits<{
 const popover = ref()
 const tagSelect = ref()
 const pendingTag = ref<string | null>(null)
+
+// Resolved through the router (not hand-built) so the hash-history prefix and any
+// future route change stay correct; empty when no document is bound.
+const documentHref = computed(() =>
+  props.document
+    ? router.resolve({ name: 'document-view', params: { id: props.document.id } }).href
+    : '',
+)
 
 const assignedTagIds = computed(
   () => new Set((props.document?.tags ?? []).map((tag) => tag.id)),
@@ -87,6 +97,23 @@ defineExpose({ show, hide })
 <template>
   <Popover ref="popover" class="tag-quick-menu" @show="onPopoverShow">
     <div class="tqm-body">
+      <!-- OPEN IN NEW TAB (#194). Right-click is claimed by this popover, so the
+           browser's own "Open link in new tab" is out of reach on the surfaces that
+           raise it; this is the explicit replacement. It sits ABOVE the ADD section
+           deliberately — the Select's overlay auto-opens on popover show (#171) and
+           would cover anything placed below it. -->
+      <div v-if="document" class="tqm-section">
+        <a
+          class="tqm-open-link"
+          :href="documentHref"
+          target="_blank"
+          rel="noopener"
+          @click="hide"
+        >
+          <i class="pi pi-external-link" aria-hidden="true" />{{ t('ui.open_in_new_tab') }}
+        </a>
+      </div>
+
       <!-- ADD -->
       <div class="tqm-section">
         <span class="tqm-label">{{ t('ui.context_add_tag') }}</span>
@@ -172,6 +199,17 @@ defineExpose({ show, hide })
 
 .tqm-select {
   width: 100%;
+}
+
+.tqm-open-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.tqm-open-link i {
+  font-size: 0.75rem;
 }
 
 .tqm-empty {

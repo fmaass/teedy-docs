@@ -152,6 +152,7 @@
     "item_document": "dokument",
     "context_add_tag": "Shto etiketë",
     "context_remove_tag": "Hiq etiketën",
+    "open_in_new_tab": "Hape në skedë të re",
     "tag_menu": {
       "search": "Kërko etiketa…",
       "all_assigned": "Të gjitha etiketat janë shtuar tashmë",

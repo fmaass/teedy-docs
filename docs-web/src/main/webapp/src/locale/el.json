@@ -152,6 +152,7 @@
     "item_document": "έγγραφο",
     "context_add_tag": "Προσθήκη ετικέτας",
     "context_remove_tag": "Αφαίρεση ετικέτας",
+    "open_in_new_tab": "Άνοιγμα σε νέα καρτέλα",
     "tag_menu": {
       "search": "Αναζήτηση ετικετών…",
       "all_assigned": "Όλες οι ετικέτες έχουν ήδη προστεθεί",

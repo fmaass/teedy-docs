@@ -133,6 +133,48 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   await expect(panel.getByText(tagNames[0], { exact: true })).toHaveCount(0)
 })
 
+// --- #194: the document title is a REAL link, so the browser's own new-tab
+//     affordances work on it. Middle-click is the one that is purely native (no app
+//     code runs beyond the modifier guard declining to intercept), so it is the
+//     honest end-to-end proof: a genuinely-navigable href reached the browser.
+//
+// REALNESS: the assertion is on the SECOND page the browser context opens and on
+// ITS url + heading. Rendering the title as a <span> (the pre-#194 markup), or
+// preventDefault-ing unconditionally, opens no page at all and the waitForEvent
+// times out — there is no way to satisfy this without a working link.
+test('middle-clicking a document title opens the full view in a new tab (#194)', async ({
+  page,
+  context,
+  request,
+  cleanup,
+}) => {
+  const title = unique('D-newtab')
+  const res = await request.put('/api/document', { form: { title, language: 'eng' } })
+  expect(res.ok(), 'create the new-tab document').toBeTruthy()
+  const docId = (await res.json()).id as string
+  cleanup.defer('purge the new-tab document', () => deleteDocApi(request, docId))
+
+  await page.goto('/#/document')
+  const link = page.getByRole('link', { name: title, exact: true })
+  await expect(link).toBeVisible()
+  // The href is the document's own full-view route — not "#" or a JS placeholder.
+  await expect(link).toHaveAttribute('href', new RegExp(`#/document/view/${docId}$`))
+
+  const [newTab] = await Promise.all([
+    context.waitForEvent('page'),
+    link.click({ button: 'middle' }),
+  ])
+  await newTab.waitForLoadState('domcontentloaded')
+  await expect(newTab).toHaveURL(new RegExp(`#/document/view/${docId}`))
+  await expect(newTab.getByRole('heading', { name: title })).toBeVisible()
+  await newTab.close()
+
+  // The originating list did NOT navigate and did NOT open the slide-over — a middle
+  // click must not be treated as the plain-click "open slide-over" gesture.
+  await expect(page).toHaveURL(/#\/document$/)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('admin/settings table pages render at the wider content width (D #25)', async ({ page }) => {
   // A wideSettings route (users) opts into the full-width layout; a narrow-measure
   // route (account) keeps the 800px cap. Assert the class the flag toggles.

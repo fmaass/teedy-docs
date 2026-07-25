@@ -152,6 +152,7 @@
     "item_document": "dokument",
     "context_add_tag": "Dodaj etykietę",
     "context_remove_tag": "Usuń etykietę",
+    "open_in_new_tab": "Otwórz w nowej karcie",
     "tag_menu": {
       "search": "Szukaj etykiet…",
       "all_assigned": "Wszystkie etykiety już dodane",
