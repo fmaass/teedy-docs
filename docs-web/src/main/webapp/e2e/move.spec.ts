@@ -1,8 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, confirmDanger, openFileList } from './helpers'
+import { unique, openFileList, deleteDocApi } from './helpers'
 
 // #175 — move a file to another document. The moved file leaves the source's file list and appears in
 // the target; a source cover that pointed at the moved file falls back, and a previously empty target
@@ -50,74 +50,63 @@ async function coverFileId(request: APIRequestContext, documentId: string): Prom
   return (await res.json()).file_id_cover as string | null
 }
 
-async function deleteDoc(page: Page, id: string) {
-  await page.goto(`/#/document/view/${id}`)
-  const del = page.getByRole('button', { name: 'Delete', exact: true })
-  if (await del.isVisible().catch(() => false)) {
-    await del.click()
-    await confirmDanger(page)
-  }
-}
-
-test('move a file to another document: it leaves the source, the source cover falls back, and the empty target gains it', async ({ page }) => {
+test('move a file to another document: it leaves the source, the source cover falls back, and the empty target gains it', async ({ page, cleanup }) => {
   const targetTitle = unique('move-target')
   const sourceId = await seedDoc(page.request, unique('move-source'), [
     { name: 'moved.png', mimeType: 'image/png', path: png },
     { name: 'stays.png', mimeType: 'image/png', path: png },
   ])
+  cleanup.defer('purge the source document', () => deleteDocApi(page.request, sourceId))
   const targetId = await seedDoc(page.request, targetTitle, [])
-  try {
-    const ids = await fileIds(page.request, sourceId)
+  cleanup.defer('purge the target document', () => deleteDocApi(page.request, targetId))
 
-    // Pin the file we are about to move as the source's explicit cover, so the move must fall the cover back.
-    await page.goto(`/#/document/view/${sourceId}/content`)
-    await openFileList(page)
-    await page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
-      .getByRole('button', { name: 'Set as cover' }).click()
-    await expect.poll(() => coverFileId(page.request, sourceId)).toBe(ids['moved.png'])
+  const ids = await fileIds(page.request, sourceId)
 
-    // The picker SEARCHES for its target, it does not list documents, and a document reaches the
-    // search index asynchronously (a Guava AsyncEventBus listener feeds LuceneIndexingHandler), so
-    // the API call that seeded the target returns before the target is findable. Wait for the very
-    // search the picker issues. Without this the dropdown renders "No results found" on a slow
-    // runner, the option click times out, and the resulting cleanup failure masks the real error.
-    await expect
-      .poll(async () => {
-        const res = await page.request.get(
-          `/api/document/list?search=${encodeURIComponent(targetTitle)}&limit=10`,
-        )
-        const documents = (await res.json()).documents as Array<{ id: string }>
-        return documents.some((d) => d.id === targetId)
-      }, { message: `target document ${targetTitle} becomes searchable` })
-      .toBe(true)
+  // Pin the file we are about to move as the source's explicit cover, so the move must fall the cover back.
+  await page.goto(`/#/document/view/${sourceId}/content`)
+  await openFileList(page)
+  await page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
+    .getByRole('button', { name: 'Set as cover' }).click()
+  await expect.poll(() => coverFileId(page.request, sourceId)).toBe(ids['moved.png'])
 
-    // Move it via the file-list action + document picker.
-    const movedRow = page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
-    await movedRow.getByRole('button', { name: /Move to document/ }).click()
-    const dialog = page.getByRole('dialog', { name: /Move to document/ })
-    await dialog.getByRole('combobox').fill(targetTitle)
-    await page.getByRole('option', { name: targetTitle }).click()
-    await dialog.getByRole('button', { name: 'Move', exact: true }).click()
+  // The picker SEARCHES for its target, it does not list documents, and a document reaches the
+  // search index asynchronously (a Guava AsyncEventBus listener feeds LuceneIndexingHandler), so
+  // the API call that seeded the target returns before the target is findable. Wait for the very
+  // search the picker issues. Without this the dropdown renders "No results found" on a slow
+  // runner, the option click times out, and the resulting cleanup failure masks the real error.
+  await expect
+    .poll(async () => {
+      const res = await page.request.get(
+        `/api/document/list?search=${encodeURIComponent(targetTitle)}&limit=10`,
+      )
+      const documents = (await res.json()).documents as Array<{ id: string }>
+      return documents.some((d) => d.id === targetId)
+    }, { message: `target document ${targetTitle} becomes searchable` })
+    .toBe(true)
 
-    // A successful move dismisses the picker. Assert that here rather than moving straight on
-    // to the API checks: those read the server directly and settle while the dialog may still
-    // be up, and an undismissed modal's mask blocks every later click on the page.
-    await expect(dialog).toBeHidden()
-    // And it leaves no modal mask behind: a stray mask is invisible but pointer-blocks the app.
-    await expect(page.locator('.p-dialog-mask')).toHaveCount(0)
+  // Move it via the file-list action + document picker.
+  const movedRow = page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
+  await movedRow.getByRole('button', { name: /Move to document/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Move to document/ })
+  await dialog.getByRole('combobox').fill(targetTitle)
+  await page.getByRole('option', { name: targetTitle }).click()
+  await dialog.getByRole('button', { name: 'Move', exact: true }).click()
 
-    // The moved file is gone from the source and present in the target.
-    await expect.poll(() => fileCount(page.request, sourceId)).toBe(1)
-    await expect.poll(() => fileCount(page.request, targetId)).toBe(1)
-    await expect.poll(async () => (await fileIds(page.request, targetId))['moved.png']).toBe(ids['moved.png'])
+  // A successful move dismisses the picker. Assert that here rather than moving straight on
+  // to the API checks: those read the server directly and settle while the dialog may still
+  // be up, and an undismissed modal's mask blocks every later click on the page.
+  await expect(dialog).toBeHidden()
+  // And it leaves no modal mask behind: a stray mask is invisible but pointer-blocks the app.
+  await expect(page.locator('.p-dialog-mask')).toHaveCount(0)
 
-    // The source's dangling cover is cleared and falls back to the remaining file; the empty target gains
-    // the moved file as its served thumbnail.
-    await expect.poll(() => coverFileId(page.request, sourceId)).toBeNull()
-    await expect.poll(() => servedFileId(page.request, sourceId)).toBe(ids['stays.png'])
-    await expect.poll(() => servedFileId(page.request, targetId)).toBe(ids['moved.png'])
-  } finally {
-    await deleteDoc(page, sourceId)
-    await deleteDoc(page, targetId)
-  }
+  // The moved file is gone from the source and present in the target.
+  await expect.poll(() => fileCount(page.request, sourceId)).toBe(1)
+  await expect.poll(() => fileCount(page.request, targetId)).toBe(1)
+  await expect.poll(async () => (await fileIds(page.request, targetId))['moved.png']).toBe(ids['moved.png'])
+
+  // The source's dangling cover is cleared and falls back to the remaining file; the empty target gains
+  // the moved file as its served thumbnail.
+  await expect.poll(() => coverFileId(page.request, sourceId)).toBeNull()
+  await expect.poll(() => servedFileId(page.request, sourceId)).toBe(ids['stays.png'])
+  await expect.poll(() => servedFileId(page.request, targetId)).toBe(ids['moved.png'])
 })

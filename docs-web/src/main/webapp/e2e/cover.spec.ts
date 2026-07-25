@@ -1,8 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, confirmDanger, openFileList } from './helpers'
+import { unique, openFileList, deleteDocApi } from './helpers'
 
 // #174 — explicit per-document cover. Picking a non-first file as the cover overrides the default
 // first-file-by-order thumbnail the list/gallery render; clearing restores it.
@@ -44,15 +44,6 @@ async function coverFileId(request: APIRequestContext, documentId: string): Prom
   return (await res.json()).file_id_cover as string | null
 }
 
-async function deleteDoc(page: Page, id: string) {
-  await page.goto(`/#/document/view/${id}`)
-  const del = page.getByRole('button', { name: 'Delete', exact: true })
-  if (await del.isVisible().catch(() => false)) {
-    await del.click()
-    await confirmDanger(page)
-  }
-}
-
 // The document list/gallery thumbnail src is the RELATIVE url getFileUrl() builds
 // (`api/file/<id>/data?size=thumb` — src/api/file.ts), so the app keeps working under a
 // non-root context path. An attribute selector matches the LITERAL attribute value, so it
@@ -62,44 +53,42 @@ function thumbOf(fileId: string): string {
   return `img[src*="api/file/${fileId}/data"]`
 }
 
-test('set a non-first file as cover: the badge appears and the gallery/table renders the chosen cover', async ({ page }) => {
+test('set a non-first file as cover: the badge appears and the gallery/table renders the chosen cover', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('cover'), [
     { name: 'first.png', mimeType: 'image/png', path: png },
     { name: 'second.png', mimeType: 'image/png', path: png },
   ])
-  try {
-    const ids = await fileIds(page.request, id)
-    expect(await coverFileId(page.request, id)).toBeNull()
-    await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-    await page.goto(`/#/document/view/${id}/content`)
-    await openFileList(page)
+  const ids = await fileIds(page.request, id)
+  expect(await coverFileId(page.request, id)).toBeNull()
+  await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
 
-    const secondRow = page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
-    const firstRow = page.locator('.file-data-table tbody tr', { hasText: 'first.png' })
-    await expect(secondRow.locator('.cover-badge')).toHaveCount(0)
+  await page.goto(`/#/document/view/${id}/content`)
+  await openFileList(page)
 
-    await secondRow.getByRole('button', { name: 'Set as cover' }).click()
-    await expect(secondRow.locator('.cover-badge')).toBeVisible()
-    await expect(firstRow.locator('.cover-badge')).toHaveCount(0)
-    await expect.poll(() => coverFileId(page.request, id)).toBe(ids['second.png'])
-    await expect.poll(() => servedFileId(page.request, id)).toBe(ids['second.png'])
+  const secondRow = page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
+  const firstRow = page.locator('.file-data-table tbody tr', { hasText: 'first.png' })
+  await expect(secondRow.locator('.cover-badge')).toHaveCount(0)
 
-    await page.goto('/#/document')
-    await expect(page.locator(thumbOf(ids['second.png'])).first()).toBeVisible()
-    await expect(page.locator(thumbOf(ids['first.png']))).toHaveCount(0)
+  await secondRow.getByRole('button', { name: 'Set as cover' }).click()
+  await expect(secondRow.locator('.cover-badge')).toBeVisible()
+  await expect(firstRow.locator('.cover-badge')).toHaveCount(0)
+  await expect.poll(() => coverFileId(page.request, id)).toBe(ids['second.png'])
+  await expect.poll(() => servedFileId(page.request, id)).toBe(ids['second.png'])
 
-    await page.goto(`/#/document/view/${id}/content`)
-    await openFileList(page)
-    await page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
-      .getByRole('button', { name: 'Remove as cover' }).click()
-    await expect.poll(() => coverFileId(page.request, id)).toBeNull()
-    await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
+  await page.goto('/#/document')
+  await expect(page.locator(thumbOf(ids['second.png'])).first()).toBeVisible()
+  await expect(page.locator(thumbOf(ids['first.png']))).toHaveCount(0)
 
-    await page.goto('/#/document')
-    await expect(page.locator(thumbOf(ids['first.png'])).first()).toBeVisible()
-    await expect(page.locator(thumbOf(ids['second.png']))).toHaveCount(0)
-  } finally {
-    await deleteDoc(page, id)
-  }
+  await page.goto(`/#/document/view/${id}/content`)
+  await openFileList(page)
+  await page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
+    .getByRole('button', { name: 'Remove as cover' }).click()
+  await expect.poll(() => coverFileId(page.request, id)).toBeNull()
+  await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
+
+  await page.goto('/#/document')
+  await expect(page.locator(thumbOf(ids['first.png'])).first()).toBeVisible()
+  await expect(page.locator(thumbOf(ids['second.png']))).toHaveCount(0)
 })

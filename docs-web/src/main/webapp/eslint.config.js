@@ -30,6 +30,49 @@ export default [
       ],
     },
   },
+  // e2e (#187): teardown must not live in a test body's `finally`. A throwing teardown
+  // SUPERSEDES the body's real exception — and teardown drives the very UI a failed body
+  // left broken, so the masking is the common case — while a hanging one turns a precise
+  // assertion failure into a bare test timeout. The `cleanup` fixture (e2e/fixtures.ts)
+  // runs deferred steps after the body, individually caught and individually bounded.
+  //
+  // The ban is on the SHAPE, not on a helper name: the recurring form of this defect is
+  // written with inline `request.delete(...)` / `expect(...)` calls, which a rule keyed on
+  // `deleteDoc` would never see. A `finally` block may therefore contain nothing but calls
+  // to `guardedTeardown` (e2e/helpers.ts) — the single sanctioned exemption, which cannot
+  // throw out of the finalizer and so preserves the body's error by construction.
+  //
+  // e2e/lint-fixtures/** is excluded from `npm run lint` and asserted the other way round
+  // by `npm run lint:teardown-rule`, which fails if this rule stops firing.
+  {
+    files: ['e2e/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "TryStatement > BlockStatement.finalizer > ExpressionStatement > AwaitExpression > CallExpression:not([callee.name='guardedTeardown'])",
+          message:
+            'No teardown in `finally` (#187): an awaited cleanup call here supersedes the body\'s real failure. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+        },
+        {
+          selector:
+            "TryStatement > BlockStatement.finalizer > ExpressionStatement > CallExpression:not([callee.name='guardedTeardown'])",
+          message:
+            'No teardown in `finally` (#187): a cleanup call here supersedes the body\'s real failure. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+        },
+        {
+          selector: 'TryStatement > BlockStatement.finalizer > :not(ExpressionStatement)',
+          message:
+            'No teardown in `finally` (#187): a `finally` block may contain only `guardedTeardown(...)` calls — conditionals, loops and declarations there are teardown logic that belongs in `cleanup.defer(label, fn)`.',
+        },
+      ],
+    },
+  },
   {
     files: ['src/**/*.vue'],
     plugins: { '@intlify/vue-i18n': vueI18n },

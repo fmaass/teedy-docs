@@ -34,45 +34,43 @@ test.describe('Two-factor enrollment (behavior A, self-service)', () => {
     await admin.dispose()
   }
 
-  test('enroll -> challenged login -> disable', async ({ page, baseURL }) => {
+  test('enroll -> challenged login -> disable', async ({ page, baseURL, cleanup }) => {
     const { username, password } = await seedUser(baseURL!)
-    try {
-      await login(page, username, password)
-      await page.goto('/#/settings/account')
-      const card = page.locator('[data-test="two-factor-card"]')
-      await expect(card).toBeVisible()
+    cleanup.defer('delete the 2FA seed user', () => deleteUser(baseURL!, username))
 
-      await page.locator('[data-test="totp-enable"]').click()
-      const qr = page.locator('[data-test="totp-qr"]')
-      await expect(qr).toBeVisible()
-      // The URI must carry the SHA1/6-digit/30-second parameters the server verifier uses.
-      await expect(qr).toHaveAttribute('data-otpauth-uri', /^otpauth:\/\/totp\/.*algorithm=SHA1&digits=6&period=30$/)
-      const secret = (await page.locator('[data-test="totp-secret"]').textContent())?.trim() ?? ''
-      expect(secret, 'the manual secret is shown').toBeTruthy()
+    await login(page, username, password)
+    await page.goto('/#/settings/account')
+    const card = page.locator('[data-test="two-factor-card"]')
+    await expect(card).toBeVisible()
 
-      await page.locator('[data-test="totp-code"]').fill(totpCode(secret))
-      await page.locator('[data-test="totp-activate"]').click()
-      await expect(page.locator('[data-test="totp-disable"]')).toBeVisible()
+    await page.locator('[data-test="totp-enable"]').click()
+    const qr = page.locator('[data-test="totp-qr"]')
+    await expect(qr).toBeVisible()
+    // The URI must carry the SHA1/6-digit/30-second parameters the server verifier uses.
+    await expect(qr).toHaveAttribute('data-otpauth-uri', /^otpauth:\/\/totp\/.*algorithm=SHA1&digits=6&period=30$/)
+    const secret = (await page.locator('[data-test="totp-secret"]').textContent())?.trim() ?? ''
+    expect(secret, 'the manual secret is shown').toBeTruthy()
 
-      await page.getByRole('button', { name: 'Logout' }).click()
-      await expect(page).toHaveURL(/#\/login/)
-      await page.getByLabel('Username').fill(username)
-      await page.locator('#login-pass').fill(password)
-      // The code field only appears once the server challenges the now TOTP-active account.
-      await expect(page.locator('#login-code')).toHaveCount(0)
-      await page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(page.locator('#login-code')).toBeVisible()
-      await page.locator('#login-code').fill(totpCode(secret))
-      await page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(page).toHaveURL(/#\/document$/)
+    await page.locator('[data-test="totp-code"]').fill(totpCode(secret))
+    await page.locator('[data-test="totp-activate"]').click()
+    await expect(page.locator('[data-test="totp-disable"]')).toBeVisible()
 
-      await page.goto('/#/settings/account')
-      await expect(page.locator('[data-test="totp-disable"]')).toBeVisible()
-      await page.locator('#totp-disable-pass').fill(password)
-      await page.locator('[data-test="totp-disable"]').click()
-      await expect(page.locator('[data-test="totp-enable"]')).toBeVisible()
-    } finally {
-      await deleteUser(baseURL!, username)
-    }
+    await page.getByRole('button', { name: 'Logout' }).click()
+    await expect(page).toHaveURL(/#\/login/)
+    await page.getByLabel('Username').fill(username)
+    await page.locator('#login-pass').fill(password)
+    // The code field only appears once the server challenges the now TOTP-active account.
+    await expect(page.locator('#login-code')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page.locator('#login-code')).toBeVisible()
+    await page.locator('#login-code').fill(totpCode(secret))
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).toHaveURL(/#\/document$/)
+
+    await page.goto('/#/settings/account')
+    await expect(page.locator('[data-test="totp-disable"]')).toBeVisible()
+    await page.locator('#totp-disable-pass').fill(password)
+    await page.locator('[data-test="totp-disable"]').click()
+    await expect(page.locator('[data-test="totp-enable"]')).toBeVisible()
   })
 })

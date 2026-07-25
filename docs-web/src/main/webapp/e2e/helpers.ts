@@ -1,4 +1,11 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type APIResponse,
+  type Locator,
+  type Page,
+} from '@playwright/test'
 import { createHmac } from 'node:crypto'
 
 // Shared e2e helpers. Kept selector-light and user-facing to match the harness
@@ -284,4 +291,180 @@ export function totpCode(secret: string, atMs: number = Date.now()): string {
     ((hmac[offset + 2] & 0xff) << 8) |
     (hmac[offset + 3] & 0xff)
   return (binary % 1_000_000).toString().padStart(6, '0')
+}
+
+// --- API teardown helpers (#187) ---------------------------------------------
+// Teardown must not drive the UI. The UI path is slow, it is the very surface a failed
+// body left broken, and every one of its waits is another way for cleanup to throw or
+// hang. These helpers hit the REST API directly and FAIL LOUDLY: a teardown that
+// silently 4xx'd is how documents, tags and users pile up across a suite run.
+//
+// They are deliberately idempotent for the "the body already deleted it" case (404),
+// and only for that case.
+
+async function describeResponse(res: APIResponse): Promise<string> {
+  const body = await res.text().catch(() => '<unreadable body>')
+  return `HTTP ${res.status()} ${body.slice(0, 500)}`
+}
+
+/**
+ * Permanently remove a document.
+ *
+ * `DELETE /api/document/:id` only TRASHES (soft-delete, `DOC_DELETEDATE_D`); the document
+ * keeps consuming quota and still sits in the owner's trash. Cleanup that stops there
+ * passes while the corpus grows every run — a clean-start baseline finished with 40 active
+ * AND 10 trashed documents — so this trashes AND purges
+ * (`DELETE /api/document/:id/permanent`).
+ *
+ * Status codes here are MEASURED, not assumed (probed against the running app):
+ *   trash   — 200 alive; 500 when already trashed or already gone (the admin path skips the
+ *             ACL check, so the DAO, not the 404 branch, is what fails). "Not found" is NOT
+ *             a 404 on this endpoint, so it cannot be used as the idempotency signal.
+ *   purge   — 200 when the document is in the CALLER's trash; 404 otherwise. It is
+ *             owner-scoped server-side (`getDeletedById(id, principal)`), so an admin
+ *             context cannot purge another user's trashed document.
+ *   GET     — 200 alive; 404 trashed, purged or nonexistent.
+ *
+ * CONTRACT FOR CALLERS: because the purge is owner-scoped, a document seeded AS A SECOND USER
+ * and cleaned up through the ADMIN request context trashes fine and then 404s on the purge, and
+ * this helper throws "trashed but not purged" rather than leaving it in that user's trash. A spec
+ * that seeds as another user must defer its cleanup on THAT user's own context (or this helper
+ * must be extended first). Every current caller seeds as admin.
+ *
+ * Hence: the purge result is authoritative, a failed purge after a SUCCESSFUL trash means
+ * the caller is not the owner (loud failure — the document would otherwise be left in
+ * someone's trash), and anything else is confirmed against a read-back before being
+ * accepted as "the body already deleted it".
+ */
+export async function deleteDocApi(request: APIRequestContext, id: string): Promise<void> {
+  const trashed = await request.delete(`/api/document/${id}`)
+  const purged = await request.delete(`/api/document/${id}/permanent`)
+  if (purged.ok()) return
+  if (trashed.ok()) {
+    throw new Error(
+      `teardown: document ${id} was trashed but not purged — ${await describeResponse(purged)}. ` +
+        `Permanent delete is owner-scoped: purge from the owning user's request context.`,
+    )
+  }
+  // Neither call succeeded. Accept that only if the document really is gone — never on the
+  // strength of an error code alone.
+  const readBack = await request.get(`/api/document/${id}`)
+  if (!readBack.ok()) return
+  throw new Error(
+    `teardown: document ${id} still exists after cleanup — trash ${trashed.status()}, ` +
+      `purge ${purged.status()}, read-back ${readBack.status()}.`,
+  )
+}
+
+/**
+ * Delete a tag by id. `DELETE /api/tag/:id` answers 500 — not 404 — for a tag that is
+ * already gone (measured), so an "already deleted by the body" teardown is confirmed
+ * against the tag list rather than inferred from the status code.
+ */
+export async function deleteTagApi(request: APIRequestContext, id: string): Promise<void> {
+  const res = await request.delete(`/api/tag/${id}`)
+  if (res.ok()) return
+  const list = await request.get('/api/tag/list')
+  if (list.ok()) {
+    const tags = (await list.json()).tags as Array<{ id: string }>
+    if (!tags.some((t) => t.id === id)) return
+  }
+  throw new Error(`teardown: delete tag ${id} failed — ${await describeResponse(res)}`)
+}
+
+/**
+ * Delete a tag by NAME (several specs only ever hold the name). Resolves it against the
+ * caller's tag list; a name that is no longer present is not an error.
+ */
+export async function deleteTagByNameApi(request: APIRequestContext, name: string): Promise<void> {
+  const listRes = await request.get('/api/tag/list')
+  if (!listRes.ok()) {
+    throw new Error(`teardown: list tags before deleting "${name}" failed — ${await describeResponse(listRes)}`)
+  }
+  const tags = (await listRes.json()).tags as Array<{ id: string; name: string }>
+  const match = tags.find((t) => t.name === name)
+  if (!match) return
+  await deleteTagApi(request, match.id)
+}
+
+/**
+ * Delete a group by name. Measured: `DELETE /api/group/:name` answers 200 on success and a clean
+ * 404 when the group is already gone (unlike the document/tag endpoints, which answer 500) — but
+ * the 404 is confirmed against the group list rather than trusted, so a future change of that
+ * status cannot turn a failed teardown into a silent no-op.
+ */
+export async function deleteGroupApi(request: APIRequestContext, name: string): Promise<void> {
+  const res = await request.delete(`/api/group/${name}`)
+  if (res.ok()) return
+  const list = await request.get('/api/group')
+  if (list.ok()) {
+    const groups = (await list.json()).groups as Array<{ name: string }>
+    if (!groups.some((g) => g.name === name)) return
+  }
+  throw new Error(`teardown: delete group ${name} failed — ${await describeResponse(res)}`)
+}
+
+/**
+ * Delete a user, reassigning any content they still own.
+ *
+ * `reassign_to_username` is passed ALWAYS: since #180 the server only demands it when
+ * the departing account still owns an active document or tag, but a teardown cannot
+ * know whether the body left content behind — and omitting it there fails the delete
+ * with `ReassignRequired`, whose 400 a `.catch(() => {})` teardown swallowed while the
+ * user leaked. The target must be an active user distinct from the departing one;
+ * `admin` satisfies both by construction.
+ *
+ * A user the body already deleted (`UserNotFound`) is not an error.
+ */
+export async function deleteUserApi(
+  request: APIRequestContext,
+  username: string,
+  reassignTo = 'admin',
+): Promise<void> {
+  const res = await request.delete(`/api/user/${username}`, {
+    params: { reassign_to_username: reassignTo },
+  })
+  if (res.ok()) return
+  const body = await res.text().catch(() => '')
+  if (body.includes('UserNotFound')) return
+  throw new Error(`teardown: delete user ${username} failed — HTTP ${res.status()} ${body.slice(0, 500)}`)
+}
+
+/**
+ * The ONE sanctioned way to run teardown inside a `finally` — the single exemption the
+ * `no-restricted-syntax` guardrail carves out, for contexts where the `cleanup` fixture
+ * is not available (Playwright global setup) or a teardown genuinely must run inside a
+ * finalizer.
+ *
+ * It preserves the body's error BY CONSTRUCTION: it never throws. A failed step is
+ * attached to the test report as a `cleanup-failures` diagnostic when a test is running,
+ * and logged to stderr otherwise.
+ *
+ * It is strictly WEAKER than `cleanup.defer`, and that is why it is the fallback and not
+ * the default: code inside a `finally` cannot tell whether the body passed (Playwright
+ * records the body's error only after the test function returns), so this wrapper cannot
+ * turn a broken cleanup after a GREEN body into a red test. `cleanup.defer` can, and does.
+ */
+export async function guardedTeardown(label: string, fn: () => unknown | Promise<unknown>): Promise<void> {
+  const failure = await Promise.resolve()
+    .then(fn)
+    .then(() => null)
+    .catch((error: unknown) => error)
+  if (failure === null) return
+  const detail = failure instanceof Error ? (failure.stack ?? failure.message) : String(failure)
+  const info = (() => {
+    try {
+      return test.info()
+    } catch {
+      return null
+    }
+  })()
+  if (!info) {
+    process.stderr.write(`guarded teardown "${label}" failed:\n${detail}\n`)
+    return
+  }
+  await info.attach('cleanup-failures', {
+    body: `guarded teardown step failed:\n\n- ${label}\n  ${detail}\n`,
+    contentType: 'text/plain',
+  })
 }

@@ -1,8 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, confirmDanger } from './helpers'
+import { unique, deleteDocApi } from './helpers'
 
 // #119 content-hash duplicate detection — the SPA hint. When the backend has a dedup master secret
 // (DOCS_DEDUP_MASTER_KEY / _FILE) it flags a content-identical upload with duplicateKind='content', and
@@ -28,30 +28,19 @@ async function seedDocWithFile(request: APIRequestContext, title: string, fileNa
   return id
 }
 
-async function deleteDoc(page: Page, id: string) {
-  await page.goto(`/#/document/view/${id}`)
-  const del = page.getByRole('button', { name: 'Delete', exact: true })
-  if (await del.isVisible().catch(() => false)) {
-    await del.click()
-    await confirmDanger(page)
-  }
-}
-
-test('a renamed identical upload shows the non-blocking content-duplicate hint', async ({ page }) => {
+test('a renamed identical upload shows the non-blocking content-duplicate hint', async ({ page, cleanup }) => {
   const id = await seedDocWithFile(page.request, unique('dedup'), 'original.txt')
-  try {
-    await page.goto(`/#/document/view/${id}/content`)
-    // Drop the SAME bytes under a DIFFERENT (non-conflicting) name so it uploads straight away and the
-    // backend recognises the identical content within this document.
-    await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles({
-      name: 'renamed.txt',
-      mimeType: 'text/plain',
-      buffer: readFileSync(txt),
-    })
-    await expect(page.getByText('Files uploaded').first()).toBeVisible()
-    // The advisory, non-blocking hint toast.
-    await expect(page.getByText(/identical to/i).first()).toBeVisible()
-  } finally {
-    await deleteDoc(page, id)
-  }
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+
+  await page.goto(`/#/document/view/${id}/content`)
+  // Drop the SAME bytes under a DIFFERENT (non-conflicting) name so it uploads straight away and the
+  // backend recognises the identical content within this document.
+  await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles({
+    name: 'renamed.txt',
+    mimeType: 'text/plain',
+    buffer: readFileSync(txt),
+  })
+  await expect(page.getByText('Files uploaded').first()).toBeVisible()
+  // The advisory, non-blocking hint toast.
+  await expect(page.getByText(/identical to/i).first()).toBeVisible()
 })

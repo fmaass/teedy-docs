@@ -103,87 +103,87 @@ test.describe('TOTP login (behavior A)', () => {
     return { username, password, secret }
   }
 
+  // Deletion requires a reassign target whenever the account still owns content (#55/#180),
+  // and its success is asserted — an unasserted delete that 400s with ReassignRequired leaks
+  // the seeded user silently.
   async function deleteUser(baseURL: string, username: string) {
     const admin = await pwRequest.newContext({ baseURL })
     await admin.post('/api/user/login', {
       form: { username: 'admin', password: 'admin', remember: false },
     })
-    await admin.delete(`/api/user/${username}`)
+    const deleted = await admin.delete(`/api/user/${username}`, {
+      params: { reassign_to_username: 'admin' },
+    })
+    expect(deleted.ok(), `cleanup: delete ${username}`).toBeTruthy()
     await admin.dispose()
   }
 
-  test('reveals the OTP field on challenge and completes a full valid-code login', async ({ page, baseURL }) => {
+  test('reveals the OTP field on challenge and completes a full valid-code login', async ({ page, baseURL, cleanup }) => {
     const { username, password, secret } = await seedTotpUser(baseURL!)
-    try {
-      await page.goto('/#/login')
-      await page.getByLabel('Username').fill(username)
-      await page.locator('#login-pass').fill(password)
-      // The OTP field is NOT present before the challenge — a non-TOTP login never
-      // shows it.
-      await expect(page.locator('#login-code')).toHaveCount(0)
+    cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-      await page.getByRole('button', { name: 'Sign in' }).click()
+    await page.goto('/#/login')
+    await page.getByLabel('Username').fill(username)
+    await page.locator('#login-pass').fill(password)
+    // The OTP field is NOT present before the challenge — a non-TOTP login never
+    // shows it.
+    await expect(page.locator('#login-code')).toHaveCount(0)
 
-      // Backend returned 400 ValidationCodeRequired → the SPA reveals the OTP field
-      // and stays on the login form (password was accepted, only the code remains).
-      await expect(page.locator('#login-code')).toBeVisible()
-      await expect(page).toHaveURL(/#\/login/)
+    await page.getByRole('button', { name: 'Sign in' }).click()
 
-      // Compute the CURRENT valid code and resubmit. The server verifies it, so a
-      // wrong algorithm here would fail the login (this is not a self-check).
-      await page.locator('#login-code').fill(totpCode(secret))
-      await page.getByRole('button', { name: 'Sign in' }).click()
+    // Backend returned 400 ValidationCodeRequired → the SPA reveals the OTP field
+    // and stays on the login form (password was accepted, only the code remains).
+    await expect(page.locator('#login-code')).toBeVisible()
+    await expect(page).toHaveURL(/#\/login/)
 
-      // Full green: a valid OTP lands us in the authenticated app shell.
-      await expect(page).toHaveURL(/#\/document$/)
-      await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
-    } finally {
-      await deleteUser(baseURL!, username)
-    }
+    // Compute the CURRENT valid code and resubmit. The server verifies it, so a
+    // wrong algorithm here would fail the login (this is not a self-check).
+    await page.locator('#login-code').fill(totpCode(secret))
+    await page.getByRole('button', { name: 'Sign in' }).click()
+
+    // Full green: a valid OTP lands us in the authenticated app shell.
+    await expect(page).toHaveURL(/#\/document$/)
+    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
   })
 
-  test('shows the invalid-code error for a wrong OTP on the challenge', async ({ page, baseURL }) => {
+  test('shows the invalid-code error for a wrong OTP on the challenge', async ({ page, baseURL, cleanup }) => {
     const { username, password } = await seedTotpUser(baseURL!)
-    try {
-      await page.goto('/#/login')
-      await page.getByLabel('Username').fill(username)
-      await page.locator('#login-pass').fill(password)
-      await page.getByRole('button', { name: 'Sign in' }).click()
+    cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-      // OTP field revealed by the challenge.
-      const codeField = page.locator('#login-code')
-      await expect(codeField).toBeVisible()
+    await page.goto('/#/login')
+    await page.getByLabel('Username').fill(username)
+    await page.locator('#login-pass').fill(password)
+    await page.getByRole('button', { name: 'Sign in' }).click()
 
-      // A deterministically-wrong 6-digit code → backend 403 → the SPA shows the
-      // dedicated invalid-code message and keeps the field visible for a retry.
-      // (One wrong attempt is well under the 5-attempt lockout threshold.)
-      await codeField.fill('000000')
-      await page.getByRole('button', { name: 'Sign in' }).click()
+    // OTP field revealed by the challenge.
+    const codeField = page.locator('#login-code')
+    await expect(codeField).toBeVisible()
 
-      await expect(page.getByRole('alert')).toContainText('Invalid validation code')
-      await expect(codeField).toBeVisible()
-      await expect(page).toHaveURL(/#\/login/)
-      await expect(page.getByRole('button', { name: 'Logout' })).toHaveCount(0)
-    } finally {
-      await deleteUser(baseURL!, username)
-    }
+    // A deterministically-wrong 6-digit code → backend 403 → the SPA shows the
+    // dedicated invalid-code message and keeps the field visible for a retry.
+    // (One wrong attempt is well under the 5-attempt lockout threshold.)
+    await codeField.fill('000000')
+    await page.getByRole('button', { name: 'Sign in' }).click()
+
+    await expect(page.getByRole('alert')).toContainText('Invalid validation code')
+    await expect(codeField).toBeVisible()
+    await expect(page).toHaveURL(/#\/login/)
+    await expect(page.getByRole('button', { name: 'Logout' })).toHaveCount(0)
   })
 
-  test('editing the username after a challenge retracts the OTP field', async ({ page, baseURL }) => {
+  test('editing the username after a challenge retracts the OTP field', async ({ page, baseURL, cleanup }) => {
     const { username, password } = await seedTotpUser(baseURL!)
-    try {
-      await page.goto('/#/login')
-      await page.getByLabel('Username').fill(username)
-      await page.locator('#login-pass').fill(password)
-      await page.getByRole('button', { name: 'Sign in' }).click()
-      await expect(page.locator('#login-code')).toBeVisible()
+    cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-      // Retyping the username must hide the code prompt so a code meant for one
-      // account can't be submitted against another (Login.vue watch guard).
-      await page.getByLabel('Username').fill(username + 'x')
-      await expect(page.locator('#login-code')).toHaveCount(0)
-    } finally {
-      await deleteUser(baseURL!, username)
-    }
+    await page.goto('/#/login')
+    await page.getByLabel('Username').fill(username)
+    await page.locator('#login-pass').fill(password)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page.locator('#login-code')).toBeVisible()
+
+    // Retyping the username must hide the code prompt so a code meant for one
+    // account can't be submitted against another (Login.vue watch guard).
+    await page.getByLabel('Username').fill(username + 'x')
+    await expect(page.locator('#login-code')).toHaveCount(0)
   })
 })

@@ -28,7 +28,7 @@ import { unique } from './helpers'
 
 const GATED_ENDPOINT = '/api/document/list?limit=1'
 
-test('an API key token authenticates as its owner; garbage and revoked tokens are rejected', async ({ page, baseURL }) => {
+test('an API key token authenticates as its owner; garbage and revoked tokens are rejected', async ({ page, baseURL, cleanup }) => {
   const keyName = unique('e2e-apikey')
 
   // --- Mint the key through the real UI and capture the one-time token ---
@@ -45,6 +45,24 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
   expect(token, 'displayed token').toMatch(/^tdapi_[0-9a-f]+$/)
   await keyDialog.getByRole('button', { name: 'Done' }).click()
 
+  // Cleanup if the revoke step below does not run (early failure). An API key has no
+  // teardown endpoint the spec can address by id here, so this stays the UI probe it
+  // always was — moved verbatim out of the old `finally`. The `.catch`es that remain
+  // are the conditional probes ("is there a leftover row / is the confirm up?"); the
+  // ones that merely swallowed a failing click are gone, so a broken teardown now
+  // reports instead of passing silently.
+  cleanup.defer('remove any leftover API key', async () => {
+    await page.goto('/#/settings/api-keys')
+    const leftover = page.getByRole('row', { name: new RegExp(keyName) })
+    if (await leftover.count().catch(() => 0)) {
+      await leftover.getByRole('button', { name: 'Delete API key' }).click()
+      const c = page.getByRole('alertdialog')
+      if (await c.isVisible().catch(() => false)) {
+        await c.getByRole('button', { name: 'Yes' }).click()
+      }
+    }
+  })
+
   // A fresh request context with NO cookies: the bearer token is the sole credential,
   // so a passing assertion cannot be explained by a leaked admin session. Pass an
   // explicit empty storageState — request.newContext() otherwise inherits the project's
@@ -54,71 +72,59 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
     baseURL,
     storageState: { cookies: [], origins: [] },
   })
-  try {
-    // --- Positive: the token authenticates as the owner (admin) ---
-    const meRes = await anon.get('/api/user', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(meRes.status(), 'GET /api/user with valid token').toBe(200)
-    const me = await meRes.json()
-    expect(me.anonymous, 'authenticated (not anonymous)').toBe(false)
-    expect(me.username, 'identity read-back').toBe('admin')
+  cleanup.defer('dispose the anonymous request context', () => anon.dispose())
 
-    // The token reaches a genuinely auth-gated endpoint (403 for anonymous callers).
-    const listRes = await anon.get(GATED_ENDPOINT, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(listRes.status(), 'gated endpoint with valid token').toBe(200)
+  // --- Positive: the token authenticates as the owner (admin) ---
+  const meRes = await anon.get('/api/user', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(meRes.status(), 'GET /api/user with valid token').toBe(200)
+  const me = await meRes.json()
+  expect(me.anonymous, 'authenticated (not anonymous)').toBe(false)
+  expect(me.username, 'identity read-back').toBe('admin')
 
-    // --- Negative: NO credential at all is an authorization denial on the gated endpoint (403) ---
-    // An absent credential is NOT a rejected credential: the api-key filter falls through to anonymous
-    // and the RESOURCE denies the anonymous caller — a genuine 403 authorization denial, which must
-    // stay 403 (distinct from the 401 bad-credential rejections below).
-    const anonList = await anon.get(GATED_ENDPOINT)
-    expect(anonList.status(), 'gated endpoint anonymous').toBe(403)
+  // The token reaches a genuinely auth-gated endpoint (403 for anonymous callers).
+  const listRes = await anon.get(GATED_ENDPOINT, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(listRes.status(), 'gated endpoint with valid token').toBe(200)
 
-    // --- Negative: a garbage tdapi_ token is an INVALID credential — rejected with 401 ---
-    const garbageRes = await anon.get(GATED_ENDPOINT, {
-      headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
-    })
-    expect(garbageRes.status(), 'gated endpoint with garbage token').toBe(401)
-    // The rejection terminates the chain on EVERY /api route, so /api/user rejects it too (401) —
-    // it answers anonymous:true only when NO credential is presented, never for an invalid one.
-    const garbageMe = await anon.get('/api/user', {
-      headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
-    })
-    expect(garbageMe.status(), 'garbage token rejected on /api/user').toBe(401)
+  // --- Negative: NO credential at all is an authorization denial on the gated endpoint (403) ---
+  // An absent credential is NOT a rejected credential: the api-key filter falls through to anonymous
+  // and the RESOURCE denies the anonymous caller — a genuine 403 authorization denial, which must
+  // stay 403 (distinct from the 401 bad-credential rejections below).
+  const anonList = await anon.get(GATED_ENDPOINT)
+  expect(anonList.status(), 'gated endpoint anonymous').toBe(403)
 
-    // --- Revoke the key via the UI, then reuse the SAME token: it must be rejected ---
-    const row = page.getByRole('row', { name: new RegExp(keyName) })
-    await expect(row).toBeVisible()
-    await row.getByRole('button', { name: 'Delete API key' }).click()
-    const confirm = page.getByRole('alertdialog')
-    await expect(confirm).toBeVisible()
-    await confirm.getByRole('button', { name: 'Yes' }).click()
-    await expect(page.getByRole('row', { name: new RegExp(keyName) })).toHaveCount(0)
+  // --- Negative: a garbage tdapi_ token is an INVALID credential — rejected with 401 ---
+  const garbageRes = await anon.get(GATED_ENDPOINT, {
+    headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
+  })
+  expect(garbageRes.status(), 'gated endpoint with garbage token').toBe(401)
+  // The rejection terminates the chain on EVERY /api route, so /api/user rejects it too (401) —
+  // it answers anonymous:true only when NO credential is presented, never for an invalid one.
+  const garbageMe = await anon.get('/api/user', {
+    headers: { Authorization: 'Bearer tdapi_deadbeefdeadbeefdeadbeefdeadbeef' },
+  })
+  expect(garbageMe.status(), 'garbage token rejected on /api/user').toBe(401)
 
-    // A deleted key resolves to no key — the SAME invalid-credential path as a garbage token — so a
-    // revoked token is rejected with 401 on every /api route, not silently downgraded to anonymous.
-    const revokedList = await anon.get(GATED_ENDPOINT, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(revokedList.status(), 'gated endpoint with revoked token').toBe(401)
-    const revokedMe = await anon.get('/api/user', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(revokedMe.status(), 'revoked token rejected on /api/user').toBe(401)
-  } finally {
-    await anon.dispose()
-    // Best-effort cleanup if the revoke step above did not run (early failure).
-    await page.goto('/#/settings/api-keys').catch(() => {})
-    const leftover = page.getByRole('row', { name: new RegExp(keyName) })
-    if (await leftover.count().catch(() => 0)) {
-      await leftover.getByRole('button', { name: 'Delete API key' }).click().catch(() => {})
-      const c = page.getByRole('alertdialog')
-      if (await c.isVisible().catch(() => false)) {
-        await c.getByRole('button', { name: 'Yes' }).click().catch(() => {})
-      }
-    }
-  }
+  // --- Revoke the key via the UI, then reuse the SAME token: it must be rejected ---
+  const row = page.getByRole('row', { name: new RegExp(keyName) })
+  await expect(row).toBeVisible()
+  await row.getByRole('button', { name: 'Delete API key' }).click()
+  const confirm = page.getByRole('alertdialog')
+  await expect(confirm).toBeVisible()
+  await confirm.getByRole('button', { name: 'Yes' }).click()
+  await expect(page.getByRole('row', { name: new RegExp(keyName) })).toHaveCount(0)
+
+  // A deleted key resolves to no key — the SAME invalid-credential path as a garbage token — so a
+  // revoked token is rejected with 401 on every /api route, not silently downgraded to anonymous.
+  const revokedList = await anon.get(GATED_ENDPOINT, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(revokedList.status(), 'gated endpoint with revoked token').toBe(401)
+  const revokedMe = await anon.get('/api/user', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  expect(revokedMe.status(), 'revoked token rejected on /api/user').toBe(401)
 })

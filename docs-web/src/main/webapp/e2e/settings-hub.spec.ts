@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, login, deleteUser, openNav, closeNav } from './helpers'
+import { unique, login, deleteUserApi, openNav, closeNav } from './helpers'
 
 // #64: /settings is a landing HUB (a grouped, annotated list), not the old redirect
 // to the Account form. These specs assert, against the real app:
@@ -42,7 +42,7 @@ test('a hub entry navigates to its leaf settings route', async ({ page }) => {
 // A NON-admin reaches the hub (it is for everyone) but sees only the Personal
 // section — the three admin groups are gated on isAdmin. Created via Settings › Users
 // as admin, then driven from a fresh cookie-less context.
-test('a non-admin sees the hub with only the Personal section', async ({ page, browser }) => {
+test('a non-admin sees the hub with only the Personal section', async ({ page, browser, cleanup }) => {
   const username = unique('hub').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const password = 'HubPass123'
   const email = `${username}@example.com`
@@ -55,26 +55,23 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
   await dialog.locator('#add-user-pass').fill(password)
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByText('User created')).toBeVisible()
+  cleanup.defer('delete the non-admin user', () => deleteUserApi(page.request, username))
 
-  try {
-    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-    const userPage = await ctx.newPage()
-    await login(userPage, username, password)
+  const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const userPage = await ctx.newPage()
+  await login(userPage, username, password)
 
-    await userPage.goto('/#/settings')
-    await expect(userPage).toHaveURL(/#\/settings$/)
-    // The hub renders for the non-admin: its H1 + the Personal section.
-    await expect(userPage.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
-    await expect(userPage.getByRole('heading', { level: 2, name: 'Personal' })).toBeVisible()
-    // But NONE of the admin group headings are present.
-    await expect(userPage.getByRole('heading', { level: 2, name: 'Access & Users' })).toHaveCount(0)
-    await expect(userPage.getByRole('heading', { level: 2, name: 'Content Model' })).toHaveCount(0)
-    await expect(userPage.getByRole('heading', { level: 2, name: 'System' })).toHaveCount(0)
+  await userPage.goto('/#/settings')
+  await expect(userPage).toHaveURL(/#\/settings$/)
+  // The hub renders for the non-admin: its H1 + the Personal section.
+  await expect(userPage.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  await expect(userPage.getByRole('heading', { level: 2, name: 'Personal' })).toBeVisible()
+  // But NONE of the admin group headings are present.
+  await expect(userPage.getByRole('heading', { level: 2, name: 'Access & Users' })).toHaveCount(0)
+  await expect(userPage.getByRole('heading', { level: 2, name: 'Content Model' })).toHaveCount(0)
+  await expect(userPage.getByRole('heading', { level: 2, name: 'System' })).toHaveCount(0)
 
-    await ctx.close()
-  } finally {
-    await deleteUser(page, username)
-  }
+  await ctx.close()
 })
 
 // #62: the running app version renders as a muted label in the sidebar footer,

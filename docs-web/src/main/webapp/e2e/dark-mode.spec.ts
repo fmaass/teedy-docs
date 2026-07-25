@@ -5,8 +5,8 @@ import { test, expect } from './fixtures'
 // `body` background from --p-surface-50 (light) to --p-surface-950 (.dark-mode), so
 // getComputedStyle(document.body).backgroundColor must actually change to a dark value
 // and back. The choice persists across a reload (localStorage 'teedy-dark-mode', read
-// back in main.ts). We toggle back off at the end (and in a finally) so the shared
-// storageState does not leak dark mode into later specs.
+// back in main.ts). We toggle back off at the end (and in a deferred cleanup step) so the
+// shared storageState does not leak dark mode into later specs.
 
 // Parse an "rgb(r, g, b)" / "rgba(...)" string to its channels.
 function rgbChannels(color: string): [number, number, number] {
@@ -25,42 +25,42 @@ async function bodyBackground(page: import('@playwright/test').Page): Promise<st
   return page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 }
 
-test('toggling dark mode changes the computed body background, persists, and toggles back', async ({ page }) => {
+test('toggling dark mode changes the computed body background, persists, and toggles back', async ({ page, cleanup }) => {
   const toggle = page.getByRole('button', { name: 'Dark mode' })
-  try {
-    await page.goto('/#/document')
-    await expect(toggle).toBeVisible()
+  await page.goto('/#/document')
+  await expect(toggle).toBeVisible()
 
-    // Light baseline.
-    const lightBg = await bodyBackground(page)
-    const lightLuma = perceivedLuminance(lightBg)
+  // Ensure dark mode is off for later specs even if an assertion failed while on.
+  // Registered once the app document exists (localStorage is unreachable on about:blank)
+  // and before the first toggle, so it covers every state this test can leave behind.
+  cleanup.defer('restore light mode for later specs', () =>
+    page.evaluate(() => {
+      localStorage.setItem('teedy-dark-mode', 'false')
+      document.documentElement.classList.remove('dark-mode')
+    }),
+  )
 
-    // Toggle ON → the computed background actually changes and becomes dark.
-    await toggle.click()
-    await expect(page.locator('html')).toHaveClass(/dark-mode/)
-    await expect.poll(async () => await bodyBackground(page)).not.toBe(lightBg)
-    const darkBg = await bodyBackground(page)
-    const darkLuma = perceivedLuminance(darkBg)
-    // "Actually dark": low absolute luminance AND darker than the light state.
-    expect(darkLuma, `dark bg ${darkBg} must be dark`).toBeLessThan(80)
-    expect(darkLuma, `dark bg ${darkBg} must be darker than light ${lightBg}`).toBeLessThan(lightLuma)
+  // Light baseline.
+  const lightBg = await bodyBackground(page)
+  const lightLuma = perceivedLuminance(lightBg)
 
-    // Persistence: reload keeps dark mode (localStorage-backed, restored in main.ts).
-    await page.reload()
-    await expect(page.locator('html')).toHaveClass(/dark-mode/)
-    await expect.poll(async () => perceivedLuminance(await bodyBackground(page))).toBeLessThan(80)
+  // Toggle ON → the computed background actually changes and becomes dark.
+  await toggle.click()
+  await expect(page.locator('html')).toHaveClass(/dark-mode/)
+  await expect.poll(async () => await bodyBackground(page)).not.toBe(lightBg)
+  const darkBg = await bodyBackground(page)
+  const darkLuma = perceivedLuminance(darkBg)
+  // "Actually dark": low absolute luminance AND darker than the light state.
+  expect(darkLuma, `dark bg ${darkBg} must be dark`).toBeLessThan(80)
+  expect(darkLuma, `dark bg ${darkBg} must be darker than light ${lightBg}`).toBeLessThan(lightLuma)
 
-    // Toggle back OFF → light restored.
-    await page.getByRole('button', { name: 'Dark mode' }).click()
-    await expect(page.locator('html')).not.toHaveClass(/dark-mode/)
-    await expect.poll(async () => await bodyBackground(page)).toBe(lightBg)
-  } finally {
-    // Ensure dark mode is off for later specs even if an assertion failed while on.
-    await page
-      .evaluate(() => {
-        localStorage.setItem('teedy-dark-mode', 'false')
-        document.documentElement.classList.remove('dark-mode')
-      })
-      .catch(() => {})
-  }
+  // Persistence: reload keeps dark mode (localStorage-backed, restored in main.ts).
+  await page.reload()
+  await expect(page.locator('html')).toHaveClass(/dark-mode/)
+  await expect.poll(async () => perceivedLuminance(await bodyBackground(page))).toBeLessThan(80)
+
+  // Toggle back OFF → light restored.
+  await page.getByRole('button', { name: 'Dark mode' }).click()
+  await expect(page.locator('html')).not.toHaveClass(/dark-mode/)
+  await expect.poll(async () => await bodyBackground(page)).toBe(lightBg)
 })

@@ -33,6 +33,7 @@ test.describe('configurable footer links', () => {
   test('render in the app shell and on the logged-out login screen with safe rel', async ({
     page,
     request,
+    cleanup,
   }) => {
     await setFooterLinks(request, [IMPRINT, PRIVACY])
 
@@ -59,19 +60,16 @@ test.describe('configurable footer links', () => {
       storageState: { cookies: [], origins: [] },
       baseURL: page.url().split('/#')[0],
     })
+    cleanup.defer('close the anonymous login-screen context', () => context.close())
     const anon = await context.newPage()
-    try {
-      await anon.goto('/#/login?local=1')
-      const loginImprint = anon.getByRole('link', { name: IMPRINT.label })
-      const loginPrivacy = anon.getByRole('link', { name: PRIVACY.label })
-      await expect(loginImprint).toBeVisible()
-      await expect(loginPrivacy).toBeVisible()
-      await expect(loginImprint).toHaveAttribute('href', IMPRINT.url)
-      await expect(loginImprint).toHaveAttribute('rel', 'noopener noreferrer')
-      await expect(loginImprint).toHaveAttribute('target', '_blank')
-      await expect(loginPrivacy).toHaveAttribute('href', PRIVACY.url)
-    } finally {
-      await context.close()
-    }
+    await anon.goto('/#/login?local=1')
+    const loginImprint = anon.getByRole('link', { name: IMPRINT.label })
+    const loginPrivacy = anon.getByRole('link', { name: PRIVACY.label })
+    await expect(loginImprint).toBeVisible()
+    await expect(loginPrivacy).toBeVisible()
+    await expect(loginImprint).toHaveAttribute('href', IMPRINT.url)
+    await expect(loginImprint).toHaveAttribute('rel', 'noopener noreferrer')
+    await expect(loginImprint).toHaveAttribute('target', '_blank')
+    await expect(loginPrivacy).toHaveAttribute('href', PRIVACY.url)
   })
 })

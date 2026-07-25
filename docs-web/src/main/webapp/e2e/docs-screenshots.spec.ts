@@ -113,7 +113,7 @@ test.beforeEach(async ({ page }) => {
 // 1. Document list with tag chips + the facet/filter panel, and the plain
 //    first-login screen (no OIDC).
 // ============================================================================
-test('doc list, tag facets, and the first-login screen', async ({ page, request }) => {
+test('doc list, tag facets, and the first-login screen', async ({ page, request, cleanup }) => {
   // Seed a small realistic corpus: three tags, several tagged documents.
   const tInvoice = await apiCreateTag(request, 'invoice', '#e67e22')
   const tContract = await apiCreateTag(request, 'contract', '#2aabd2')
@@ -145,18 +145,15 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request 
     baseURL: page.url().split('/#')[0],
     viewport: VIEWPORT,
   })
+  cleanup.defer('close the anonymous first-login screenshot context', () => context.close())
   const anon = await context.newPage()
-  try {
-    await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
-    await anon.goto('/#/login?local=1')
-    await expect(anon.getByLabel('Username')).toBeVisible()
-    await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
-    await anon.waitForLoadState('networkidle')
-    await anon.setViewportSize(VIEWPORT)
-    if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-first'), animations: 'disabled' })
-  } finally {
-    await context.close()
-  }
+  await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
+  await anon.goto('/#/login?local=1')
+  await expect(anon.getByLabel('Username')).toBeVisible()
+  await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
+  await anon.waitForLoadState('networkidle')
+  await anon.setViewportSize(VIEWPORT)
+  if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-first'), animations: 'disabled' })
 })
 
 // ============================================================================
@@ -475,7 +472,7 @@ test('settings inbox with the connection fields revealed', async ({ page }) => {
 // 10. Settings → OIDC: enabled with a masked secret; and the login screen with
 //     the "Login with SSO" button + footer links (config is left DISABLED after).
 // ============================================================================
-test('OIDC settings, SSO login screen, footer links, and the users list', async ({ page, request }) => {
+test('OIDC settings, SSO login screen, footer links, and the users list', async ({ page, request, cleanup }) => {
   // --- OIDC settings shot: enable + fill fields, masked secret ---
   await page.goto('/#/settings/oidc')
   await expect(page.getByRole('heading', { name: 'OIDC authentication' })).toBeVisible()
@@ -533,21 +530,18 @@ test('OIDC settings, SSO login screen, footer links, and the users list', async 
     baseURL: page.url().split('/#')[0],
     viewport: VIEWPORT,
   })
+  cleanup.defer('close the anonymous SSO-login screenshot context', () => context.close())
   const anon = await context.newPage()
-  try {
-    await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
-    // ?local=1 suppresses the auto-redirect so BOTH the local form and the SSO
-    // button render together (matches the docs description).
-    await anon.goto('/#/login?local=1')
-    await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
-    await expect(anon.getByRole('button', { name: /SSO/i })).toBeVisible()
-    await expect(anon.getByRole('link', { name: 'Imprint' })).toBeVisible()
-    await anon.waitForLoadState('networkidle')
-    await anon.setViewportSize(VIEWPORT)
-    if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-sso'), animations: 'disabled' })
-  } finally {
-    await context.close()
-  }
+  await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
+  // ?local=1 suppresses the auto-redirect so BOTH the local form and the SSO
+  // button render together (matches the docs description).
+  await anon.goto('/#/login?local=1')
+  await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
+  await expect(anon.getByRole('button', { name: /SSO/i })).toBeVisible()
+  await expect(anon.getByRole('link', { name: 'Imprint' })).toBeVisible()
+  await anon.waitForLoadState('networkidle')
+  await anon.setViewportSize(VIEWPORT)
+  if (UPDATE_SCREENSHOTS) await anon.screenshot({ path: shotPath('login-sso'), animations: 'disabled' })
 
   // Cleanup the global config so a re-run / other specs see defaults.
   await request.post('/api/app/footer_links', { form: { links: JSON.stringify([]) } }).catch(() => {})

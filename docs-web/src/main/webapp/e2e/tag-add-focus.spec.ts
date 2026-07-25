@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, isMobileViewport } from './helpers'
+import { unique, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
 
 async function apiCreateDocument(request: APIRequestContext, title: string): Promise<string> {
   const res = await request.put('/api/document', { form: { title, language: 'eng' } })
@@ -43,60 +43,56 @@ async function keyboardAddTag(page: import('@playwright/test').Page, name: strin
   await page.keyboard.press('Enter')
 }
 
-test('right-click tag menu focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request }) => {
+test('right-click tag menu focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
   const name = tagName()
   const title = unique('tqm-focus-doc')
   const tagId = await apiCreateTag(request, name)
+  cleanup.defer('delete the quick-menu tag', () => deleteTagApi(request, tagId))
   const docId = await apiCreateDocument(request, title)
-  try {
-    expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
+  cleanup.defer('purge the quick-menu document', () => deleteDocApi(request, docId))
 
-    await page.goto('/#/document')
-    const row = page.getByRole('row', {
-      name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-    })
-    await expect(row).toBeVisible()
+  expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
 
-    await row.click({ button: 'right' })
-    await expect(page.locator('.p-popover')).toBeVisible()
+  await page.goto('/#/document')
+  const row = page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+  await expect(row).toBeVisible()
 
-    await expectFilterFocused(page)
+  await row.click({ button: 'right' })
+  await expect(page.locator('.p-popover')).toBeVisible()
 
-    await keyboardAddTag(page, name)
-    await expect
-      .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard-only quick menu' })
-      .toContain(tagId)
-  } finally {
-    await request.delete(`/api/document/${docId}`).catch(() => {})
-    await request.delete(`/api/tag/${tagId}`).catch(() => {})
-  }
+  await expectFilterFocused(page)
+
+  await keyboardAddTag(page, name)
+  await expect
+    .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard-only quick menu' })
+    .toContain(tagId)
 })
 
-test('slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request }) => {
+test('slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
   const name = tagName()
   const title = unique('slide-focus-doc')
   const tagId = await apiCreateTag(request, name)
+  cleanup.defer('delete the slide-over tag', () => deleteTagApi(request, tagId))
   const docId = await apiCreateDocument(request, title)
-  try {
-    expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
+  cleanup.defer('purge the slide-over document', () => deleteDocApi(request, docId))
 
-    await page.goto('/#/document')
-    await page.getByRole('cell', { name: title }).first().click()
-    const slideOver = page.getByRole('dialog')
-    await expect(slideOver).toBeVisible()
-    await expect(slideOver.locator('.slide-over-title')).toHaveText(title)
+  expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
 
-    await slideOver.locator('.tag-add-btn').click()
+  await page.goto('/#/document')
+  await page.getByRole('cell', { name: title }).first().click()
+  const slideOver = page.getByRole('dialog')
+  await expect(slideOver).toBeVisible()
+  await expect(slideOver.locator('.slide-over-title')).toHaveText(title)
 
-    await expectFilterFocused(page)
+  await slideOver.locator('.tag-add-btn').click()
 
-    await keyboardAddTag(page, name)
-    await expect
-      .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard-only slide-over' })
-      .toContain(tagId)
-  } finally {
-    await request.delete(`/api/document/${docId}`).catch(() => {})
-    await request.delete(`/api/tag/${tagId}`).catch(() => {})
-  }
+  await expectFilterFocused(page)
+
+  await keyboardAddTag(page, name)
+  await expect
+    .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard-only slide-over' })
+    .toContain(tagId)
 })

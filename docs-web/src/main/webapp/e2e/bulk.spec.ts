@@ -1,22 +1,29 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, deleteDocApi, deleteTagByNameApi } from './helpers'
 
 // Bulk operations over a multi-selection: add a tag, set a language, delete.
 // Teedy has no bulk endpoint — each action fans out over single-doc endpoints and
 // reports a per-document success/failure summary (see utils/bulkOps.ts).
 
-test('bulk add tag, set language, then delete a multi-selection', async ({ page }) => {
+test('bulk add tag, set language, then delete a multi-selection', async ({ page, cleanup }) => {
   // Seed a tag and two documents so we have a selection to act on.
   const tagName = unique('bulk-tag')
   await page.goto('/#/tag')
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Tag created')).toBeVisible()
+  // This spec had NO teardown at all: it cleaned up only on the happy path, at the end of
+  // the body, and its bulk delete merely TRASHES. Both documents and (on any failure) the
+  // tag survived every run. The defers below purge them whatever the body does — each is a
+  // no-op when the body's own cleanup already ran.
+  cleanup.defer('delete the seeded tag', () => deleteTagByNameApi(page.request, tagName))
 
   const titleA = unique('bulk-a')
   const titleB = unique('bulk-b')
   const docA = await createDocument(page, titleA)
-  await createDocument(page, titleB)
+  cleanup.defer('purge the first seeded document', () => deleteDocApi(page.request, docA.id))
+  const docB = await createDocument(page, titleB)
+  cleanup.defer('purge the second seeded document', () => deleteDocApi(page.request, docB.id))
 
   await page.goto('/#/document')
   const rowA = page.getByRole('row', { name: new RegExp(titleA) })

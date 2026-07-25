@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique } from './helpers'
+import { unique, deleteDocApi } from './helpers'
 
 // #38: rich (sanitized) HTML descriptions with server-side sanitization.
 //
@@ -24,93 +24,81 @@ async function apiPutDocument(
   return (await res.json()).id as string
 }
 
-test('authored rich formatting survives a refresh (#38)', async ({ page }) => {
+test('authored rich formatting survives a refresh (#38)', async ({ page, cleanup }) => {
   const title = unique('rich-desc')
-  let id: string | undefined
 
-  try {
-    await page.goto('/#/document/add')
-    await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
-    await page.locator('#edit-title').fill(title)
+  await page.goto('/#/document/add')
+  await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
+  await page.locator('#edit-title').fill(title)
 
-    const editor = page.locator('#edit-desc .ql-editor')
-    await expect(editor).toBeVisible()
+  const editor = page.locator('#edit-desc .ql-editor')
+  await expect(editor).toBeVisible()
 
-    // Bold line.
-    await editor.click()
-    await page.locator('#edit-desc .ql-bold').click()
-    await page.keyboard.type('boldword')
-    await page.keyboard.press('Enter')
-    // Turn OFF bold for the list.
-    await page.locator('#edit-desc .ql-bold').click()
+  // Bold line.
+  await editor.click()
+  await page.locator('#edit-desc .ql-bold').click()
+  await page.keyboard.type('boldword')
+  await page.keyboard.press('Enter')
+  // Turn OFF bold for the list.
+  await page.locator('#edit-desc .ql-bold').click()
 
-    // Bullet list with one item.
-    await page.locator('#edit-desc .ql-list[value="bullet"]').click()
-    await page.keyboard.type('listitemword')
-    await page.keyboard.press('Enter')
+  // Bullet list with one item.
+  await page.locator('#edit-desc .ql-list[value="bullet"]').click()
+  await page.keyboard.type('listitemword')
+  await page.keyboard.press('Enter')
 
-    // Code block.
-    await page.locator('#edit-desc .ql-code-block').click()
-    await page.keyboard.type('codeword();')
+  // Code block.
+  await page.locator('#edit-desc .ql-code-block').click()
+  await page.keyboard.type('codeword();')
 
-    await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page).toHaveURL(/#\/document\/view\//)
-    id = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/#\/document\/view\//)
+  const id = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+  cleanup.defer('purge the authored document', () => deleteDocApi(page.request, id))
 
-    // Authoritative read-back: reload the detail view and assert the rendered markup.
-    await page.reload()
-    const desc = page.locator('.doc-description')
-    await expect(desc).toBeVisible()
-    // Bold survived (a <strong>/<b> around the word).
-    await expect(desc.locator('strong, b').filter({ hasText: 'boldword' })).toBeVisible()
-    // The list item survived.
-    await expect(desc.locator('li').filter({ hasText: 'listitemword' })).toBeVisible()
-    // The code block survived.
-    await expect(desc.locator('pre').filter({ hasText: 'codeword' })).toBeVisible()
-  } finally {
-    if (id) {
-      await page.request.delete(`/api/document/${id}`)
-    }
-  }
+  // Authoritative read-back: reload the detail view and assert the rendered markup.
+  await page.reload()
+  const desc = page.locator('.doc-description')
+  await expect(desc).toBeVisible()
+  // Bold survived (a <strong>/<b> around the word).
+  await expect(desc.locator('strong, b').filter({ hasText: 'boldword' })).toBeVisible()
+  // The list item survived.
+  await expect(desc.locator('li').filter({ hasText: 'listitemword' })).toBeVisible()
+  // The code block survived.
+  await expect(desc.locator('pre').filter({ hasText: 'codeword' })).toBeVisible()
 })
 
-test('request-level hostile payload is stored and rendered inert (#38)', async ({ page, request }) => {
+test('request-level hostile payload is stored and rendered inert (#38)', async ({ page, request, cleanup }) => {
   const title = unique('xss-desc')
-  let id: string | undefined
 
-  try {
-    // Bypass the editor: submit raw HTML with a script + onerror + javascript: link
-    // directly to the API, exactly as a hostile API client would.
-    const hostile =
-      '<p>safeword</p><script>window.__xss=1;alert(1)</script>' +
-      '<img src=x onerror="window.__xss=1">' +
-      '<a href="javascript:window.__xss=1">click</a>'
-    id = await apiPutDocument(request, title, hostile)
+  // Bypass the editor: submit raw HTML with a script + onerror + javascript: link
+  // directly to the API, exactly as a hostile API client would.
+  const hostile =
+    '<p>safeword</p><script>window.__xss=1;alert(1)</script>' +
+    '<img src=x onerror="window.__xss=1">' +
+    '<a href="javascript:window.__xss=1">click</a>'
+  const id = await apiPutDocument(request, title, hostile)
+  cleanup.defer('purge the hostile-payload document', () => deleteDocApi(request, id))
 
-    // Authoritative server read-back: the stored description is already sanitized.
-    const apiRes = await request.get(`/api/document/${id}`)
-    expect(apiRes.ok()).toBeTruthy()
-    const stored = (await apiRes.json()).description as string
-    expect(stored).toContain('safeword')
-    expect(stored.toLowerCase()).not.toContain('<script')
-    expect(stored).not.toContain('alert(1)')
-    expect(stored.toLowerCase()).not.toContain('onerror')
-    expect(stored.toLowerCase()).not.toContain('<img')
-    expect(stored.toLowerCase()).not.toContain('javascript:')
+  // Authoritative server read-back: the stored description is already sanitized.
+  const apiRes = await request.get(`/api/document/${id}`)
+  expect(apiRes.ok()).toBeTruthy()
+  const stored = (await apiRes.json()).description as string
+  expect(stored).toContain('safeword')
+  expect(stored.toLowerCase()).not.toContain('<script')
+  expect(stored).not.toContain('alert(1)')
+  expect(stored.toLowerCase()).not.toContain('onerror')
+  expect(stored.toLowerCase()).not.toContain('<img')
+  expect(stored.toLowerCase()).not.toContain('javascript:')
 
-    // Rendered detail view: no script executed (the sentinel global stays unset) and no
-    // live event-handler attribute is present in the rendered description markup.
-    await page.goto(`/#/document/view/${id}`)
-    const desc = page.locator('.doc-description')
-    await expect(desc).toBeVisible()
-    await expect(desc).toContainText('safeword')
-    expect(await desc.locator('script').count()).toBe(0)
-    expect(await desc.locator('img').count()).toBe(0)
-    const xssFired = await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)
-    expect(xssFired, 'no injected script must have executed').toBeFalsy()
-  } finally {
-    if (id) {
-      await request.delete(`/api/document/${id}`)
-    }
-  }
+  // Rendered detail view: no script executed (the sentinel global stays unset) and no
+  // live event-handler attribute is present in the rendered description markup.
+  await page.goto(`/#/document/view/${id}`)
+  const desc = page.locator('.doc-description')
+  await expect(desc).toBeVisible()
+  await expect(desc).toContainText('safeword')
+  expect(await desc.locator('script').count()).toBe(0)
+  expect(await desc.locator('img').count()).toBe(0)
+  const xssFired = await page.evaluate(() => (window as unknown as { __xss?: number }).__xss)
+  expect(xssFired, 'no injected script must have executed').toBeFalsy()
 })

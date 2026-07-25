@@ -12,59 +12,61 @@ import { test, expect } from './fixtures'
 //   3. DISABLES guest login again and verifies both the config read-back
 //      (/api/app guest_login:false) AND that the button is gone.
 //
-// SECURITY-CRITICAL cleanup ordering: the enable happens as the FIRST action INSIDE
-// the try, and "disable guest login" is the FIRST action in finally with its own
-// assertion — so any failure after enabling still restores GUEST_LOGIN=false, and a
-// failed disable actually FAILS the test rather than silently leaving passwordless
-// access on (which would poison later runs and the shared image).
+// SECURITY-CRITICAL cleanup ordering: the disable step is registered with `cleanup.defer`
+// IMMEDIATELY after the enabling POST, so any failure afterwards still restores
+// GUEST_LOGIN=false. `cleanup.defer` runs its steps in REGISTRATION ORDER (FIFO), so the
+// three teardown steps below execute exactly as before — disable + verify the flag flipped
+// off, THEN close the guest context, THEN re-check in a fresh context. The disable keeps its
+// own assertions, so a failed disable actually FAILS the test rather than silently leaving
+// passwordless access on (which would poison later runs and the shared image).
 
-test('guest login button works once an admin enables it', async ({ browser, request }) => {
-  let guestContext: Awaited<ReturnType<typeof browser.newContext>> | null = null
-  try {
-    // --- 1. Admin enables guest login (admin cookie from the project storageState) ---
-    const enableRes = await request.post('/api/app/guest_login', { form: { enabled: true } })
-    expect(enableRes.ok(), 'admin enable of guest_login').toBeTruthy()
+test('guest login button works once an admin enables it', async ({ browser, request, cleanup }) => {
+  // --- 1. Admin enables guest login (admin cookie from the project storageState) ---
+  const enableRes = await request.post('/api/app/guest_login', { form: { enabled: true } })
+  expect(enableRes.ok(), 'admin enable of guest_login').toBeTruthy()
 
-    // Confirm the app now advertises guest_login (drives the button's render).
-    const appRes = await request.get('/api/app')
-    expect((await appRes.json()).guest_login).toBe(true)
-
-    // --- 2. Clean, cookie-less context: a truly logged-out visitor sees + uses it ---
-    guestContext = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-    const guestPage = await guestContext.newPage()
-
-    // Prove the context starts anonymous.
-    const before = await guestContext.request.get('/api/user')
-    expect((await before.json()).anonymous).toBe(true)
-
-    await guestPage.goto('/#/login')
-    const guestButton = guestPage.getByRole('button', { name: 'Login as guest' })
-    await expect(guestButton).toBeVisible()
-    await guestButton.click()
-
-    // A successful guest login lands on the documents list and establishes a real,
-    // NON-anonymous session named "guest".
-    await expect(guestPage).toHaveURL(/#\/document$/)
-    const me = await guestContext.request.get('/api/user')
-    const body = await me.json()
-    expect(body.anonymous).toBeFalsy()
-    expect(body.username).toBe('guest')
-  } finally {
-    // --- 3. Teardown (security-critical, runs even if the above threw): disable guest
-    //        login FIRST and verify the config actually flipped back off. ---
+  // Teardown step 1 (security-critical, registered the moment guest login is on): disable
+  // guest login and verify the config actually flipped back off.
+  cleanup.defer('disable guest login and verify it is off', async () => {
     const disableRes = await request.post('/api/app/guest_login', { form: { enabled: false } })
     expect(disableRes.ok(), 'admin disable of guest_login').toBeTruthy()
     const afterDisable = await request.get('/api/app')
     expect((await afterDisable.json()).guest_login, 'guest_login must be OFF after teardown').toBe(false)
+  })
 
-    if (guestContext) await guestContext.close()
+  // Confirm the app now advertises guest_login (drives the button's render).
+  const appRes = await request.get('/api/app')
+  expect((await appRes.json()).guest_login).toBe(true)
 
-    // And the button is gone in a fresh clean context.
+  // --- 2. Clean, cookie-less context: a truly logged-out visitor sees + uses it ---
+  const guestContext = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  // Teardown step 2: close the guest context (AFTER the disable above).
+  cleanup.defer('close the guest context', () => guestContext.close())
+  // Teardown step 3: and the button is gone in a fresh clean context.
+  cleanup.defer('the guest button is gone in a fresh clean context', async () => {
     const cleanupContext = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const cleanupPage = await cleanupContext.newPage()
     await cleanupPage.goto('/#/login')
     await expect(cleanupPage.getByRole('button', { name: 'Sign in' })).toBeVisible()
     await expect(cleanupPage.getByRole('button', { name: 'Login as guest' })).toHaveCount(0)
     await cleanupContext.close()
-  }
+  })
+  const guestPage = await guestContext.newPage()
+
+  // Prove the context starts anonymous.
+  const before = await guestContext.request.get('/api/user')
+  expect((await before.json()).anonymous).toBe(true)
+
+  await guestPage.goto('/#/login')
+  const guestButton = guestPage.getByRole('button', { name: 'Login as guest' })
+  await expect(guestButton).toBeVisible()
+  await guestButton.click()
+
+  // A successful guest login lands on the documents list and establishes a real,
+  // NON-anonymous session named "guest".
+  await expect(guestPage).toHaveURL(/#\/document$/)
+  const me = await guestContext.request.get('/api/user')
+  const body = await me.json()
+  expect(body.anonymous).toBeFalsy()
+  expect(body.username).toBe('guest')
 })

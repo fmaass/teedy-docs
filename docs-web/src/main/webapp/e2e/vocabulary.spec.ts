@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, deleteDocApi } from './helpers'
 
 // Delete every remaining entry of a vocabulary namespace via the admin API. A
 // vocabulary ceases to exist once it has no entries, so this fully removes `name`.
@@ -25,131 +25,128 @@ async function purgeVocabulary(request: APIRequestContext, name: string): Promis
 // Select (#edit-type, options = vocabularyOptionsFor('type')). The added value is
 // removed again in teardown so the built-in namespace is left as found.
 
-test('admin vocabulary CRUD: create namespace, entries, rename, reorder, delete', async ({ page, request }) => {
+test('admin vocabulary CRUD: create namespace, entries, rename, reorder, delete', async ({ page, request, cleanup }) => {
   // A namespace name must match ^[a-z0-9-]+$.
   const ns = unique('voc').replace(/[^a-z0-9]/gi, '-').toLowerCase()
   const first = `first-${Date.now()}`
   const second = `second-${Date.now()}`
   const firstRenamed = `${first}-edited`
 
-  try {
-    await page.goto('/#/settings/vocabulary')
-    await expect(page.getByRole('heading', { name: 'Vocabularies' })).toBeVisible()
+  // Failure-safe purge: if the test threw before deleting its entries, the namespace
+  // would leak. Delete any remaining entries of `ns` via the admin API (idempotent —
+  // a clean pass leaves nothing to delete). Registered up front, keyed only on `ns`, so
+  // it covers a failure at any point in the body.
+  cleanup.defer('purge any surviving entries of the test vocabulary', () => purgeVocabulary(request, ns))
 
-    // --- Create a new vocabulary namespace with its first entry ---
-    await page.getByRole('button', { name: 'New vocabulary' }).click()
-    const newDialog = page.getByRole('dialog', { name: 'Create vocabulary' })
-    await newDialog.locator('#new-vocabulary-name').fill(ns)
-    await newDialog.locator('#new-vocabulary-value').fill(first)
-    await newDialog.getByRole('button', { name: 'Create', exact: true }).click()
-    await expect(page.getByText('Vocabulary created')).toBeVisible()
+  await page.goto('/#/settings/vocabulary')
+  await expect(page.getByRole('heading', { name: 'Vocabularies' })).toBeVisible()
 
-    // The picker now focuses the new namespace and lists its first entry.
-    await expect(page.getByRole('cell', { name: first })).toBeVisible()
+  // --- Create a new vocabulary namespace with its first entry ---
+  await page.getByRole('button', { name: 'New vocabulary' }).click()
+  const newDialog = page.getByRole('dialog', { name: 'Create vocabulary' })
+  await newDialog.locator('#new-vocabulary-name').fill(ns)
+  await newDialog.locator('#new-vocabulary-value').fill(first)
+  await newDialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(page.getByText('Vocabulary created')).toBeVisible()
 
-    // --- Add a second entry ---
-    await page.getByRole('button', { name: 'Add entry' }).click()
-    const addDialog = page.getByRole('dialog', { name: 'Add vocabulary entry' })
-    await addDialog.locator('#vocabulary-value').fill(second)
-    await addDialog.getByRole('button', { name: 'Add', exact: true }).click()
-    await expect(page.getByText('Entry added')).toBeVisible()
-    await expect(page.getByRole('cell', { name: second })).toBeVisible()
+  // The picker now focuses the new namespace and lists its first entry.
+  await expect(page.getByRole('cell', { name: first })).toBeVisible()
 
-    // --- Rename the first entry inline ---
-    const firstRow = page.getByRole('row', { name: new RegExp(first) })
-    await firstRow.getByRole('button', { name: 'Rename' }).click()
-    await firstRow.locator('input').fill(firstRenamed)
-    await firstRow.getByRole('button', { name: 'Confirm rename' }).click()
-    await expect(page.getByText('Entry updated')).toBeVisible()
-    await expect(page.getByRole('cell', { name: firstRenamed, exact: true })).toBeVisible()
+  // --- Add a second entry ---
+  await page.getByRole('button', { name: 'Add entry' }).click()
+  const addDialog = page.getByRole('dialog', { name: 'Add vocabulary entry' })
+  await addDialog.locator('#vocabulary-value').fill(second)
+  await addDialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText('Entry added')).toBeVisible()
+  await expect(page.getByRole('cell', { name: second })).toBeVisible()
 
-    // --- Reorder: move the second entry up so it precedes the first ---
-    const rows = page.locator('.vocabulary-table tbody tr')
-    await expect(rows.nth(0)).toContainText(firstRenamed)
-    await rows.nth(1).getByRole('button', { name: 'Move up' }).click()
-    await expect(rows.nth(0)).toContainText(second)
-    await expect(rows.nth(1)).toContainText(firstRenamed)
+  // --- Rename the first entry inline ---
+  const firstRow = page.getByRole('row', { name: new RegExp(first) })
+  await firstRow.getByRole('button', { name: 'Rename' }).click()
+  await firstRow.locator('input').fill(firstRenamed)
+  await firstRow.getByRole('button', { name: 'Confirm rename' }).click()
+  await expect(page.getByText('Entry updated')).toBeVisible()
+  await expect(page.getByRole('cell', { name: firstRenamed, exact: true })).toBeVisible()
 
-    // --- Delete both entries; deleting the last one removes the namespace ---
-    // (Assert on the row disappearing rather than the toast — success toasts stack.)
-    await page.getByRole('row', { name: new RegExp(second) }).getByRole('button', { name: 'Delete vocabulary entry' }).click()
-    await confirmDanger(page)
-    await expect(page.getByRole('cell', { name: second })).toHaveCount(0)
+  // --- Reorder: move the second entry up so it precedes the first ---
+  const rows = page.locator('.vocabulary-table tbody tr')
+  await expect(rows.nth(0)).toContainText(firstRenamed)
+  await rows.nth(1).getByRole('button', { name: 'Move up' }).click()
+  await expect(rows.nth(0)).toContainText(second)
+  await expect(rows.nth(1)).toContainText(firstRenamed)
 
-    await page.getByRole('row', { name: new RegExp(firstRenamed) }).getByRole('button', { name: 'Delete vocabulary entry' }).click()
-    await confirmDanger(page)
-    await expect(page.getByRole('cell', { name: firstRenamed, exact: true })).toHaveCount(0)
+  // --- Delete both entries; deleting the last one removes the namespace ---
+  // (Assert on the row disappearing rather than the toast — success toasts stack.)
+  await page.getByRole('row', { name: new RegExp(second) }).getByRole('button', { name: 'Delete vocabulary entry' }).click()
+  await confirmDanger(page)
+  await expect(page.getByRole('cell', { name: second })).toHaveCount(0)
 
-    // The namespace no longer appears in the picker options (it had no more entries).
-    await page.reload()
-    await page.locator('#vocabulary-name').click()
-    await expect(page.getByRole('option', { name: ns, exact: true })).toHaveCount(0)
-  } finally {
-    // Failure-safe purge: if the test threw before deleting its entries, the namespace
-    // would leak. Delete any remaining entries of `ns` via the admin API (idempotent —
-    // a clean pass leaves nothing to delete).
-    await purgeVocabulary(request, ns)
-  }
+  await page.getByRole('row', { name: new RegExp(firstRenamed) }).getByRole('button', { name: 'Delete vocabulary entry' }).click()
+  await confirmDanger(page)
+  await expect(page.getByRole('cell', { name: firstRenamed, exact: true })).toHaveCount(0)
+
+  // The namespace no longer appears in the picker options (it had no more entries).
+  await page.reload()
+  await page.locator('#vocabulary-name').click()
+  await expect(page.getByRole('option', { name: ns, exact: true })).toHaveCount(0)
 })
 
-test('deleting a referenced vocabulary entry warns with the usage count and proceeds on confirm', async ({ page, request }) => {
+test('deleting a referenced vocabulary entry warns with the usage count and proceeds on confirm', async ({ page, request, cleanup }) => {
   // A namespace name must match ^[a-z0-9-]+$.
   const ns = unique('vocref').replace(/[^a-z0-9]/gi, '-').toLowerCase()
   const value = `ref-${Date.now()}`
-  let metadataId: string | undefined
-  let docId: string | undefined
 
-  try {
-    // --- Seed a referenced value entirely via the admin API ---
-    // 1) Create the vocabulary entry (a namespace with one value).
-    const vocRes = await request.put('/api/vocabulary', {
-      form: { name: ns, value, order: '0' },
-    })
-    expect(vocRes.ok()).toBeTruthy()
-    const entryId = (await vocRes.json()).id as string
+  // Teardown of the vocabulary namespace is keyed only on `ns` and is idempotent, so it is
+  // registered up front — the entry created on the very next lines is then covered whatever
+  // the body does. Metadata and document teardown follow their own creation below.
+  cleanup.defer('purge any surviving entries of the test vocabulary', () => purgeVocabulary(request, ns))
 
-    // 2) A VOCABULARY metadata field referencing that namespace.
-    const metaRes = await request.put('/api/metadata', {
-      form: { name: `${ns}-field`, type: 'VOCABULARY', vocabulary: ns },
-    })
-    expect(metaRes.ok()).toBeTruthy()
-    metadataId = (await metaRes.json()).id as string
+  // --- Seed a referenced value entirely via the admin API ---
+  // 1) Create the vocabulary entry (a namespace with one value).
+  const vocRes = await request.put('/api/vocabulary', {
+    form: { name: ns, value, order: '0' },
+  })
+  expect(vocRes.ok()).toBeTruthy()
+  const entryId = (await vocRes.json()).id as string
 
-    // 3) A document carrying that value under the field — this is the reference.
-    const docRes = await request.put('/api/document', {
-      form: { title: unique('vocref-doc'), language: 'eng', metadata_id: metadataId, metadata_value: value },
-    })
-    expect(docRes.ok()).toBeTruthy()
-    docId = (await docRes.json()).id as string
+  // 2) A VOCABULARY metadata field referencing that namespace.
+  const metaRes = await request.put('/api/metadata', {
+    form: { name: `${ns}-field`, type: 'VOCABULARY', vocabulary: ns },
+  })
+  expect(metaRes.ok()).toBeTruthy()
+  const metadataId = (await metaRes.json()).id as string
+  cleanup.defer('delete the seeded metadata field', () => request.delete(`/api/metadata/${metadataId}`))
 
-    // --- Delete the entry through the admin UI; the confirm must carry the count ---
-    await page.goto('/#/settings/vocabulary')
-    await page.locator('#vocabulary-name').click()
-    await page.getByRole('option', { name: ns, exact: true }).click()
+  // 3) A document carrying that value under the field — this is the reference.
+  const docRes = await request.put('/api/document', {
+    form: { title: unique('vocref-doc'), language: 'eng', metadata_id: metadataId, metadata_value: value },
+  })
+  expect(docRes.ok()).toBeTruthy()
+  const docId = (await docRes.json()).id as string
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, docId))
 
-    await page.getByRole('row', { name: new RegExp(value) })
-      .getByRole('button', { name: 'Delete vocabulary entry' }).click()
+  // --- Delete the entry through the admin UI; the confirm must carry the count ---
+  await page.goto('/#/settings/vocabulary')
+  await page.locator('#vocabulary-name').click()
+  await page.getByRole('option', { name: ns, exact: true }).click()
 
-    // The reference-count confirm dialog names the value and the (single) document.
-    const dialog = page.getByRole('alertdialog')
-    await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText(value)
-    await expect(dialog).toContainText('1 document')
+  await page.getByRole('row', { name: new RegExp(value) })
+    .getByRole('button', { name: 'Delete vocabulary entry' }).click()
 
-    // Proceeds only on confirm.
-    await dialog.getByRole('button', { name: 'Yes' }).click()
-    await expect(dialog).toBeHidden()
-    await expect(page.getByText('Entry deleted')).toBeVisible()
-    await expect(page.getByRole('cell', { name: value, exact: true })).toHaveCount(0)
-  } finally {
-    // Teardown: remove the document, the metadata field, and any surviving vocab entry.
-    if (docId) await request.delete(`/api/document/${docId}`).catch(() => {})
-    if (metadataId) await request.delete(`/api/metadata/${metadataId}`).catch(() => {})
-    await purgeVocabulary(request, ns)
-  }
+  // The reference-count confirm dialog names the value and the (single) document.
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText(value)
+  await expect(dialog).toContainText('1 document')
+
+  // Proceeds only on confirm.
+  await dialog.getByRole('button', { name: 'Yes' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText('Entry deleted')).toBeVisible()
+  await expect(page.getByRole('cell', { name: value, exact: true })).toHaveCount(0)
 })
 
-test('a vocabulary value backs the document Type dropdown', async ({ page }) => {
+test('a vocabulary value backs the document Type dropdown', async ({ page, cleanup }) => {
   // Add a unique value to the built-in `type` namespace, then confirm the document
   // editor's Type Select offers it as an option. Cleaned up afterwards.
   const typeValue = `e2e-type-${Date.now()}`
@@ -164,28 +161,11 @@ test('a vocabulary value backs the document Type dropdown', async ({ page }) => 
   await addDialog.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page.getByText('Entry added')).toBeVisible()
 
-  // Open a fresh document editor and assert the Type Select surfaces the new value.
-  const { id } = await createDocument(page, unique('voc-doc'))
-  try {
-    await page.goto(`/#/document/edit/${id}`)
-    await expect(page.locator('#edit-title')).toBeVisible()
-    // The Type Select lives in the collapsible "Additional metadata" section.
-    await page.getByRole('button', { name: 'Additional metadata' }).click()
-    await expect(page.locator('#edit-type')).toBeVisible()
-    await page.locator('#edit-type').click()
-    await expect(page.getByRole('option', { name: typeValue, exact: true })).toBeVisible()
-    // Select it so we exercise the real bind, then close the overlay.
-    await page.getByRole('option', { name: typeValue, exact: true }).click()
-    await expect(page.locator('#edit-type')).toContainText(typeValue)
-  } finally {
-    // Cleanup the doc.
-    await page.goto(`/#/document/view/${id}`)
-    const del = page.getByRole('button', { name: 'Delete', exact: true })
-    if (await del.isVisible().catch(() => false)) {
-      await del.click()
-      await confirmDanger(page)
-    }
-    // Cleanup the vocabulary value (leave `type` as found).
+  // Cleanup the vocabulary value (leave `type` as found). Registered as soon as the value
+  // exists — a failure between here and the document seed would otherwise leak it into the
+  // built-in namespace permanently. There is no API teardown path for a single entry of a
+  // built-in namespace, so this stays the admin UI the test itself drives.
+  cleanup.defer('remove the added `type` vocabulary value', async () => {
     await page.goto('/#/settings/vocabulary')
     await page.locator('#vocabulary-name').click()
     await page.getByRole('option', { name: 'type', exact: true }).click()
@@ -194,5 +174,27 @@ test('a vocabulary value backs the document Type dropdown', async ({ page }) => 
       await row.getByRole('button', { name: 'Delete vocabulary entry' }).click()
       await confirmDanger(page)
     }
-  }
+  })
+
+  // Open a fresh document editor and assert the Type Select surfaces the new value.
+  const { id } = await createDocument(page, unique('voc-doc'))
+  cleanup.defer('delete the seeded document', async () => {
+    await page.goto(`/#/document/view/${id}`)
+    const del = page.getByRole('button', { name: 'Delete', exact: true })
+    if (await del.isVisible().catch(() => false)) {
+      await del.click()
+      await confirmDanger(page)
+    }
+  })
+
+  await page.goto(`/#/document/edit/${id}`)
+  await expect(page.locator('#edit-title')).toBeVisible()
+  // The Type Select lives in the collapsible "Additional metadata" section.
+  await page.getByRole('button', { name: 'Additional metadata' }).click()
+  await expect(page.locator('#edit-type')).toBeVisible()
+  await page.locator('#edit-type').click()
+  await expect(page.getByRole('option', { name: typeValue, exact: true })).toBeVisible()
+  // Select it so we exercise the real bind, then close the overlay.
+  await page.getByRole('option', { name: typeValue, exact: true }).click()
+  await expect(page.locator('#edit-type')).toContainText(typeValue)
 })

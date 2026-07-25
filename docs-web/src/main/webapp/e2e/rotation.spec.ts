@@ -121,6 +121,7 @@ test('image rotation persists to the server and survives a reload', async ({ pag
 test('a second session sees the persisted image rotation (server-stored, not per-session)', async ({
   page,
   browser,
+  cleanup,
 }) => {
   const title = unique('rotate-img-2')
   const { id } = await createDocument(page, title)
@@ -138,14 +139,11 @@ test('a second session sees the persisted image rotation (server-stored, not per
   // stored server-side and not held in the first session's memory. The admin storageState re-auths
   // this second context.
   const otherContext = await browser.newContext({ storageState: 'e2e/.auth/admin.json' })
-  try {
-    const res = await otherContext.request.get(`/api/document/${id}?files=true`)
-    expect(res.ok()).toBeTruthy()
-    const body = await res.json()
-    expect(body.files[0].rotation).toBe(90)
-  } finally {
-    await otherContext.close()
-  }
+  cleanup.defer('close the second browser context', () => otherContext.close())
+  const res = await otherContext.request.get(`/api/document/${id}?files=true`)
+  expect(res.ok()).toBeTruthy()
+  const body = await res.json()
+  expect(body.files[0].rotation).toBe(90)
 
   // Cleanup.
   await page.goto(`/#/document/view/${id}`)

@@ -1,8 +1,8 @@
-import { test, expect, type APIRequestContext, type Page } from './fixtures'
+import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, confirmDanger, openFileList } from './helpers'
+import { unique, openFileList, deleteDocApi } from './helpers'
 
 // rc.8 Phase G (#131/#132): the backend serializes a file `name` via JsonUtil.nullable, so a
 // name-less file must render a stable localized fallback ("Untitled file") — never a blank cell /
@@ -51,71 +51,56 @@ async function seedEmptyNameDoc(request: APIRequestContext, title: string): Prom
   return id
 }
 
-async function deleteDoc(page: Page, id: string) {
-  await page.goto(`/#/document/view/${id}`)
-  const del = page.getByRole('button', { name: 'Delete', exact: true })
-  if (await del.isVisible().catch(() => false)) {
-    await del.click()
-    await confirmDanger(page)
-  }
-}
-
-test('file panel (grid + list) shows the Untitled-file fallback for a name-less file', async ({ page }) => {
+test('file panel (grid + list) shows the Untitled-file fallback for a name-less file', async ({ page, cleanup }) => {
   const id = await seedEmptyNameDoc(page.request, unique('nullname-panel'))
-  try {
-    await page.goto(`/#/document/view/${id}/content`)
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-    // Grid (default): the name-less file's label is the localized fallback, not an empty node.
-    const gridLabel = page.locator('.file-preview-label')
-    await expect(gridLabel).toHaveText(UNTITLED)
+  await page.goto(`/#/document/view/${id}/content`)
 
-    // List mode: the name cell is the same fallback.
-    await openFileList(page)
-    await expect(page.locator('.file-name-text')).toHaveText(UNTITLED)
-  } finally {
-    await deleteDoc(page, id)
-  }
+  // Grid (default): the name-less file's label is the localized fallback, not an empty node.
+  const gridLabel = page.locator('.file-preview-label')
+  await expect(gridLabel).toHaveText(UNTITLED)
+
+  // List mode: the name cell is the same fallback.
+  await openFileList(page)
+  await expect(page.locator('.file-name-text')).toHaveText(UNTITLED)
 })
 
-test('slide-over files tab shows the Untitled-file fallback for a name-less file', async ({ page }) => {
+test('slide-over files tab shows the Untitled-file fallback for a name-less file', async ({ page, cleanup }) => {
   const title = unique('nullname-slide')
   const id = await seedEmptyNameDoc(page.request, title)
-  try {
-    await page.goto('/#/document')
-    // A single click on the row opens the slide-over drawer.
-    await page.getByText(title, { exact: true }).click()
-    const drawer = page.getByRole('dialog')
-    await expect(drawer).toBeVisible()
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-    // Activate the Files tab (its label carries the file count) and assert the fallback.
-    await drawer.getByRole('tab', { name: /file/i }).click()
-    await expect(drawer.locator('.slide-file-list .file-name')).toHaveText(UNTITLED)
-  } finally {
-    await deleteDoc(page, id)
-  }
+  await page.goto('/#/document')
+  // A single click on the row opens the slide-over drawer.
+  await page.getByText(title, { exact: true }).click()
+  const drawer = page.getByRole('dialog')
+  await expect(drawer).toBeVisible()
+
+  // Activate the Files tab (its label carries the file count) and assert the fallback.
+  await drawer.getByRole('tab', { name: /file/i }).click()
+  await expect(drawer.locator('.slide-file-list .file-name')).toHaveText(UNTITLED)
 })
 
-test('anonymous share view shows the Untitled-file fallback for a name-less file', async ({ page, browser }) => {
+test('anonymous share view shows the Untitled-file fallback for a name-less file', async ({ page, browser, cleanup }) => {
   const title = unique('nullname-share')
   const id = await seedEmptyNameDoc(page.request, title)
-  try {
-    // Create a public share on the document via the API and build its anonymous URL.
-    const shareRes = await page.request.put('/api/share', {
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      data: new URLSearchParams([['id', id]]).toString(),
-    })
-    expect(shareRes.ok(), 'share creation must succeed').toBeTruthy()
-    const shareId = (await shareRes.json()).id as string
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-    const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
-    const anon = await anonCtx.newPage()
-    await anon.goto(`/#/share/${id}/${shareId}`)
-    await expect(anon.getByRole('heading', { name: title })).toBeVisible()
+  // Create a public share on the document via the API and build its anonymous URL.
+  const shareRes = await page.request.put('/api/share', {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: new URLSearchParams([['id', id]]).toString(),
+  })
+  expect(shareRes.ok(), 'share creation must succeed').toBeTruthy()
+  const shareId = (await shareRes.json()).id as string
 
-    // The share-file card renders the fallback (never a blank name).
-    await expect(anon.locator('.share-file-name')).toHaveText(UNTITLED)
-    await anonCtx.close()
-  } finally {
-    await deleteDoc(page, id)
-  }
+  const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+  const anon = await anonCtx.newPage()
+  await anon.goto(`/#/share/${id}/${shareId}`)
+  await expect(anon.getByRole('heading', { name: title })).toBeVisible()
+
+  // The share-file card renders the fallback (never a blank name).
+  await expect(anon.locator('.share-file-name')).toHaveText(UNTITLED)
+  await anonCtx.close()
 })

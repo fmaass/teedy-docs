@@ -16,11 +16,25 @@ const FILTER = '(uid=USERNAME)'
 const EMAIL = 'ldap-default@persist.example.com'
 
 test.describe('LDAP settings persistence (#83)', () => {
-  test('retained settings repopulate the form after disable + reload', async ({ page }) => {
+  test('retained settings repopulate the form after disable + reload', async ({ page, cleanup }) => {
     // 1. Configure and enable LDAP through the UI.
     await page.goto('/#/settings/ldap')
     await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
     await page.locator('#ldap-enabled').click()
+
+    // Cleanup: leave LDAP disabled so this spec does not affect others. Registered the
+    // moment the test intends to enable LDAP, so every later failure path is covered.
+    // There is no config API teardown path here — the disable is the same admin UI the
+    // test drives.
+    cleanup.defer('leave LDAP disabled so this spec does not affect others', async () => {
+      await page.goto('/#/settings/ldap')
+      const enabled = page.locator('#ldap-enabled')
+      if (await enabled.isChecked().catch(() => false)) {
+        await enabled.click()
+      }
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
+    })
+
     await expect(page.locator('#ldap-host')).toBeVisible()
 
     await page.locator('#ldap-host').fill(HOST)
@@ -41,32 +55,22 @@ test.describe('LDAP settings persistence (#83)', () => {
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page.getByText('LDAP configuration saved').first()).toBeVisible()
 
-    try {
-      // 3. FULL page reload → brand-new SPA (fresh QueryClient + a fresh SettingsLdap mount that
-      //    re-seeds its form from a fresh GET /app/config_ldap). This is load-bearing: the component
-      //    seeds its form ONCE (a `seeded` guard) and disable only flips `enabled` in the in-memory
-      //    reactive form, so a same-route hash nav would NOT refetch and the test would pass on stale
-      //    in-memory values even if the #83 GET bug were present. Only a real reload exercises the GET
-      //    path where #83 lived.
-      await page.reload()
-      await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
+    // 3. FULL page reload → brand-new SPA (fresh QueryClient + a fresh SettingsLdap mount that
+    //    re-seeds its form from a fresh GET /app/config_ldap). This is load-bearing: the component
+    //    seeds its form ONCE (a `seeded` guard) and disable only flips `enabled` in the in-memory
+    //    reactive form, so a same-route hash nav would NOT refetch and the test would pass on stale
+    //    in-memory values even if the #83 GET bug were present. Only a real reload exercises the GET
+    //    path where #83 lived.
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
 
-      // 4. Re-enable and assert the retained settings repopulated the form.
-      await page.locator('#ldap-enabled').click()
-      await expect(page.locator('#ldap-host')).toBeVisible()
-      await expect(page.locator('#ldap-host')).toHaveValue(HOST)
-      await expect(page.locator('#ldap-admin-dn')).toHaveValue(ADMIN_DN)
-      await expect(page.locator('#ldap-base-dn')).toHaveValue(BASE_DN)
-      await expect(page.locator('#ldap-filter')).toHaveValue(FILTER)
-      await expect(page.locator('#ldap-default-email')).toHaveValue(EMAIL)
-    } finally {
-      // Cleanup: leave LDAP disabled so this spec does not affect others.
-      await page.goto('/#/settings/ldap').catch(() => {})
-      const enabled = page.locator('#ldap-enabled')
-      if (await enabled.isChecked().catch(() => false)) {
-        await enabled.click().catch(() => {})
-      }
-      await page.getByRole('button', { name: 'Save', exact: true }).click().catch(() => {})
-    }
+    // 4. Re-enable and assert the retained settings repopulated the form.
+    await page.locator('#ldap-enabled').click()
+    await expect(page.locator('#ldap-host')).toBeVisible()
+    await expect(page.locator('#ldap-host')).toHaveValue(HOST)
+    await expect(page.locator('#ldap-admin-dn')).toHaveValue(ADMIN_DN)
+    await expect(page.locator('#ldap-base-dn')).toHaveValue(BASE_DN)
+    await expect(page.locator('#ldap-filter')).toHaveValue(FILTER)
+    await expect(page.locator('#ldap-default-email')).toHaveValue(EMAIL)
   })
 })

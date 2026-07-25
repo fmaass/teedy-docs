@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures'
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
+import { deleteDocApi } from './helpers'
 
 // Webhook delivery — OBSERVED, not merely CRUD'd. We stand up a real HTTP listener
 // inside the test process, register a DOCUMENT_CREATED webhook in Teedy pointing at
@@ -64,61 +65,58 @@ async function startListener(): Promise<{
   return { port, server, received }
 }
 
-test('a DOCUMENT_CREATED webhook is delivered to a live listener with the expected payload', async ({ request }) => {
+test('a DOCUMENT_CREATED webhook is delivered to a live listener with the expected payload', async ({ request, cleanup }) => {
   const { port, server, received } = await startListener()
+  cleanup.defer('close the in-process webhook listener', () => server.close())
   const hookUrl = `http://${HOST_ALIAS}:${port}${HOOK_PATH}`
 
-  let webhookId: string | undefined
-  let documentId: string | undefined
-  try {
-    // Register the webhook via the admin API. The harness guarantees the topology
-    // (host-gateway alias + DOCS_WEBHOOK_ALLOW_PRIVATE), so a rejection here — e.g.
-    // the allow-flag dropped or the alias unresolvable — is a hard failure.
-    const addRes = await request.put('/api/webhook', {
-      form: { event: 'DOCUMENT_CREATED', url: hookUrl },
-    })
-    expect(
-      addRes.ok(),
-      `register webhook -> ${hookUrl} (HTTP ${addRes.status()}; the harness must boot the ` +
-        `container with --add-host=host.docker.internal:host-gateway and ` +
-        `DOCS_WEBHOOK_ALLOW_PRIVATE=true — see scripts/e2e-run.sh)`,
-    ).toBeTruthy()
+  // Register the webhook via the admin API. The harness guarantees the topology
+  // (host-gateway alias + DOCS_WEBHOOK_ALLOW_PRIVATE), so a rejection here — e.g.
+  // the allow-flag dropped or the alias unresolvable — is a hard failure.
+  const addRes = await request.put('/api/webhook', {
+    form: { event: 'DOCUMENT_CREATED', url: hookUrl },
+  })
+  expect(
+    addRes.ok(),
+    `register webhook -> ${hookUrl} (HTTP ${addRes.status()}; the harness must boot the ` +
+      `container with --add-host=host.docker.internal:host-gateway and ` +
+      `DOCS_WEBHOOK_ALLOW_PRIVATE=true — see scripts/e2e-run.sh)`,
+  ).toBeTruthy()
 
-    // Find the webhook id (for teardown).
-    const listRes = await request.get('/api/webhook')
-    const hooks = (await listRes.json()).webhooks as Array<{ id: string; url: string }>
-    webhookId = hooks.find((h) => h.url === hookUrl)?.id
-
-    // Trigger the event: create a document. The DocumentCreatedAsyncEvent fans out to
-    // WebhookAsyncListener which POSTs our listener.
-    const createRes = await request.put('/api/document', {
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      data: new URLSearchParams([['title', `webhook-doc-${Date.now()}`], ['language', 'eng']]).toString(),
-    })
-    expect(createRes.ok(), 'create document (fires DOCUMENT_CREATED)').toBeTruthy()
-    documentId = (await createRes.json()).id as string
-
-    // OBSERVE the delivery. Race the capture against a timeout so a non-delivery fails
-    // loudly instead of hanging.
-    const captured = await Promise.race<Captured | 'timeout'>([
-      received,
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 15_000)),
-    ])
-    expect(captured, 'webhook was delivered within 15s').not.toBe('timeout')
-
-    const { method, url, headers, body } = captured as Captured
-    // The delivery is a POST to the exact path we registered, carrying JSON.
-    expect(method, 'delivery HTTP method').toBe('POST')
-    expect(url, 'delivery request path').toBe(HOOK_PATH)
-    expect(headers['content-type'] ?? '').toContain('application/json')
-    const payload = JSON.parse(body)
-    // The historical payload shape: {"event": "...", "id": "..."} — and the id must be
-    // the document we just created, proving THIS event drove the delivery.
-    expect(payload.event, 'payload.event').toBe('DOCUMENT_CREATED')
-    expect(payload.id, 'payload.id === created document id').toBe(documentId)
-  } finally {
-    server.close()
-    if (documentId) await request.delete(`/api/document/${documentId}`).catch(() => {})
-    if (webhookId) await request.delete(`/api/webhook/${webhookId}`).catch(() => {})
+  // Find the webhook id (for teardown).
+  const listRes = await request.get('/api/webhook')
+  const hooks = (await listRes.json()).webhooks as Array<{ id: string; url: string }>
+  const webhookId = hooks.find((h) => h.url === hookUrl)?.id
+  if (webhookId) {
+    cleanup.defer('delete the registered webhook', () => request.delete(`/api/webhook/${webhookId}`))
   }
+
+  // Trigger the event: create a document. The DocumentCreatedAsyncEvent fans out to
+  // WebhookAsyncListener which POSTs our listener.
+  const createRes = await request.put('/api/document', {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: new URLSearchParams([['title', `webhook-doc-${Date.now()}`], ['language', 'eng']]).toString(),
+  })
+  expect(createRes.ok(), 'create document (fires DOCUMENT_CREATED)').toBeTruthy()
+  const documentId = (await createRes.json()).id as string
+  cleanup.defer('purge the document that fired the event', () => deleteDocApi(request, documentId))
+
+  // OBSERVE the delivery. Race the capture against a timeout so a non-delivery fails
+  // loudly instead of hanging.
+  const captured = await Promise.race<Captured | 'timeout'>([
+    received,
+    new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 15_000)),
+  ])
+  expect(captured, 'webhook was delivered within 15s').not.toBe('timeout')
+
+  const { method, url, headers, body } = captured as Captured
+  // The delivery is a POST to the exact path we registered, carrying JSON.
+  expect(method, 'delivery HTTP method').toBe('POST')
+  expect(url, 'delivery request path').toBe(HOOK_PATH)
+  expect(headers['content-type'] ?? '').toContain('application/json')
+  const payload = JSON.parse(body)
+  // The historical payload shape: {"event": "...", "id": "..."} — and the id must be
+  // the document we just created, proving THIS event drove the delivery.
+  expect(payload.event, 'payload.event').toBe('DOCUMENT_CREATED')
+  expect(payload.id, 'payload.id === created document id').toBe(documentId)
 })

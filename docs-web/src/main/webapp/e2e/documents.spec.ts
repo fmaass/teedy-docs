@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique } from './helpers'
+import { unique, deleteDocApi, deleteTagApi } from './helpers'
 
 // Runs authenticated. Creates a document via the real Add-document form. On save,
 // Teedy routes to the full document view (DocumentEdit -> document-view). We then
@@ -63,7 +63,7 @@ test('double-clicking a document row navigates to the full document view (D #11)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 })
 
-test('a document with more than 3 tags shows a focusable +N control whose popover reveals the rest (D #24)', async ({ page, baseURL, request }) => {
+test('a document with more than 3 tags shows a focusable +N control whose popover reveals the rest (D #24)', async ({ page, baseURL, request, cleanup }) => {
   // Seed 5 uniquely-named tags + a document carrying all of them via REST so the
   // list row deterministically overflows (>3 tags). The tags are named so their
   // creation order is stable; the first 3 render inline, the last 2 collapse.
@@ -74,7 +74,9 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   for (const name of tagNames) {
     const res = await request.put(`${base}/api/tag`, { form: { name, color: '#2aabd2' } })
     expect(res.ok(), `create tag ${name}`).toBeTruthy()
-    tagIds.push((await res.json()).id)
+    const tagId = (await res.json()).id as string
+    tagIds.push(tagId)
+    cleanup.defer(`delete tag ${name}`, () => deleteTagApi(page.request, tagId))
   }
 
   const docTitle = unique('D-overflow')
@@ -88,51 +90,47 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   })
   expect(docRes.ok(), 'create tagged document').toBeTruthy()
   const docId = (await docRes.json()).id as string
+  cleanup.defer('purge the tagged document', () => deleteDocApi(page.request, docId))
 
-  try {
-    await page.goto('/#/document')
-    const row = page.getByRole('row', { name: new RegExp(docTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
-    await expect(row).toBeVisible()
+  await page.goto('/#/document')
+  const row = page.getByRole('row', { name: new RegExp(docTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
+  await expect(row).toBeVisible()
 
-    // Exactly the first 3 tags render inline as badges; the +N control accounts for
-    // the remaining 2.
-    const overflow = row.getByRole('button', { name: /more tags/i })
-    await expect(overflow).toBeVisible()
-    await expect(overflow).toHaveText(/\+2/)
+  // Exactly the first 3 tags render inline as badges; the +N control accounts for
+  // the remaining 2.
+  const overflow = row.getByRole('button', { name: /more tags/i })
+  await expect(overflow).toBeVisible()
+  await expect(overflow).toHaveText(/\+2/)
 
-    // It is focusable (keyboard-operable) and starts collapsed.
-    await overflow.focus()
-    await expect(overflow).toBeFocused()
-    await expect(overflow).toHaveAttribute('aria-expanded', 'false')
+  // It is focusable (keyboard-operable) and starts collapsed.
+  await overflow.focus()
+  await expect(overflow).toBeFocused()
+  await expect(overflow).toHaveAttribute('aria-expanded', 'false')
 
-    // Activating it opens the popover (teleported to <body>) with the 2 hidden tags,
-    // and does NOT navigate the row (still on the list).
-    //
-    // On the touch viewport the tap is occasionally swallowed under full-suite load: a
-    // list re-render (the document query keeps previous data and refetches) replaces the
-    // trigger between actionability and dispatch, so the toggle handler never runs and
-    // aria-expanded stays false (#118). The reveal is idempotent and
-    // the handler flips `open` synchronously, so aria-expanded is an EXACT post-tap signal:
-    // retry the tap until it flips, re-tapping ONLY while still collapsed (a tap on an
-    // already-open trigger would toggle it shut). Same dropped-click remedy as the
-    // Empty-trash gesture in trash.spec.ts. No arbitrary sleeps — the DOM signal gates it.
-    await expect(async () => {
-      if ((await overflow.getAttribute('aria-expanded')) !== 'true') {
-        await overflow.click()
-      }
-      await expect(overflow).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 })
-    }).toPass({ timeout: 15000 })
-    await expect(page).toHaveURL(/#\/document$/)
-    const panel = page.locator('.tag-overflow-panel')
-    await expect(panel).toBeVisible()
-    await expect(panel.getByText(tagNames[3], { exact: true })).toBeVisible()
-    await expect(panel.getByText(tagNames[4], { exact: true })).toBeVisible()
-    // The first-3 tags are NOT repeated inside the overflow popover.
-    await expect(panel.getByText(tagNames[0], { exact: true })).toHaveCount(0)
-  } finally {
-    await request.delete(`${base}/api/document/${docId}`)
-    for (const id of tagIds) await request.delete(`${base}/api/tag/${id}`)
-  }
+  // Activating it opens the popover (teleported to <body>) with the 2 hidden tags,
+  // and does NOT navigate the row (still on the list).
+  //
+  // On the touch viewport the tap is occasionally swallowed under full-suite load: a
+  // list re-render (the document query keeps previous data and refetches) replaces the
+  // trigger between actionability and dispatch, so the toggle handler never runs and
+  // aria-expanded stays false (#118). The reveal is idempotent and
+  // the handler flips `open` synchronously, so aria-expanded is an EXACT post-tap signal:
+  // retry the tap until it flips, re-tapping ONLY while still collapsed (a tap on an
+  // already-open trigger would toggle it shut). Same dropped-click remedy as the
+  // Empty-trash gesture in trash.spec.ts. No arbitrary sleeps — the DOM signal gates it.
+  await expect(async () => {
+    if ((await overflow.getAttribute('aria-expanded')) !== 'true') {
+      await overflow.click()
+    }
+    await expect(overflow).toHaveAttribute('aria-expanded', 'true', { timeout: 1000 })
+  }).toPass({ timeout: 15000 })
+  await expect(page).toHaveURL(/#\/document$/)
+  const panel = page.locator('.tag-overflow-panel')
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText(tagNames[3], { exact: true })).toBeVisible()
+  await expect(panel.getByText(tagNames[4], { exact: true })).toBeVisible()
+  // The first-3 tags are NOT repeated inside the overflow popover.
+  await expect(panel.getByText(tagNames[0], { exact: true })).toHaveCount(0)
 })
 
 test('admin/settings table pages render at the wider content width (D #25)', async ({ page }) => {

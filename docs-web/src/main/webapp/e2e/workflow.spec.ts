@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, deleteDocApi, deleteGroupApi } from './helpers'
 
 // Workflow (route model + document routing) end to end. Proves the admin route-model
 // editor (SettingsWorkflow) AND the per-document act flow (DocumentViewWorkflow):
@@ -101,129 +101,112 @@ async function startModel(page: Page, modelName: string): Promise<void> {
   await expect(page.getByText('Workflow started')).toBeVisible()
 }
 
-test('admin builds a workflow, runs it to DONE, and a second run halts on REJECT', async ({ page, request }) => {
+test('admin builds a workflow, runs it to DONE, and a second run halts on REJECT', async ({ page, request, cleanup }) => {
   const modelName = unique('wf')
   // A group admin belongs to (so admin can act on its steps) and that the target
   // typeahead will surface. Group names allow letters/digits.
   const groupName = unique('wfgrp').replace(/[^a-z0-9]/gi, '').toLowerCase()
 
-  const docIds: string[] = []
-  try {
-    // Setup (inside try so the finally cleans up on any failure): create the group and
-    // add admin to it (admin cookie from storageState).
-    await createMemberGroup(request, groupName)
+  // Setup: create the group and add admin to it (admin cookie from storageState).
+  await createMemberGroup(request, groupName)
+  cleanup.defer('delete the workflow target group', () => deleteGroupApi(request, groupName))
 
-    await createReviewModel(page, modelName, groupName)
+  await createReviewModel(page, modelName, groupName)
+  cleanup.defer('delete the route model', () => deleteModel(page, modelName))
 
-    // ---- Run A: validate then approve -> DONE ----
-    const docA = await createDocument(page, unique('wf-approve'))
-    docIds.push(docA.id)
-    await page.goto(`/#/document/view/${docA.id}/workflow`)
-    await startModel(page, modelName)
+  // ---- Run A: validate then approve -> DONE ----
+  const docA = await createDocument(page, unique('wf-approve'))
+  cleanup.defer('purge the approve-run document', () => deleteDocApi(page.request, docA.id))
+  await page.goto(`/#/document/view/${docA.id}/workflow`)
+  await startModel(page, modelName)
 
-    // Step 1 is a VALIDATE step: the current step shows a Validate button.
-    await expect(page.getByRole('heading', { name: 'Current step' })).toBeVisible()
-    await expect(page.locator('.wf-step-name')).toHaveText('Review metadata')
-    await page.getByRole('button', { name: 'Validate', exact: true }).click()
+  // Step 1 is a VALIDATE step: the current step shows a Validate button.
+  await expect(page.getByRole('heading', { name: 'Current step' })).toBeVisible()
+  await expect(page.locator('.wf-step-name')).toHaveText('Review metadata')
+  await page.getByRole('button', { name: 'Validate', exact: true }).click()
 
-    // Step 2 is the APPROVE step: the current step advances to it (the reliable
-    // signal the VALIDATE landed) and it surfaces Approve + Reject. Approve it.
-    await expect(page.locator('.wf-step-name')).toHaveText('Final approval')
-    await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  // Step 2 is the APPROVE step: the current step advances to it (the reliable
+  // signal the VALIDATE landed) and it surfaces Approve + Reject. Approve it.
+  await expect(page.locator('.wf-step-name')).toHaveText('Final approval')
+  await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
 
-    // The route is DONE: no current-step section remains, history shows the DONE badge
-    // and both acted rows (Validated + Approved).
-    await expect(page.getByRole('heading', { name: 'Current step' })).toHaveCount(0)
-    const historyA = page.locator('.wf-route').filter({ hasText: modelName })
-    await expect(historyA.getByText('Done', { exact: true })).toBeVisible()
-    await expect(historyA.locator('.wf-step').filter({ hasText: 'Review metadata' }).getByText('Validated')).toBeVisible()
-    await expect(historyA.locator('.wf-step').filter({ hasText: 'Final approval' }).getByText('Approved')).toBeVisible()
+  // The route is DONE: no current-step section remains, history shows the DONE badge
+  // and both acted rows (Validated + Approved).
+  await expect(page.getByRole('heading', { name: 'Current step' })).toHaveCount(0)
+  const historyA = page.locator('.wf-route').filter({ hasText: modelName })
+  await expect(historyA.getByText('Done', { exact: true })).toBeVisible()
+  await expect(historyA.locator('.wf-step').filter({ hasText: 'Review metadata' }).getByText('Validated')).toBeVisible()
+  await expect(historyA.locator('.wf-step').filter({ hasText: 'Final approval' }).getByText('Approved')).toBeVisible()
 
-    // ---- Run B: validate then reject -> REJECTED, no advance ----
-    const docB = await createDocument(page, unique('wf-reject'))
-    docIds.push(docB.id)
-    await page.goto(`/#/document/view/${docB.id}/workflow`)
-    await startModel(page, modelName)
+  // ---- Run B: validate then reject -> REJECTED, no advance ----
+  const docB = await createDocument(page, unique('wf-reject'))
+  cleanup.defer('purge the reject-run document', () => deleteDocApi(page.request, docB.id))
+  await page.goto(`/#/document/view/${docB.id}/workflow`)
+  await startModel(page, modelName)
 
-    // Validate step 1.
-    await expect(page.locator('.wf-step-name')).toHaveText('Review metadata')
-    await page.getByRole('button', { name: 'Validate', exact: true }).click()
+  // Validate step 1.
+  await expect(page.locator('.wf-step-name')).toHaveText('Review metadata')
+  await page.getByRole('button', { name: 'Validate', exact: true }).click()
 
-    // Reject step 2 (APPROVE step) via the danger-confirm dialog.
-    await expect(page.locator('.wf-step-name')).toHaveText('Final approval')
-    await page.getByRole('button', { name: 'Reject', exact: true }).click()
-    await confirmDanger(page)
+  // Reject step 2 (APPROVE step) via the danger-confirm dialog.
+  await expect(page.locator('.wf-step-name')).toHaveText('Final approval')
+  await page.getByRole('button', { name: 'Reject', exact: true }).click()
+  await confirmDanger(page)
 
-    // The route halts REJECTED: no more current step, history shows the REJECTED badge
-    // and the rejected transition. There is no third step to advance to, so the route
-    // simply ends — a reject halts the whole workflow.
-    await expect(page.getByRole('heading', { name: 'Current step' })).toHaveCount(0)
-    const historyB = page.locator('.wf-route').filter({ hasText: modelName })
-    await expect(historyB.getByText('Rejected', { exact: true }).first()).toBeVisible()
-    await expect(
-      historyB.locator('.wf-step').filter({ hasText: 'Final approval' }).getByText('Rejected'),
-    ).toBeVisible()
-  } finally {
-    // Cleanup: delete the docs, the model, then the group.
-    for (const id of docIds) {
-      await page.goto(`/#/document/view/${id}`)
-      const del = page.getByRole('button', { name: 'Delete', exact: true })
-      if (await del.isVisible().catch(() => false)) {
-        await del.click()
-        await confirmDanger(page)
-      }
-    }
-    await deleteModel(page, modelName)
-    await request.delete(`/api/group/${groupName}`).catch(() => {})
-  }
+  // The route halts REJECTED: no more current step, history shows the REJECTED badge
+  // and the rejected transition. There is no third step to advance to, so the route
+  // simply ends — a reject halts the whole workflow.
+  await expect(page.getByRole('heading', { name: 'Current step' })).toHaveCount(0)
+  const historyB = page.locator('.wf-route').filter({ hasText: modelName })
+  await expect(historyB.getByText('Rejected', { exact: true }).first()).toBeVisible()
+  await expect(
+    historyB.locator('.wf-step').filter({ hasText: 'Final approval' }).getByText('Rejected'),
+  ).toBeVisible()
 })
 
 // #88 regression: the tag ACL editor extended the shared AclEditor (an immutable
 // predicate + a grant-confirmation hook), both OPTIONAL. This proves the SettingsWorkflow
 // consumer — which passes neither — still grants and revokes a route-model permission
 // unchanged, with NO grant-disclosure dialog (that hook is tag-only).
-test('SettingsWorkflow ACL editing still grants and revokes (AclEditor regression, #88)', async ({ page, request }) => {
+test('SettingsWorkflow ACL editing still grants and revokes (AclEditor regression, #88)', async ({ page, request, cleanup }) => {
   const modelName = unique('wfacl')
   const groupName = unique('wfaclgrp').replace(/[^a-z0-9]/gi, '').toLowerCase()
-  try {
-    await createMemberGroup(request, groupName)
-    await createReviewModel(page, modelName, groupName)
+  await createMemberGroup(request, groupName)
+  cleanup.defer('delete the workflow target group', () => deleteGroupApi(request, groupName))
+  await createReviewModel(page, modelName, groupName)
+  cleanup.defer('delete the route model', () => deleteModel(page, modelName))
 
-    // Re-open the model editor; the Sharing section (AclEditor) renders for an existing model.
-    await page.goto('/#/settings/workflow')
-    await page.getByRole('row', { name: new RegExp(modelName) })
-      .getByRole('button', { name: 'Edit workflow' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Edit workflow' })
-    await expect(dialog).toBeVisible()
-    await expect(dialog.getByRole('heading', { name: 'Sharing' })).toBeVisible()
+  // Re-open the model editor; the Sharing section (AclEditor) renders for an existing model.
+  await page.goto('/#/settings/workflow')
+  await page.getByRole('row', { name: new RegExp(modelName) })
+    .getByRole('button', { name: 'Edit workflow' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit workflow' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('heading', { name: 'Sharing' })).toBeVisible()
 
-    // Grant the group READ via the AclEditor add form. The add lands DIRECTLY — no
-    // disclosure dialog appears, because the tag-only beforeAdd hook is not wired here.
-    const addForm = dialog.locator('.acl-add')
-    await addForm.locator('input').first().fill(groupName)
-    await page.getByRole('option', { name: new RegExp(groupName) }).click()
-    await addForm.getByRole('button', { name: 'Add', exact: true }).click()
-    await expect(page.getByText('Permission added')).toBeVisible()
-    await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  // Grant the group READ via the AclEditor add form. The add lands DIRECTLY — no
+  // disclosure dialog appears, because the tag-only beforeAdd hook is not wired here.
+  const addForm = dialog.locator('.acl-add')
+  await addForm.locator('input').first().fill(groupName)
+  await page.getByRole('option', { name: new RegExp(groupName) }).click()
+  await addForm.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText('Permission added')).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
 
-    const aclRow = dialog.locator('.acl-row', { hasText: groupName })
-    await expect(aclRow).toBeVisible()
-    await expect(aclRow.getByText('Can view')).toBeVisible()
+  const aclRow = dialog.locator('.acl-row', { hasText: groupName })
+  await expect(aclRow).toBeVisible()
+  await expect(aclRow.getByText('Can view')).toBeVisible()
 
-    // Revoke it: the danger confirm removes the grant from the list.
-    await aclRow.getByRole('button', { name: 'Remove permission' }).click()
-    await confirmDanger(page)
-    await expect(page.getByText('Permission removed')).toBeVisible()
-    await expect(dialog.locator('.acl-row', { hasText: groupName })).toHaveCount(0)
+  // Revoke it: the danger confirm removes the grant from the list.
+  await aclRow.getByRole('button', { name: 'Remove permission' }).click()
+  await confirmDanger(page)
+  await expect(page.getByText('Permission removed')).toBeVisible()
+  await expect(dialog.locator('.acl-row', { hasText: groupName })).toHaveCount(0)
 
-    // Close the editor so its modal mask does not block the list actions in cleanup.
-    await dialog.getByRole('button', { name: 'Cancel' }).click()
-    await expect(dialog).toBeHidden()
-  } finally {
-    await deleteModel(page, modelName)
-    await request.delete(`/api/group/${groupName}`).catch(() => {})
-  }
+  // Close the editor so its modal mask does not block the list actions in cleanup.
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
 })
 
 // Create a group and add admin to it via the admin API. This is setup plumbing for

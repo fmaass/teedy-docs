@@ -1,6 +1,7 @@
 import { chromium, request, type FullConfig } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { guardedTeardown } from './helpers'
 
 // Logs in once as the default admin (admin/admin) through the real native login
 // form and persists the authenticated storageState so every spec starts logged
@@ -50,7 +51,10 @@ async function globalSetup(config: FullConfig) {
 
     await page.context().storageState({ path: STORAGE_STATE })
   } finally {
-    await browser.close()
+    // Global setup runs outside any test, so the `cleanup` fixture does not exist here.
+    // `guardedTeardown` is the sanctioned fallback: a failing browser.close() is reported
+    // instead of replacing the login failure that caused it.
+    await guardedTeardown('close the global-setup browser', () => browser.close())
   }
 }
 

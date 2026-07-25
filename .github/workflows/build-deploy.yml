@@ -231,8 +231,14 @@ jobs:
       - name: Check i18n key parity
         run: cd docs-web/src/main/webapp && npm run i18n:check
 
-      - name: Lint frontend (i18n no-raw-text)
+      - name: Lint frontend (i18n no-raw-text + e2e teardown guardrail)
         run: cd docs-web/src/main/webapp && npm run lint
+
+      # Asserts the #187 no-teardown-in-`finally` rule still FIRES. `npm run lint` proves
+      # the tree is clean; without this, deleting or mis-scoping the rule would look
+      # equally clean.
+      - name: Check the e2e teardown lint guardrail still fires
+        run: cd docs-web/src/main/webapp && npm run lint:teardown-rule
 
       - name: Run frontend unit tests
         run: cd docs-web/src/main/webapp && npm run test:unit

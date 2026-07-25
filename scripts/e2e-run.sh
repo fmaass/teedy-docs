@@ -168,4 +168,13 @@ else
   echo "Running Playwright FUNCTIONAL e2e suite (excluding ${grep_invert}) against ${PLAYWRIGHT_BASE_URL}..."
   cd "${webapp}"
   npx playwright test --grep-invert "${grep_invert}" "$@"
+
+  # #187 CONTROL GATE. e2e/cleanup-control.spec.ts holds two tests that are SUPPOSED to
+  # fail — a body failure surviving a hanging cleanup, and a broken cleanup after a green
+  # body going red — so they are skipped by the run above (E2E_CLEANUP_CONTROL unset) and
+  # asserted here by OUTCOME instead. Without this, the deferred-cleanup fixture could
+  # silently regress to swallowing teardown errors and every suite would still read green.
+  # Runs only once the functional suite passed (set -e), against the same live app.
+  echo "Verifying the deferred-cleanup control specs (#187)..."
+  node scripts/verify-cleanup-controls.mjs
 fi

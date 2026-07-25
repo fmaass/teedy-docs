@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique } from './helpers'
+import { unique, deleteDocApi, deleteTagApi } from './helpers'
 
 // #39: the gallery VIEW MODE. A pure render mode over the SAME paginated list — the
 // list⇄gallery toggle persists to localStorage, cards render the document thumbnail
@@ -132,151 +132,135 @@ async function thumbDimensions(
 test('@flaky gallery renders cards; real thumb vs placeholder is proven on fetched bytes (#39, quarantined #80)', async ({
   page,
   request,
+  cleanup,
 }) => {
   const imageTitle = unique('gal-image')
   const otherTitle = unique('gal-other')
-  let imageId: string | undefined
-  let otherId: string | undefined
 
-  try {
-    // An image document (wide.png → a real, aspect-preserving thumbnail).
-    imageId = await apiCreateDocument(request, imageTitle)
-    const imageFileId = await apiAttachFile(request, imageId, widePng, 'wide.png', 'image/png')
-    // A non-convertible document (application/zip → no format handler → placeholder).
-    otherId = await apiCreateDocument(request, otherTitle)
-    const otherFileId = await apiAttachFile(request, otherId, placeholderZip, 'archive.zip', 'application/zip')
+  // An image document (wide.png → a real, aspect-preserving thumbnail).
+  const imageId = await apiCreateDocument(request, imageTitle)
+  cleanup.defer('purge the image document', () => deleteDocApi(request, imageId))
+  const imageFileId = await apiAttachFile(request, imageId, widePng, 'wide.png', 'image/png')
+  // A non-convertible document (application/zip → no format handler → placeholder).
+  const otherId = await apiCreateDocument(request, otherTitle)
+  cleanup.defer('purge the non-convertible document', () => deleteDocApi(request, otherId))
+  const otherFileId = await apiAttachFile(request, otherId, placeholderZip, 'archive.zip', 'application/zip')
 
-    // Switch to gallery mode and assert both cards render (browse/open surface).
-    await page.goto('/#/document')
-    await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
-    await expect(card(page, imageTitle)).toBeVisible()
-    await expect(card(page, otherTitle)).toBeVisible()
-    // Each card carries a thumbnail IMG element sourced from its file.
-    await expect(card(page, imageTitle).locator('img')).toBeVisible()
+  // Switch to gallery mode and assert both cards render (browse/open surface).
+  await page.goto('/#/document')
+  await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
+  await expect(card(page, imageTitle)).toBeVisible()
+  await expect(card(page, otherTitle)).toBeVisible()
+  // Each card carries a thumbnail IMG element sourced from its file.
+  await expect(card(page, imageTitle).locator('img')).toBeVisible()
 
-    // ACCEPTANCE (fetched-byte evidence): the image doc's thumbnail decodes to a
-    // NON-square, NON-256 raster once generation settles — a real thumbnail, not the
-    // placeholder. wide.png is 60x20 → a 256-box thumb is ~256x85, so height < width
-    // and it is NOT the 256x256 placeholder.
-    await expect
-      .poll(async () => {
-        const d = await thumbDimensions(request, imageFileId)
-        // Real thumb: not the square placeholder, and aspect-preserving (wider than tall).
-        return d.width !== PLACEHOLDER_SIZE || d.height !== PLACEHOLDER_SIZE
-      }, { message: 'image thumbnail should become a real (non-256x256) raster' })
-      .toBe(true)
-    const imageThumb = await thumbDimensions(request, imageFileId)
-    expect(imageThumb.width).not.toBe(imageThumb.height) // wide source → non-square thumb
-    expect(imageThumb.height).toBeLessThan(imageThumb.width)
+  // ACCEPTANCE (fetched-byte evidence): the image doc's thumbnail decodes to a
+  // NON-square, NON-256 raster once generation settles — a real thumbnail, not the
+  // placeholder. wide.png is 60x20 → a 256-box thumb is ~256x85, so height < width
+  // and it is NOT the 256x256 placeholder.
+  await expect
+    .poll(async () => {
+      const d = await thumbDimensions(request, imageFileId)
+      // Real thumb: not the square placeholder, and aspect-preserving (wider than tall).
+      return d.width !== PLACEHOLDER_SIZE || d.height !== PLACEHOLDER_SIZE
+    }, { message: 'image thumbnail should become a real (non-256x256) raster' })
+    .toBe(true)
+  const imageThumb = await thumbDimensions(request, imageFileId)
+  expect(imageThumb.width).not.toBe(imageThumb.height) // wide source → non-square thumb
+  expect(imageThumb.height).toBeLessThan(imageThumb.width)
 
-    // The non-convertible doc serves the exact 256x256 placeholder (image/file-thumb.png)
-    // — no real thumbnail is ever generated for a type with no format handler.
-    const otherThumb = await thumbDimensions(request, otherFileId)
-    expect(otherThumb.width).toBe(PLACEHOLDER_SIZE)
-    expect(otherThumb.height).toBe(PLACEHOLDER_SIZE)
-  } finally {
-    for (const id of [imageId, otherId]) {
-      if (id) await request.delete(`/api/document/${id}`).catch(() => {})
-    }
-  }
+  // The non-convertible doc serves the exact 256x256 placeholder (image/file-thumb.png)
+  // — no real thumbnail is ever generated for a type with no format handler.
+  const otherThumb = await thumbDimensions(request, otherFileId)
+  expect(otherThumb.width).toBe(PLACEHOLDER_SIZE)
+  expect(otherThumb.height).toBe(PLACEHOLDER_SIZE)
 })
 
 test('gallery mode persists across a reload and re-renders a tag-filtered set (#39)', async ({
   page,
   request,
+  cleanup,
 }) => {
   const tagName = unique('galtag')
   const inTitle = unique('gal-in')
   const outTitle = unique('gal-out')
-  let tagId: string | undefined
-  let inId: string | undefined
-  let outId: string | undefined
 
-  try {
-    tagId = await apiCreateTag(request, tagName)
-    inId = await apiCreateDocumentWithTag(request, inTitle, tagId)
-    outId = await apiCreateDocument(request, outTitle)
+  const tagId = await apiCreateTag(request, tagName)
+  cleanup.defer('delete the filter tag', () => deleteTagApi(request, tagId))
+  const inId = await apiCreateDocumentWithTag(request, inTitle, tagId)
+  cleanup.defer('purge the tagged document', () => deleteDocApi(request, inId))
+  const outId = await apiCreateDocument(request, outTitle)
+  cleanup.defer('purge the untagged document', () => deleteDocApi(request, outId))
 
-    await page.goto('/#/document')
-    await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
-    await expect(card(page, inTitle)).toBeVisible()
-    await expect(card(page, outTitle)).toBeVisible()
+  await page.goto('/#/document')
+  await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
+  await expect(card(page, inTitle)).toBeVisible()
+  await expect(card(page, outTitle)).toBeVisible()
 
-    // Reload: the gallery mode was persisted to localStorage, so the cards (not a
-    // table) render immediately on a cold load — a post-reload barrier.
-    await page.reload()
-    await expect(card(page, inTitle)).toBeVisible()
-    await expect(page.locator('.doc-gallery')).toBeVisible()
+  // Reload: the gallery mode was persisted to localStorage, so the cards (not a
+  // table) render immediately on a cold load — a post-reload barrier.
+  await page.reload()
+  await expect(card(page, inTitle)).toBeVisible()
+  await expect(page.locator('.doc-gallery')).toBeVisible()
 
-    // The favorite star is a SIBLING control on the card (not nested in the open
-    // link) and is togglable from gallery mode: star it, then read the favorited
-    // state back after a full reload (authoritative server-side persistence).
-    await cardContainer(page, inTitle).getByRole('button', { name: 'Add to favorites' }).click()
-    await expect(
-      cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    await page.reload()
-    await expect(
-      cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }),
-    ).toHaveAttribute('aria-pressed', 'true')
-    // Unstar again to leave no favorite behind for other assertions/cleanup.
-    await cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }).click()
-    await expect(
-      cardContainer(page, inTitle).getByRole('button', { name: 'Add to favorites' }),
-    ).toHaveAttribute('aria-pressed', 'false')
+  // The favorite star is a SIBLING control on the card (not nested in the open
+  // link) and is togglable from gallery mode: star it, then read the favorited
+  // state back after a full reload (authoritative server-side persistence).
+  await cardContainer(page, inTitle).getByRole('button', { name: 'Add to favorites' }).click()
+  await expect(
+    cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await page.reload()
+  await expect(
+    cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  // Unstar again to leave no favorite behind for other assertions/cleanup.
+  await cardContainer(page, inTitle).getByRole('button', { name: 'Remove from favorites' }).click()
+  await expect(
+    cardContainer(page, inTitle).getByRole('button', { name: 'Add to favorites' }),
+  ).toHaveAttribute('aria-pressed', 'false')
 
-    // Filter by the tag by clicking OUR document's tag chip on its card. The list
-    // re-queries server-side; the gallery re-renders the FILTERED set.
-    // The tag chip is a sibling of the open link inside the card container.
-    await cardContainer(page, inTitle).getByRole('button', { name: new RegExp(tagName) }).click()
-    await expect(page).toHaveURL(new RegExp(`tags=${tagId}`))
-    // POST-refresh barrier: the untagged doc detaches, the tagged doc survives — the
-    // filter genuinely drove the query, and it did so while still in gallery mode.
-    await expect(card(page, outTitle)).toBeHidden()
-    await expect(card(page, inTitle)).toBeVisible()
-    await expect(page.locator('.doc-gallery')).toBeVisible()
-  } finally {
-    for (const id of [inId, outId]) {
-      if (id) await request.delete(`/api/document/${id}`).catch(() => {})
-    }
-    if (tagId) await request.delete(`/api/tag/${tagId}`).catch(() => {})
-  }
+  // Filter by the tag by clicking OUR document's tag chip on its card. The list
+  // re-queries server-side; the gallery re-renders the FILTERED set.
+  // The tag chip is a sibling of the open link inside the card container.
+  await cardContainer(page, inTitle).getByRole('button', { name: new RegExp(tagName) }).click()
+  await expect(page).toHaveURL(new RegExp(`tags=${tagId}`))
+  // POST-refresh barrier: the untagged doc detaches, the tagged doc survives — the
+  // filter genuinely drove the query, and it did so while still in gallery mode.
+  await expect(card(page, outTitle)).toBeHidden()
+  await expect(card(page, inTitle)).toBeVisible()
+  await expect(page.locator('.doc-gallery')).toBeVisible()
 })
 
 test('a list multi-selection does NOT leave the bulk toolbar reachable in gallery mode (#39/B2)', async ({
   page,
   request,
+  cleanup,
 }) => {
   const titleA = unique('gal-selA')
   const titleB = unique('gal-selB')
-  let idA: string | undefined
-  let idB: string | undefined
 
-  try {
-    idA = await apiCreateDocument(request, titleA)
-    idB = await apiCreateDocument(request, titleB)
+  const idA = await apiCreateDocument(request, titleA)
+  cleanup.defer('purge document A', () => deleteDocApi(request, idA))
+  const idB = await apiCreateDocument(request, titleB)
+  cleanup.defer('purge document B', () => deleteDocApi(request, idB))
 
-    // Start in list mode (default) and select a row via its checkbox — the bulk
-    // toolbar appears (it renders solely from the selection count).
-    await page.goto('/#/document')
-    const rowA = page.getByRole('row', { name: new RegExp(titleA) })
-    await expect(rowA).toBeVisible()
-    await rowA.getByRole('checkbox').first().check()
-    const bulkBar = page.getByRole('toolbar', { name: 'Bulk actions' })
-    await expect(bulkBar).toBeVisible()
+  // Start in list mode (default) and select a row via its checkbox — the bulk
+  // toolbar appears (it renders solely from the selection count).
+  await page.goto('/#/document')
+  const rowA = page.getByRole('row', { name: new RegExp(titleA) })
+  await expect(rowA).toBeVisible()
+  await rowA.getByRole('checkbox').first().check()
+  const bulkBar = page.getByRole('toolbar', { name: 'Bulk actions' })
+  await expect(bulkBar).toBeVisible()
 
-    // Switch to gallery: the selection is cleared (B2), so the bulk toolbar detaches —
-    // no bulk-mutation control is reachable in the browse/open-only gallery.
-    await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
-    await expect(page.locator('.doc-gallery')).toBeVisible()
-    await expect(bulkBar).toBeHidden()
+  // Switch to gallery: the selection is cleared (B2), so the bulk toolbar detaches —
+  // no bulk-mutation control is reachable in the browse/open-only gallery.
+  await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
+  await expect(page.locator('.doc-gallery')).toBeVisible()
+  await expect(bulkBar).toBeHidden()
 
-    // Switching back to list confirms the selection stayed empty (nothing to act on).
-    await page.locator('.view-mode-toggle').getByText('List', { exact: true }).click()
-    await expect(page.getByRole('toolbar', { name: 'Bulk actions' })).toHaveCount(0)
-  } finally {
-    for (const id of [idA, idB]) {
-      if (id) await request.delete(`/api/document/${id}`).catch(() => {})
-    }
-  }
+  // Switching back to list confirms the selection stayed empty (nothing to act on).
+  await page.locator('.view-mode-toggle').getByText('List', { exact: true }).click()
+  await expect(page.getByRole('toolbar', { name: 'Bulk actions' })).toHaveCount(0)
 })
