@@ -4,22 +4,30 @@ import FileActionMenu from './FileActionMenu.vue'
 
 // The per-file action menu is the reusable surface the file list (and, later,
 // #73 "Edit pages" / #117 "Upload new version") mount their per-file actions onto.
-// Its load-bearing contract: version history is always available (read-only), while
-// rename + delete + the cover action are gated on `writable`, and an `extra` slot lets
-// callers inject more writable-only actions. The cover action toggles between
-// "set as cover" (when this file is not the cover) and "remove as cover" (when it is).
-// t() is stubbed to the key so assertions target the stable aria-label keys, not copy.
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
+// Its load-bearing contract: preview + download + version history are always available
+// (read actions), while rename + delete + the cover action are gated on `writable`, and an
+// `extra` slot lets callers inject more writable-only actions. The cover action toggles
+// between "set as cover" (when this file is not the cover) and "remove as cover" (when it is).
+// t() is stubbed to the key (with the interpolated name appended) so assertions target the
+// stable aria-label keys, not copy. getFileUrl is a dependency, stubbed deterministically.
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (k: string, p?: Record<string, unknown>) => (p ? `${k}:${p.name}` : k),
+  }),
+}))
+vi.mock('../api/file', () => ({ getFileUrl: (id: string) => `/api/file/${id}/data` }))
 
 const file = { id: 'f1', name: 'report.pdf', mimetype: 'application/pdf' }
+const PREVIEW_LABEL = 'ui.file_view.open_file:report.pdf'
 
 function mountMenu(
   writable: boolean,
   slots: Record<string, unknown> = {},
   isCover = false,
+  target: { id: string; name: string | null; mimetype: string } = file,
 ) {
   return mount(FileActionMenu, {
-    props: { file, writable, isCover },
+    props: { file: target, writable, isCover },
     global: { directives: { tooltip: {} } },
     slots,
   })
@@ -30,10 +38,11 @@ function labels(wrapper: ReturnType<typeof mountMenu>) {
 }
 
 describe('FileActionMenu', () => {
-  it('writable, not the cover: exposes history, set-as-cover, move, rename and delete', () => {
+  it('writable, not the cover: exposes history, preview, set-as-cover, move, rename and delete', () => {
     const wrapper = mountMenu(true)
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
+      PREVIEW_LABEL,
       'ui.set_as_cover',
       'ui.move_file',
       'rename',
@@ -45,6 +54,7 @@ describe('FileActionMenu', () => {
     const wrapper = mountMenu(true, {}, true)
     expect(labels(wrapper)).toEqual([
       'ui.versions.title',
+      PREVIEW_LABEL,
       'ui.remove_as_cover',
       'ui.move_file',
       'rename',
@@ -52,10 +62,10 @@ describe('FileActionMenu', () => {
     ])
   })
 
-  it('read-only: exposes ONLY version history — no cover action, no rename, no delete', () => {
-    expect(labels(mountMenu(false))).toEqual(['ui.versions.title'])
+  it('read-only: exposes ONLY the read actions — no cover action, no rename, no delete', () => {
+    expect(labels(mountMenu(false))).toEqual(['ui.versions.title', PREVIEW_LABEL])
     // Even when this file is the cover, a read-only viewer gets no cover mutation.
-    expect(labels(mountMenu(false, {}, true))).toEqual(['ui.versions.title'])
+    expect(labels(mountMenu(false, {}, true))).toEqual(['ui.versions.title', PREVIEW_LABEL])
   })
 
   it('emits versions/rename/delete with the file when the buttons are clicked', async () => {
@@ -90,6 +100,42 @@ describe('FileActionMenu', () => {
     expect(wrapper.emitted('move')?.[0]).toEqual([file])
     // A read-only viewer never sees the move action.
     expect(labels(mountMenu(false))).not.toContain('ui.move_file')
+  })
+
+  // #178 — preview and download are READ actions: they live above the writable gate, so a
+  // read-only viewer (and a share recipient's host view) keeps both.
+  it('emits preview with the file, in both writable and read-only mode', async () => {
+    const writable = mountMenu(true)
+    await writable.findAll('button').find((b) => b.attributes('aria-label') === PREVIEW_LABEL)!.trigger('click')
+    expect(writable.emitted('preview')?.[0]).toEqual([file])
+
+    const readOnly = mountMenu(false)
+    await readOnly.findAll('button').find((b) => b.attributes('aria-label') === PREVIEW_LABEL)!.trigger('click')
+    expect(readOnly.emitted('preview')?.[0]).toEqual([file])
+  })
+
+  it('offers exactly one Download anchor to the ORIGINAL file, writable or not', () => {
+    for (const writable of [true, false]) {
+      const wrapper = mountMenu(writable)
+      const anchors = wrapper.findAll('a')
+      expect(anchors.length).toBe(1)
+      const anchor = anchors[0]
+      expect(anchor.attributes('href')).toBe('/api/file/f1/data')
+      // No size=… variant: Download must serve the original bytes, not a derived raster.
+      expect(anchor.attributes('href')).not.toContain('size=')
+      expect(anchor.attributes('download')).toBe('report.pdf')
+      // The exact label the relaxed e2e invariant keys on: an unlabelled /data link is a defect.
+      expect(anchor.attributes('aria-label')).toBe('download')
+    }
+  })
+
+  it('a null-named file falls back to the untitled label and an empty download filename', () => {
+    const unnamed = { id: 'f9', name: null, mimetype: 'application/octet-stream' }
+    const wrapper = mountMenu(true, {}, false, unnamed)
+    expect(labels(wrapper)).toContain('ui.file_view.open_file:ui.file_view.untitled')
+    const anchor = wrapper.find('a')
+    expect(anchor.attributes('download')).toBe('')
+    expect(anchor.attributes('href')).toBe('/api/file/f9/data')
   })
 
   it('renders the writable-only `extra` slot for callers to mount extra actions (#73/#117)', () => {

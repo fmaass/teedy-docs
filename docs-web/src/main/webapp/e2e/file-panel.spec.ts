@@ -264,11 +264,16 @@ test('opening a file previews it in-app; only Download targets the original (#14
     await expect(page.locator('.file-preview-card img').first()).toHaveAttribute('src', /^blob:/)
 
     // The generic (non-image/non-PDF) card is a BUTTON, not a link to the original /data URL.
-    // Named explicitly: two files here are generic (readme.txt and archive.zip), so a bare
-    // class locator would be ambiguous.
-    const genericCard = page.getByRole('button', { name: 'Open readme.txt', exact: true })
+    // Two files here are generic (readme.txt and archive.zip), so the card is pinned by class
+    // AND file name: since #178 the tile's action menu carries a preview control with the SAME
+    // accessible name, so a bare role+name locator now matches two elements.
+    const genericCard = page.locator('.generic-open', { hasText: 'readme.txt' })
     await expect(genericCard).toBeVisible()
     await expect(genericCard).toHaveJSProperty('tagName', 'BUTTON')
+    // …and the #144 invariant the role locator used to carry, asserted directly: NOTHING named
+    // "Open <file>" is a link to the original URL — every such affordance is a button.
+    await expect(page.getByRole('link', { name: 'Open readme.txt', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Open readme.txt', exact: true })).toHaveCount(2)
 
     // Invariant: no affordance exposes the original URL as an unlabelled "open" — the only
     // links to /data are Download-labelled (the grid PDF card offers a Download), and the
@@ -283,7 +288,7 @@ test('opening a file previews it in-app; only Download targets the original (#14
     // so the dialog opens in the "preview unavailable" state — the one state that used
     // to render a SECOND, inline Download beside the footer's (#181). Picking the .txt
     // card instead would open the text preview and the count below would prove nothing.
-    await page.getByRole('button', { name: 'Open archive.zip', exact: true }).click()
+    await page.locator('.generic-open', { hasText: 'archive.zip' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText("Preview isn't available for this file type.")).toBeVisible()
@@ -304,7 +309,18 @@ test('opening a file previews it in-app; only Download targets the original (#14
     // The dialog exposes no unlabelled original-URL control — the viewer's own Download is
     // suppressed in favour of the dialog's explicit Download.
     await openFileList(page)
-    await expect(page.locator('.file-data-table a[href*="/data"]')).toHaveCount(0)
+    // Invariant RELAXED with maintainer approval (#178): the list now carries a legitimate
+    // per-row Download, so "no /data links at all" is no longer expressible. The surviving
+    // invariant is the same one the grid has carried since #144/#181 — no *unlabelled*
+    // link to the original URL — plus a positive assertion so the relaxed form cannot pass
+    // vacuously: every seeded row exposes exactly one Download-labelled anchor.
+    await expect(
+      page.locator('.file-data-table a[href*="/data"]:not([aria-label="Download"])'),
+    ).toHaveCount(0)
+    const rowDownloads = page.locator('.file-data-table a[href*="/data"][aria-label="Download"]')
+    await expect(rowDownloads).toHaveCount(4)
+    await expect(rowDownloads.first()).toBeVisible()
+    expect(await rowDownloads.first().getAttribute('href')).not.toContain('size=')
     await page.locator('.file-data-table tbody tr', { hasText: 'report.pdf' }).dblclick()
     await expect(page.getByRole('dialog')).toBeVisible()
     await expect(page.locator('.pdf-viewer')).toBeVisible()
@@ -336,7 +352,9 @@ test('the single Download is reachable AND activatable by keyboard alone (#181)'
   const id = await seedDoc(page.request, unique('kbd-dl'), [zipFile('archive.zip')])
   try {
     await page.goto(`/#/document/view/${id}/content`)
-    await page.getByRole('button', { name: 'Open archive.zip', exact: true }).click()
+    // Pinned by class: the tile's action menu offers a preview control with the same
+    // accessible name since #178, so role+name alone is ambiguous here.
+    await page.locator('.generic-open', { hasText: 'archive.zip' }).click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
@@ -345,9 +363,13 @@ test('the single Download is reachable AND activatable by keyboard alone (#181)'
     const download = dialog.locator('a.file-preview-download')
     await expect(download).toHaveCount(1)
 
-    // Tab through the dialog's focus trap until focus lands on the Download anchor.
+    // Tab through the dialog's focus trap until focus lands on the Download anchor. The
+    // budget is generous rather than tight: focus starts on the tile control that opened the
+    // dialog, so the number of presses tracks how many focusable controls the tile carries —
+    // #178 added two per tile (preview + Download), which overran the original budget of 10.
+    // The invariant under test is reachability by keyboard alone, not the exact press count.
     let focused = false
-    for (let i = 0; i < 10 && !focused; i++) {
+    for (let i = 0; i < 30 && !focused; i++) {
       await page.keyboard.press('Tab')
       focused = await download.evaluate((el) => el === document.activeElement)
     }

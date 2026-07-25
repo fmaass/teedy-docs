@@ -942,6 +942,7 @@ onUnmounted(() => {
                 :writable="doc.writable"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
+                @preview="openPreview"
                 @rename="startGridRename"
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"
@@ -955,10 +956,14 @@ onUnmounted(() => {
             </div>
           </div>
           <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
+            <!-- `downloadable=false`: the tile's own action menu now carries the explicit
+                 Download (#178), so the viewer's built-in one would be a second, unlabelled
+                 control on the same card — the duplicate #181 removed from the dialog. -->
             <PdfViewer
               :src="getFileUrl(file.id)"
               :initial-rotation="file.rotation ?? 0"
               :persistable="doc.writable"
+              :downloadable="false"
               @rotate="(deg: number) => persistRotation(file, deg)"
             />
             <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
@@ -979,6 +984,7 @@ onUnmounted(() => {
                 :writable="doc.writable"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
+                @preview="openPreview"
                 @rename="startGridRename"
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"
@@ -1024,6 +1030,7 @@ onUnmounted(() => {
                 :writable="doc.writable"
                 :is-cover="doc.file_id_cover === file.id"
                 @versions="showVersions"
+                @preview="openPreview"
                 @rename="startGridRename"
                 @delete="confirmDelete"
                 @set-cover="setCoverFor"

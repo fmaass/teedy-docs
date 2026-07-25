@@ -244,14 +244,41 @@ describe('FileListTable', () => {
 
   it('the icon open control previews (emits open) and never links to the original /data URL (#144)', async () => {
     const wrapper = mountTable(twoFiles)
-    // No affordance in the list may navigate to the raw attachment URL — "open" must
-    // route to an in-app preview, not a browser download.
+    // No *unlabelled* affordance may navigate to the raw attachment URL — "open" must route
+    // to an in-app preview, not a browser download. Since #178 the row also carries an
+    // explicit Download; that anchor is the ONLY sanctioned link to the original, and it is
+    // labelled, so the #144 invariant survives as "every /data link is a Download".
     const dataAnchors = wrapper.findAll('a').filter((a) => (a.attributes('href') ?? '').includes('/data'))
-    expect(dataAnchors.length).toBe(0)
+    expect(dataAnchors.length).toBe(2)
+    expect(dataAnchors.every((a) => a.attributes('aria-label') === 'download')).toBe(true)
     const opener = wrapper.find('.file-open-link')
     expect(opener.exists()).toBe(true)
     await opener.trigger('click')
     expect(wrapper.emitted('open')?.[0]).toEqual([twoFiles[0]])
+  })
+
+  // #178 — the row action menu gets the same preview + download pair as the grid tiles. The
+  // preview control routes into the SAME `open` event the icon control uses, so the list has
+  // one preview path, not two.
+  it('the action-menu preview control emits open with its own row file', async () => {
+    const wrapper = mountTable(twoFiles)
+    const betaRow = wrapper.findAll('tbody tr').find((r) => r.text().includes('beta.pdf'))!
+    const preview = betaRow
+      .findAll('.file-action-menu button')
+      .find((b) => b.attributes('aria-label') === 'ui.file_view.open_file:{"name":"beta.pdf"}')!
+    expect(preview, 'the row action menu exposes a preview control').toBeTruthy()
+    await preview.trigger('click')
+    expect(wrapper.emitted('open')?.[0]).toEqual([twoFiles[1]])
+  })
+
+  it('every row offers a Download anchor to its own original file, read-only included', () => {
+    for (const writable of [true, false]) {
+      const wrapper = mountTable(twoFiles, writable)
+      const hrefs = wrapper
+        .findAll('.file-action-menu a')
+        .map((a) => a.attributes('href'))
+      expect(hrefs).toEqual(['/api/file/f1/data', '/api/file/f2/data'])
+    }
   })
 
   it('shows the cover badge only on the cover row, and no badge when no cover is set', () => {

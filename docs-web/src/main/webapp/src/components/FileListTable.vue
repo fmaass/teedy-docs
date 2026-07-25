@@ -379,6 +379,7 @@ defineExpose({ columns, reorderEnabled, virtualize, reorderFailed, reorderPendin
             :writable="writable"
             :is-cover="!!coverFileId && data.id === coverFileId"
             @versions="emit('versions', data)"
+            @preview="emit('open', data)"
             @rename="startRename(data)"
             @delete="emit('delete', data)"
             @set-cover="emit('setCover', data)"

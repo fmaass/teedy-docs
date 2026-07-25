@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { ref } from 'vue'
+import { defineComponent, h, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
@@ -85,6 +85,22 @@ vi.mock('../../composables/usePreviewQueue', () => ({
 }))
 
 import DocumentViewContent from './DocumentViewContent.vue'
+import FilePreviewDialog from '../../components/FilePreviewDialog.vue'
+
+// A PROP-AWARE PdfViewer stub. `PdfViewer: true` would erase the prop contract and record
+// every binding as a plain attribute, so a MISSING `:downloadable` and the #178 fix that adds
+// `:downloadable="false"` would look identical. Declaring the real props — with `downloadable`'s
+// true default — makes the omission observable.
+const PdfViewerStub = defineComponent({
+  name: 'PdfViewer',
+  props: {
+    src: { type: String, default: '' },
+    initialRotation: { type: Number, default: 0 },
+    persistable: { type: Boolean, default: false },
+    downloadable: { type: Boolean, default: true },
+  },
+  render: () => h('div', { class: 'pdf-viewer-stub' }),
+})
 
 function makeDoc(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
   return {
@@ -118,7 +134,7 @@ function mountView(doc: DocumentDetail, slots: Record<string, string> = {}) {
         CameraCaptureButton: true,
         UploadProgressList: true,
         FileVersionsDialog: true,
-        PdfViewer: true,
+        PdfViewer: PdfViewerStub,
         EmptyState: true,
         RouterLink: { template: '<a><slot /></a>' },
       },
@@ -403,5 +419,111 @@ describe('DocumentViewContent — grid tile actions', () => {
     await input.trigger('keyup.enter')
     await flushPromises()
     expect(renameFileMock).not.toHaveBeenCalled()
+  })
+})
+
+// #178 — preview + download are now offered by the SHARED FileActionMenu, so they must be
+// live at every mount site. The grid duplicates its tile markup per MIME branch (image /
+// PDF / generic), so a single-branch test would let one branch stay silently unwired —
+// each branch is exercised separately. The list row is the fourth mount site. Note that
+// DocumentViewContent.processing.spec.ts stubs FileActionMenu, so this wiring is invisible
+// there; the coverage has to live here.
+describe('DocumentViewContent — #178 preview + download from the tile action menu', () => {
+  beforeEach(() => localStorage.clear())
+
+  function mixedDoc(writable = true): DocumentDetail {
+    return makeDoc({
+      relations: [],
+      writable,
+      files: [
+        { id: 'f-img', name: 'a.jpg', mimetype: 'image/jpeg', size: 1, version: 0, create_date: 0, creator: 'admin' },
+        { id: 'f-pdf', name: 'b.pdf', mimetype: 'application/pdf', size: 1, version: 0, create_date: 0, creator: 'admin' },
+        { id: 'f-zip', name: 'c.zip', mimetype: 'application/zip', size: 1, version: 0, create_date: 0, creator: 'admin' },
+      ],
+    } as unknown as Partial<DocumentDetail>)
+  }
+
+  function tileFor(wrapper: ReturnType<typeof mountView>['wrapper'], label: string) {
+    return wrapper
+      .findAll('.file-preview-card')
+      .find((c) => c.find('.file-preview-label').text() === label)!
+  }
+
+  // The action-menu preview control, scoped to the tile's action row: the generic tile's
+  // own card button carries the same label, and this must not fall back onto it.
+  function previewButton(tile: ReturnType<typeof tileFor>) {
+    return tile
+      .findAll('.file-card-actions button')
+      .find((b) => b.attributes('aria-label') === 'ui.file_view.open_file')!
+  }
+
+  it.each([
+    ['image', 'a.jpg', 'f-img', 'image/jpeg'],
+    ['pdf', 'b.pdf', 'f-pdf', 'application/pdf'],
+    ['generic', 'c.zip', 'f-zip', 'application/zip'],
+  ])('the %s grid tile wires its action-menu preview into the in-app dialog', async (_kind, label, id, mimetype) => {
+    const { wrapper } = mountView(mixedDoc()) // grid is the default view mode
+    const preview = previewButton(tileFor(wrapper, label))
+    expect(preview, `${label} tile exposes an action-menu preview control`).toBeTruthy()
+
+    await preview.trigger('click')
+
+    const dialog = wrapper.findComponent(FilePreviewDialog)
+    expect(dialog.props('visible')).toBe(true)
+    expect(dialog.props('file')).toMatchObject({ id, mimetype })
+  })
+
+  it('the LIST row action menu previews through the same dialog (fourth mount site)', async () => {
+    // Anonymous username in tests → the per-user key has an empty suffix.
+    localStorage.setItem('teedy_file_view_mode:', 'list')
+    const { wrapper } = mountView(mixedDoc())
+    expect(wrapper.find('.file-data-table').exists()).toBe(true)
+
+    const pdfRow = wrapper.findAll('tbody tr').find((r) => r.text().includes('b.pdf'))!
+    const preview = pdfRow
+      .findAll('.file-action-menu button')
+      .find((b) => b.attributes('aria-label') === 'ui.file_view.open_file')!
+    expect(preview, 'list row exposes an action-menu preview control').toBeTruthy()
+
+    await preview.trigger('click')
+
+    const dialog = wrapper.findComponent(FilePreviewDialog)
+    expect(dialog.props('visible')).toBe(true)
+    expect(dialog.props('file')).toMatchObject({ id: 'f-pdf', mimetype: 'application/pdf' })
+  })
+
+  it('every grid tile offers exactly one labelled Download for the ORIGINAL file', () => {
+    const { wrapper } = mountView(mixedDoc())
+    const anchors = wrapper.findAll('.file-card-actions a')
+    expect(anchors.map((a) => a.attributes('href'))).toEqual([
+      '/api/file/f-img/data',
+      '/api/file/f-pdf/data',
+      '/api/file/f-zip/data',
+    ])
+    // No derived variant: Download must serve the original bytes, not a web/thumb raster.
+    expect(anchors.every((a) => !(a.attributes('href') ?? '').includes('size='))).toBe(true)
+    expect(anchors.map((a) => a.attributes('aria-label'))).toEqual(['download', 'download', 'download'])
+  })
+
+  it('the grid PdfViewer no longer exposes its own download (the replacement is the menu anchor)', () => {
+    const { wrapper } = mountView(mixedDoc())
+    const pdf = wrapper.findComponent(PdfViewerStub)
+    expect(pdf.exists()).toBe(true)
+    expect(pdf.props('downloadable')).toBe(false)
+    // The rest of the binding is unchanged: the viewer still serves the original URL.
+    expect(pdf.props('src')).toBe('/api/file/f-pdf/data')
+  })
+
+  it('read-only tiles keep preview and download (both are read actions, above the writable gate)', () => {
+    const { wrapper } = mountView(mixedDoc(false))
+    const tile = tileFor(wrapper, 'a.jpg')
+    expect(previewButton(tile)).toBeTruthy()
+    const download = tile.find('.file-card-actions a')
+    expect(download.exists()).toBe(true)
+    expect(download.attributes('href')).toBe('/api/file/f-img/data')
+    // …while the write actions stay gated.
+    const labels = tile.findAll('.file-card-actions button').map((b) => b.attributes('aria-label'))
+    expect(labels).not.toContain('rename')
+    expect(labels).not.toContain('ui.remove_file')
   })
 })
