@@ -545,14 +545,26 @@ const moveSearchResults = ref<DocumentListItem[]>([])
 const moveTarget = ref<DocumentListItem | null>(null)
 const movingFile = ref(false)
 
+// Generation counter for the picker's searches. A response may only publish when it is the newest
+// search OF THE CURRENT PICKER SESSION; any other write is harmful, because the AutoComplete
+// re-opens its overlay whenever its suggestions change while a search is pending. So a stale write
+// re-shows a dropdown — for the previous query, or for a session the user already dismissed and
+// reopened — and an out-of-order write replaces the live query's results with an older query's.
+// Opening the picker starts a new generation, and every search (including one whose query was
+// cleared) bumps it, so any request still in flight from before is superseded.
+let moveSearchSeq = 0
+
 function openMoveDialog(file: FileActionTarget) {
   fileToMove.value = file
   moveTarget.value = null
   moveSearchResults.value = []
+  moveSearchSeq++
   moveDialogVisible.value = true
 }
 
 async function completeMoveSearch(event: { query: string }) {
+  const seq = ++moveSearchSeq
+  const isCurrent = () => seq === moveSearchSeq && moveDialogVisible.value
   const query = event.query.trim()
   if (!query || !doc.value) {
     moveSearchResults.value = []
@@ -560,9 +572,11 @@ async function completeMoveSearch(event: { query: string }) {
   }
   try {
     const { data } = await listDocuments({ search: query, limit: 10 })
+    if (!isCurrent()) return
     // Exclude the current document — moving to the same document is rejected by the backend.
     moveSearchResults.value = data.documents.filter((d) => d.id !== doc.value!.id)
   } catch {
+    if (!isCurrent()) return
     moveSearchResults.value = []
   }
 }

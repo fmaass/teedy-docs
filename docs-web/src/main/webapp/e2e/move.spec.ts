@@ -76,6 +76,21 @@ test('move a file to another document: it leaves the source, the source cover fa
       .getByRole('button', { name: 'Set as cover' }).click()
     await expect.poll(() => coverFileId(page.request, sourceId)).toBe(ids['moved.png'])
 
+    // The picker SEARCHES for its target, it does not list documents, and a document reaches the
+    // search index asynchronously (a Guava AsyncEventBus listener feeds LuceneIndexingHandler), so
+    // the API call that seeded the target returns before the target is findable. Wait for the very
+    // search the picker issues. Without this the dropdown renders "No results found" on a slow
+    // runner, the option click times out, and the resulting cleanup failure masks the real error.
+    await expect
+      .poll(async () => {
+        const res = await page.request.get(
+          `/api/document/list?search=${encodeURIComponent(targetTitle)}&limit=10`,
+        )
+        const documents = (await res.json()).documents as Array<{ id: string }>
+        return documents.some((d) => d.id === targetId)
+      }, { message: `target document ${targetTitle} becomes searchable` })
+      .toBe(true)
+
     // Move it via the file-list action + document picker.
     const movedRow = page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
     await movedRow.getByRole('button', { name: /Move to document/ }).click()
@@ -88,6 +103,8 @@ test('move a file to another document: it leaves the source, the source cover fa
     // to the API checks: those read the server directly and settle while the dialog may still
     // be up, and an undismissed modal's mask blocks every later click on the page.
     await expect(dialog).toBeHidden()
+    // And it leaves no modal mask behind: a stray mask is invisible but pointer-blocks the app.
+    await expect(page.locator('.p-dialog-mask')).toHaveCount(0)
 
     // The moved file is gone from the source and present in the target.
     await expect.poll(() => fileCount(page.request, sourceId)).toBe(1)
