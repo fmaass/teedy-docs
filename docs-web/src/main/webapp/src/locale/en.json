@@ -217,6 +217,9 @@
       "saved": "Relations updated",
       "failed_save": "Failed to update relations",
       "remove": "Remove relation",
+      "swap": "Reverse direction",
+      "swapped": "Relation direction reversed",
+      "failed_swap": "Failed to reverse the relation",
       "remove_confirm": "Remove the link to \"{title}\"?",
       "remove_from_source": "Linked from \"{title}\" — remove it from that document"
     },

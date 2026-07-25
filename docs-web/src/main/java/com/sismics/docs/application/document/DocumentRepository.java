@@ -31,6 +31,18 @@ public interface DocumentRepository {
     void update(UpdateDocumentCommand command);
 
     /**
+     * Reverses the relation between the command's two documents, collapsing the pair onto a single
+     * canonical row that points from the target to the document. Idempotent: applied to an
+     * already-reversed pair it writes nothing and returns normally. Both WRITE authorizations are
+     * checked by the handler BEFORE this call.
+     *
+     * @param command The swap instructions
+     * @throws DocumentNotFoundException when either document is absent or trashed, or the two documents
+     *                                   are unrelated in both directions
+     */
+    void swapRelation(SwapDocumentRelationCommand command);
+
+    /**
      * Sets the document's explicit cover file and reconciles the served pointer synchronously. The
      * chosen file must be attached to this document (latest version, not deleted); an unattached file
      * is a client error. The WRITE authorization is checked by the handler BEFORE this call.

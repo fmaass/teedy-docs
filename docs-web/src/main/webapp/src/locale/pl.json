@@ -217,6 +217,9 @@
       "saved": "Zaktualizowano powiązania",
       "failed_save": "Nie udało się zaktualizować powiązań",
       "remove": "Usuń powiązanie",
+      "swap": "Odwróć kierunek",
+      "swapped": "Odwrócono kierunek powiązania",
+      "failed_swap": "Nie udało się odwrócić powiązania",
       "remove_confirm": "Usunąć powiązanie z „{title}”?",
       "remove_from_source": "Powiązany z „{title}” — usuń go z tego dokumentu"
     },

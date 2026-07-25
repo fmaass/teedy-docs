@@ -7,6 +7,7 @@ import com.sismics.docs.application.document.DocumentEventPublisher;
 import com.sismics.docs.application.document.DocumentRepository;
 import com.sismics.docs.application.document.DuplicateDocumentHandler;
 import com.sismics.docs.application.document.GetDocumentHandler;
+import com.sismics.docs.application.document.SwapDocumentRelationHandler;
 import com.sismics.docs.application.document.UnitOfWork;
 import com.sismics.docs.application.document.UpdateDocumentHandler;
 import com.sismics.docs.infrastructure.persistence.JpaDocumentAuthorizationService;
@@ -33,6 +34,7 @@ public final class DocumentSliceModule {
     private final UpdateDocumentHandler updateDocumentHandler;
     private final DocumentCoverHandler documentCoverHandler;
     private final DuplicateDocumentHandler duplicateDocumentHandler;
+    private final SwapDocumentRelationHandler swapDocumentRelationHandler;
 
     private DocumentSliceModule() {
         Clock clock = new DefaultClock();
@@ -46,6 +48,7 @@ public final class DocumentSliceModule {
         this.updateDocumentHandler = new UpdateDocumentHandler(documentRepository, authorizationService, eventPublisher);
         this.documentCoverHandler = new DocumentCoverHandler(documentRepository, authorizationService, eventPublisher);
         this.duplicateDocumentHandler = new DuplicateDocumentHandler(documentRepository, authorizationService);
+        this.swapDocumentRelationHandler = new SwapDocumentRelationHandler(documentRepository, authorizationService, eventPublisher);
     }
 
     private static final class Holder {
@@ -77,5 +80,9 @@ public final class DocumentSliceModule {
 
     public DuplicateDocumentHandler duplicateDocumentHandler() {
         return duplicateDocumentHandler;
+    }
+
+    public SwapDocumentRelationHandler swapDocumentRelationHandler() {
+        return swapDocumentRelationHandler;
     }
 }

@@ -217,6 +217,9 @@
       "saved": "Relazioni aggiornate",
       "failed_save": "Impossibile aggiornare le relazioni",
       "remove": "Rimuovi relazione",
+      "swap": "Inverti la direzione",
+      "swapped": "Direzione della relazione invertita",
+      "failed_swap": "Impossibile invertire la relazione",
       "remove_confirm": "Rimuovere il collegamento a \"{title}\"?",
       "remove_from_source": "Collegato da \"{title}\" — rimuovilo da quel documento"
     },

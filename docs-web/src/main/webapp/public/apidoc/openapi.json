@@ -1206,6 +1206,46 @@
         }
       }
     },
+    "/document/relation/swap": {
+      "post": {
+        "tags": [
+          "document"
+        ],
+        "summary": "Reverse the direction of a document relation",
+        "operationId": "post_document_relation_swap",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Document the relation currently points from"
+                  },
+                  "target": {
+                    "type": "string",
+                    "description": "Document the relation currently points at"
+                  }
+                },
+                "required": [
+                  "id",
+                  "target"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "404": {
+            "description": "Document not found, or the two documents are unrelated"
+          }
+        }
+      }
+    },
     "/document/{id}/cover": {
       "post": {
         "tags": [

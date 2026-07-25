@@ -217,6 +217,9 @@
       "saved": "关联已更新",
       "failed_save": "更新关联失败",
       "remove": "移除关联",
+      "swap": "反转方向",
+      "swapped": "关联方向已反转",
+      "failed_swap": "反转关联失败",
       "remove_confirm": "移除到“{title}”的链接？",
       "remove_from_source": "被“{title}”链接——请从该文档中移除"
     },

@@ -217,6 +217,9 @@
       "saved": "Lidhjet u përditësuan",
       "failed_save": "Përditësimi i lidhjeve dështoi",
       "remove": "Hiq lidhjen",
+      "swap": "Përmbys drejtimin",
+      "swapped": "Drejtimi i lidhjes u përmbys",
+      "failed_swap": "Përmbysja e lidhjes dështoi",
       "remove_confirm": "Të hiqet lidhja me \"{title}\"?",
       "remove_from_source": "E lidhur nga \"{title}\" — hiqeni atë nga ai dokument"
     },

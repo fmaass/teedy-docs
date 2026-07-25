@@ -18,10 +18,12 @@ beforeEach(() => setActivePinia(createPinia()))
 
 const listDocumentsMock = vi.fn()
 const updateDocumentMock = vi.fn()
+const swapRelationMock = vi.fn()
 vi.mock('../../api/document', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/document')>()),
   listDocuments: (...a: unknown[]) => listDocumentsMock(...a),
   updateDocument: (...a: unknown[]) => updateDocumentMock(...a),
+  swapRelation: (...a: unknown[]) => swapRelationMock(...a),
 }))
 const setRotationMock = vi.fn(() => Promise.resolve({ data: { status: 'ok', rotation: 0 } }))
 const renameFileMock = vi.fn(() => Promise.resolve({ data: {} }))
@@ -149,10 +151,16 @@ type ViewVm = {
   handleAddRelation: () => Promise<void>
 }
 
+// `t` is stubbed to the identity, so the aria-label IS the message key. Naming the control is what
+// keeps these assertions honest now that a relation row carries more than one button.
+const SWAP_BUTTON = 'button[aria-label="ui.relations.swap"]'
+const REMOVE_BUTTON = 'button[aria-label="ui.relations.remove"]'
+
 describe('DocumentViewContent — related documents (#36)', () => {
   beforeEach(() => {
     listDocumentsMock.mockReset()
     updateDocumentMock.mockReset().mockResolvedValue({ data: { id: 'doc-src' } })
+    swapRelationMock.mockReset().mockResolvedValue({ data: { status: 'ok' } })
   })
 
   it('renders relations grouped by direction (outgoing under links_to, incoming under linked_from)', () => {
@@ -167,12 +175,16 @@ describe('DocumentViewContent — related documents (#36)', () => {
     expect(linkedFrom.text()).not.toContain('Outgoing Doc')
   })
 
-  it('incoming rows carry NO remove control; outgoing rows do (writable doc)', () => {
+  it('incoming rows carry NO remove control; outgoing rows do — both carry the swap control (writable doc)', () => {
     const { wrapper } = mountView(makeDoc())
     const linksTo = wrapper.findAll('.relation-group').find((g) => g.text().includes('ui.relations.links_to'))!
     const linkedFrom = wrapper.findAll('.relation-group').find((g) => g.text().includes('ui.relations.linked_from'))!
-    expect(linksTo.findAll('button').length).toBe(1)
-    expect(linkedFrom.findAll('button').length).toBe(0)
+    // Outgoing: swap + remove. Incoming: swap only — the link is owned by the other document, so it
+    // can be reversed onto this one but not removed from here.
+    expect(linksTo.findAll(REMOVE_BUTTON).length).toBe(1)
+    expect(linksTo.findAll(SWAP_BUTTON).length).toBe(1)
+    expect(linkedFrom.findAll(REMOVE_BUTTON).length).toBe(0)
+    expect(linkedFrom.findAll(SWAP_BUTTON).length).toBe(1)
   })
 
   it('renders no add form and no remove controls when the document is not writable (links still shown)', () => {
@@ -209,7 +221,7 @@ describe('DocumentViewContent — related documents (#36)', () => {
     } as Partial<DocumentDetail>)
     const { wrapper } = mountView(doc)
     const dropRow = wrapper.findAll('.relation-row').find((r) => r.text().includes('Drop Me'))!
-    await dropRow.find('button').trigger('click')
+    await dropRow.get(REMOVE_BUTTON).trigger('click')
     await flushPromises()
     expect(updateDocumentMock).toHaveBeenCalledTimes(1)
     const [, params] = updateDocumentMock.mock.calls[0] as [string, URLSearchParams]
@@ -222,7 +234,7 @@ describe('DocumentViewContent — related documents (#36)', () => {
       relations: [{ id: 'rel-only', title: 'Last One', source: true }],
     } as Partial<DocumentDetail>)
     const { wrapper } = mountView(doc)
-    await wrapper.find('.relation-row button').trigger('click')
+    await wrapper.get(`.relation-row ${REMOVE_BUTTON}`).trigger('click')
     await flushPromises()
     const [, params] = updateDocumentMock.mock.calls[0] as [string, URLSearchParams]
     expect(params.getAll('relations')).toEqual([])
@@ -248,11 +260,48 @@ describe('DocumentViewContent — related documents (#36)', () => {
       relations: [{ id: 'rel-gone', title: 'To Remove', source: true }],
     } as Partial<DocumentDetail>)
     const { wrapper, invalidateSpy } = mountView(doc)
-    await wrapper.find('.relation-row button').trigger('click')
+    await wrapper.get(`.relation-row ${REMOVE_BUTTON}`).trigger('click')
     await flushPromises()
     const keys = invalidateSpy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
     expect(keys).toContainEqual(['document', 'doc-src'])
     expect(keys).toContainEqual(['document', 'rel-gone'])
+  })
+
+  // #191 — the endpoint takes the pair in its CURRENT orientation, so the argument order is the
+  // whole contract: get it backwards on the incoming group and the call either 404s or reverses a
+  // different pair. Both directions are pinned explicitly.
+  it('swapping an OUTGOING relation sends (this document, related document) in that order', async () => {
+    const { wrapper } = mountView(makeDoc())
+    const outgoingRow = wrapper.findAll('.relation-row').find((r) => r.text().includes('Outgoing Doc'))!
+    await outgoingRow.get(SWAP_BUTTON).trigger('click')
+    await flushPromises()
+    expect(swapRelationMock).toHaveBeenCalledTimes(1)
+    expect(swapRelationMock.mock.calls[0]).toEqual(['doc-src', 'rel-out'])
+    expect(updateDocumentMock).not.toHaveBeenCalled()
+  })
+
+  it('swapping an INCOMING relation sends (related document, this document) — the reverse order', async () => {
+    const { wrapper } = mountView(makeDoc())
+    const incomingRow = wrapper.findAll('.relation-row').find((r) => r.text().includes('Incoming Doc'))!
+    await incomingRow.get(SWAP_BUTTON).trigger('click')
+    await flushPromises()
+    expect(swapRelationMock).toHaveBeenCalledTimes(1)
+    expect(swapRelationMock.mock.calls[0]).toEqual(['rel-in', 'doc-src'])
+  })
+
+  it('a swap invalidates BOTH documents\' queries', async () => {
+    const { wrapper, invalidateSpy } = mountView(makeDoc())
+    const outgoingRow = wrapper.findAll('.relation-row').find((r) => r.text().includes('Outgoing Doc'))!
+    await outgoingRow.get(SWAP_BUTTON).trigger('click')
+    await flushPromises()
+    const keys = invalidateSpy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey)
+    expect(keys).toContainEqual(['document', 'doc-src'])
+    expect(keys).toContainEqual(['document', 'rel-out'])
+  })
+
+  it('renders no swap control on either group when the document is not writable', () => {
+    const { wrapper } = mountView(makeDoc({ writable: false } as Partial<DocumentDetail>))
+    expect(wrapper.findAll(SWAP_BUTTON).length).toBe(0)
   })
 })
 

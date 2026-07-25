@@ -217,6 +217,9 @@
       "saved": "Relations mises à jour",
       "failed_save": "Échec de la mise à jour des relations",
       "remove": "Supprimer la relation",
+      "swap": "Inverser le sens",
+      "swapped": "Sens de la relation inversé",
+      "failed_swap": "Échec de l’inversion de la relation",
       "remove_confirm": "Supprimer le lien vers « {title} » ?",
       "remove_from_source": "Lié depuis « {title} » — supprimez-le depuis ce document"
     },

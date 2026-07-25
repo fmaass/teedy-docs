@@ -217,6 +217,9 @@
       "saved": "關聯已更新",
       "failed_save": "更新關聯失敗",
       "remove": "移除關聯",
+      "swap": "反轉方向",
+      "swapped": "關聯方向已反轉",
+      "failed_swap": "反轉關聯失敗",
       "remove_confirm": "移除與「{title}」的連結？",
       "remove_from_source": "被「{title}」連結 — 請從該文件移除"
     },

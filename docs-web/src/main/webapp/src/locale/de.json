@@ -217,6 +217,9 @@
       "saved": "Verknüpfungen aktualisiert",
       "failed_save": "Verknüpfungen konnten nicht aktualisiert werden",
       "remove": "Verknüpfung entfernen",
+      "swap": "Richtung umkehren",
+      "swapped": "Richtung der Verknüpfung umgekehrt",
+      "failed_swap": "Richtung konnte nicht umgekehrt werden",
       "remove_confirm": "Verknüpfung zu „{title}“ entfernen?",
       "remove_from_source": "Verwiesen von „{title}“ – dort entfernen"
     },

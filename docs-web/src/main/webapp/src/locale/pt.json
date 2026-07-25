@@ -217,6 +217,9 @@
       "saved": "Relações atualizadas",
       "failed_save": "Falha ao atualizar as relações",
       "remove": "Remover relação",
+      "swap": "Inverter a direção",
+      "swapped": "Direção da relação invertida",
+      "failed_swap": "Falha ao inverter a relação",
       "remove_confirm": "Remover a ligação a \"{title}\"?",
       "remove_from_source": "Ligado a partir de \"{title}\" — remova-a desse documento"
     },

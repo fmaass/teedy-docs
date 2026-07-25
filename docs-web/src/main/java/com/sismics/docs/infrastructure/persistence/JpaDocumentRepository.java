@@ -18,6 +18,7 @@ import com.sismics.docs.application.document.DocumentView.RouteStepView;
 import com.sismics.docs.application.document.DocumentView.TagView;
 import com.sismics.docs.application.document.GetDocumentQuery;
 import com.sismics.docs.application.document.SetDocumentCoverCommand;
+import com.sismics.docs.application.document.SwapDocumentRelationCommand;
 import com.sismics.docs.application.document.UpdateDocumentCommand;
 import com.sismics.docs.core.constant.AclType;
 import com.sismics.docs.core.constant.PermType;
@@ -385,6 +386,39 @@ public class JpaDocumentRepository implements DocumentRepository {
             }
         }
         relationDao.updateRelationList(documentId, documentIdSet);
+    }
+
+    @Override
+    public void swapRelation(SwapDocumentRelationCommand command) {
+        String documentId = command.documentId();
+        String targetDocumentId = command.targetDocumentId();
+
+        // A document is never related to itself (both relation-writing paths drop self-links), so a
+        // self-swap has nothing to reverse. Rejecting it here also keeps the lock acquisition below from
+        // naming the same row twice.
+        if (documentId.equals(targetDocumentId)) {
+            throw new DocumentNotFoundException();
+        }
+
+        // Lock BOTH document rows FOR UPDATE, in deterministic id order, exactly as FileMoveService does:
+        // the reversal reads the relation rows of the pair and then rewrites them, and the ordered pair of
+        // locks is what stops a concurrent swap of the SAME pair in the opposite direction from each
+        // observing "both directions active" and deleting the other's row (which would leave the documents
+        // unrelated). It equally serializes against the single source lock taken by a relation-list
+        // reconcile. A row that is absent under the lock is a trashed or purged document: not found.
+        DocumentDao documentDao = new DocumentDao();
+        String firstId = documentId.compareTo(targetDocumentId) <= 0 ? documentId : targetDocumentId;
+        String secondId = firstId.equals(documentId) ? targetDocumentId : documentId;
+        if (documentDao.getActiveByIdForUpdate(firstId) == null
+                || documentDao.getActiveByIdForUpdate(secondId) == null) {
+            throw new DocumentNotFoundException();
+        }
+
+        // Read-and-reverse happens entirely under the locks; unrelated documents are a not-found, never a
+        // silent 200 that would tell the caller a link exists when it does not.
+        if (!new RelationDao().swap(documentId, targetDocumentId)) {
+            throw new DocumentNotFoundException();
+        }
     }
 
     @Override

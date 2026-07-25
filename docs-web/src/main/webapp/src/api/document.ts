@@ -133,6 +133,23 @@ export function updateDocument(id: string, params: URLSearchParams) {
 }
 
 /**
+ * Reverse the direction of the relation between two documents (#191):
+ * POST /document/relation/swap, form params `id` + `target`.
+ *
+ * The pair is named in its CURRENT orientation — `fromDocumentId` is the document the link points
+ * from today — and the server makes it read the other way round. WRITE is required on BOTH
+ * documents; the server is the sole authority on that, and answers 404 (never 403) when either
+ * document is unwritable, unknown or unrelated, so an unwritable counterpart is indistinguishable
+ * from a missing one.
+ */
+export function swapRelation(fromDocumentId: string, toDocumentId: string) {
+  const params = new URLSearchParams()
+  params.set('id', fromDocumentId)
+  params.set('target', toDocumentId)
+  return api.post('/document/relation/swap', params)
+}
+
+/**
  * Set the explicit cover file of a document (#174): POST /document/:id/cover, form param `file`.
  * The chosen file must be attached to the document; the server reconciles the served pointer.
  */

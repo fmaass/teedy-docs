@@ -86,3 +86,76 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   await expect(page.locator('.relation-group', { hasText: 'Linked from' })).toHaveCount(0)
 })
+
+// #191 — reversing a relation's direction from either group. The endpoint takes the pair in its
+// CURRENT orientation, so the two groups exercise OPPOSITE argument orders; running both here is
+// what proves the outgoing and incoming buttons are not wired the same way round. The observable
+// contract is that the two groups exchange membership on BOTH documents, and that ownership of the
+// link (the remove control) moves with it.
+test('swap a relation direction from both groups — the groups exchange membership', async ({ page, cleanup }) => {
+  const titleA = unique('swap-A')
+  const titleB = unique('swap-B')
+  const idA = (await createDocument(page, titleA)).id
+  cleanup.defer('purge document A', () => deleteDocApi(page.request, idA))
+  const idB = (await createDocument(page, titleB)).id
+  cleanup.defer('purge document B', () => deleteDocApi(page.request, idB))
+
+  const relationsToast = page.getByRole('alert').filter({ hasText: 'Relations updated' })
+  const swapToast = page.getByRole('alert').filter({ hasText: 'Relation direction reversed' })
+
+  // --- Seed A → B from A's Content tab ---
+  await page.goto(`/#/document/view/${idA}`)
+  await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
+  const addRow = page.locator('.relation-add')
+  await addRow.locator('input').first().fill(titleB)
+  await page.getByRole('option', { name: new RegExp(titleB) }).click()
+  await addRow.getByRole('button', { name: 'Add', exact: true }).click()
+  // Let this toast expire before the swap so the swap's own toast is unambiguous.
+  await expect(relationsToast).toBeVisible()
+  await expect(relationsToast).toBeHidden({ timeout: 3_000 })
+
+  // --- Swap from the OUTGOING group: B leaves "Links to" and appears under "Linked from" ---
+  await page
+    .locator('.relation-group', { hasText: 'Links to' })
+    .locator('.relation-row', { hasText: titleB })
+    .getByRole('button', { name: 'Reverse direction' })
+    .click()
+  await expect(swapToast).toBeVisible()
+
+  // In-app propagation (NO reload): A's own view must re-render from the invalidated query.
+  await expect(page.locator('.relation-group', { hasText: 'Links to' })).toHaveCount(0)
+  const linkedFromA = page.locator('.relation-group', { hasText: 'Linked from' })
+  await expect(linkedFromA.locator('.relation-row', { hasText: titleB })).toBeVisible()
+  await expect(swapToast).toBeHidden({ timeout: 3_000 })
+
+  // --- B now OWNS the link: it appears under "Links to" there, with a remove control ---
+  await page.goto(`/#/document/view/${idB}`)
+  const linksToB = page.locator('.relation-group', { hasText: 'Links to' })
+  await expect(linksToB).toBeVisible()
+  await expect(linksToB.locator('.relation-row', { hasText: titleA })).toBeVisible()
+  await expect(
+    linksToB.locator('.relation-row', { hasText: titleA }).getByRole('button', { name: 'Remove relation' }),
+  ).toBeVisible()
+  await expect(page.locator('.relation-group', { hasText: 'Linked from' })).toHaveCount(0)
+
+  // --- Swap BACK from the INCOMING group on A: the reverse argument order must work too ---
+  await page.goto(`/#/document/view/${idA}`)
+  await page
+    .locator('.relation-group', { hasText: 'Linked from' })
+    .locator('.relation-row', { hasText: titleB })
+    .getByRole('button', { name: 'Reverse direction' })
+    .click()
+  await expect(swapToast).toBeVisible()
+  await expect(page.locator('.relation-group', { hasText: 'Linked from' })).toHaveCount(0)
+  await expect(
+    page.locator('.relation-group', { hasText: 'Links to' }).locator('.relation-row', { hasText: titleB }),
+  ).toBeVisible()
+
+  // --- And it stuck server-side: B is back to the read-only incoming side after a reload ---
+  await page.goto(`/#/document/view/${idB}`)
+  await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
+  await expect(page.locator('.relation-group', { hasText: 'Links to' })).toHaveCount(0)
+  const incomingB = page.locator('.relation-group', { hasText: 'Linked from' }).locator('.relation-row', { hasText: titleA })
+  await expect(incomingB).toBeVisible()
+  await expect(incomingB.getByRole('button', { name: 'Remove relation' })).toHaveCount(0)
+})

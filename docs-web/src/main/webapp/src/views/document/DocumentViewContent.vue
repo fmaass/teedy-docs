@@ -13,6 +13,7 @@ import {
   setDocumentCover,
   clearDocumentCover,
   buildRelationsParams,
+  swapRelation,
   type DocumentListItem,
   type DocumentDetail,
 } from '../../api/document'
@@ -160,6 +161,33 @@ async function handleAddRelation() {
   await saveOutgoing(ids)
   selectedRelationTarget.value = null
   relationSearchResults.value = []
+}
+
+/**
+ * Reverse a relation's direction (#191). The row is passed in its displayed orientation: an
+ * outgoing row reads this document -> the related one, an incoming row the other way round, and
+ * the endpoint always takes the pair in its CURRENT orientation. Both documents' details change
+ * (the link leaves one outgoing list and joins the other's), so both are invalidated.
+ *
+ * WRITE on the counterpart document is unknown to the client — `doc.writable` describes only this
+ * document — so the server is the sole authority and a refusal surfaces as an error toast.
+ */
+async function handleSwapRelation(relation: { id: string; title: string; source: boolean }) {
+  if (!doc.value?.writable) return
+  const documentId = doc.value.id
+  const fromId = relation.source ? documentId : relation.id
+  const toId = relation.source ? relation.id : documentId
+  savingRelation.value = true
+  try {
+    await swapRelation(fromId, toId)
+    queryClient.invalidateQueries({ queryKey: queryKeys.document(documentId) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.document(relation.id) })
+    toast.add({ severity: 'success', summary: t('ui.relations.swapped'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.relations.failed_swap'), life: 3000 })
+  } finally {
+    savingRelation.value = false
+  }
 }
 
 function confirmRemoveRelation(relation: { id: string; title: string }) {
@@ -875,6 +903,17 @@ onUnmounted(() => {
             </router-link>
             <Button
               v-if="doc.writable"
+              icon="pi pi-arrow-right-arrow-left"
+              text
+              rounded
+              size="small"
+              :loading="savingRelation"
+              @click="handleSwapRelation(relation)"
+              v-tooltip="t('ui.relations.swap')"
+              :aria-label="t('ui.relations.swap')"
+            />
+            <Button
+              v-if="doc.writable"
               icon="pi pi-times"
               text
               rounded
@@ -889,8 +928,9 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Incoming: other documents link here. Read-only — no remove control; the relation
-           is owned by the source document and must be removed from there. -->
+      <!-- Incoming: other documents link here. The relation is owned by the source document, so it
+           still has no remove control — but it CAN be reversed from here (#191), which brings it
+           onto this document's outgoing list. -->
       <div v-if="incomingRelations.length" class="relation-group">
         <p class="relation-group-label">{{ t('ui.relations.linked_from') }}</p>
         <div class="relation-list">
@@ -903,6 +943,17 @@ onUnmounted(() => {
             >
               {{ relation.title }}
             </router-link>
+            <Button
+              v-if="doc.writable"
+              icon="pi pi-arrow-right-arrow-left"
+              text
+              rounded
+              size="small"
+              :loading="savingRelation"
+              @click="handleSwapRelation(relation)"
+              v-tooltip="t('ui.relations.swap')"
+              :aria-label="t('ui.relations.swap')"
+            />
           </div>
         </div>
       </div>
