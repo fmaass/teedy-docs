@@ -231,6 +231,7 @@
       "untitled": "Unbenannte Datei",
       "open_file": "{name} öffnen",
       "preview_unavailable": "Für diesen Dateityp ist keine Vorschau verfügbar.",
+      "fullscreen": "Vollbild umschalten",
       "filter_placeholder": "Dateien filtern…",
       "filter_aria": "Dateien nach Name oder Typ filtern",
       "columns": "Spalten",

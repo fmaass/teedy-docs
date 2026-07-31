@@ -231,6 +231,7 @@
       "untitled": "Fichier sans titre",
       "open_file": "Ouvrir {name}",
       "preview_unavailable": "L'aperçu n'est pas disponible pour ce type de fichier.",
+      "fullscreen": "Basculer en plein écran",
       "filter_placeholder": "Filtrer les fichiers…",
       "filter_aria": "Filtrer les fichiers par nom ou type",
       "columns": "Colonnes",

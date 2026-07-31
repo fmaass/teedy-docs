@@ -231,6 +231,7 @@
       "untitled": "Skedar pa titull",
       "open_file": "Hap {name}",
       "preview_unavailable": "Paraparja nuk është e disponueshme për këtë lloj skedari.",
+      "fullscreen": "Ndërro në ekran të plotë",
       "filter_placeholder": "Filtro skedarët…",
       "filter_aria": "Filtro skedarët sipas emrit ose llojit",
       "columns": "Kolonat",

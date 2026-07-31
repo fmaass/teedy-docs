@@ -231,6 +231,7 @@
       "untitled": "未命名檔案",
       "open_file": "開啟 {name}",
       "preview_unavailable": "此檔案類型無法預覽。",
+      "fullscreen": "切換全螢幕",
       "filter_placeholder": "篩選檔案…",
       "filter_aria": "依名稱或類型篩選檔案",
       "columns": "欄位",

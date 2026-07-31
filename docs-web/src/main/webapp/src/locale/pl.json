@@ -231,6 +231,7 @@
       "untitled": "Plik bez nazwy",
       "open_file": "Otwórz {name}",
       "preview_unavailable": "Podgląd nie jest dostępny dla tego typu pliku.",
+      "fullscreen": "Przełącz tryb pełnoekranowy",
       "filter_placeholder": "Filtruj pliki…",
       "filter_aria": "Filtruj pliki według nazwy lub typu",
       "columns": "Kolumny",

@@ -35,6 +35,15 @@ const visible = defineModel<boolean>('visible', { required: true })
 
 const { t } = useI18n()
 
+// #205 — fullscreen. PrimeVue owns the maximize state internally and only announces it
+// through maximize/unmaximize, so this mirrors it: the dialog's own `p-dialog-maximized`
+// class carries `width: 100vw !important` but NOTHING that overrides a `max-width`, and the
+// windowed media caps below are plain CSS. Both must be relaxed from here, or "maximized"
+// stays a 960px-wide box with 70vh-tall media — the same view, only repositioned.
+// It is deliberately NOT reset when the dialog closes: PrimeVue keeps its own flag across
+// an open/close cycle, so resetting here would desynchronise the two.
+const maximized = ref(false)
+
 type PreviewKind = 'image' | 'pdf' | 'text' | 'unsupported'
 function kindOf(mime: string): PreviewKind {
   if (mime.startsWith('image/')) return 'image'
@@ -139,9 +148,13 @@ onUnmounted(() => {
     v-model:visible="visible"
     modal
     dismissableMask
+    maximizable
     :header="headerText"
-    class="file-preview-dialog"
-    :style="{ width: '92vw', maxWidth: '960px' }"
+    :class="['file-preview-dialog', { 'file-preview-dialog--maximized': maximized }]"
+    :style="maximized ? {} : { width: '92vw', maxWidth: '960px' }"
+    :maximizeButtonProps="{ 'aria-label': t('ui.file_view.fullscreen') }"
+    @maximize="maximized = true"
+    @unmaximize="maximized = false"
   >
     <div v-if="file" class="file-preview-body">
       <div v-if="previewMode === 'image'" class="file-preview-image-stage">
@@ -224,6 +237,25 @@ onUnmounted(() => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Maximized (#205). The dialog now IS the viewport, so every windowed size constraint has
+   to give way — the 70vh media caps here, and the inline 960px max-width in the template.
+   Relaxing only one of them is not fullscreen: the media would still stop at 70vh, or stay
+   inside a 960px column. The body fills the dialog's content box and the media flexes into
+   it (`min-height: 0` so a flex item may shrink below its content size), so the preview is
+   FITTED to the enlarged dialog rather than handed to the user as a scrolling image. */
+.file-preview-dialog--maximized .file-preview-body {
+  height: 100%;
+}
+.file-preview-dialog--maximized .file-preview-image-stage,
+.file-preview-dialog--maximized .file-preview-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.file-preview-dialog--maximized .file-preview-image {
+  max-height: 100%;
 }
 
 .file-preview-status {

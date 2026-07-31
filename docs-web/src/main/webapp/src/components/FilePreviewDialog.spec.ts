@@ -37,7 +37,12 @@ function mountDialog(file: PreviewFile | null, shareId?: string) {
         // SEPARATE wrappers so a test can tell a body-rendered control from a footer one
         // (#181: the surviving Download must be the footer's).
         Dialog: {
-          props: ['visible'],
+          // `maximizable`/`maximizeButtonProps` are declared so the #205 tests can read what
+          // the dialog hands PrimeVue; Boolean typing turns the valueless `maximizable`
+          // attribute into a real `true` instead of an empty string. Everything else
+          // (class, style) stays an ATTRIBUTE and falls through to `.dlg`, which is what
+          // those tests measure.
+          props: { visible: Boolean, maximizable: Boolean, maximizeButtonProps: Object },
           template:
             '<div class="dlg"><div class="dlg-body"><slot /></div><div class="dlg-footer"><slot name="footer" /></div></div>',
         },
@@ -236,6 +241,70 @@ describe('FilePreviewDialog (#144)', () => {
       for (const mime of ['image/png', 'application/pdf', 'text/plain']) {
         const wrapper = mountDialog({ id: 'p1', name: 'f', mimetype: mime })
         await flushPromises()
+        expect(downloadLinkCount(wrapper), mime).toBe(1)
+      }
+    })
+  })
+
+  // #205 — fullscreen. PrimeVue keeps the maximize state to itself and only announces it via
+  // maximize/unmaximize, so the two windowed size constraints this component owns must be
+  // released from those events: the inline 960px max-width (the dialog's own style) and the
+  // 70vh media caps (released through the --maximized class the scoped CSS keys off). These
+  // tests pin the WIRING; the rendered geometry — that the media really outgrows the 70vh cap
+  // and the box outgrows 960px — is measured against a real browser in
+  // e2e/preview-fullscreen.spec.ts, which jsdom cannot do (it applies no scoped stylesheet).
+  describe('#205: fullscreen wiring', () => {
+    function dialogStub(wrapper: ReturnType<typeof mountDialog>) {
+      return wrapper.findComponent('.dlg')
+    }
+
+    it('offers the maximize affordance with a translated accessible name', () => {
+      const wrapper = mountDialog({ id: 'f1', name: 'photo.png', mimetype: 'image/png' })
+      expect(dialogStub(wrapper).props('maximizable')).toBe(true)
+      // Icon-only control: without a label it reaches a screen reader unnamed. The label goes
+      // through t(), so it is translatable rather than a hardcoded English string.
+      expect(dialogStub(wrapper).props('maximizeButtonProps')).toEqual({
+        'aria-label': 'ui.file_view.fullscreen',
+      })
+    })
+
+    it('windowed: the dialog is width-clamped to 960px and carries no maximized modifier', () => {
+      const wrapper = mountDialog({ id: 'f1', name: 'photo.png', mimetype: 'image/png' })
+      expect(wrapper.find('.dlg').attributes('style')).toContain('960px')
+      expect(wrapper.find('.dlg').classes()).toContain('file-preview-dialog')
+      expect(wrapper.find('.dlg').classes()).not.toContain('file-preview-dialog--maximized')
+    })
+
+    it('maximize DROPS the 960px clamp and flags the maximized state', async () => {
+      const wrapper = mountDialog({ id: 'f1', name: 'photo.png', mimetype: 'image/png' })
+      await dialogStub(wrapper).vm.$emit('maximize')
+      await wrapper.vm.$nextTick()
+      // The clamp is the pre-gate catch: PrimeVue's own maximized CSS forces width:100vw but
+      // overrides no max-width, so leaving it here would keep "fullscreen" 960px wide.
+      expect(wrapper.find('.dlg').attributes('style') ?? '').not.toContain('960px')
+      // …and the class the scoped CSS uses to lift the 70vh media caps.
+      expect(wrapper.find('.dlg').classes()).toContain('file-preview-dialog--maximized')
+    })
+
+    it('unmaximize restores the windowed clamp — the relaxation does not leak', async () => {
+      const wrapper = mountDialog({ id: 'f1', name: 'photo.png', mimetype: 'image/png' })
+      await dialogStub(wrapper).vm.$emit('maximize')
+      await wrapper.vm.$nextTick()
+      await dialogStub(wrapper).vm.$emit('unmaximize')
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.dlg').attributes('style')).toContain('960px')
+      expect(wrapper.find('.dlg').classes()).not.toContain('file-preview-dialog--maximized')
+    })
+
+    it('every preview mode keeps its single Download while maximized (#181 still holds)', async () => {
+      getFileContentMock.mockReset()
+      getFileContentMock.mockResolvedValue('body text')
+      for (const mime of ['image/png', 'application/pdf', 'text/plain', 'application/zip']) {
+        const wrapper = mountDialog({ id: 'p1', name: 'f', mimetype: mime })
+        await flushPromises()
+        await dialogStub(wrapper).vm.$emit('maximize')
+        await wrapper.vm.$nextTick()
+        expect(wrapper.find('.dlg').classes(), mime).toContain('file-preview-dialog--maximized')
         expect(downloadLinkCount(wrapper), mime).toBe(1)
       }
     })

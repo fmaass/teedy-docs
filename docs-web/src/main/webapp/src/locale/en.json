@@ -231,6 +231,7 @@
       "untitled": "Untitled file",
       "open_file": "Open {name}",
       "preview_unavailable": "Preview isn't available for this file type.",
+      "fullscreen": "Toggle full screen",
       "filter_placeholder": "Filter files…",
       "filter_aria": "Filter files by name or type",
       "columns": "Columns",

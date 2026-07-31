@@ -231,6 +231,7 @@
       "untitled": "File senza titolo",
       "open_file": "Apri {name}",
       "preview_unavailable": "L'anteprima non è disponibile per questo tipo di file.",
+      "fullscreen": "Attiva/disattiva schermo intero",
       "filter_placeholder": "Filtra file…",
       "filter_aria": "Filtra i file per nome o tipo",
       "columns": "Colonne",

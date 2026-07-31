@@ -231,6 +231,7 @@
       "untitled": "Archivo sin título",
       "open_file": "Abrir {name}",
       "preview_unavailable": "La vista previa no está disponible para este tipo de archivo.",
+      "fullscreen": "Alternar pantalla completa",
       "filter_placeholder": "Filtrar archivos…",
       "filter_aria": "Filtrar archivos por nombre o tipo",
       "columns": "Columnas",
