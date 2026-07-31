@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { uniqueTag, createDocument, confirmDanger } from './helpers'
+import { uniqueTag, createDocument, confirmDanger, gotoRouteReady, ROUTE_ROOT } from './helpers'
 
 // Full-text search: a created document is found by a title term and by a tag:
 // operator, and the search-help popover lists the supported operators.
@@ -14,7 +14,9 @@ test('full-text and tag: operator search find a document; help popover lists ope
   // A document with a distinctive title token, tagged with the seeded tag.
   const token = `zephyr${Date.now()}`
   const title = `Search ${token}`
-  await page.goto('/#/document/add')
+  // In-app hash navigation away from /#/tag: wait for the add form's own root, not just
+  // for `location` to change, before filling the form.
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(title)
   await page.locator('#edit-tags').click()
   await page.getByRole('option', { name: tagName }).click()

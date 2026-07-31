@@ -39,7 +39,13 @@ export default defineConfig({
   },
   use: {
     baseURL,
-    trace: 'on-first-retry',
+    // A trace is only useful if the run that failed KEPT one. `on-first-retry` records
+    // nothing where retries are zero — which is every local/pinned-CPU control run
+    // (`retries` is 1 only under CI) — so the one run worth diagnosing was exactly the run
+    // with no evidence (#203). `retain-on-failure` records every test and discards the
+    // trace of the ones that pass, so a failing test always leaves its trace behind, on CI
+    // and locally alike, at the cost of recording overhead on the passing majority.
+    trace: 'retain-on-failure',
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },

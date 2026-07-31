@@ -1,7 +1,15 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, deleteDocApi, fillDescription, isMobileViewport } from './helpers'
+import {
+  unique,
+  createDocument,
+  deleteDocApi,
+  fillDescription,
+  isMobileViewport,
+  expectRouteReady,
+  ROUTE_ROOT,
+} from './helpers'
 
 const fileFixture = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample.txt')
 
@@ -208,9 +216,13 @@ test('#113 empty activity response renders the empty state', async ({ page, clea
   )
   cleanup.defer('drop the auditlog route interception', () => page.unroute('**/api/auditlog**'))
 
-  await page.goto(`/#/document/view/${docId}/activity`)
+  // The reload re-runs the SPA's WHOLE first-navigation sequence, so route readiness
+  // belongs after it — a barrier asserted on the goto is discarded with the document the
+  // reload replaces (#203).
+  const activityUrl = `/#/document/view/${docId}/activity`
+  await page.goto(activityUrl)
   await page.reload()
-  await expect(page.locator('.p-datatable')).toBeVisible()
+  await expectRouteReady(page, activityUrl, ROUTE_ROOT.documentActivity)
   await expect(page.getByText('No activity recorded')).toBeVisible()
   await expect(page.locator('.p-datatable tbody tr .activity-type')).toHaveCount(0)
 })

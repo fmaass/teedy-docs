@@ -268,28 +268,101 @@ export async function fillDescription(page: Page, text: string): Promise<void> {
   await editor.fill(text)
 }
 
+// --- Route readiness (#215 / #203) -------------------------------------------
+//
+// `page.goto` resolves on `load`, which on a contended runner fires while vue-router's
+// FIRST navigation is still pending: that navigation awaits a lazily imported route
+// component (src/router/index.ts). vue-router attaches its history listener only from
+// `markAsReady()` once the first navigation finalizes (vue-router 4.6.4,
+// dist/vue-router.mjs:1393 called at :1459), so a hash navigation issued inside that
+// window updates `location` and is never observed by the router. Nothing re-emits it —
+// the URL reads as the new route while the app keeps rendering the old one, permanently.
+// That is the CI failure mode of #215: the next locator never attaches and the action
+// times out MUTE, blaming an element instead of the navigation that never happened.
+//
+// An in-app hash navigation (the router is long since ready) cannot hit that barrier, but
+// it has its own race: `goto` to a same-document URL resolves the moment `location`
+// changes, before the destination component has mounted. A spec that then reads the
+// destination is reading the PREVIOUS route's DOM.
+//
+// Both are the same assertion: do not proceed until the URL is the expected one AND the
+// destination route's own root is on screen. That is what these helpers assert, by name,
+// so the failure says "the route never mounted" instead of "waiting for locator(…)".
+
 /**
- * Go to the document list AND wait until the SPA has actually mounted that route.
+ * Route roots used for readiness — each is the destination component's OWN root element,
+ * verified destination-exclusive against src (a selector shared with another route would
+ * make readiness pass on the wrong page):
  *
- * The wait is not politeness — it is the only thing that makes a FOLLOWING hash
- * navigation reliable (#215). `page.goto` resolves on `load`, which on a contended runner
- * fires while vue-router's FIRST navigation is still pending: that navigation awaits the
- * lazily imported list component (src/router/index.ts:58). vue-router attaches its history
- * listener only from `markAsReady()` once the first navigation finalizes (vue-router 4.6.4,
- * dist/vue-router.mjs:1393 called at :1459), so a hash navigation issued inside that window
- * updates `location` and is never observed by the router. Nothing re-emits it — the URL
- * reads as the deep link while the app keeps rendering the list, permanently. That is the
- * CI failure: `.file-view-toggle` never attaches and the click times out mute.
- *
- * `.doc-list-page` is the list route's own root, so seeing it proves the first navigation
- * finalized and the router is listening for the next one.
+ *   documentList  `.doc-list-page`  — DocumentList.vue:572, the only occurrence in src.
+ *   documentEdit  `.doc-edit`       — DocumentEdit.vue:490 (add AND edit render it), the
+ *                                     only occurrence; the `doc-edit-*` siblings are
+ *                                     different class tokens and do not match.
+ *   documentPermissions
+ *                 `.permissions-view` — DocumentViewPermissions.vue:167, the only
+ *                                     occurrence, and rendered under `v-if="doc"`, so it
+ *                                     also proves the document itself loaded.
+ *   documentActivity
+ *                 `.doc-tab-content .p-datatable` — the Activity tab is the one
+ *                                     document-view child that has no root class of its
+ *                                     own (DocumentViewActivity.vue renders ActivityTable
+ *                                     directly, whose root is a bare <div>), and giving it
+ *                                     one is a product change this phase must not make. Its
+ *                                     table inside the document-view tab outlet
+ *                                     (DocumentView.vue `.doc-tab-content`, itself rendered
+ *                                     only under `v-else-if="doc"`) is the destination-
+ *                                     specific tab content: on the `/activity` hash — which
+ *                                     expectRouteReady pins first — it can only be
+ *                                     ActivityTable's DataTable.
  */
-export async function gotoDocumentList(page: Page): Promise<void> {
-  await page.goto('/#/document')
+export const ROUTE_ROOT = {
+  documentList: '.doc-list-page',
+  documentEdit: '.doc-edit',
+  documentPermissions: '.permissions-view',
+  documentActivity: '.doc-tab-content .p-datatable',
+} as const
+
+/**
+ * Assert the SPA has ARRIVED at `url`: the expected hash first (so a lost or redirected
+ * navigation is named as such), then the destination route's own visible root.
+ *
+ * Separate from gotoRouteReady because readiness is not always about a `goto`: a spec that
+ * RELOADS re-runs the whole first-navigation sequence, so its readiness belongs after the
+ * reload, not before it.
+ *
+ * `url` is the URL the SPA should END on — pass the post-redirect target for a route that
+ * redirects (e.g. `/#/document/view/<id>` lands on `…/content`).
+ *
+ * The root assertion runs in Playwright's strict mode: a selector that matches more than
+ * one element fails loudly, which is exactly the signal that it was not exclusive.
+ */
+export async function expectRouteReady(page: Page, url: string, routeRoot: string): Promise<void> {
+  const hashAt = url.indexOf('#')
+  const expectedHash = hashAt === -1 ? '' : url.slice(hashAt)
+  await expect
+    .poll(() => new URL(page.url()).hash, {
+      message: `the URL reached "${expectedHash}" (the SPA navigated where the spec asked)`,
+    })
+    .toBe(expectedHash)
   await expect(
-    page.locator('.doc-list-page'),
-    'the document list route mounted (vue-router now listens for the next hash navigation)',
+    page.locator(routeRoot),
+    `the "${expectedHash}" route mounted its own root "${routeRoot}" ` +
+      `(vue-router finalized this navigation and now listens for the next one)`,
   ).toBeVisible()
+}
+
+/**
+ * Go to `url` AND wait until the SPA has actually mounted that route. The wait is not
+ * politeness — see the block comment above.
+ */
+export async function gotoRouteReady(page: Page, url: string, routeRoot: string): Promise<void> {
+  await page.goto(url)
+  await expectRouteReady(page, url, routeRoot)
+}
+
+/** The document list, route-ready (#215). A thin wrapper — the barrier is gotoRouteReady's. */
+export async function gotoDocumentList(page: Page): Promise<void> {
+  await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
 }
 
 // The document-view file panel defaults to GRID (#58). Switch it to the enriched

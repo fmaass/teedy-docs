@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, gotoRouteReady, ROUTE_ROOT } from './helpers'
 
 // #58 — the anonymous/shared view is READ-ONLY and GRID-ONLY: files render as open/
 // download cards with no list toggle and none of the authenticated write affordances.
@@ -31,8 +31,9 @@ test('anonymous share view renders files read-only and grid-only', async ({ page
   const id = await seedDoc(page.request, title)
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  // Create a public share link on the document.
-  await page.goto(`/#/document/view/${id}/permissions`)
+  // Create a public share link on the document. This is the test's FIRST navigation, so
+  // it carries the #215 barrier: proceed only once the permissions route has mounted.
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   await page.getByPlaceholder('Link name (optional)').fill('e2e-grid')
   await page.getByRole('button', { name: 'Create link' }).click()
   await expect(page.getByText('Share link created')).toBeVisible()

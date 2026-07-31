@@ -49,7 +49,15 @@ async function keyboardAddTag(page: import('@playwright/test').Page, name: strin
   await page.keyboard.press('Enter')
 }
 
-test('right-click tag menu focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
+// QUARANTINED (@flaky, #213). The auto-opened Select overlay intermittently self-dismisses
+// before its filter input mounts, so `.p-select-overlay input.p-select-filter` never appears
+// and this test reds a required CI job on a coin flip. The behaviour it covers is real and the
+// assertions are sound — the QUARANTINE is on the flake, not on the feature — so the tag comes
+// off as soon as #213 (the overlay self-dismissal) is fixed, with no other change to this test.
+// Semantics of the tag: scripts/e2e-run.sh excludes `@flaky` from every default run (the
+// release-gating e2e job in build-deploy.yml), while the nightly Scheduled Regression sets
+// E2E_INCLUDE_FLAKY=1 (regression.yml) so the flake stays visible for triage.
+test('@flaky right-click tag menu focuses the filter and adds a tag by keyboard alone (#171, quarantined #213)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
   const name = tagName()
   const title = unique('tqm-focus-doc')
@@ -166,7 +174,12 @@ test('a scroll dismissal during the quick-menu auto-open raises no page error (#
   expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toEqual([])
 })
 
-test('slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
+// QUARANTINED (@flaky, #213) — the same exposure as the right-click test above, reached
+// through the slide-over instead of the context menu: both drive expectFilterFocused, so the
+// overlay self-dismissing before its filter input mounts reds this one identically. Quarantining
+// only its sibling would leave the flake free to red the nightly from here. Same terms: the tag
+// comes off when #213 is fixed, with no other change to this test.
+test('@flaky slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171, quarantined #213)', async ({ page, request, cleanup }) => {
   const name = tagName()
   const title = unique('slide-focus-doc')
   const tagId = await apiCreateTag(request, name)

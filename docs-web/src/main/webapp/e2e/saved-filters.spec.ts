@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures'
-import { unique, uniqueTag, confirmDanger, toggleTagFilter } from './helpers'
+import { unique, uniqueTag, confirmDanger, toggleTagFilter, gotoRouteReady, ROUTE_ROOT } from './helpers'
 
 // #42: per-user saved filters. A user builds a filter (an included tag + free-text
 // search), SAVES it by name, CLEARS the filter, RE-APPLIES it from the search-bar
@@ -29,7 +29,9 @@ async function createTag(page: Page, name: string) {
 }
 
 async function createDocWithTag(page: Page, title: string, tag: string) {
-  await page.goto('/#/document/add')
+  // In-app hash navigation (the caller is already on /#/tag): `goto` resolves as soon as
+  // `location` changes, so wait for the add form's own root before touching its fields.
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(title)
   await page.locator('#edit-tags').click()
   await page.getByRole('option', { name: tag }).click()

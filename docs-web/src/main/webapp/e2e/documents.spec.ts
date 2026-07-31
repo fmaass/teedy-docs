@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, uniqueTag, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, deleteDocApi, deleteTagApi, gotoRouteReady, ROUTE_ROOT } from './helpers'
 
 // Runs authenticated. Creates a document via the real Add-document form. On save,
 // Teedy routes to the full document view (DocumentEdit -> document-view). We then
@@ -47,7 +47,9 @@ test('creates a document, sees it in the list, and opens it', async ({ page }) =
 test('double-clicking a document row navigates to the full document view (D #11)', async ({ page }) => {
   const title = unique('D-dblclick')
 
-  await page.goto('/#/document/add')
+  // FIRST navigation of the test: the #215 barrier applies, and the save below is the
+  // in-app navigation it would swallow.
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(title)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
