@@ -140,6 +140,33 @@ public class FileUtil {
     }
 
     /**
+     * Create a new file whose MIME type is KNOWN, bypassing the guess.
+     *
+     * <p>{@link MimeTypeUtil#guessMimeType} asks the host ({@code Files.probeContentType}, then the JDK
+     * filename map), so the same bytes can type differently on two installations — the producer that
+     * already knows what it wrote (#197's raw {@code message/rfc822} mail capture) must not depend on
+     * that. Everything else is the normal create path: quota reservation, encryption, processing event.</p>
+     *
+     * @param name File name
+     * @param unencryptedFile Path to the unencrypted file
+     * @param fileSize File size
+     * @param language File language, can be null if associated to no document
+     * @param userId User ID creating the file
+     * @param documentId Associated document ID or null if no document
+     * @param mimeType The file's MIME type, stored as given
+     * @return File ID
+     * @throws Exception e
+     */
+    public static String createFileWithMimeType(String name, Path unencryptedFile, long fileSize, String language, String userId, String documentId, String mimeType) throws Exception {
+        String contentMac;
+        try (InputStream plaintext = Files.newInputStream(unencryptedFile)) {
+            contentMac = ContentMacUtil.computeMac(documentId, plaintext);
+        }
+        return createFile(name, null, unencryptedFile, fileSize, language, userId, documentId, contentMac, mimeType)
+                .getFileId();
+    }
+
+    /**
      * Create a new file, computing content-hash duplicate detection (#119) from a precomputed content MAC.
      *
      * <p>The MAC is computed by the caller (streaming the plaintext as the upload temp is written, so there
@@ -173,12 +200,36 @@ public class FileUtil {
      * @throws Exception e
      */
     public static FileCreatedResult createFile(String name, String previousFileId, Path unencryptedFile, long fileSize, String language, String userId, String documentId, String contentMac) throws Exception {
+        return createFile(name, previousFileId, unencryptedFile, fileSize, language, userId, documentId, contentMac, null);
+    }
+
+    /**
+     * Create a new file, as {@link #createFile(String, String, Path, long, String, String, String, String)},
+     * with an optional caller-supplied MIME type.
+     *
+     * @param name File name, can be null
+     * @param previousFileId ID of the previous version of the file, if the new file is a new version
+     * @param unencryptedFile Path to the unencrypted file
+     * @param fileSize File size
+     * @param language File language, can be null if associated to no document
+     * @param userId User ID creating the file
+     * @param documentId Associated document ID or null if no document
+     * @param contentMac Precomputed lowercase-hex content MAC, or null when the feature is off / no document
+     * @param explicitMimeType The known MIME type, or null to guess it from the file's bytes and name
+     * @return the rich creation result (file id + acquired-resource flags + advisory duplicate hint)
+     * @throws Exception e
+     */
+    public static FileCreatedResult createFile(String name, String previousFileId, Path unencryptedFile, long fileSize, String language, String userId, String documentId, String contentMac, String explicitMimeType) throws Exception {
         // Validate mime type
         String mimeType;
-        try {
-            mimeType = MimeTypeUtil.guessMimeType(unencryptedFile, name);
-        } catch (IOException e) {
-            throw new IOException("ErrorGuessMime", e);
+        if (explicitMimeType != null) {
+            mimeType = explicitMimeType;
+        } else {
+            try {
+                mimeType = MimeTypeUtil.guessMimeType(unencryptedFile, name);
+            } catch (IOException e) {
+                throw new IOException("ErrorGuessMime", e);
+            }
         }
 
         FileDao fileDao = new FileDao();

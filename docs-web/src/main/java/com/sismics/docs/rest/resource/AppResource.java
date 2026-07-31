@@ -541,6 +541,8 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} tag Tag for created documents
      * @apiSuccess {Boolean} dedicatedFolder True if the import folder is dedicated to Teedy (enables the
      * non-UIDPLUS generic-expunge fallback)
+     * @apiSuccess {Boolean} emlAttach True if the raw message is attached to each imported document as a
+     * .eml file
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission admin
      * @apiVersion 1.5.0
@@ -561,6 +563,9 @@ public class AppResource extends BaseResource {
         Boolean deleteImported = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED);
         // Not DB-seeded (default off), so read with a default rather than the throwing single-arg accessor.
         Boolean dedicatedFolder = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DEDICATED_FOLDER, false);
+        // (#197) Seeded, not defaulted -- on for a fresh install, off for an upgraded one (migration 064).
+        // Read with a default anyway so a database predating the seed cannot make this endpoint throw.
+        Boolean emlAttach = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_EML_ATTACH, false);
         Config hostnameConfig = configDao.getById(ConfigType.INBOX_HOSTNAME);
         Config portConfig = configDao.getById(ConfigType.INBOX_PORT);
         Boolean starttls = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_STARTTLS);
@@ -573,6 +578,7 @@ public class AppResource extends BaseResource {
         response.add("autoTagsEnabled", autoTags);
         response.add("deleteImported", deleteImported);
         response.add("dedicatedFolder", dedicatedFolder);
+        response.add("emlAttach", emlAttach);
         if (hostnameConfig == null) {
             response.addNull("hostname");
         } else {
@@ -628,6 +634,8 @@ public class AppResource extends BaseResource {
      * @apiParam {Boolean} deleteImported If true delete message from mailbox after import
      * @apiParam {Boolean} [dedicatedFolder] If true the import folder is dedicated to Teedy, enabling the
      * non-UIDPLUS generic-expunge fallback. Optional: when absent the stored value is preserved.
+     * @apiParam {Boolean} [emlAttach] If true the raw message is attached to each imported document as a
+     * .eml file. Optional: when absent the stored value is preserved.
      * @apiParam {String} hostname IMAP hostname
      * @apiParam {Integer} port IMAP port
      * @apiParam {String} username IMAP username
@@ -654,6 +662,7 @@ public class AppResource extends BaseResource {
                                 @FormParam("autoTagsEnabled") Boolean autoTagsEnabled,
                                 @FormParam("deleteImported") Boolean deleteImported,
                                 @FormParam("dedicatedFolder") Boolean dedicatedFolder,
+                                @FormParam("emlAttach") Boolean emlAttach,
                                 @FormParam("hostname") String hostname,
                                 @FormParam("port") String portStr,
                                 @FormParam("starttls") Boolean starttls,
@@ -683,6 +692,11 @@ public class AppResource extends BaseResource {
         // preserve the stored value.
         if (dedicatedFolder != null) {
             configDao.update(ConfigType.INBOX_DEDICATED_FOLDER, dedicatedFolder.toString());
+        }
+        // (#197) Same absent = preserve contract: an API client that predates this field must not silently
+        // turn the raw .eml attachment off (or on) just by saving the rest of the inbox configuration.
+        if (emlAttach != null) {
+            configDao.update(ConfigType.INBOX_EML_ATTACH, emlAttach.toString());
         }
         if (!Strings.isNullOrEmpty(hostname)) {
             configDao.update(ConfigType.INBOX_HOSTNAME, hostname);

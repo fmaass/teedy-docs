@@ -897,6 +897,8 @@
       "auto_tags_hint": "Appliquer les tags écrits dans le corps du message, préfixés par #.",
       "delete_imported": "Supprimer les messages après importation",
       "delete_imported_hint": "Retirer chaque message de la boîte aux lettres une fois qu'il a été importé.",
+      "eml_attach": "Joindre le message d'origine",
+      "eml_attach_hint": "Enregistrer aussi chaque message importé sous forme de fichier .eml sur le document, à côté des pièces jointes extraites. Si le quota de stockage est insuffisant, le document et ses pièces jointes sont importés malgré tout.",
       "save_and_test": "Enregistrer et tester la connexion",
       "test_success": "Connexion réussie — {count} message(s) non lu(s) trouvé(s).",
       "test_failed": "Échec du test de connexion. Vérifiez les paramètres et réessayez.",

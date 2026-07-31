@@ -897,6 +897,8 @@
       "auto_tags_hint": "套用寫在郵件內文中、以 # 為前綴的標籤。",
       "delete_imported": "匯入後刪除郵件",
       "delete_imported_hint": "每封郵件匯入後即從信箱移除。",
+      "eml_attach": "附加原始郵件",
+      "eml_attach_hint": "將每封匯入的郵件同時以 .eml 檔案形式儲存於文件中，與擷取出的附件並列。若儲存配額不足以保存，文件及其附件仍會照常匯入。",
       "save_and_test": "儲存並測試連線",
       "test_success": "連線成功 — 找到 {count} 封未讀郵件。",
       "test_failed": "連線測試失敗。請檢查設定後再試一次。",

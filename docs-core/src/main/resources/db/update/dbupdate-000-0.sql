@@ -35,6 +35,13 @@ create index IDX_LOG_IDENTITY_C on T_AUDIT_LOG (LOG_IDENTITY_C);
 
 insert into T_CONFIG(CFG_ID_C, CFG_VALUE_C) values('DB_VERSION', '0');
 insert into T_CONFIG(CFG_ID_C, CFG_VALUE_C) values('LUCENE_DIRECTORY_STORAGE', 'FILE');
+-- #197 raw .eml attachment, ON for a FRESH installation. This script runs only when the database is
+-- created (DbOpenHelper.open: onCreate() is reached only when T_CONFIG has no DB_VERSION row), so this is
+-- the one place that can distinguish a new installation from an upgraded one. dbupdate-064-0.sql inserts
+-- the same key as 'false' when it is ABSENT, which is exactly the upgrade case: an existing installation
+-- keeps producing what it produced before, and never starts charging a second copy of every imported mail
+-- against its operator's quota unasked.
+insert into T_CONFIG(CFG_ID_C, CFG_VALUE_C) values('INBOX_EML_ATTACH', 'true');
 insert into T_BASE_FUNCTION(BAF_ID_C) values('ADMIN');
 insert into T_LOCALE(LOC_ID_C) values('en');
 insert into T_LOCALE(LOC_ID_C) values('fr');

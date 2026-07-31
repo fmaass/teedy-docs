@@ -897,6 +897,8 @@
       "auto_tags_hint": "Zbato etiketat e shkruara në trupin e mesazhit, të paraprira me #.",
       "delete_imported": "Fshi mesazhet pas importimit",
       "delete_imported_hint": "Hiq çdo mesazh nga kutia postare pasi të jetë importuar.",
+      "eml_attach": "Bashkëngjit mesazhin origjinal",
+      "eml_attach_hint": "Ruaj çdo mesazh të importuar edhe si skedar .eml në dokument, krahas bashkëngjitjeve të nxjerra. Nëse kuota e hapësirës nuk mjafton, dokumenti dhe bashkëngjitjet e tij importohen gjithsesi.",
       "save_and_test": "Ruaj dhe testo lidhjen",
       "test_success": "Lidhja u realizua — u gjetën {count} mesazh(e) të palexuar.",
       "test_failed": "Testi i lidhjes dështoi. Kontrolloni cilësimet dhe provoni përsëri.",

@@ -63,6 +63,8 @@ public class MimeTypeUtil {
                 return "mp4";
             case MimeType.VIDEO_WEBM:
                 return "webm";
+            case MimeType.MESSAGE_RFC822:
+                return "eml";
             default:
                 return "bin";
         }

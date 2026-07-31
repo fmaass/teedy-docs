@@ -897,6 +897,8 @@
       "auto_tags_hint": "Zastosuj etykiety zapisane w treści wiadomości, poprzedzone znakiem #.",
       "delete_imported": "Usuń wiadomości po zaimportowaniu",
       "delete_imported_hint": "Usuń każdą wiadomość ze skrzynki pocztowej po jej zaimportowaniu.",
+      "eml_attach": "Dołącz oryginalną wiadomość",
+      "eml_attach_hint": "Zapisuj każdą zaimportowaną wiadomość również jako plik .eml w dokumencie, obok wyodrębnionych załączników. Jeśli zabraknie na to limitu miejsca, dokument i jego załączniki i tak zostaną zaimportowane.",
       "save_and_test": "Zapisz i przetestuj połączenie",
       "test_success": "Połączenie udane — znaleziono {count} nieprzeczytanych wiadomości.",
       "test_failed": "Test połączenia nie powiódł się. Sprawdź ustawienia i spróbuj ponownie.",

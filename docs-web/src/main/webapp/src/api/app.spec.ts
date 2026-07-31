@@ -190,6 +190,20 @@ describe('inbox config api', () => {
     expect(params.get('starttls')).toBe('false')
   })
 
+  it('saveInboxConfig sends emlAttach when the caller owns it and omits it otherwise (#197)', async () => {
+    await saveInboxConfig({ enabled: true, autoTagsEnabled: false, deleteImported: false, starttls: true, emlAttach: true })
+    expect((clientMock.post.mock.calls[0][1] as URLSearchParams).get('emlAttach')).toBe('true')
+
+    clientMock.post.mockClear()
+    await saveInboxConfig({ enabled: true, autoTagsEnabled: false, deleteImported: false, starttls: true, emlAttach: false })
+    expect((clientMock.post.mock.calls[0][1] as URLSearchParams).get('emlAttach')).toBe('false')
+
+    // Omitted by the caller -> not sent, so the server preserves whatever is stored.
+    clientMock.post.mockClear()
+    await saveInboxConfig({ enabled: true, autoTagsEnabled: false, deleteImported: false, starttls: true })
+    expect((clientMock.post.mock.calls[0][1] as URLSearchParams).has('emlAttach')).toBe(false)
+  })
+
   it('saveInboxConfig sends optional fields when filled and omits an empty password', async () => {
     await saveInboxConfig({
       enabled: true, autoTagsEnabled: true, deleteImported: true, starttls: true,

@@ -28,7 +28,6 @@ import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.ExportGuard;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.docs.core.util.DocumentUtil;
-import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.MetadataUtil;
 import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.jpa.PaginatedList;
@@ -721,13 +720,13 @@ public class DocumentResource extends BaseResource {
         // Validate input data
         ValidationUtil.validateRequired(fileBodyPart, "file");
 
-        // Read the EML file and add its files. The original EML temp is created inside the
-        // cleanup scope so a failure during its multipart copy also deletes it. EmailUtil
-        // extracts each attachment into its own plaintext temp file; ownership of a temp
-        // transfers to the async event queued by FileUtil.createFile only once that call
-        // returns normally. Any temp not handed off (copy/parse/createFile failure) is
-        // deleted by the finally below.
+        // Read the EML file and add its files. Every plaintext temp — the uploaded message itself and
+        // each attachment EmailUtil extracts — is created inside the cleanup scope, and ownership of one
+        // transfers to the async event queued by the file create only once that call returns normally.
+        // Any temp not handed off (copy/parse/create failure, or a quota-skipped raw message) is deleted
+        // by the finally below.
         java.nio.file.Path unencryptedFile = null;
+        long unencryptedFileSize = 0;
         Properties props = new Properties();
         Session mailSession = Session.getDefaultInstance(props, null);
         EmailUtil.MailContent mailContent = new EmailUtil.MailContent();
@@ -736,7 +735,7 @@ public class DocumentResource extends BaseResource {
             // Save the uploaded EML to a temporary file
             try {
                 unencryptedFile = AppContext.getInstance().getFileService().createTemporaryFile();
-                Files.copy(fileBodyPart.getValueAs(InputStream.class), unencryptedFile, StandardCopyOption.REPLACE_EXISTING);
+                unencryptedFileSize = Files.copy(fileBodyPart.getValueAs(InputStream.class), unencryptedFile, StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException e) {
                 throw new ServerException("StreamError", "Error reading the input file", e);
             }
@@ -778,14 +777,12 @@ public class DocumentResource extends BaseResource {
             documentCreatedAsyncEvent.setDocumentId(document.getId());
             ThreadLocalContext.get().addAsyncEvent(documentCreatedAsyncEvent);
 
-            // Add files to the document
+            // Add files to the document: the extracted attachments, then (#197) the uploaded message
+            // itself — its ORIGINAL bytes, unconditionally, and last so it can never take headroom an
+            // attachment needed. Temps the helper records in handedOffTemps now belong to a queued event.
             try {
-                for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
-                    FileUtil.createFile(fileContent.getName(), null, fileContent.getFile(), fileContent.getSize(),
-                            document.getLanguage(), principal.getId(), document.getId());
-                    // Ownership transferred to the async event queued by createFile
-                    handedOffTemps.add(fileContent.getFile());
-                }
+                DocumentResourceHelper.attachEmailFiles(mailContent, unencryptedFile, unencryptedFileSize,
+                        document, principal.getId(), handedOffTemps);
             } catch (IOException e) {
                 throw new ClientException(e.getMessage(), e.getMessage(), e);
             } catch (Exception e) {
@@ -796,9 +793,12 @@ public class DocumentResource extends BaseResource {
                     .add("id", document.getId());
             return Response.ok().entity(response.build()).build();
         } finally {
-            // Delete the original EML temp (only needed for parsing) and any attachment
-            // temp whose ownership was not handed off to a queued async event.
-            deleteTempIfExists(unencryptedFile, "EML");
+            // Delete every temp whose ownership was not handed off — the uploaded message included: since
+            // #197 it is attached (and then owned by its event) on the success path, but on any failure,
+            // and when the quota rejected it, this request is still its only owner.
+            if (!handedOffTemps.contains(unencryptedFile)) {
+                deleteTempIfExists(unencryptedFile, "EML");
+            }
             for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
                 if (!handedOffTemps.contains(fileContent.getFile())) {
                     deleteTempIfExists(fileContent.getFile(), "EML attachment");

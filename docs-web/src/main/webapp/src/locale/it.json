@@ -897,6 +897,8 @@
       "auto_tags_hint": "Applica i tag scritti nel corpo del messaggio, preceduti da #.",
       "delete_imported": "Elimina i messaggi dopo l'importazione",
       "delete_imported_hint": "Rimuovi ogni messaggio dalla casella di posta una volta importato.",
+      "eml_attach": "Allega il messaggio originale",
+      "eml_attach_hint": "Salva ogni messaggio importato anche come file .eml nel documento, accanto agli allegati estratti. Se la quota di archiviazione non basta, il documento e i suoi allegati vengono importati comunque.",
       "save_and_test": "Salva e verifica connessione",
       "test_success": "Connessione riuscita — trovato/i {count} messaggio/i non letto/i.",
       "test_failed": "Test di connessione non riuscito. Controlla le impostazioni e riprova.",

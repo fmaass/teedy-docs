@@ -897,6 +897,8 @@
       "auto_tags_hint": "Aplicar las etiquetas escritas en el cuerpo del mensaje, precedidas de #.",
       "delete_imported": "Eliminar los mensajes tras la importación",
       "delete_imported_hint": "Eliminar cada mensaje del buzón una vez que se ha importado.",
+      "eml_attach": "Adjuntar el correo original",
+      "eml_attach_hint": "Guardar también cada mensaje importado como archivo .eml en el documento, junto a los adjuntos extraídos. Si la cuota de almacenamiento no alcanza, el documento y sus adjuntos se importan igualmente.",
       "save_and_test": "Guardar y probar la conexión",
       "test_success": "Conexión correcta: se encontraron {count} mensaje(s) sin leer.",
       "test_failed": "La prueba de conexión falló. Compruebe los ajustes e inténtelo de nuevo.",

@@ -269,10 +269,10 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/FileUtil.java:376:59",
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/FileUtil.java:427:59",
       "sink_line": "        try (InputStream plaintext = Files.newInputStream(plaintextFile)) {",
       "finding": "CodeQL path-injection: reading the decrypted attach temp for the content MAC flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-24: sink shifted from line 366 to 376 vs 38cb0566b62558b88ea81095e1cbe21b66d9a2a1; content verified byte-identical.",
+      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow. Coordinates refreshed 2026-07-24: sink shifted from line 366 to 376 vs 38cb0566b62558b88ea81095e1cbe21b66d9a2a1; content verified byte-identical. Coordinates refreshed 2026-07-31: sink shifted from line 376 to 427 vs HEAD; content verified byte-identical.",
       "owner": "fmaass",
       "introduced": "2026-07-21",
       "expires": "2026-10-15",

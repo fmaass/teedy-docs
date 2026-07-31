@@ -897,6 +897,8 @@
       "auto_tags_hint": "Aplicar etiquetas escritas no corpo da mensagem, prefixadas com #.",
       "delete_imported": "Eliminar mensagens após a importação",
       "delete_imported_hint": "Remover cada mensagem da caixa de correio depois de ter sido importada.",
+      "eml_attach": "Anexar a mensagem original",
+      "eml_attach_hint": "Guardar também cada mensagem importada como ficheiro .eml no documento, junto aos anexos extraídos. Se a quota de armazenamento não chegar, o documento e os seus anexos são importados na mesma.",
       "save_and_test": "Guardar e testar ligação",
       "test_success": "Ligação estabelecida — {count} mensagem(ns) não lida(s) encontrada(s).",
       "test_failed": "O teste de ligação falhou. Verifique as definições e tente novamente.",

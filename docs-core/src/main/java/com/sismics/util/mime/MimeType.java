@@ -32,5 +32,7 @@ public class MimeType {
 
     public static final String VIDEO_MP4 = "video/mp4";
 
+    public static final String MESSAGE_RFC822 = "message/rfc822";
+
     public static final String DEFAULT = "application/octet-stream";
 }

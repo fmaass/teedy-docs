@@ -897,6 +897,8 @@
       "auto_tags_hint": "Apply tags written in the message body, prefixed with #.",
       "delete_imported": "Delete messages after import",
       "delete_imported_hint": "Remove each message from the mailbox once it has been imported.",
+      "eml_attach": "Attach the original email",
+      "eml_attach_hint": "Also store each imported message as a .eml file on the document, next to its extracted attachments. If the storage quota is too tight for it, the document and its attachments are still imported.",
       "save_and_test": "Save & test connection",
       "test_success": "Connection succeeded — {count} unread message(s) found.",
       "test_failed": "Connection test failed. Check the settings and try again.",

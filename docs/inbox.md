@@ -24,6 +24,7 @@ the connection fields:
 | **Tag for imported documents** | Optional. Every imported document is given this tag |
 | **Detect tags from the message** | When on, `#tag` tokens in the subject line are matched against existing tags and applied (see [Auto-tagging](#auto-tagging-from-the-subject) below) |
 | **Delete messages after import** | When on, each message is removed from the mailbox once imported (see [Delete-after-import](#delete-after-import) below) |
+| **Attach the original email** | When on, the raw message is stored on the document as a `.eml` file in addition to its extracted attachments (see [Attaching the original email](#attaching-the-original-email) below) |
 
 Two buttons save the configuration:
 
@@ -54,6 +55,34 @@ each run it connects to the configured folder and processes every **unread**
   scanned PDF forwarded by email is attached and (being a file) goes through the
   normal OCR and [tag-match-rule](tags-and-filtering.md#auto-tagging-tag-match-rules)
   pipeline.
+- **The message itself** is added as a `.eml` file when **Attach the original email**
+  is on (see below).
+
+## Attaching the original email
+
+The description only holds an excerpt of the body (the first 4000 characters), and
+the extracted attachments do not preserve headers. With **Attach the original email**
+on, Teedy also stores the message exactly as it arrived — headers, body and all — as
+a `.eml` file on the document, so nothing about the mail is lost.
+
+- The file is named after the subject (`Invoice 42.eml`; a message with no usable
+  subject becomes `message.eml`) and is typed `message/rfc822`. It is stored and
+  downloadable; Teedy does not render it in the browser.
+- The extracted attachments are **kept as well**. The bytes are therefore stored
+  twice — once inside the `.eml`, once as the extracted file — which is what keeps
+  OCR, content search and thumbnails working on forwarded documents.
+- Both copies count towards the owner's **storage quota**. If the quota is too tight
+  for the raw message, the document, its attachments and its tags are imported
+  anyway, just without the `.eml`, and a warning is written to the server log. The
+  extra copy never costs you a mail that would have imported before.
+- **New installations start with this on; installations upgraded from an earlier
+  Teedy start with it off**, so an upgrade never begins consuming extra quota
+  unasked. Either way the switch in **Settings → Inbox** is what changes it.
+- It applies to what is imported **from now on** — existing documents are not
+  revisited.
+
+Uploading an `.eml` file yourself (**Documents → Import EML**) always attaches the
+uploaded message the same way; that path has no switch, because you chose the file.
 
 ### Who owns the imported document
 

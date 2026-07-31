@@ -23,6 +23,7 @@ const form = reactive<InboxConfig>({
   enabled: false,
   autoTagsEnabled: false,
   deleteImported: false,
+  emlAttach: false,
   starttls: true,
   hostname: '',
   port: 993,
@@ -43,6 +44,7 @@ watch(inboxConfig, (config) => {
   form.enabled = config.enabled === true
   form.autoTagsEnabled = config.autoTagsEnabled === true
   form.deleteImported = config.deleteImported === true
+  form.emlAttach = config.emlAttach === true
   form.starttls = config.starttls !== false
   form.hostname = config.hostname ?? ''
   form.port = config.port ?? 993
@@ -173,6 +175,14 @@ async function onSaveAndTest() {
             <span>{{ t('ui.inbox.delete_imported') }}</span>
           </div>
           <small class="field-hint">{{ t('ui.inbox.delete_imported_hint') }}</small>
+        </div>
+
+        <div class="form-field">
+          <div class="inline-toggle">
+            <ToggleSwitch v-model="form.emlAttach" inputId="inbox-eml-attach" />
+            <span>{{ t('ui.inbox.eml_attach') }}</span>
+          </div>
+          <small class="field-hint">{{ t('ui.inbox.eml_attach_hint') }}</small>
         </div>
       </template>
 

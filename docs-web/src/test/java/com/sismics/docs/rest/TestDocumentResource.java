@@ -830,9 +830,16 @@ public class TestDocumentResource extends BaseJerseyTest {
      */
     @Test
     public void testEmlImport() throws Exception {
-        // Login document_eml
-        clientUtil.createUser("document_eml");
+        // Login document_eml. 2 MB of quota: since #197 the import stores the 718 KB message itself on top
+        // of its 530 KB of extracted attachments, which no longer fits the 1 MB default.
+        clientUtil.createUser("document_eml", 2_000_000);
         String documentEmlToken = clientUtil.login("document_eml");
+
+        // (#197) The upload ingress attaches the uploaded message unconditionally: the user handed us
+        // that exact file. Pin it with the INBOX toggle explicitly OFF — that key governs the IMAP
+        // ingress only, and must not gate this one.
+        com.sismics.docs.core.util.TransactionUtil.handle(() -> new com.sismics.docs.core.dao.ConfigDao()
+                .update(com.sismics.docs.core.constant.ConfigType.INBOX_EML_ATTACH, "false"));
 
         // Import a document as EML
         JsonObject json;
@@ -870,13 +877,74 @@ public class TestDocumentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, documentEmlToken)
                 .get(JsonObject.class);
         JsonArray files = json.getJsonArray("files");
-        Assertions.assertEquals(2, files.size());
+        Assertions.assertEquals(3, files.size());
         Assertions.assertEquals("14_UNHCR_nd.pdf", files.getJsonObject(0).getString("name"));
         Assertions.assertEquals(251216L, files.getJsonObject(0).getJsonNumber("size").longValue());
         Assertions.assertEquals("application/pdf", files.getJsonObject(0).getString("mimetype"));
         Assertions.assertEquals("refugee status determination.pdf", files.getJsonObject(1).getString("name"));
         Assertions.assertEquals(279276L, files.getJsonObject(1).getJsonNumber("size").longValue());
         Assertions.assertEquals("application/pdf", files.getJsonObject(1).getString("mimetype"));
+
+        // (#197) The raw message itself, attached LAST, typed explicitly (never guessed from the host's
+        // MIME table) and named from the subject, at the byte size of the uploaded original.
+        Assertions.assertEquals("subject here.eml", files.getJsonObject(2).getString("name"));
+        Assertions.assertEquals("message/rfc822", files.getJsonObject(2).getString("mimetype"));
+        Assertions.assertEquals(717939L, files.getJsonObject(2).getJsonNumber("size").longValue());
+    }
+
+    /**
+     * (#197) An EML upload whose attachments fit but whose raw message does NOT must still import: the
+     * document and both extracted attachments are created, the raw message is skipped for quota, and the
+     * request succeeds. The raw copy is strictly additive — it never takes headroom an attachment needed,
+     * and never turns an upload that worked before #197 into a 400.
+     *
+     * @throws Exception e
+     */
+    @Test
+    public void testEmlImportOverQuotaRawMessageStillImports() throws Exception {
+        // Room for both attachments (251216 + 279276 = 530492) but not for the 717939-byte raw message.
+        clientUtil.createUser("document_eml_rawquota", 630492);
+        String token = clientUtil.login("document_eml_rawquota");
+
+        // Capture the temps this import creates: the raw message temp is created FIRST (at the top of
+        // importEml), and on the quota-skip path nobody takes ownership of it — so the request itself
+        // must delete it rather than leak a plaintext copy of the mail.
+        java.util.List<Path> created = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        JsonObject json;
+        com.sismics.docs.core.service.FileService.setTemporaryFileListener(created::add);
+        try (InputStream is = Resources.getResource("file/test_mail.eml").openStream()) {
+            StreamDataBodyPart part = new StreamDataBodyPart("file", is, "test_mail.eml");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                json = target().register(MultiPartFeature.class)
+                        .path("/document/eml").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                        .put(Entity.entity(multiPart.bodyPart(part), MediaType.MULTIPART_FORM_DATA_TYPE),
+                                JsonObject.class);
+            }
+        } finally {
+            com.sismics.docs.core.service.FileService.setTemporaryFileListener(null);
+        }
+
+        String documentId = json.getString("id");
+        Assertions.assertNotNull(documentId, "the import must succeed without the raw message");
+
+        Assertions.assertEquals(3, created.size(),
+                "the import must create exactly the raw message temp + 2 attachment temps: " + created);
+        Assertions.assertFalse(Files.exists(created.get(0)),
+                "the skipped raw message temp must be deleted, not leaked: " + created.get(0));
+
+        json = target().path("/file/list")
+                .queryParam("id", documentId)
+                .request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        JsonArray files = json.getJsonArray("files");
+        Assertions.assertEquals(2, files.size(),
+                "both attachments must survive; only the over-quota raw message is skipped: " + files);
+        for (int i = 0; i < files.size(); i++) {
+            Assertions.assertNotEquals("message/rfc822", files.getJsonObject(i).getString("mimetype"),
+                    "the over-quota raw message must not be attached");
+        }
     }
 
     /**

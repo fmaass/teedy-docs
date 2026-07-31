@@ -461,6 +461,9 @@
                   "dedicatedFolder": {
                     "type": "string"
                   },
+                  "emlAttach": {
+                    "type": "string"
+                  },
                   "hostname": {
                     "type": "string"
                   },

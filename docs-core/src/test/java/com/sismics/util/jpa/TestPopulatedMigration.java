@@ -32,7 +32,7 @@ import java.util.List;
  *       whose ACL_SOURCEID_C references a route-model id) plus retained USER-type ACLs.</li>
  * </ul>
  * It then runs the REAL upgrade path ({@link DbOpenHelper#open()} reading DB_VERSION=36)
- * and asserts that after the run: db.version==63, the retired rows are gone (the workflow/
+ * and asserts that after the run: db.version==64, the retired rows are gone (the workflow/
  * vocabulary tables are dropped by 037/038 and reinstated empty by 042, seeded with the
  * default review model + full vocabulary), and every retained row + FK relationship survives intact.
  *
@@ -42,8 +42,8 @@ import java.util.List;
 public class TestPopulatedMigration {
 
     /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062
-     * + group-membership dedup & active-unique index 063). */
-    private static final int TARGET_VERSION = 63;
+     * + group-membership dedup & active-unique index 063 + raw .eml attachment toggle 064). */
+    private static final int TARGET_VERSION = 64;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -861,6 +861,17 @@ public class TestPopulatedMigration {
         Assertions.assertEquals(1, count(connection, "T_ACL", "ACL_SOURCEID_C = 'rtm-1'"),
                 "seed: a route-model-scoped acl must exist pre-migration");
 
+        // (#197) Model the real input of an upgrade: a database created before this feature has NO
+        // INBOX_EML_ATTACH row. The fixture builds its schema with TODAY's base install script, which
+        // seeds the row for fresh installations, so remove it here — otherwise this test would assert the
+        // fresh-install branch while claiming to test the upgrade one.
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("delete from T_CONFIG where CFG_ID_C = 'INBOX_EML_ATTACH'");
+        }
+        connection.commit();
+        Assertions.assertNull(configValue(connection, "INBOX_EML_ATTACH"),
+                "seed: the raw .eml toggle must be absent pre-migration");
+
         // Snapshot of retained data that must survive untouched.
         Assertions.assertEquals(SEED_VERSION, dbVersion(connection), "seed: DB_VERSION must be 36 before upgrade");
 
@@ -886,6 +897,12 @@ public class TestPopulatedMigration {
         // 5a. Landed on target version.
         Assertions.assertEquals(TARGET_VERSION, dbVersion(connection),
                 "DB_VERSION must be " + TARGET_VERSION + " after the full upgrade path");
+
+        // 5a-bis. (#197) Migration 064 seeded the raw .eml attachment toggle OFF: an upgraded
+        //         installation keeps importing exactly what it imported before, and starts charging
+        //         nothing extra against its quota, until an operator turns the feature on.
+        Assertions.assertEquals("false", configValue(connection, "INBOX_EML_ATTACH"),
+                "064 must seed the raw .eml attachment toggle OFF on an upgrade");
 
         // 5a'. Migration 040 created the tag-leading covering index on T_DOCUMENT_TAG.
         Assertions.assertTrue(indexExists(connection, "IDX_DOT_TAG"),
@@ -1933,6 +1950,16 @@ public class TestPopulatedMigration {
         try (Statement s = connection.createStatement(); ResultSet rs = s.executeQuery(sql)) {
             Assertions.assertTrue(rs.next(), "count query returned no row: " + sql);
             return rs.getInt(1);
+        }
+    }
+
+    /**
+     * The value of a T_CONFIG row, or null when the row is absent.
+     */
+    private static String configValue(Connection connection, String key) throws Exception {
+        try (Statement s = connection.createStatement();
+             ResultSet rs = s.executeQuery("select CFG_VALUE_C from T_CONFIG where CFG_ID_C = '" + key + "'")) {
+            return rs.next() ? rs.getString(1) : null;
         }
     }
 

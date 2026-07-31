@@ -14,16 +14,19 @@ import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.File;
 import com.sismics.docs.core.util.CredentialLifecycleUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
+import com.sismics.docs.core.util.EmlAttachmentUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.util.RestUtil;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.EmailUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
 import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
 import jakarta.ws.rs.NotFoundException;
+import java.nio.file.Path;
 import java.text.MessageFormat;
 import java.util.Collection;
 import java.util.Date;
@@ -103,6 +106,41 @@ public final class DocumentResourceHelper {
         String sanitized = DescriptionSanitizer.sanitize(description);
         // The stored contract: sanitized HTML must fit the widened column.
         return ValidationUtil.validateLength(sanitized, "description", 0, DESCRIPTION_STORED_MAX, true);
+    }
+
+    /**
+     * Attach an imported email's files to its document: every extracted attachment first, then (#197)
+     * the raw RFC822 message itself, LAST.
+     *
+     * <p>The order is a quota-safety requirement, not presentation: the attachments claim their storage
+     * headroom exactly as they did before the raw copy existed, and only the raw file's own quota
+     * rejection is swallowed (inside {@link EmlAttachmentUtil#attachRawMessage}) — so an upload that
+     * imported cleanly before #197 still imports, simply without the {@code .eml}. Any other failure
+     * propagates to the caller, which owns the HTTP mapping.</p>
+     *
+     * <p>Ownership: every temp whose {@code createFile} returned normally is recorded in
+     * {@code handedOffTemps}, meaning a queued processing event now owns it and the caller's cleanup
+     * must NOT delete it. Temps absent from that set are still the caller's to delete.</p>
+     *
+     * @param mailContent Parsed mail content (its attachment temps)
+     * @param rawMessage Plaintext temp holding the exact bytes of the message itself
+     * @param rawMessageSize Size of the raw message in bytes
+     * @param document Document to attach to
+     * @param userId User the files belong to (and whose quota is charged)
+     * @param handedOffTemps Collects every temp whose ownership transferred to a queued event
+     * @throws Exception any failure other than the raw message's quota rejection
+     */
+    public static void attachEmailFiles(EmailUtil.MailContent mailContent, Path rawMessage, long rawMessageSize,
+                                        Document document, String userId, Set<Path> handedOffTemps) throws Exception {
+        for (EmailUtil.FileContent fileContent : mailContent.getFileContentList()) {
+            FileUtil.createFile(fileContent.getName(), null, fileContent.getFile(), fileContent.getSize(),
+                    document.getLanguage(), userId, document.getId());
+            handedOffTemps.add(fileContent.getFile());
+        }
+        if (EmlAttachmentUtil.attachRawMessage(mailContent.getSubject(), rawMessage, rawMessageSize,
+                document.getLanguage(), userId, document.getId())) {
+            handedOffTemps.add(rawMessage);
+        }
     }
 
     /**

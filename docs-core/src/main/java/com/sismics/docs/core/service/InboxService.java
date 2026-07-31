@@ -38,6 +38,7 @@ import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
+import com.sismics.docs.core.model.context.AppContext;
 import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.model.jpa.Document;
 import com.sismics.docs.core.model.jpa.InboxImportReceipt;
@@ -45,6 +46,7 @@ import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.util.ConfigUtil;
 import com.sismics.docs.core.util.DescriptionSanitizer;
 import com.sismics.docs.core.util.DocumentUtil;
+import com.sismics.docs.core.util.EmlAttachmentUtil;
 import com.sismics.docs.core.util.FileUtil;
 import com.sismics.docs.core.util.ImapSourceIdentity;
 import com.sismics.docs.core.util.TransactionUtil;
@@ -255,6 +257,7 @@ public class InboxService extends AbstractScheduledService {
             config.folder = ConfigUtil.getConfigStringValue(ConfigType.INBOX_FOLDER);
             config.deleteImported = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DELETE_IMPORTED, false);
             config.dedicatedFolder = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_DEDICATED_FOLDER, false);
+            config.attachEml = ConfigUtil.getConfigBooleanValue(ConfigType.INBOX_EML_ATTACH, false);
             config.defaultLanguage = ConfigUtil.getConfigStringValue(ConfigType.DEFAULT_LANGUAGE);
             config.inboxTagId = ConfigUtil.getConfigStringValue(ConfigType.INBOX_TAG);
             config.tagMap = getAllTags();
@@ -351,6 +354,14 @@ public class InboxService extends AbstractScheduledService {
                 item.sender = firstSenderAddress(message.getFrom());
                 item.mailContent.setSubject(message.getSubject());
                 item.mailContent.setDate(message.getSentDate());
+                // (#197) Capture the raw message BEFORE parsing it: the parse loads the body, after which
+                // the same call would re-serialize the parsed form instead of streaming the bytes that
+                // actually arrived. The temp path is recorded on the work item FIRST, so it is in the
+                // cleanup ledger even if the capture itself fails halfway.
+                if (config.attachEml) {
+                    item.rawTemp = AppContext.getInstance().getFileService().createTemporaryFile();
+                    item.rawSize = EmailUtil.writeRawMessage(message, item.rawTemp);
+                }
                 EmailUtil.parseMailContent(message, item.mailContent);
                 items.add(item);
             } catch (Exception e) {
@@ -369,6 +380,23 @@ public class InboxService extends AbstractScheduledService {
      * per-message failure is isolated so the loop continues with the remaining messages.
      */
     private boolean importWorkItem(WorkItem item, InboxConfig config, Folder inbox) {
+        try {
+            return doImportWorkItem(item, config, inbox);
+        } finally {
+            // (#197) The raw message temp has no other owner on two paths that both END here without an
+            // exception: the quota-skipped attach (the import COMMITS, so no rollback cleanup fires) and
+            // the duplicate fast-path (nothing was ever handed to FileUtil). Deleting it here covers both,
+            // and is skipped only once FileUtil.createFile has taken ownership of it.
+            if (!item.rawTempHandedOff) {
+                deleteRawTemp(item);
+            }
+        }
+    }
+
+    /**
+     * The import proper; {@link #importWorkItem} wraps it with the raw-message temp cleanup.
+     */
+    private boolean doImportWorkItem(WorkItem item, InboxConfig config, Folder inbox) {
         try {
             TransactionUtil.handle(() -> {
                 InboxImportReceiptDao receiptDao = new InboxImportReceiptDao();
@@ -712,6 +740,18 @@ public class InboxService extends AbstractScheduledService {
                     document.getLanguage(), userId, document.getId());
         }
 
+        // (#197) Attach the raw message LAST, so the extracted attachments claim their storage headroom
+        // first and exactly as they did before this feature existed. Only THIS file's quota rejection is
+        // swallowed (inside the attach helper): the document, its attachments, its receipt and the ack all
+        // survive an over-quota raw copy, which is what keeps an over-quota mail from failing the whole
+        // import and re-driving the poller every cycle.
+        if (item.rawTemp != null && EmlAttachmentUtil.attachRawMessage(mailContent.getSubject(), item.rawTemp,
+                item.rawSize, document.getLanguage(), userId, document.getId())) {
+            // Ownership passed to the processing event queued by createFile (which deletes it after the
+            // commit, or on rollback through the compensation FileUtil registers).
+            item.rawTempHandedOff = true;
+        }
+
         return document.getId();
     }
 
@@ -746,9 +786,13 @@ public class InboxService extends AbstractScheduledService {
     }
 
     /**
-     * Delete a work item's parsed attachment temps. Called on every path that does NOT hand them to
-     * FileUtil (parser failure, duplicate fast-path, lost-claim race). Idempotent and guarded so a
-     * failure never aborts the cycle.
+     * Delete a work item's parsed attachment temps AND its captured raw-message temp. Called on every
+     * path that does NOT hand them to FileUtil (parser failure, duplicate fast-path, lost-claim race).
+     * Idempotent and guarded so a failure never aborts the cycle.
+     *
+     * <p>The raw temp is captured BEFORE the parse (#197), so a message that fails to materialize after a
+     * successful capture is skipped by {@link #materialize} without ever reaching the import — this is
+     * the only owner that decrypted copy would otherwise have.</p>
      */
     private void deleteParsedTemps(WorkItem item) {
         if (item == null || item.mailContent == null) {
@@ -764,6 +808,24 @@ public class InboxService extends AbstractScheduledService {
             } catch (Exception e) {
                 log.warn("Unable to delete a parsed inbox attachment temp: " + file, e);
             }
+        }
+        if (!item.rawTempHandedOff) {
+            deleteRawTemp(item);
+        }
+    }
+
+    /**
+     * Delete a work item's captured raw-message temp, unless FileUtil already owns it. Idempotent and
+     * guarded so a failure never aborts the cycle.
+     */
+    private void deleteRawTemp(WorkItem item) {
+        if (item == null || item.rawTemp == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(item.rawTemp);
+        } catch (Exception e) {
+            log.warn("Unable to delete a captured raw inbox message temp: " + item.rawTemp, e);
         }
     }
 
@@ -862,6 +924,7 @@ public class InboxService extends AbstractScheduledService {
         private boolean deleteImported;
         private boolean dedicatedFolder;
         private String defaultLanguage;
+        private boolean attachEml;
         private String inboxTagId;
         private Map<String, String> tagMap;
         private String storedUidValidityRaw;
@@ -887,5 +950,11 @@ public class InboxService extends AbstractScheduledService {
         private String folder;
         private InternetAddress sender;
         private EmailUtil.MailContent mailContent;
+        /** (#197) Captured raw RFC822 bytes, or null when the feature is off. */
+        private Path rawTemp;
+        /** Size of {@link #rawTemp} in bytes. */
+        private long rawSize;
+        /** True once FileUtil owns {@link #rawTemp}; until then this service must delete it. */
+        private boolean rawTempHandedOff;
     }
 }

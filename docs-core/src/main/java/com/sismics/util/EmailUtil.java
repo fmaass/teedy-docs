@@ -263,6 +263,37 @@ public class EmailUtil {
     }
 
     /**
+     * (#197) Capture a message's RAW RFC822 bytes into an owned temporary file, for attaching the
+     * original mail to the imported document.
+     *
+     * <p>IMAP ONLY, and it must run BEFORE the message is parsed and OUTSIDE any transaction. On an
+     * {@link com.sun.mail.imap.IMAPMessage} whose body is not yet loaded, {@code writeTo} streams the
+     * server's own bytes (a {@code BODY.PEEK[]} fetch under the peek settings this importer sets, so it
+     * never sets {@code \Seen}); once {@link #parseMailContent} has pulled the content, the same call
+     * would re-serialize the parsed representation instead — different headers, different folding, so no
+     * longer the bytes that arrived. The upload ingress never uses this: it already holds the exact bytes
+     * the user submitted and attaches those.</p>
+     *
+     * <p>Owns its partial output: a mid-fetch failure deletes the half-written temp before rethrowing, so
+     * a network error cannot leave a decrypted mail copy behind (the pattern
+     * {@link #parseMailContent} uses for attachment temps).</p>
+     *
+     * @param message Message to capture
+     * @param target Temporary file to write the raw message to
+     * @return Size in bytes of the captured message
+     * @throws Exception e
+     */
+    public static long writeRawMessage(Message message, Path target) throws Exception {
+        try (java.io.OutputStream outputStream = Files.newOutputStream(target)) {
+            message.writeTo(outputStream);
+        } catch (Exception e) {
+            Files.deleteIfExists(target);
+            throw e;
+        }
+        return Files.size(target);
+    }
+
+    /**
      * Structure defining a parsed email to be imported.
      */
     public static class MailContent {

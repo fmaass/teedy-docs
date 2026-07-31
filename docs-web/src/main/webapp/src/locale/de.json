@@ -897,6 +897,8 @@
       "auto_tags_hint": "teedy übernimmt Tags aus dem Nachrichtentext, die mit # beginnen.",
       "delete_imported": "Nachrichten nach dem Import löschen",
       "delete_imported_hint": "Jede Nachricht nach dem Import aus dem Postfach entfernen.",
+      "eml_attach": "Original-E-Mail anhängen",
+      "eml_attach_hint": "Jede importierte Nachricht zusätzlich als .eml-Datei am Dokument speichern, neben den extrahierten Anhängen. Reicht der Speicherplatz dafür nicht, werden Dokument und Anhänge trotzdem importiert.",
       "save_and_test": "Speichern & Verbindung testen",
       "test_success": "Verbindung erfolgreich — {count} ungelesene Nachricht(en) gefunden.",
       "test_failed": "Verbindungstest fehlgeschlagen. Prüfe die Einstellungen und versuche es erneut.",

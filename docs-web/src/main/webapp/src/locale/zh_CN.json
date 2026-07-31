@@ -897,6 +897,8 @@
       "auto_tags_hint": "应用邮件正文中以 # 为前缀标记的标签。",
       "delete_imported": "导入后删除邮件",
       "delete_imported_hint": "每封邮件导入后从邮箱中移除。",
+      "eml_attach": "附加原始邮件",
+      "eml_attach_hint": "将每封导入的邮件同时以 .eml 文件形式保存到文档中，与提取出的附件并列。若存储配额不足以保存它，文档及其附件仍会照常导入。",
       "save_and_test": "保存并测试连接",
       "test_success": "连接成功——找到 {count} 封未读邮件。",
       "test_failed": "连接测试失败。请检查设置后重试。",

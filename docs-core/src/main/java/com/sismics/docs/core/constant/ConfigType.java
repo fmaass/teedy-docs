@@ -65,6 +65,18 @@ public enum ConfigType {
     INBOX_DEDICATED_FOLDER,
 
     /**
+     * (#197) Attach the raw RFC822 message as a {@code .eml} file on every IMAP-imported document, in
+     * addition to today's extracted attachments and description excerpt. Read with a {@code false}
+     * default, but the value is SEEDED, not defaulted: the base install script seeds {@code true} (a
+     * fresh installation gets the feature) and migration 064 inserts {@code false} only when the row is
+     * absent (an upgraded installation keeps producing exactly what it produced before, and never starts
+     * charging the extra copy against an operator's quota unasked). The upload ingress
+     * ({@code PUT /document/eml}) always attaches its original bytes and does not read this key — the
+     * user handed us that exact file deliberately.
+     */
+    INBOX_EML_ATTACH,
+
+    /**
      * Persisted baseline of the inbox source's accepted UIDVALIDITY epoch, stored as
      * {@code <sourceIdentityDigest>:<uidValidity>}. On each sync the current folder UIDVALIDITY is
      * compared with this baseline for the SAME source: a change means the mailbox was recreated and

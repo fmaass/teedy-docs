@@ -191,6 +191,10 @@ export interface InboxConfig {
   enabled: boolean
   autoTagsEnabled: boolean
   deleteImported: boolean
+  // (#197) Attach the raw message to each imported document as a .eml file. Seeded on for a fresh
+  // installation and off for an upgraded one, so it is optional here: an older caller that omits it
+  // leaves the stored value alone rather than silently flipping it.
+  emlAttach?: boolean
   starttls: boolean
   hostname?: string | null
   port?: number | null
@@ -212,6 +216,8 @@ export function saveInboxConfig(config: InboxConfig) {
   params.set('autoTagsEnabled', String(config.autoTagsEnabled))
   params.set('deleteImported', String(config.deleteImported))
   params.set('starttls', String(config.starttls))
+  // Absent = preserve server-side, so only send it when this caller actually owns the value.
+  if (config.emlAttach != null) params.set('emlAttach', String(config.emlAttach))
   // The rest are keep-on-empty: only send non-empty values. An empty password
   // preserves the stored secret.
   if (config.hostname != null && config.hostname !== '') params.set('hostname', config.hostname)
