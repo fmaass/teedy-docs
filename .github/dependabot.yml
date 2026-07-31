@@ -12,6 +12,12 @@ updates:
       interval: "monthly"
     open-pull-requests-limit: 5
 
+  - package-ecosystem: "npm"
+    directory: "/docs-importer"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

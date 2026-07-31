@@ -182,7 +182,8 @@ jobs:
   docs-importer:
     # Smoke-check the standalone Node.js bulk importer: install from the
     # lockfile and verify the entry parses and its dependencies still resolve
-    # after the request -> fetch migration (ADR-0007 / RR-56).
+    # after the request -> fetch migration (ADR-0007 / RR-56), then build and run
+    # the container image so the shipped binary is exercised too.
     runs-on: ubuntu-latest
 
     steps:
@@ -198,6 +199,16 @@ jobs:
 
       - name: Smoke-test importer
         run: cd docs-importer && npm test
+
+      # The published importer is a pkg-compiled binary, so only the files copied
+      # into the Dockerfile's build stage end up in its require graph: a module left
+      # out of that COPY crashes the binary at startup while the npm steps above stay
+      # green. Run the compiled binary itself (with stdin closed, so the interactive
+      # wizard reaches EOF and exits) to prove the graph is complete.
+      - name: Build and smoke-test importer image
+        run: |
+          docker build -t teedy-importer:ci docs-importer
+          docker run --rm --entrypoint /teedy-importer teedy-importer:ci < /dev/null
 
   build:
     runs-on: ubuntu-latest

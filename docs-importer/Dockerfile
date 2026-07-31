@@ -1,6 +1,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /build
-COPY main.js package-lock.json package.json ./
+# Every local module main.js requires must be in the build context: pkg resolves
+# the require graph at compile time, and a missing file becomes a MODULE_NOT_FOUND
+# crash in the published binary that no npm-level test can catch.
+COPY cookies.js main.js package-lock.json package.json ./
 RUN npm ci && npm install -g @yao-pkg/pkg
 RUN pkg -t node20-alpine-x64 .
 
