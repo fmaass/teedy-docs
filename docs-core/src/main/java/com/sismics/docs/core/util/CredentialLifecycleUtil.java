@@ -2,9 +2,11 @@ package com.sismics.docs.core.util;
 
 import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.DocumentDao;
+import com.sismics.docs.core.dao.GroupDao;
 import com.sismics.docs.core.dao.RouteModelDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.UserDao;
+import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
 
@@ -73,6 +75,24 @@ public final class CredentialLifecycleUtil {
      */
     public static User lockActiveUser(String userId) {
         return new UserDao().getActiveByIdForUpdate(userId);
+    }
+
+    /**
+     * Locks an active group's row FOR UPDATE for the rest of the caller's transaction, or returns null if
+     * the group does not exist or is soft-deleted — the GROUP counterpart of {@link #lockActiveUser},
+     * with the same fail-closed contract (a null means the caller must abort, never proceed unserialized).
+     *
+     * <p>By ID, because the id is the process-wide group-lock ORDERING key (#202): a caller holding
+     * several group targets sorts them ascending by id and takes them in that order, the same order
+     * {@code RouteModelStepUtil.lockGroupsByName} imposes. Both end in the same DAO primitive
+     * ({@code GroupDao.getActiveByIdForUpdate}), so the two sites can never walk a shared pair of group
+     * rows in opposite directions.</p>
+     *
+     * @param groupId Group ID
+     * @return the locked active group, or null
+     */
+    public static Group lockActiveGroup(String groupId) {
+        return new GroupDao().getActiveByIdForUpdate(groupId);
     }
 
     /**

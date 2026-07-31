@@ -42,10 +42,11 @@ import java.util.function.BooleanSupplier;
  *       a start racing a deletion of one of its targets parks on that user row and fails closed.</li>
  * </ul>
  *
- * <p>GROUP-typed step targets are deliberately NOT locked (they are a different principal table and
- * locking them as users would reject every group-targeted model, including the seeded
- * administrators-group workflow that {@link TestRouteResource} exercises). This class therefore makes NO
- * claim about group-deletion races.</p>
+ * <p>GROUP-typed step targets are never resolved as users (that would reject every group-targeted model,
+ * including the seeded administrators-group workflow that {@link TestRouteResource} exercises); they are
+ * locked as groups, immediately after the user targets, by the #202 half of the fix. This class makes no
+ * claim about group-deletion races — {@link TestGroupDeleteRouteLockOrdering} pins those, including the
+ * USER -&gt; GROUP relative position asserted here only from the USER side.</p>
  *
  * <p>Every test here asserts PostgreSQL row-lock semantics and is skipped on H2 (whose FOR UPDATE /
  * FOR KEY SHARE and uncommitted-write conflict rules differ and do not model these invariants). CI

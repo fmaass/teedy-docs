@@ -241,7 +241,7 @@ Method <com.sismics.docs.rest.resource.GroupResource.addMember(java.lang.String,
 Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls constructor <com.sismics.docs.core.dao.GroupDao.<init>()> in (GroupResource.java:214)
 Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls constructor <com.sismics.docs.core.dao.RoleBaseFunctionDao.<init>()> in (GroupResource.java:222)
 Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls method <com.sismics.docs.core.dao.GroupDao.delete(java.lang.String, java.lang.String)> in (GroupResource.java:235)
-Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls method <com.sismics.docs.core.dao.GroupDao.getActiveByName(java.lang.String)> in (GroupResource.java:215)
+Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls method <com.sismics.docs.core.dao.GroupDao.getActiveByNameForUpdate(java.lang.String)> in (GroupResource.java:223)
 Method <com.sismics.docs.rest.resource.GroupResource.delete(java.lang.String)> calls method <com.sismics.docs.core.dao.RoleBaseFunctionDao.findByRoleId(java.util.Set)> in (GroupResource.java:223)
 Method <com.sismics.docs.rest.resource.GroupResource.get(java.lang.String)> calls constructor <com.sismics.docs.core.dao.GroupDao.<init>()> in (GroupResource.java:437)
 Method <com.sismics.docs.rest.resource.GroupResource.get(java.lang.String)> calls constructor <com.sismics.docs.core.dao.UserDao.<init>()> in (GroupResource.java:455)

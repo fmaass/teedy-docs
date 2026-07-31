@@ -37,6 +37,42 @@ import java.util.TreeSet;
 /**
  * Route REST resources.
  *
+ * <p><strong>GLOBAL LOCK ORDER — USER -&gt; GROUP -&gt; DOCUMENT -&gt; ROUTE.</strong> Every path that
+ * takes rows of more than one of these tables in one transaction acquires them in that order, and every
+ * multi-row acquisition within one table is one sequence sorted by the rows' immutable ids (ascending).
+ * {@link #start} is the widest such path: it locks its USER-typed step targets <em>and the initiator</em>,
+ * then its GROUP-typed step targets, then the document, then creates the route and its steps. The
+ * initiator belongs to the USER phase because of an IMPLICIT acquisition, not an explicit one — see the
+ * foreign-key table below. The deletion paths take the
+ * same order from the other side — a user deletion locks USER then its document set
+ * ({@code PrincipalDeletionUtil.lockDeletionDocumentSet}, DOCUMENT then TAG), a group deletion locks
+ * GROUP then the documents of the routes it cancels ({@code GroupResource.delete}) — so no pair of
+ * paths can hold each other's next lock. Ids, never names, are the ordering key: a name is mutable and
+ * different sites reach the same row from different keys ({@code RouteModelStepUtil.lockGroupsByName}
+ * resolves names to ids for exactly this reason).</p>
+ *
+ * <p>Nothing runs the order backwards. The only sites that lock a GROUP row are
+ * {@code GroupResource.update} / {@code GroupResource.delete} (one row each, by name, before any
+ * document row), {@code GroupDao.addMember} (one row, before a {@code T_USER_GROUP} insert — that table
+ * carries no foreign key, so the insert locks no user row) and the two ascending-id sites above. None of
+ * them holds a USER or DOCUMENT row while reaching for a group, so USER -&gt; GROUP and
+ * GROUP -&gt; DOCUMENT close no cycle.</p>
+ *
+ * <p><strong>Implicit (foreign-key) acquisitions of a start.</strong> A row INSERT takes FOR KEY SHARE on
+ * every row its foreign keys reference, at INSERT time — i.e. after all three lock phases — so each edge
+ * must resolve to a row this transaction ALREADY holds, or to no row at all. Every edge, enumerated
+ * against the schema (#202):</p>
+ * <ul>
+ *   <li>{@code T_ROUTE.FK_RTE_IDUSER_C -> T_USER} (initiator): held since the USER phase.</li>
+ *   <li>{@code T_ROUTE.FK_RTE_IDDOCUMENT_C -> T_DOCUMENT}: held since the DOCUMENT phase.</li>
+ *   <li>{@code T_ROUTE_STEP.FK_RTP_IDROUTE_C -> T_ROUTE}: the route row this transaction just inserted —
+ *       nothing to wait for.</li>
+ *   <li>{@code T_ROUTE_STEP.FK_RTP_IDVALIDATORUSER_C -> T_USER}: NULL on creation (a validator is stamped
+ *       only when a step is ended), and a NULL key is not checked — no referent.</li>
+ *   <li>The routing ACL row and the audit rows: {@code T_ACL} and {@code T_AUDIT_LOG} declare no foreign
+ *       keys (their source/target ids are polymorphic), so they acquire no referent.</li>
+ * </ul>
+ *
  * @author bgamard
  */
 @Path("/route")
@@ -89,8 +125,9 @@ public class RouteResource extends BaseResource {
         // taken, so the whole start runs off a single consistent target set (#189).
         List<ResolvedStep> resolvedSteps = resolveSteps(routeModel);
 
-        // #189 GLOBAL LOCK ORDER: USER before DOCUMENT. Lock the USER-typed step targets' active rows
-        // FOR UPDATE (deduplicated, ascending id) before the document row below. Principal deletion
+        // #189 GLOBAL LOCK ORDER: USER before DOCUMENT. Lock the USER-typed step targets' active rows —
+        // AND the initiator's, see lockUserStepTargets — FOR UPDATE (deduplicated, ascending id) before
+        // the document row below. Principal deletion
         // acquires USER (the departing owner row) and then DOCUMENT; before this reorder, start
         // acquired DOCUMENT first, so adding a target lock afterwards would have closed a
         // DOCUMENT->USER / USER->DOCUMENT cycle. Taking the user locks first instead makes both paths
@@ -98,7 +135,18 @@ public class RouteResource extends BaseResource {
         // other. Each lock is eligibility-scoped (CredentialLifecycleUtil.lockActiveUser), so a start
         // that parks on a concurrent deletion of one of its targets re-reads the now soft-deleted row
         // and FAILS CLOSED — no step is ever assigned to a user whose deletion has committed.
-        lockUserStepTargets(resolvedSteps);
+        lockUserStepTargets(resolvedSteps, principal.getId());
+
+        // #202 GLOBAL LOCK ORDER: GROUP after USER, before DOCUMENT. Lock the GROUP-typed step targets'
+        // active rows FOR UPDATE (deduplicated, ascending id) — the same rows, in the same ascending-id
+        // order, that RouteModelStepUtil.lockGroupsByName takes, and that GroupResource.delete takes
+        // (a single row, by name) before it scans for the routes to cancel. Without it a group
+        // deletion could commit between this start's target resolution and its step INSERTs: the
+        // deletion's cancel scan sees only persisted rows, so the steps land after the scan and the
+        // route is stranded on a principal that no longer exists, with no route to cancel it.
+        // Symmetrical to the USER lock above: a start that parks on a concurrent deletion of one of its
+        // group targets re-reads the now soft-deleted row and FAILS CLOSED.
+        lockGroupStepTargets(resolvedSteps);
 
         // Lock the document row FOR UPDATE before the "no active route" check, making the whole
         // check-and-create atomic per document: two concurrent starts serialize on this lock so the
@@ -128,8 +176,8 @@ public class RouteResource extends BaseResource {
         RouteDao routeDao = new RouteDao();
         routeDao.create(route, principal.getId());
 
-        // Create the steps from the resolved snapshot (no re-resolution: the targets were validated and,
-        // for USER targets, locked above)
+        // Create the steps from the resolved snapshot (no re-resolution: every target was validated and
+        // its principal row locked above — USER targets and GROUP targets alike)
         for (ResolvedStep resolvedStep : resolvedSteps) {
             routeStepDao.create(new RouteStep()
                     .setRouteId(route.getId())
@@ -218,30 +266,105 @@ public class RouteResource extends BaseResource {
     }
 
     /**
-     * Lock the ACTIVE user row of every USER-typed step target FOR UPDATE, deduplicated and in ascending
-     * id order, failing closed (InvalidRouteModel) on a target that is no longer active — via the same
-     * {@link CredentialLifecycleUtil#lockActiveUser} owner-row primitive {@code DocumentUtil.createDocument},
-     * {@code TagCreationUtil.createTag} and both user-deletion paths take.
-     * Held to commit, these locks serialize a start against the deletion of any of its user targets:
+     * Lock the ACTIVE user row of every USER-typed step target <em>and of the route's INITIATOR</em> FOR
+     * UPDATE, as ONE deduplicated ascending-id sequence, failing closed on a row that is no longer active
+     * — via the same {@link CredentialLifecycleUtil#lockActiveUser} owner-row primitive
+     * {@code DocumentUtil.createDocument}, {@code TagCreationUtil.createTag} and both user-deletion paths
+     * take. Held to commit, these locks serialize a start against the deletion of any of its user targets:
      * a deletion that commits first leaves this start to re-read a soft-deleted row and abort, and a start
      * that commits first blocks the deletion until its steps exist (so the deletion's route-cancel scan
      * sees them).
      *
-     * <p>GROUP targets are deliberately NOT locked: they are a different principal table, and resolving
-     * them as users would reject every group-targeted model (including the seeded administrators-group
-     * workflow). Group deletion is a separate lock site and is out of scope here.</p>
+     * <p><strong>Why the initiator belongs in this phase (#202).</strong> {@code T_ROUTE} carries
+     * {@code FK_RTE_IDUSER_C} to the initiator's user row, so the route INSERT further down acquires that
+     * row IMPLICITLY (FOR KEY SHARE, taken by the foreign-key check) — after the GROUP and DOCUMENT locks.
+     * An implicit acquisition is still an acquisition, and it is the one place where a start reached for a
+     * USER row out of phase order. FOR KEY SHARE conflicts only with a KEY-strength holder, i.e. a real
+     * row DELETE — and the batch purge is exactly that: {@code AppResource.batchCleanStorage} hard-deletes
+     * soft-deleted user rows and then, in the same transaction, hard-deletes soft-deleted GROUP rows
+     * (USER -&gt; GROUP). Before this fix, a start whose initiator had just been soft-deleted would hold
+     * its GROUP target and wait for that user row's key share while the purge held the user row and waited
+     * for the group — a cycle. Taking the initiator's row HERE means the transaction already holds it when
+     * the insert's key-share check arrives (a lock never conflicts with its own holder), and — the lock
+     * being eligibility-scoped — a start for a soft-deleted (hence purgeable) initiator is rejected before
+     * any group row is touched at all. The declared USER -&gt; GROUP -&gt; DOCUMENT order now holds for
+     * every row a start acquires, explicitly or implicitly.</p>
+     *
+     * <p>Two concurrent starts, by contrast, could never close that cycle: Hibernate's
+     * {@code PESSIMISTIC_WRITE} emits {@code FOR NO KEY UPDATE} on PostgreSQL, which is compatible with the
+     * foreign key's {@code FOR KEY SHARE} (verified empirically against the pre-fix build — both starts
+     * completed, zero engine deadlocks). The invariant this phase pins is the acquisition ORDER, which
+     * {@code TestGroupDeleteRouteLockOrdering#groupTargetedStartLocksItsInitiatorBeforeAnyGroupRow} asserts
+     * directly; the order must not depend on a lock-mode compatibility argument that a future stronger
+     * user-row lock would silently invalidate.</p>
+     *
+     * <p>An initiator whose account stopped being active mid-request is rejected ForbiddenError rather
+     * than InvalidRouteModel: the model is fine, the caller is gone — the same fail-closed stance
+     * {@code DocumentUtil.createDocument} takes for an inactive owner.</p>
+     *
+     * <p>GROUP targets live in a different principal table and are locked separately, immediately after
+     * this method, by {@link #lockGroupStepTargets(List)} — they are never resolved as users (that would
+     * reject every group-targeted model, including the seeded administrators-group workflow).</p>
+     *
+     * @param resolvedSteps Resolved steps of the model being started
+     * @param initiatorId The starting user's id — the future {@code RTE_IDUSER_C} of the route row
+     */
+    private void lockUserStepTargets(List<ResolvedStep> resolvedSteps, String initiatorId) {
+        SortedSet<String> userRowIds = new TreeSet<>();
+        for (ResolvedStep resolvedStep : resolvedSteps) {
+            if (resolvedStep.targetType == AclTargetType.USER) {
+                userRowIds.add(resolvedStep.targetId);
+            }
+        }
+        // ONE sorted sequence over targets AND initiator (deduplicated): locking the initiator separately,
+        // before or after the target block, would break the ascending-id property two concurrent starts
+        // rely on.
+        userRowIds.add(initiatorId);
+
+        for (String userRowId : userRowIds) {
+            if (CredentialLifecycleUtil.lockActiveUser(userRowId) == null) {
+                if (userRowId.equals(initiatorId)) {
+                    throw new ForbiddenClientException();
+                }
+                throw new ClientException("InvalidRouteModel", "A step has an invalid target");
+            }
+        }
+    }
+
+    /**
+     * Lock the ACTIVE group row of every GROUP-typed step target FOR UPDATE, deduplicated and in
+     * ascending id order, failing closed (InvalidRouteModel) on a target that is no longer active — the
+     * GROUP half of the start's target locking (#202), taken AFTER {@link #lockUserStepTargets(List, String)}
+     * and BEFORE the document lock, per the class's USER -&gt; GROUP -&gt; DOCUMENT order.
+     *
+     * <p>Uses the same {@link CredentialLifecycleUtil#lockActiveGroup} facade primitive (over
+     * {@code GroupDao.getActiveByIdForUpdate}) — and the same ascending-id acquisition order — as
+     * {@code RouteModelStepUtil.lockGroupsByName}, the other multi-group lock site; {@code GroupDao.addMember}
+     * and {@code GroupResource.delete} each lock a single group row — the latter by name, before its
+     * route-cancel scan. Going through the util keeps this resource off the frozen legacy
+     * {@code rest.resource -> core.dao} edge, exactly as the user half does.</p>
+     *
+     * <p>Held to commit, these locks serialize a start against the deletion of any of its group targets
+     * in both directions:</p>
+     * <ul>
+     *   <li>a deletion that wins the row commits the soft-delete first, so this re-read finds no active
+     *       group and the whole start aborts — no step is ever assigned to a deleted group;</li>
+     *   <li>a start that wins the row commits its steps first, so they are already persisted when the
+     *       deletion's cancel scan (which sees only persisted rows) runs, and the deletion cancels the
+     *       route instead of stranding it.</li>
+     * </ul>
      *
      * @param resolvedSteps Resolved steps of the model being started
      */
-    private void lockUserStepTargets(List<ResolvedStep> resolvedSteps) {
-        SortedSet<String> userTargetIds = new TreeSet<>();
+    private void lockGroupStepTargets(List<ResolvedStep> resolvedSteps) {
+        SortedSet<String> groupTargetIds = new TreeSet<>();
         for (ResolvedStep resolvedStep : resolvedSteps) {
-            if (resolvedStep.targetType == AclTargetType.USER) {
-                userTargetIds.add(resolvedStep.targetId);
+            if (resolvedStep.targetType == AclTargetType.GROUP) {
+                groupTargetIds.add(resolvedStep.targetId);
             }
         }
-        for (String userTargetId : userTargetIds) {
-            if (CredentialLifecycleUtil.lockActiveUser(userTargetId) == null) {
+        for (String groupTargetId : groupTargetIds) {
+            if (CredentialLifecycleUtil.lockActiveGroup(groupTargetId) == null) {
                 throw new ClientException("InvalidRouteModel", "A step has an invalid target");
             }
         }

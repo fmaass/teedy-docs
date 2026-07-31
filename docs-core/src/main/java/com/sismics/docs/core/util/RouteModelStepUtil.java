@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeSet;
 
 /**
@@ -33,8 +34,8 @@ import java.util.TreeSet;
  * leave a blob naming a group that no longer exists:
  * <ul>
  *   <li>Every {@code RTM_STEPS_C} writer first locks (FOR UPDATE) each distinct GROUP row it
- *       references, in a deterministic (sorted-by-id) order, before it validates group existence or
- *       writes the blob. Deterministic ordering makes the multi-group case deadlock-free.</li>
+ *       references, in ascending group ID order, before it validates group existence or writes the
+ *       blob. Deterministic ordering makes the multi-group case deadlock-free.</li>
  *   <li>A group rename locks the (old) group row first, then locks the referencing route-model rows,
  *       re-reads their blobs fresh under the locks, and rewrites the matching GROUP targets.</li>
  * </ul>
@@ -44,6 +45,15 @@ import java.util.TreeSet;
  * until an in-flight create/update naming G commits (then it repairs the just-committed blob). The
  * DB lock — held until the request transaction commits via RequestContextFilter — is the guarantee,
  * not JPA entity attachment (ThreadLocalContext flushes/clears the L1 cache on every access).
+ * <p>
+ * The group-lock order is the process-wide one (#202): GROUP rows are ALWAYS acquired by ascending
+ * group id, and groups sit between users and documents in the global order
+ * USER -&gt; GROUP -&gt; DOCUMENT -&gt; ROUTE ({@code RouteResource} states it in full). This util is
+ * not the only multi-group lock site any more — {@code RouteResource.start} locks its GROUP step
+ * targets by id — so the ordering key has to be one both sites can compute: the row id, never the
+ * mutable name. A site that locks exactly one group row may still resolve it by name
+ * ({@code GroupResource.update} / {@code GroupResource.delete}) — a single acquisition has no internal
+ * order to get wrong.
  *
  * @author teedy
  */
@@ -54,10 +64,11 @@ public final class RouteModelStepUtil {
 
     /**
      * Parses a route-model step blob and returns the distinct GROUP target names it references, in a
-     * deterministic (natural-sorted) order suitable for lock acquisition. USER/SHARE/other targets
-     * are ignored — only GROUP targets participate in the group-first lock protocol. Malformed blobs
-     * yield an empty set (validation happens elsewhere; this method never throws on bad JSON so it can
-     * be used defensively by both writers).
+     * deterministic (natural-sorted) order. USER/SHARE/other targets are ignored — only GROUP targets
+     * participate in the group-first lock protocol. Malformed blobs yield an empty set (validation
+     * happens elsewhere; this method never throws on bad JSON so it can be used defensively by both
+     * writers). The natural sort makes the returned list stable for callers that compare or log it; it
+     * is NOT the lock-acquisition order — {@link #lockGroupsByName} imposes that itself, by group id.
      *
      * @param steps Steps JSON blob
      * @return Sorted distinct GROUP target names (possibly empty, never null)
@@ -89,18 +100,40 @@ public final class RouteModelStepUtil {
     }
 
     /**
-     * Acquires a pessimistic write lock on each of the given GROUP rows (by name), in the order the
-     * names are supplied. Callers must pass a deterministically ordered collection (see
-     * {@link #parseGroupTargetNames}) so concurrent writers acquire multiple group locks in the same
-     * order and cannot deadlock. A name that does not resolve to a live group is skipped (no row to
-     * lock); existence is validated separately by the caller after locking.
+     * Acquires a pessimistic write lock on the GROUP row of each of the given names, deduplicated and
+     * <strong>in ascending group ID order</strong> — the single acquisition order every multi-group lock
+     * site in the application uses (#202).
      *
-     * @param groupNames Deterministically ordered GROUP names to lock
+     * <p>The supplied names are an input SET only; the acquisition order is derived here from the rows'
+     * immutable ids, never from the names. Each name is first resolved to its group id WITHOUT taking a
+     * lock, the distinct ids are sorted, and the rows are then locked by id. The id is the only ordering
+     * key every group-lock site can agree on: a name is mutable (a rename moves it between rows) and
+     * {@code RouteResource.start} reaches the very same rows holding only ids. Ordering by name here
+     * while route-start ordered by id would let two transactions acquire the same pair of group rows in
+     * opposite directions — a real deadlock, not a theoretical one.</p>
+     *
+     * <p>A name that resolves to no live group is skipped: there is no row to lock. Existence is
+     * validated by the caller AFTER the locks are held (see {@code RouteModelResource.validateAndLockForWrite}),
+     * so a group that vanished under the resolution fails that re-validation rather than being written
+     * back as an orphaned name.</p>
+     *
+     * @param groupNames GROUP names whose rows to lock (any order — the acquisition order is imposed here)
      */
     public static void lockGroupsByName(List<String> groupNames) {
         GroupDao groupDao = new GroupDao();
+
+        // Resolve to ids first, unlocked: the lock order is the id order, so the ids have to be known
+        // before the first lock is taken.
+        SortedSet<String> groupIds = new TreeSet<>();
         for (String groupName : groupNames) {
-            groupDao.getActiveByNameForUpdate(groupName);
+            Group group = groupDao.getActiveByName(groupName);
+            if (group != null) {
+                groupIds.add(group.getId());
+            }
+        }
+
+        for (String groupId : groupIds) {
+            groupDao.getActiveByIdForUpdate(groupId);
         }
     }
 
