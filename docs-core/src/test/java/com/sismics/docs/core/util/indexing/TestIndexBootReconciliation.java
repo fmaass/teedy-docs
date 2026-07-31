@@ -256,8 +256,17 @@ public class TestIndexBootReconciliation extends BaseTest {
         asyncEventBusField.set(appContext, new EventBus() {
             @Override
             public void post(Object event) {
-                attempts.incrementAndGet();
-                throw new IllegalStateException("the event bus is unavailable");
+                // Fail — and count — ONLY the reconciliation's own event. Anything else reaching this bus
+                // belongs to a background service of the context booted above, and on PostgreSQL those
+                // services have real work: the docs-core suite shares ONE database across all test classes
+                // (H2 gives each class JVM a private jdbc:h2:mem:docs), so rows and config committed by
+                // earlier classes are still there. Counting every post made this assertion depend on
+                // JVM-wide quiescence that no test can enforce; foreign events pass through untouched.
+                if (event instanceof RebuildIndexAsyncEvent) {
+                    attempts.incrementAndGet();
+                    throw new IllegalStateException("the event bus is unavailable");
+                }
+                realBus.post(event);
             }
         });
 
@@ -269,7 +278,8 @@ public class TestIndexBootReconciliation extends BaseTest {
             });
 
             Assertions.assertEquals(1, attempts.get(),
-                    "the reconciliation must have reached the bus — and failed there");
+                    "the reconciliation must have posted its rebuild event to the bus exactly once — and"
+                            + " survived the failure it got back");
 
             // The handler is fully started despite the failed reconciliation.
             File file = new File();
