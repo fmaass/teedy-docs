@@ -338,6 +338,48 @@ describe('DocumentView — header cover thumbnail (#206)', () => {
     expect(wrapper.find('.doc-header-thumb i.pi-file').exists()).toBe(true)
   })
 
+  // A recorded failure must never outlive the URL it was about. Once the placeholder is
+  // showing, NO <img> is mounted — so nothing on screen can ever retry that raster by itself;
+  // only a URL change can put an element back. If the record survives a URL change, rotating
+  // away and back lands on a URL that still matches it and the header is stuck on the
+  // placeholder for the rest of the view's life, even though the raster has since been
+  // generated. The retry is therefore driven by the CANDIDATE url changing, not by file_id
+  // (which a same-file rotation never touches).
+  it('a cover that failed is RETRIED after rotating away and back to it', async () => {
+    servedDoc = DOC_WITH_COVER // rotation 90
+    const wrapper = await mountView()
+    const urlAt90 = wrapper.find('.doc-header-thumb img').attributes('src')!
+    expect(urlAt90).toContain('v=90')
+
+    // The rotation-90 raster is still being generated and fails → placeholder, by design.
+    await wrapper.find('.doc-header-thumb img').trigger('error')
+    await flushPromises()
+    expect(wrapper.find('.doc-header-thumb img').exists()).toBe(false)
+    expect(wrapper.find('.doc-header-thumb i.pi-file').exists()).toBe(true)
+
+    // Rotate to 180 — a different url, so the cover is attempted again.
+    queryClient.setQueryData(['document', 'doc1'], { ...DOC_WITH_COVER, file_rotation: 180 })
+    await flushPromises()
+    expect(wrapper.find('.doc-header-thumb img').attributes('src')).toContain('v=180')
+
+    // …and back to 90, where the raster now exists. The header must ATTEMPT it.
+    queryClient.setQueryData(['document', 'doc1'], { ...DOC_WITH_COVER })
+    await flushPromises()
+    const img = wrapper.find('.doc-header-thumb img')
+    expect(img.exists(), 'the previously-failed cover is retried, not permanently placeheld').toBe(
+      true,
+    )
+    expect(img.attributes('src')).toBe(urlAt90)
+    expect(wrapper.find('.doc-header-thumb i.pi-file').exists()).toBe(false)
+
+    // REALNESS: the retry is one honest attempt, not a disabled failure path — if it fails
+    // again, the placeholder comes back.
+    await wrapper.find('.doc-header-thumb img').trigger('error')
+    await flushPromises()
+    expect(wrapper.find('.doc-header-thumb img').exists()).toBe(false)
+    expect(wrapper.find('.doc-header-thumb i.pi-file').exists()).toBe(true)
+  })
+
   it('an unrotated cover carries no cache-bust key (URLs stay stable)', async () => {
     servedDoc = { ...DOC_WITH_COVER, file_rotation: 0 }
     const wrapper = await mountView()

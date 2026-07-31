@@ -86,21 +86,31 @@ function onThumbError(event: Event) {
   const src = (event.target as HTMLImageElement).getAttribute('src')
   if (src) failedThumbUrl.value = src
 }
-watch(
-  () => doc.value?.file_id,
-  () => {
-    // STILL LOAD-BEARING, not made dead by the element guard: the failure is remembered by
-    // url, so without this a cover that failed once would keep its placeholder when the user
-    // cycles back to it. Clearing on a cover change retries it (a raster mid-generation
-    // succeeds on the next look).
-    failedThumbUrl.value = null
-  },
-)
-const coverThumbUrl = computed(() => {
+
+// The url the cover WOULD be served from, with no failure gating — the discriminator for
+// "this is a different raster than the one that failed".
+const candidateThumbUrl = computed(() => {
   const d = doc.value
   if (!d?.file_id) return null
-  const url = getFileUrl(d.file_id, 'thumb', undefined, d.file_rotation)
-  return url === failedThumbUrl.value ? null : url
+  return getFileUrl(d.file_id, 'thumb', undefined, d.file_rotation)
+})
+
+// A recorded failure must never OUTLIVE the url it was about. While the placeholder shows,
+// no <img> is mounted, so nothing on screen can retry that raster by itself — only a url
+// change puts an element back. Keying this reset on the candidate url (not on file_id, which
+// a same-file rotation never changes) is what makes rotating away and back a real retry
+// instead of a permanent placeholder for the rest of the view's life. It only ever CLEARS the
+// record; recording stays gated by element identity above, so no stale event can slip in.
+watch(candidateThumbUrl, () => {
+  failedThumbUrl.value = null
+})
+
+const coverThumbUrl = computed(() => {
+  const url = candidateThumbUrl.value
+  // The no-file case is spelled out rather than left to `null === null`: it must render the
+  // placeholder because there IS no raster, not because one failed.
+  if (!url || url === failedThumbUrl.value) return null
+  return url
 })
 
 watch(error, (err) => {
