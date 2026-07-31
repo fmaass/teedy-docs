@@ -7,6 +7,7 @@ import com.google.common.collect.Maps;
 import com.sismics.docs.core.constant.ConfigType;
 import com.sismics.docs.core.constant.PermType;
 import com.sismics.docs.core.dao.ConfigDao;
+import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.criteria.DocumentCriteria;
 import com.sismics.docs.core.dao.dto.DocumentDto;
 import com.sismics.docs.core.event.RebuildIndexAsyncEvent;
@@ -100,6 +101,13 @@ public class LuceneIndexingHandler implements IndexingHandler {
 
     @Override
     public void startUp() throws Exception {
+        // Set when the corrupt-index recovery below already scheduled a full rebuild, so the absent-index
+        // reconciliation stands down: it would post the very same work. The guard is load-bearing rather
+        // than cosmetic — the event bus is ASYNCHRONOUS in production, so the recovery rebuild has not run
+        // yet when the reconciliation check executes; the freshly re-created index it observes is
+        // legitimately empty and would schedule a second, redundant full rebuild (#208).
+        boolean recoveryRebuildScheduled = false;
+
         try {
             initLucene();
         } catch (Exception e) {
@@ -126,6 +134,62 @@ public class LuceneIndexingHandler implements IndexingHandler {
             initLucene();
             RebuildIndexAsyncEvent rebuildIndexAsyncEvent = new RebuildIndexAsyncEvent();
             AppContext.getInstance().getAsyncEventBus().post(rebuildIndexAsyncEvent);
+            recoveryRebuildScheduled = true;
+        }
+
+        // The index opened cleanly but may still be EMPTY while the database holds documents — the index
+        // directory was lost or never restored with the data volume, or the instance runs a RAM index, which
+        // starts empty after every restart. Nothing rebuilt it automatically, so search silently returned
+        // nothing until an administrator noticed and ran POST /app/batch/reindex (#208).
+        //
+        // Deliberately OUTSIDE the try above: a failure of the count / index read / post below is NOT index
+        // corruption, and letting it reach that catch would run the recovery path and DELETE a healthy index.
+        if (!recoveryRebuildScheduled) {
+            reconcileAbsentIndex();
+        }
+    }
+
+    /**
+     * Schedules a full index rebuild when the index is empty while the database still holds documents (#208).
+     *
+     * <p>This reconciles PRESENCE of the index as a whole, once per boot — not per file or per content: the
+     * index stays a derived, rebuildable store whose per-file completion is owned by the durable marker of
+     * ADR-0019, which this deliberately does not touch.</p>
+     *
+     * <p>Runs on the startup thread inside the caller's transactional context, so the document count is read
+     * through the enclosing transaction. Every failure is caught and logged: the reconciliation is a
+     * convenience over the manual reindex and must never abort a boot — nor be mistaken for the index
+     * corruption that {@link #startUp()}'s recovery path handles by deleting the index.</p>
+     *
+     * <p>Package-private (like {@link #countIndexedDocuments(String)}) so a test can exercise the
+     * "index still holds the corpus, schedule nothing" branch against a genuinely populated index.</p>
+     */
+    void reconcileAbsentIndex() {
+        try {
+            long documentCount = new DocumentDao().getDocumentCount();
+            if (documentCount == 0) {
+                // Nothing to reconcile: a fresh install must not schedule a rebuild of an empty corpus.
+                return;
+            }
+
+            // A near-real-time reader opened ON THE WRITER. The cached directory-backed reader
+            // (getDirectoryReader) cannot be used here: a brand-new index has no committed segment yet, so
+            // it would return null and leave "empty" indistinguishable from "unreadable".
+            int indexedCount;
+            try (DirectoryReader reader = DirectoryReader.open(indexWriter)) {
+                indexedCount = reader.numDocs();
+            }
+            if (indexedCount > 0) {
+                return;
+            }
+
+            log.info("The search index is empty while the database holds {} document(s): scheduling an" +
+                    " automatic rebuild, so search is not silently empty until an administrator triggers" +
+                    " a reindex", documentCount);
+            AppContext.getInstance().getAsyncEventBus().post(new RebuildIndexAsyncEvent());
+        } catch (Exception e) {
+            log.error("Unable to check whether the search index needs to be rebuilt; startup continues" +
+                    " without the automatic reconciliation (POST /app/batch/reindex rebuilds it manually)", e);
         }
     }
 

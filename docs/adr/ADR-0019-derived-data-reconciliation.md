@@ -51,7 +51,7 @@ action. `POST /app/batch/reindex` does **not** fix it: `RebuildIndexAsyncListene
 - **Index-presence is not a durable per-file signal either — with corrected reasoning.** The install
   **seeds `LUCENE_DIRECTORY_STORAGE=FILE`** (`dbupdate-000-0.sql:37`), so a normal instance has a
   **file-backed, boot-persistent** index (RAM only if an operator sets `RAM`, or on a legacy DB
-  missing the row → code default RAM, `LuceneIndexingHandler.java:138-145`; a full rebuild fires only
+  missing the row → code default RAM, `LuceneIndexingHandler.java:202-209`; a full rebuild fires only
   after an index-init/health failure). Even so, index-presence cannot be the completion predicate:
   the index is a **derived, rebuildable** store — `batch/reindex` repopulates it from stored `content`,
   so a file whose OCR was lost gets an index entry with *empty* content once reindexed ("present in
@@ -419,3 +419,30 @@ acceptable and (b)=later → the backfill is the smaller, lower-risk fix. If (a)
 - **Durable event outbox** — see Escalation. Correct and more general (covers recurring obligations +
   durable webhooks), larger blast radius; deferred to the maintainer as the explicit alternative,
   with Findings 2 and 3 common to both.
+
+## Addendum (2026-07-31) — boot-level index PRESENCE reconciliation (#208)
+
+**Status:** accepted, narrow extension of this ADR. **Shipped in:** _pending — target v3.8.0._
+
+`LuceneIndexingHandler.startUp` now schedules the existing `RebuildIndexAsyncEvent` once, on a boot where
+the database holds documents while the index holds none. This does **not** reverse the per-file stance
+argued at lines 51–59 above; it operates one level up, and the distinction is the whole point:
+
+- **Lines 51–59 reject index-presence as the per-FILE completion predicate**, because the index is a
+  derived, rebuildable store: `batch/reindex` repopulates it from the stored `FIL_CONTENT_C`, so "this file
+  is present in the index" says nothing about whether its OCR ever ran. That reasoning is untouched.
+  `FIL_PROCESSED_D` remains the sole durable per-file completion marker, and the reconciliation added here
+  reads it not at all, writes it not at all, and cannot mark any file complete.
+- **What is reconciled is the WHOLE index's presence**, once per boot: an all-or-nothing condition
+  (`db document count > 0 && index numDocs == 0`) that means the derived store as a unit is missing — a data
+  volume restored without the `lucene/` directory, an index directory deleted by hand, a `RAM` index after a
+  restart. The remedy is exactly the operator's own remedy (`POST /app/batch/reindex`, `RebuildIndexAsyncListener`),
+  fired automatically instead of waiting for a human to notice that search returns nothing. Rebuilding a
+  clearable store from its source of truth is precisely what that store is for; it is coupling *durability
+  correctness* to it that this ADR rejects.
+
+Boundaries, deliberately: no per-file or per-content predicate; nothing runs when the index holds any
+document; the rebuild stays asynchronous, so the boot is never blocked; every failure of the check is caught
+and logged, and — because the check runs OUTSIDE the corrupt-index recovery's `try` — can never be
+misclassified as corruption and delete a healthy index. Single-flight: when the corrupt-index recovery has
+already scheduled a rebuild, the check stands down, so a corrupt-index boot schedules exactly one.
