@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi } from './helpers'
+import { unique, openFileList, deleteDocApi, gotoDocumentList } from './helpers'
 
 // #192 — a shareable link to ONE file of a document, driven against the running app.
 //
@@ -62,8 +62,10 @@ test('copying a file link and following it opens the preview on that exact file 
   )
 
   // Follow it COLD: leave the document entirely first, so what is measured is the link
-  // hydrating a fresh page load, not a dialog that never closed.
-  await page.goto('/#/document')
+  // hydrating a fresh page load, not a dialog that never closed. The list must be MOUNTED
+  // before the deep link is issued — a hash navigation that overtakes the first one is
+  // clobbered when it finalizes (#215, see gotoDocumentList).
+  await gotoDocumentList(page)
   await page.goto(copied)
 
   const dialog = page.getByRole('dialog')
@@ -106,8 +108,11 @@ test('the preview param is written by replace, never pushed onto history (#192)'
   const id = await seedDoc(page.request, unique('deeplink-hist'), ['alpha.txt'])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  // Two history entries: the document list, then this document's content tab.
-  await page.goto('/#/document')
+  // Two history entries: the document list, then this document's content tab. The list is
+  // waited for, not just navigated to: a hash navigation issued while the first one is
+  // still resolving gets clobbered when it finalizes, leaving the app on the list with the
+  // deep link's URL undone (#215, see gotoDocumentList).
+  await gotoDocumentList(page)
   await page.goto(`/#/document/view/${id}/content`)
   await openFileList(page)
 

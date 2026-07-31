@@ -268,10 +268,43 @@ export async function fillDescription(page: Page, text: string): Promise<void> {
   await editor.fill(text)
 }
 
+/**
+ * Go to the document list AND wait until the SPA has actually mounted that route.
+ *
+ * The wait is not politeness — it is the only thing that makes a FOLLOWING hash
+ * navigation reliable (#215). `page.goto` resolves on `load`, which on a contended runner
+ * fires while vue-router's FIRST navigation is still pending: that navigation awaits the
+ * lazily imported list component (src/router/index.ts:58). vue-router attaches its history
+ * listener only from `markAsReady()` once the first navigation finalizes (vue-router 4.6.4,
+ * dist/vue-router.mjs:1393 called at :1459), so a hash navigation issued inside that window
+ * updates `location` and is never observed by the router. Nothing re-emits it — the URL
+ * reads as the deep link while the app keeps rendering the list, permanently. That is the
+ * CI failure: `.file-view-toggle` never attaches and the click times out mute.
+ *
+ * `.doc-list-page` is the list route's own root, so seeing it proves the first navigation
+ * finalized and the router is listening for the next one.
+ */
+export async function gotoDocumentList(page: Page): Promise<void> {
+  await page.goto('/#/document')
+  await expect(
+    page.locator('.doc-list-page'),
+    'the document list route mounted (vue-router now listens for the next hash navigation)',
+  ).toBeVisible()
+}
+
 // The document-view file panel defaults to GRID (#58). Switch it to the enriched
 // LIST mode (a per-user localStorage preference) so the list-only affordances
 // (rows, columns, action menu, drag reorder) are present for assertions.
 export async function openFileList(page: Page): Promise<void> {
+  // Precondition, stated out loud (#215): the toggle only exists inside the file panel,
+  // which DocumentViewContent renders under `v-if="doc.files?.length"` (:1137). Asserting
+  // the panel first means "the document view never mounted, or the document has no files"
+  // fails by that name, instead of as a mute 10s actionability timeout on the click whose
+  // call log says only "waiting for locator(…)".
+  await expect(
+    page.locator('.file-panel'),
+    "the document view's file panel rendered (route mounted and files loaded)",
+  ).toBeVisible()
   await page.locator('.file-view-toggle').getByText('List', { exact: true }).click()
   await expect(page.locator('.file-data-table')).toBeVisible()
 }
