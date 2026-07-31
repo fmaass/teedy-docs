@@ -61,6 +61,24 @@ The CI `e2e-harness` job is a trimmed smoke and is non-gating — it does not sa
 Record the harness scenario counts and the script's exit code in the release evidence before
 requesting the tag go.
 
+## Dependency currency (informational, non-gating)
+
+Before cutting a release, take a reading of how far the dependency pins have drifted:
+
+```
+cd docs-web/src/main/webapp && npm outdated
+mvn versions:display-dependency-updates          # ad hoc — deliberately NOT wired into the POM
+```
+
+Neither command gates the release; a non-empty `npm outdated` is expected and normal (it exits
+non-zero whenever anything is listed, so it must never be used as a pass/fail gate). Record the
+resulting delta as a table in the release record page — package, current, latest, and the
+disposition (bumped this release, or deferred with the reason). The value is the written disposition: an unbumped major stays a deliberate, dated
+decision rather than silent drift, and the next release starts from a known baseline.
+
+Majors are out of scope for a routine pre-release refresh — take patch/minor lines only, and file
+an issue for any major worth its own migration.
+
 ## Migration mechanism
 
 Custom incremental SQL: `docs-core/src/main/resources/db/update/dbupdate-NNN-0.sql`, applied by

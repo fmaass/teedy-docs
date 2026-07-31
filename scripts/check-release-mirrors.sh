@@ -8,6 +8,7 @@
 #   the locale JSONs      vs en.json's key set
 #   db.version (3 files)  vs the newest dbupdate-NNN migration
 #   codeql-known.json     vs the triaged sink lines (coordinate drift)
+#   Dockerfile JETTY_VERSION vs the pom's jetty property
 #   poms + package.json   vs the release tag            (only with a tag argument)
 #
 # Drift in a mirror cannot fail a unit test, so without this it surfaces only in the push
@@ -58,6 +59,9 @@ run_gate "db.version parity (3 overlays vs newest migration)" \
 
 run_gate "CodeQL baseline drift (codeql-known.json coordinates vs triaged sink lines)" \
   node scripts/check-codeql-baseline-drift.mjs
+
+run_gate "Jetty pin parity (Dockerfile JETTY_VERSION vs pom jetty property)" \
+  bash scripts/check-jetty-version.sh
 
 if [ -n "$TAG" ]; then
   run_gate "version consistency (tag vs poms vs package.json)" \
