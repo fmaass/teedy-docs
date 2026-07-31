@@ -245,6 +245,7 @@
       "order_sorted_hint": "Sortowanie jest tymczasowe — przeciągnij, aby ustawić zapisaną kolejność.",
       "order_failed": "Nie zapisano kolejności",
       "order_failed_hint": "Nowej kolejności nie udało się zapisać i została przywrócona. Spróbuj ponownie.",
+      "reorder_handle": "Przeciągnij, aby zmienić kolejność",
       "no_matches": "Żaden plik nie pasuje do filtra",
       "reorder_saved": "Zapisano kolejność plików",
       "reorder_failed": "Nie udało się zapisać kolejności plików",

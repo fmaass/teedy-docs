@@ -27,6 +27,11 @@ vi.mock('../../api/document', async (importOriginal) => ({
 }))
 const setRotationMock = vi.fn(() => Promise.resolve({ data: { status: 'ok', rotation: 0 } }))
 const renameFileMock = vi.fn(() => Promise.resolve({ data: {} }))
+// #211: the grid reorder asserts on the persisted payload AND on what a REJECTED persist does
+// to the local order, so this one has to be steerable per test.
+const reorderFilesMock = vi.fn<(...a: unknown[]) => Promise<unknown>>(() =>
+  Promise.resolve({ data: { status: 'ok' } }),
+)
 // DocumentViewContent syncs the preview to a `?file=` deep link (#192), so it now resolves
 // a route and a router. A static stand-in is enough here — this spec drives neither.
 vi.mock('vue-router', () => ({
@@ -48,7 +53,7 @@ vi.mock('../../api/file', () => ({
   deleteFile: vi.fn(),
   renameFile: (...a: unknown[]) => renameFileMock(...a),
   uploadFile: vi.fn(),
-  reorderFiles: vi.fn(() => Promise.resolve({ data: { status: 'ok' } })),
+  reorderFiles: (...a: unknown[]) => reorderFilesMock(...a),
 }))
 // pdfjs-dist (imported at module level by PdfViewer) needs DOMMatrix, which jsdom
 // lacks — replace the whole module; the viewer is irrelevant to the relations unit.
@@ -581,6 +586,360 @@ describe('DocumentViewContent — #178 preview + download from the tile action m
     const labels = tile.findAll('.file-card-actions button').map((b) => b.attributes('aria-label'))
     expect(labels).not.toContain('rename')
     expect(labels).not.toContain('ui.remove_file')
+  })
+})
+
+// #211 — grid-view drag reorder. The list reorders through PrimeVue's rowReorder inside
+// FileListTable, which ALSO owns the list's optimistic order, its pre-drag snapshot and its
+// in-flight lock. None of that exists in grid mode — FileListTable is not mounted — so the
+// grid's ordered state lives in this component and every one of those guarantees has to be
+// proven here, against the same POST /file/reorder contract.
+describe('DocumentViewContent — grid drag reorder (#211)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    reorderFilesMock.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+  })
+
+  function file(id: string, name: string, mimetype = 'text/plain') {
+    return { id, name, mimetype, size: 1, version: 0, create_date: 0, creator: 'admin' }
+  }
+
+  function gridDoc(writable = true, files = [file('f1', 'a.txt'), file('f2', 'b.txt'), file('f3', 'c.txt')]) {
+    return makeDoc({ relations: [], writable, files } as unknown as Partial<DocumentDetail>)
+  }
+
+  type Wrapper = ReturnType<typeof mountView>['wrapper']
+
+  function tileNames(wrapper: Wrapper) {
+    return wrapper.findAll('.file-preview-grid .file-preview-label').map((l) => l.text())
+  }
+
+  // The gesture as the browser delivers it: a mousedown ON THE HANDLE (which arms the card as a
+  // drag source), then dragstart on the card, then dragover + drop on the target card. jsdom has
+  // no drag-and-drop, so the events carry no dataTransfer — which is also the honest shape of
+  // the code under test (it never reads the payload back).
+  async function dragTile(wrapper: Wrapper, from: number, to: number) {
+    const cards = wrapper.findAll('.file-preview-card')
+    await cards[from].get('.file-card-drag-handle').trigger('mousedown')
+    await cards[from].trigger('dragstart')
+    await cards[to].trigger('dragover')
+    await cards[to].trigger('drop')
+  }
+
+  it('a drag applies the new order optimistically and persists the FULL id order', async () => {
+    const { wrapper } = mountView(gridDoc())
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+
+    await dragTile(wrapper, 0, 2)
+
+    // Optimistic: the tiles move before the request resolves.
+    expect(tileNames(wrapper)).toEqual(['b.txt', 'c.txt', 'a.txt'])
+    await flushPromises()
+    expect(reorderFilesMock).toHaveBeenCalledTimes(1)
+    // The endpoint rewrites each file's order from its position, so the payload must be the
+    // COMPLETE id list — a partial one would renumber the document's files wrongly.
+    expect(reorderFilesMock.mock.calls[0]).toEqual(['doc-src', ['f2', 'f3', 'f1']])
+  })
+
+  it('a REJECTED persist rolls the grid back to the pre-drag order', async () => {
+    // Rejected on demand rather than immediately, so the OPTIMISTIC order is observable in
+    // between: an implementation that never applied it would pass a rollback-only assertion.
+    let fail: (reason: unknown) => void = () => {}
+    reorderFilesMock.mockReturnValue(new Promise((_resolve, reject) => (fail = reject)))
+    const { wrapper } = mountView(gridDoc())
+
+    await dragTile(wrapper, 0, 2)
+    expect(tileNames(wrapper), 'optimistic order applied before the failure').toEqual([
+      'b.txt',
+      'c.txt',
+      'a.txt',
+    ])
+
+    fail(new Error('500'))
+    await flushPromises()
+    // The refetch may fail too, so the rollback has to be local and unconditional: the grid
+    // must never keep showing an order the server refused.
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+  })
+
+  it('serializes reorders — the handles are withdrawn while a persist is pending, and return after it', async () => {
+    let settle: (v: unknown) => void = () => {}
+    reorderFilesMock.mockReturnValue(new Promise((resolve) => (settle = resolve)))
+    const { wrapper } = mountView(gridDoc())
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(3)
+
+    await dragTile(wrapper, 0, 2)
+    // No handle means no second drag: the single pre-drag snapshot cannot be overwritten
+    // while a late failure could still need it.
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+    expect(reorderFilesMock).toHaveBeenCalledTimes(1)
+
+    settle({ data: { status: 'ok' } })
+    await flushPromises()
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(3)
+  })
+
+  // The dragged card is the one the drop leaves under the pointer, so it is the one whose
+  // synthesized click has to be swallowed — and the ONLY one.
+  function cardNamed(wrapper: Wrapper, name: string) {
+    return wrapper.findAll('.file-preview-card').find((c) => c.text().includes(name))!
+  }
+
+  it('a completed drop does not activate the control under the pointer on the DRAGGED card', async () => {
+    const { wrapper } = mountView(gridDoc())
+    await dragTile(wrapper, 0, 2)
+    await flushPromises()
+
+    // The click a finished drag synthesizes lands on whatever is under the pointer — the
+    // dragged tile's own open-preview button. It must be swallowed, or every reorder opens a
+    // preview of the file that was just moved.
+    await cardNamed(wrapper, 'a.txt').get('.generic-open').trigger('click')
+    expect(wrapper.findComponent(FilePreviewDialog).props('visible')).toBe(false)
+  })
+
+  it('a click on ANOTHER tile right after a drop is NOT swallowed', async () => {
+    const { wrapper } = mountView(gridDoc())
+    await dragTile(wrapper, 0, 2)
+    await flushPromises()
+
+    // Same millisecond, different card: this is the user's own click on a file the drag never
+    // touched, and a blanket time-window swallow would eat it.
+    await cardNamed(wrapper, 'c.txt').get('.generic-open').trigger('click')
+    const dialog = wrapper.findComponent(FilePreviewDialog)
+    expect(dialog.props('visible')).toBe(true)
+    expect(dialog.props('file')).toMatchObject({ id: 'f3' })
+  })
+
+  it('an ordinary click (no preceding drop) still opens the preview', async () => {
+    const { wrapper } = mountView(gridDoc())
+    await wrapper.findAll('.generic-open')[0].trigger('click')
+    expect(wrapper.findComponent(FilePreviewDialog).props('visible')).toBe(true)
+  })
+
+  // The window a refresh can land in starts at the GRAB, not at the drop: an in-flight drag
+  // holds an INDEX into the displayed order, so re-seeding underneath it makes that index name
+  // a different file and the drop moves — and persists — the wrong one.
+  it('a refetch landing MID-DRAG does not move the grab: the drop still moves the file that was grabbed', async () => {
+    const { wrapper, docRef } = mountView(gridDoc())
+    const cards = wrapper.findAll('.file-preview-card')
+    await cards[0].get('.file-card-drag-handle').trigger('mousedown')
+    await cards[0].trigger('dragstart') // grabbed a.txt, at index 0 of [a, b, c]
+
+    // A refresh lands mid-drag in a DIFFERENT order and with an extra file: index 0 would now
+    // name d.txt.
+    docRef.value = {
+      ...docRef.value,
+      files: [file('f4', 'd.txt'), file('f1', 'a.txt'), file('f2', 'b.txt'), file('f3', 'c.txt')],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+    expect(tileNames(wrapper), 'the order under the drag is frozen').toEqual([
+      'a.txt',
+      'b.txt',
+      'c.txt',
+    ])
+
+    await cards[2].trigger('dragover')
+    await cards[2].trigger('drop')
+    await flushPromises()
+
+    // a.txt — the file actually grabbed — moved to the end. Not d.txt, which the refresh put
+    // at the grabbed index.
+    expect(reorderFilesMock.mock.calls[0]).toEqual(['doc-src', ['f2', 'f3', 'f1']])
+    // The held-back refresh is reconciled once the drag concludes: its new file appears.
+    expect(tileNames(wrapper)).toEqual(['b.txt', 'c.txt', 'a.txt', 'd.txt'])
+  })
+
+  it('a drag CANCELLED after a mid-drag refetch applies that refresh and persists nothing', async () => {
+    const { wrapper, docRef } = mountView(gridDoc())
+    const cards = wrapper.findAll('.file-preview-card')
+    await cards[0].get('.file-card-drag-handle').trigger('mousedown')
+    await cards[0].trigger('dragstart')
+
+    docRef.value = {
+      ...docRef.value,
+      files: [file('f3', 'c.txt'), file('f1', 'a.txt'), file('f2', 'b.txt')],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+
+    // Escape / a release outside the grid: dragend without a drop. Nothing holds the order any
+    // more, so the server's order must take over — a frozen order that never thaws would show
+    // a stale grid until the next refetch.
+    await cards[0].trigger('dragend')
+    expect(tileNames(wrapper)).toEqual(['c.txt', 'a.txt', 'b.txt'])
+    expect(reorderFilesMock).not.toHaveBeenCalled()
+  })
+
+  // A sibling mutation (rename, rotate, the upload poll) invalidates the document query, so a
+  // refresh can land at any moment — including while a reorder POST is in flight, carrying the
+  // PRE-reorder order because the server had not applied ours yet.
+  it('a refetch landing MID-PERSIST neither clobbers the optimistic order nor re-opens the lock', async () => {
+    let settle: (v: unknown) => void = () => {}
+    reorderFilesMock.mockReturnValue(new Promise((resolve) => (settle = resolve)))
+    const { wrapper, docRef } = mountView(gridDoc())
+
+    await dragTile(wrapper, 0, 2)
+    expect(tileNames(wrapper)).toEqual(['b.txt', 'c.txt', 'a.txt'])
+
+    docRef.value = {
+      ...docRef.value,
+      files: [file('f1', 'a.txt'), file('f2', 'b.txt'), file('f3', 'c.txt'), file('f4', 'd.txt')],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+
+    // The order under the in-flight request is untouched…
+    expect(tileNames(wrapper), 'the optimistic order survives a mid-persist refresh').toEqual([
+      'b.txt',
+      'c.txt',
+      'a.txt',
+    ])
+    // …and the refresh has NOT released the single-in-flight lock: no second drag can start.
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+    const cards = wrapper.findAll('.file-preview-card')
+    await cards[1].trigger('dragstart')
+    await cards[0].trigger('dragover')
+    await cards[0].trigger('drop')
+    expect(reorderFilesMock).toHaveBeenCalledTimes(1)
+
+    settle({ data: { status: 'ok' } })
+    await flushPromises()
+    // Reconciled on resolution: the persisted sequence, plus the file the refresh brought.
+    expect(tileNames(wrapper)).toEqual(['b.txt', 'c.txt', 'a.txt', 'd.txt'])
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(4)
+  })
+
+  it('a rollback after a mid-persist refetch reverts to the FRESH server order, not the stale snapshot', async () => {
+    let fail: (reason: unknown) => void = () => {}
+    reorderFilesMock.mockReturnValue(new Promise((_resolve, reject) => (fail = reject)))
+    const { wrapper, docRef } = mountView(gridDoc())
+
+    await dragTile(wrapper, 0, 2)
+    docRef.value = {
+      ...docRef.value,
+      files: [file('f1', 'a.txt'), file('f2', 'b.txt'), file('f3', 'c.txt'), file('f4', 'd.txt')],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+
+    fail(new Error('500'))
+    await flushPromises()
+    // The pre-drag snapshot has no d.txt — restoring it would drop a file the server has.
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
+  })
+
+  it('a handle press that never becomes a drag leaves the tile unarmed', async () => {
+    const { wrapper } = mountView(gridDoc())
+    const card = wrapper.findAll('.file-preview-card')[0]
+    await card.get('.file-card-drag-handle').trigger('mousedown')
+    expect((card.element as HTMLElement).draggable, 'armed by the handle press').toBe(true)
+
+    // Released without a drag: the tile must stop being a drag source again.
+    await card.trigger('mouseup')
+    expect((card.element as HTMLElement).draggable).toBe(false)
+  })
+
+  it('a press released OUTSIDE the tile disarms it too', async () => {
+    const { wrapper } = mountView(gridDoc())
+    const card = wrapper.findAll('.file-preview-card')[0]
+    await card.get('.file-card-drag-handle').trigger('mousedown')
+    expect((card.element as HTMLElement).draggable, 'armed by the handle press').toBe(true)
+
+    // Carried off the tile with the button down and released somewhere else entirely: the
+    // card's own mouseup never fires, and its mouseleave was skipped because a button was held.
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    expect((card.element as HTMLElement).draggable).toBe(false)
+  })
+
+  it('the pointer leaving the tile WITH the button held keeps it armed (the drag is starting)', async () => {
+    const { wrapper } = mountView(gridDoc())
+    const card = wrapper.findAll('.file-preview-card')[0]
+    await card.get('.file-card-drag-handle').trigger('mousedown')
+
+    // Chromium dispatches this boundary crossing before it turns the move into a dragstart, so
+    // disarming here cancels every drag at its first pixel (it did: the e2e reorder stopped
+    // working on both viewports until this case was excluded).
+    await card.trigger('mouseleave', { buttons: 1 })
+    expect((card.element as HTMLElement).draggable, 'still a drag source').toBe(true)
+
+    // …and the drag that follows still reorders.
+    await card.trigger('dragstart')
+    await wrapper.findAll('.file-preview-card')[1].trigger('dragover')
+    await wrapper.findAll('.file-preview-card')[1].trigger('drop')
+    await flushPromises()
+    expect(reorderFilesMock.mock.calls[0]).toEqual(['doc-src', ['f2', 'f1', 'f3']])
+  })
+
+  it('a refetch re-seeds the grid from the authoritative order', async () => {
+    const { wrapper, docRef } = mountView(gridDoc())
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+
+    // What the query cache hands back after a successful persist (the backend returns the
+    // files in their stored order) — this is what makes a reorder survive a reload.
+    docRef.value = {
+      ...docRef.value,
+      files: [file('f3', 'c.txt'), file('f1', 'a.txt'), file('f2', 'b.txt')],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+    expect(tileNames(wrapper)).toEqual(['c.txt', 'a.txt', 'b.txt'])
+  })
+
+  it('every tile branch (image / PDF / generic) carries a handle', () => {
+    const { wrapper } = mountView(
+      gridDoc(true, [
+        file('f-img', 'a.jpg', 'image/jpeg'),
+        file('f-pdf', 'b.pdf', 'application/pdf'),
+        file('f-zip', 'c.zip', 'application/zip'),
+      ]),
+    )
+    expect(wrapper.findAll('.file-preview-card').length).toBe(3)
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(3)
+  })
+
+  // Eligibility parity with the list (FileListTable:157).
+  it('a read-only document has no handles and cannot reorder', async () => {
+    const { wrapper } = mountView(gridDoc(false))
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+    // …and the drop path is inert even if a drag event is delivered anyway.
+    const cards = wrapper.findAll('.file-preview-card')
+    await cards[2].trigger('dragover')
+    await cards[2].trigger('drop')
+    await flushPromises()
+    expect(reorderFilesMock).not.toHaveBeenCalled()
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+  })
+
+  it('withdraws the handles above the 100-file threshold (the endpoint needs the complete order)', () => {
+    const many = Array.from({ length: 101 }, (_, i) => file(`f${i}`, `f${i}.txt`))
+    const { wrapper } = mountView(gridDoc(true, many))
+    expect(wrapper.findAll('.file-preview-card').length, 'every tile still renders').toBe(101)
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+
+    const hundred = mountView(gridDoc(true, many.slice(0, 100))).wrapper
+    expect(hundred.findAll('.file-card-drag-handle').length).toBe(100)
+  })
+
+  // The handle is the only drag origin: a tile carries a preview click, rotation controls, PDF
+  // controls and an action menu, and none of them may become a way to reorder the document.
+  it('a drag that did NOT begin on the handle is inert', async () => {
+    const { wrapper } = mountView(gridDoc())
+    const cards = wrapper.findAll('.file-preview-card')
+
+    // A mousedown anywhere else on the tile disarms it…
+    await cards[0].get('.generic-open').trigger('mousedown')
+    await cards[0].trigger('dragstart')
+    await cards[2].trigger('dragover')
+    await cards[2].trigger('drop')
+    await flushPromises()
+
+    expect(reorderFilesMock).not.toHaveBeenCalled()
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
+  })
+
+  it('a drop on the tile the drag started from changes nothing and persists nothing', async () => {
+    const { wrapper } = mountView(gridDoc())
+    await dragTile(wrapper, 1, 1)
+    await flushPromises()
+    expect(reorderFilesMock).not.toHaveBeenCalled()
+    expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
   })
 })
 

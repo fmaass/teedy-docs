@@ -245,6 +245,7 @@
       "order_sorted_hint": "L'ordinamento è temporaneo — trascina per impostare un ordine salvato.",
       "order_failed": "Ordine non salvato",
       "order_failed_hint": "Non è stato possibile salvare il nuovo ordine ed è stato ripristinato. Riprova.",
+      "reorder_handle": "Trascina per riordinare",
       "no_matches": "Nessun file corrisponde al filtro",
       "reorder_saved": "Ordine dei file salvato",
       "reorder_failed": "Impossibile salvare l'ordine dei file",

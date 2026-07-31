@@ -245,6 +245,7 @@
       "order_sorted_hint": "Le tri est temporaire — glissez pour définir un ordre enregistré.",
       "order_failed": "Ordre non enregistré",
       "order_failed_hint": "Le nouvel ordre n'a pas pu être enregistré et a été rétabli. Réessayez.",
+      "reorder_handle": "Glisser pour réorganiser",
       "no_matches": "Aucun fichier ne correspond au filtre",
       "reorder_saved": "Ordre des fichiers enregistré",
       "reorder_failed": "Échec de l'enregistrement de l'ordre des fichiers",

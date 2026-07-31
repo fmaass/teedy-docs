@@ -160,6 +160,53 @@ test('drag-handle reorder persists the file order and survives a reload', async 
   await expect(page.locator('.file-data-table tbody tr .file-name-text')).toHaveText(afterDrag)
 })
 
+// #211 — the SAME persisted order, reached from the grid. The grid has no DataTable and so no
+// rowReorder: it drags natively off a per-tile handle and keeps its optimistic order in
+// DocumentViewContent (FileListTable, which owns the list's, is not mounted in grid mode). The
+// spec therefore proves all three: the drag reorders, the order is server-side (it survives a
+// full reload), and the two views agree — one order per document, not one per view.
+test('grid drag-handle reorder persists the file order and matches the list view', async ({
+  page,
+  cleanup,
+}) => {
+  const id = await seedDoc(page.request, unique('gridorder'), [
+    txtFile('a-first.txt'),
+    txtFile('b-second.txt'),
+    txtFile('c-third.txt'),
+  ])
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+  // Grid is the default, but the mode is a per-user localStorage preference and an earlier spec
+  // may have left "list" there — pin it so this test measures the grid.
+  await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
+  await page.goto(`/#/document/view/${id}/content`)
+  await expect(page.locator('.file-preview-grid')).toBeVisible()
+
+  const names = page.locator('.file-preview-grid .file-preview-label')
+  await expect(names).toHaveText(['a-first.txt', 'b-second.txt', 'c-third.txt'])
+
+  const cards = page.locator('.file-preview-card')
+  // Onto the NEIGHBOUR, not across the grid: a tile is ~500px tall, so at the mobile project's
+  // 393×851 single-column viewport any further target sits below the fold, and the scroll
+  // Playwright would need mid-drag cancels the drag (measured: the drop never lands). The
+  // neighbour is a real reorder at both viewports, which is what this spec is about.
+  await cards.nth(0).locator('.file-card-drag-handle').dragTo(cards.nth(1))
+
+  await expect(page.getByText('File order saved').first()).toBeVisible()
+  await expect(names.first()).not.toHaveText('a-first.txt')
+  const afterDrag = await names.allInnerTexts()
+
+  // A completed drop must not also open the preview of whatever tile it landed on.
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // Persisted server-side: the order survives a full reload.
+  await page.reload()
+  await expect(page.locator('.file-preview-grid .file-preview-label')).toHaveText(afterDrag)
+
+  // …and it is THE document's order, not a grid-local one: the list shows the same sequence.
+  await openFileList(page)
+  await expect(page.locator('.file-data-table tbody tr .file-name-text')).toHaveText(afterDrag)
+})
+
 test('the client-side quick filter narrows the list by name and mimetype', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('filter'), [
     txtFile('alpha.txt'),

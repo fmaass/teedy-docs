@@ -245,6 +245,7 @@
       "order_sorted_hint": "Renditja është e përkohshme — tërhiqni për të vendosur një renditje të ruajtur.",
       "order_failed": "Renditja nuk u ruajt",
       "order_failed_hint": "Renditja e re nuk mund të ruhej dhe u rikthye. Provoni përsëri.",
+      "reorder_handle": "Tërhiqeni për ta rirenditur",
       "no_matches": "Asnjë skedar nuk përputhet me filtrin",
       "reorder_saved": "Renditja e skedarëve u ruajt",
       "reorder_failed": "Ruajtja e renditjes së skedarëve dështoi",

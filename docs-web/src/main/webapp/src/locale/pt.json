@@ -245,6 +245,7 @@
       "order_sorted_hint": "A ordenação é temporária — arraste para definir uma ordem guardada.",
       "order_failed": "Ordem não guardada",
       "order_failed_hint": "A nova ordem não pôde ser guardada e foi revertida. Tente novamente.",
+      "reorder_handle": "Arraste para reordenar",
       "no_matches": "Nenhum ficheiro corresponde ao filtro",
       "reorder_saved": "Ordem dos ficheiros guardada",
       "reorder_failed": "Falha ao guardar a ordem dos ficheiros",

@@ -245,6 +245,7 @@
       "order_sorted_hint": "排序为临时的——拖动可设置并保存顺序。",
       "order_failed": "顺序未保存",
       "order_failed_hint": "新顺序无法保存，已还原。请重试。",
+      "reorder_handle": "拖动以重新排序",
       "no_matches": "没有符合筛选条件的文件",
       "reorder_saved": "文件顺序已保存",
       "reorder_failed": "保存文件顺序失败",

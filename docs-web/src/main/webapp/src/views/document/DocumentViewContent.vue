@@ -707,28 +707,320 @@ function commitGridRename(fileId: string) {
   cancelGridRename()
 }
 
+// --- Grid drag reorder (#211) -------------------------------------------------------
+// The list reorders through PrimeVue DataTable's `rowReorder` (FileListTable:299), which has
+// no equivalent in a CSS grid, so the grid reorders with native HTML5 drag-and-drop — the same
+// primitive PdfPageOrganizer:224 uses — off a dedicated per-tile handle. What IS shared with
+// the list is the persistence contract, and only that: one POST /file/reorder carrying the
+// COMPLETE id order, an optimistic local order, and a deterministic rollback on failure.
+//
+// The optimistic order has to live here rather than in FileListTable, because in grid mode
+// that component is not mounted at all: `fileListRef` is null, so the confirm/rollback calls
+// below would land on nothing and a rejected persist would leave the grid showing an order
+// the server refused.
+type DocFile = NonNullable<DocumentDetail['files']>[number]
+
+// Above this count the handles are withdrawn, exactly as in the list (FileListTable:65).
+// It is not a rendering cap — every tile always renders — it guards the reorder contract:
+// the endpoint needs the complete id order, and a drag across hundreds of tiles is
+// error-prone and easy to drop files from.
+const GRID_REORDER_LIMIT = 100
+
+// Working copy of the grid's order, re-seeded from every refetch (the backend returns the
+// files in their persisted `order`), so a saved reorder survives a reload and a rejected one
+// is replaced by the authoritative order as soon as the refetch lands.
+const gridOrderedFiles = ref<DocFile[]>([])
+// The order in effect BEFORE the last optimistic drag: a failed persist rolls back to exactly
+// this sequence, independently of whether the refetch that follows also succeeds.
+let gridOrderBeforeDrag: DocFile[] = []
+// Serialize reorders: only ONE may be in flight. While a persist is pending the handles are
+// withdrawn, so a second drag can never overwrite the single pre-drag snapshot (which would
+// let a late failure roll back to the wrong order). ONLY confirm/rollback clears it — a
+// refetch must not, or a sibling mutation's refresh would re-open the door mid-POST.
+const gridReorderPending = ref(false)
+// The tile a drag started on. Only an ARMED tile sets it (see onGridCardMouseDown), which is
+// what keeps every other control on a tile an ordinary control: a drag that did not begin on a
+// handle (an image's native drag, a text selection, a file dragged in from the desktop) leaves
+// this null, and every drop below is then inert.
+const gridDragIndex = ref<number | null>(null)
+// The tile the pointer is currently over, for the drop-target outline.
+const gridDragOverId = ref<string | null>(null)
+
+// A file-set refresh that arrived while the grid's order was FROZEN. It is remembered rather
+// than applied, and reconciled once the freeze lifts. Any sibling mutation — a rename, a
+// rotation, the upload poll, another tab — invalidates the document query, so such a refresh can
+// land at any instant.
+let gridPendingRefresh: DocFile[] | null = null
+
+// The order is frozen for as long as anything is holding an index into it:
+//   * an ACTIVE DRAG (dragstart → drop/dragend) holds `gridDragIndex`, a position in THIS
+//     sequence. Re-seed underneath it and that index silently names a different file: the drop
+//     would move — and POST — the wrong one.
+//   * a PENDING PERSIST holds the optimistic order the in-flight request is about to confirm.
+// Outside both, a refresh is authoritative and applied at once.
+const gridOrderFrozen = () => gridDragIndex.value !== null || gridReorderPending.value
+
+watch(
+  () => doc.value?.files,
+  (files) => {
+    const next = [...(files ?? [])]
+    if (gridOrderFrozen()) {
+      gridPendingRefresh = next
+      return
+    }
+    gridOrderedFiles.value = next
+  },
+  { immediate: true },
+)
+
+// Apply a held-back refresh once nothing holds the order any more. A drag that ended without a
+// persist (cancelled, dropped on its own tile, dropped outside) unfreezes here; a drag that DID
+// persist stays frozen and is reconciled by confirm/rollback instead.
+function releaseGridRefresh() {
+  if (gridOrderFrozen()) return
+  const fresh = gridPendingRefresh
+  gridPendingRefresh = null
+  if (fresh) gridOrderedFiles.value = fresh
+}
+
+// Eligibility parity with the list (FileListTable:157): a writable document, the COMPLETE
+// order (the grid has neither quick filter nor sort, so what it shows is always the complete
+// unfiltered/unsorted order), under the size threshold, and no persist in flight.
+const gridReorderEnabled = computed(
+  () =>
+    !!doc.value?.writable &&
+    gridOrderedFiles.value.length <= GRID_REORDER_LIMIT &&
+    !gridReorderPending.value,
+)
+
+
+// A drag ends with a pointer release over a tile, which the browser may follow with a click on
+// whatever sits under it — the preview button, a rotation control, the action menu. Exactly ONE
+// such click is swallowed: within this window AND only inside the card that was dragged, which
+// is the card the drop leaves under the pointer. A click anywhere else in the grid is the
+// user's own and must go through, even in the same millisecond.
+const GRID_DROP_CLICK_SUPPRESS_MS = 300
+let gridDropAt = 0
+// The card element the current drag started from, and the one the last drop landed. Held as
+// elements, not ids, so the check is a plain DOM containment test against the click target.
+let gridDragCard: HTMLElement | null = null
+let gridDroppedCard: HTMLElement | null = null
+
+// A tile becomes a drag source ONLY for a gesture that began on its handle, and stops being one
+// the moment any other mousedown lands on it. This is the same arming trick PrimeVue's DataTable
+// uses for the list's row handle (`onRowMouseDown`, datatable/index.mjs:5580) — and it is not a
+// stylistic choice: a nested `draggable` handle inside the tile starts no drag at all (measured
+// against the running app — dragging such a handle fires no dragstart, while an armed card fires
+// the full dragstart/dragenter/dragover chain). It is set imperatively, like PrimeVue's, because
+// a reactive attribute would not be in the DOM before the browser decides whether to drag.
+// The currently armed card, and the document-level release that always finds it. A press can
+// end anywhere — off the tile, off the grid, outside the window — and in those cases neither the
+// card's mouseup nor its mouseleave-with-no-button ever fires, so a card-scoped listener alone
+// leaves the tile armed. The document listener exists ONLY while something is armed.
+let gridArmedCard: HTMLElement | null = null
+
+function disarmGridCard() {
+  if (gridArmedCard) gridArmedCard.draggable = false
+  gridArmedCard = null
+  document.removeEventListener('mouseup', onGridDocumentMouseUp)
+}
+
+function onGridDocumentMouseUp() {
+  // A real drag never gets here: the browser ends it with dragend and delivers no mouseup.
+  if (gridDragIndex.value !== null) return
+  disarmGridCard()
+}
+
+function onGridCardMouseDown(event: MouseEvent) {
+  const card = event.currentTarget as HTMLElement
+  const origin = event.target as HTMLElement | null
+  const arm = !!(gridReorderEnabled.value && origin?.closest('.file-card-drag-handle'))
+  // Every press re-evaluates the arming, so whatever was armed before is released first.
+  disarmGridCard()
+  card.draggable = arm
+  if (!arm) return
+  gridArmedCard = card
+  document.addEventListener('mouseup', onGridDocumentMouseUp)
+}
+
+// A press on the handle that produced no drag (a plain click) must not leave the card armed.
+//
+// Only ever with NO button held. A mouseleave WITH the button down is the pointer being carried
+// off the tile by the very gesture that is about to become a drag, and Chromium dispatches that
+// boundary crossing BEFORE it turns the move into a dragstart: disarming there cancels every
+// drag at its first pixel. Measured — an unguarded mouseleave disarm made the e2e grid reorder
+// fail on both viewports (no drop, no persist) while every other file-panel spec stayed green.
+// `buttons` is 0 on mouseup too, so the one guard covers both events.
+function onGridCardDisarm(event: MouseEvent) {
+  if (event.buttons !== 0 || gridDragIndex.value !== null) return
+  const card = event.currentTarget as HTMLElement | null
+  if (card) card.draggable = false
+  disarmGridCard()
+}
+
+function onGridDragStart(index: number, event: DragEvent) {
+  // An unarmed tile is not draggable, so the browser fires no dragstart on it at all; asserting
+  // it here as well is what makes "the handle is the only drag origin" a checkable invariant
+  // rather than a property of the arming code alone.
+  const card = event.currentTarget as HTMLElement | null
+  if (!gridReorderEnabled.value || !card?.draggable) return
+  gridDragIndex.value = index
+  gridDragCard = card
+  // Firefox starts no drag at all unless the dataTransfer carries something. The payload is
+  // never read back — the index above is the source of truth.
+  if (event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', gridOrderedFiles.value[index]?.id ?? '')
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function onGridDragOver(fileId: string, event: DragEvent) {
+  // Only a tile drag may be dropped here. Without preventDefault the browser rejects the drop
+  // outright; WITH it unconditionally, a tile would also start accepting the OS file drags
+  // that belong to the upload dropzone.
+  if (gridDragIndex.value === null) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (gridDragOverId.value !== fileId) gridDragOverId.value = fileId
+}
+
+function onGridDragLeave(fileId: string) {
+  if (gridDragOverId.value === fileId) gridDragOverId.value = null
+}
+
+function onGridDrop(index: number) {
+  const from = gridDragIndex.value
+  gridDragIndex.value = null
+  gridDragOverId.value = null
+  if (from === null) {
+    // Not a tile drag (nothing was armed), so nothing was frozen by it either.
+    releaseGridRefresh()
+    return
+  }
+  // Any completed drag arms the click suppressor — including one that changes nothing, which
+  // still ends over a tile control. It is armed for the DRAGGED card, which the reorder leaves
+  // sitting under the pointer; every other tile stays clickable.
+  gridDropAt = Date.now()
+  gridDroppedCard = gridDragCard
+  if (gridReorderEnabled.value && from !== index) {
+    const next = [...gridOrderedFiles.value]
+    const [moved] = next.splice(from, 1)
+    next.splice(index, 0, moved)
+    // Snapshot BEFORE applying the optimistic order, so a rejected persist reverts to exactly
+    // the last sequence the server acknowledged.
+    gridOrderBeforeDrag = [...gridOrderedFiles.value]
+    gridReorderPending.value = true
+    gridOrderedFiles.value = next
+    void onReorderFiles(
+      next.map((f) => f.id),
+      'grid',
+    )
+  }
+  // A persist takes the freeze over (confirm/rollback reconciles); a drop that persisted
+  // nothing has to lift it here, or a refresh held back mid-drag would never be applied.
+  releaseGridRefresh()
+}
+
+function onGridDragEnd(event: DragEvent) {
+  gridDragIndex.value = null
+  gridDragOverId.value = null
+  gridDragCard = null
+  // Disarm: the tile stops being a drag source until a handle mousedown arms it again.
+  const card = event.currentTarget as HTMLElement | null
+  if (card) card.draggable = false
+  disarmGridCard()
+  // A drag that ended without a drop (cancelled with Escape, released outside the grid) leaves
+  // the order frozen and a refresh possibly held back — lift it.
+  releaseGridRefresh()
+}
+
+function onGridClickCapture(event: MouseEvent) {
+  const dropped = gridDroppedCard
+  if (!dropped) return
+  if (Date.now() - gridDropAt >= GRID_DROP_CLICK_SUPPRESS_MS) {
+    gridDroppedCard = null
+    return
+  }
+  // Scope: only the card that was just dropped. A click on ANY other tile in the same window is
+  // the user's own — swallowing it would eat a preview, a rotation or an action-menu press on a
+  // file the drag never touched.
+  const target = event.target as Node | null
+  if (!target || !dropped.contains(target)) return
+  // One click only: disarm before swallowing, so a drop can never eat two.
+  gridDroppedCard = null
+  gridDropAt = 0
+  event.stopPropagation()
+  event.preventDefault()
+}
+
+// Called when POST /file/reorder resolves: the optimistic order already equals the persisted
+// one, so this releases the in-flight lock and reconciles any refresh that landed meanwhile
+// (the post-persist refetch re-seeds authoritatively shortly after).
+function confirmGridReorder() {
+  gridReorderPending.value = false
+  const fresh = gridPendingRefresh
+  gridPendingRefresh = null
+  if (!fresh) return
+  // That refresh was computed BEFORE the server applied this reorder: its file SET is newer,
+  // its ORDER is stale. So reconcile rather than replace — keep the sequence the server just
+  // acknowledged for the files that survive, and append whatever the refresh brought (which is
+  // where the backend appends a new file anyway). Replacing wholesale would bounce every tile
+  // back to the pre-drag order until the post-persist refetch lands.
+  const byId = new Map(fresh.map((f) => [f.id, f]))
+  const kept = gridOrderedFiles.value.flatMap((f) => {
+    const current = byId.get(f.id)
+    return current ? [current] : []
+  })
+  const known = new Set(gridOrderedFiles.value.map((f) => f.id))
+  gridOrderedFiles.value = [...kept, ...fresh.filter((f) => !known.has(f.id))]
+}
+
+// Called when POST /file/reorder rejects: restore the last order the server acknowledged and
+// release the lock, regardless of whether the refetch that follows succeeds.
+function rollbackGridReorder() {
+  const fresh = gridPendingRefresh
+  gridPendingRefresh = null
+  // A refresh that landed mid-flight is a NEWER baseline than the pre-drag snapshot — that
+  // snapshot can name files the refresh deleted, and miss ones it added — and it carries the
+  // pre-reorder order, which is exactly what a rollback wants. Prefer it when there is one.
+  gridOrderedFiles.value = fresh ?? [...gridOrderBeforeDrag]
+  gridReorderPending.value = false
+}
+
 // Reference to the list so a failed reorder can be rolled back deterministically at the
 // component that owns the optimistic order (present only while the list view is mounted).
 const fileListRef = ref<InstanceType<typeof FileListTable> | null>(null)
 
+// Which view raised the reorder — the two own their optimistic order in different places
+// (the list inside FileListTable, the grid in this component, because FileListTable is not
+// mounted in grid mode), so confirm/rollback has to be routed rather than broadcast.
+type ReorderSource = 'list' | 'grid'
+
 // Persist an explicit drag reorder (the only order-persisting action) via the existing
-// reorder endpoint. On success the refetch re-seeds the list from the authoritative
-// order (so it survives reload); on failure the list rolls back its optimistic order to
-// the last saved sequence and shows the not-saved indicator — never a false "saved".
-async function onReorderFiles(orderedIds: string[]) {
+// reorder endpoint. On success the refetch re-seeds the raising view from the authoritative
+// order (so it survives reload); on failure that view rolls its optimistic order back to the
+// last saved sequence — never a false "saved".
+async function onReorderFiles(orderedIds: string[], source: ReorderSource = 'list') {
   const documentId = doc.value?.id
-  if (!documentId) return
+  if (!documentId) {
+    // Nothing to persist against. The grid holds its in-flight lock until confirm/rollback, so
+    // it has to be released here too — otherwise the handles never come back.
+    if (source === 'grid') rollbackGridReorder()
+    return
+  }
   try {
     await reorderFiles(documentId, orderedIds)
     toast.add({ severity: 'success', summary: t('ui.file_view.reorder_saved'), life: 2000 })
-    // Release the list's in-flight lock so the drag re-enables promptly (before the
-    // refetch settles); the optimistic order already equals the persisted one.
-    fileListRef.value?.confirmReorder()
+    // Release the in-flight lock so the drag re-enables promptly (before the refetch
+    // settles); the optimistic order already equals the persisted one.
+    if (source === 'grid') confirmGridReorder()
+    else fileListRef.value?.confirmReorder()
     queryClient.invalidateQueries({ queryKey: ['document', documentId] })
   } catch {
     toast.add({ severity: 'error', summary: t('ui.file_view.reorder_failed'), life: 3000 })
     // Deterministic local rollback independent of the refetch (which may also fail).
-    fileListRef.value?.rollbackReorder()
+    if (source === 'grid') rollbackGridReorder()
+    else fileListRef.value?.rollbackReorder()
     queryClient.invalidateQueries({ queryKey: ['document', documentId] })
   }
 }
@@ -986,8 +1278,13 @@ watch(
   { immediate: true },
 )
 
+// The key is SORTED, so it describes the file SET and each file's rotation — the two things
+// that decide which previews have to be (re)fetched — and not their order. Unsorted, a
+// reorder (#211) changed the key, and the reload below cancels the queue and revokes every
+// object URL: every image in the grid would blank out and refetch after each drag, for an
+// order the previews do not depend on.
 watch(
-  () => doc.value?.files?.map((f) => `${f.id}:${effectiveRotation(f)}`).join(','),
+  () => doc.value?.files?.map((f) => `${f.id}:${effectiveRotation(f)}`).sort().join(','),
   (next, prev) => {
     if (next !== prev)
       nextTick(() => {
@@ -998,6 +1295,8 @@ watch(
 )
 
 onUnmounted(() => {
+  // The armed-card release lives on `document`, so it outlives this component unless removed.
+  disarmGridCard()
   poller.dispose()
   previewQueue.cancel()
   revokeAllObjectUrls()
@@ -1159,14 +1458,33 @@ onUnmounted(() => {
            PDF viewer is unchanged (preview DOM untouched); every other type gets an icon
            card with an open link so nothing is hidden in the default view. Each tile also
            carries the shared FileActionMenu, so the per-file action menu (and the
-           #file-extra mount point) is present in BOTH views. -->
-      <div v-if="fileViewMode === 'grid'" class="file-preview-grid">
-        <template v-for="file in doc.files" :key="file.id">
+           #file-extra mount point) is present in BOTH views.
+
+           Tiles render `gridOrderedFiles` — the local optimistic order (#211) — not
+           `doc.files` directly, so a drag reorders immediately and a rejected persist can be
+           rolled back here. The click listener is on the CONTAINER and in the CAPTURE phase
+           because it has to swallow the post-drop click before the tile control under the
+           pointer (preview, rotation, action menu) ever sees it. -->
+      <div
+        v-if="fileViewMode === 'grid'"
+        class="file-preview-grid"
+        @click.capture="onGridClickCapture"
+      >
+        <template v-for="(file, index) in gridOrderedFiles" :key="file.id">
           <div
             v-if="isImage(file.mimetype)"
             class="file-preview-card"
+            :class="{ 'file-card-drag-over': gridDragOverId === file.id }"
             :data-file-id="file.id"
             :ref="(el: any) => setPreviewCardRef(file.id, el as HTMLElement | null)"
+            @mousedown="onGridCardMouseDown"
+            @mouseup="onGridCardDisarm"
+            @mouseleave="onGridCardDisarm"
+            @dragstart="onGridDragStart(index, $event)"
+            @dragover="onGridDragOver(file.id, $event)"
+            @dragleave="onGridDragLeave(file.id)"
+            @drop.prevent="onGridDrop(index)"
+            @dragend="onGridDragEnd"
           >
             <div class="image-preview-stage">
               <img
@@ -1201,6 +1519,17 @@ onUnmounted(() => {
             </div>
             <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
+              <!-- The ONLY drag origin on a tile (#211): a mousedown here is what arms the CARD
+                   as a drag source (onGridCardMouseDown), so everything else on the card stays
+                   an ordinary control. Withdrawn while this tile is being renamed so the editor
+                   keeps the row to itself. -->
+              <span
+                v-if="gridReorderEnabled && gridRenamingId !== file.id"
+                class="file-card-drag-handle"
+                :title="t('ui.file_view.reorder_handle')"
+              >
+                <i class="pi pi-bars" aria-hidden="true" />
+              </span>
               <InputText
                 v-if="gridRenamingId === file.id"
                 v-model="gridRenameValue"
@@ -1231,7 +1560,19 @@ onUnmounted(() => {
               </FileActionMenu>
             </div>
           </div>
-          <div v-else-if="file.mimetype === 'application/pdf'" class="file-preview-card">
+          <div
+            v-else-if="file.mimetype === 'application/pdf'"
+            class="file-preview-card"
+            :class="{ 'file-card-drag-over': gridDragOverId === file.id }"
+            @mousedown="onGridCardMouseDown"
+            @mouseup="onGridCardDisarm"
+            @mouseleave="onGridCardDisarm"
+            @dragstart="onGridDragStart(index, $event)"
+            @dragover="onGridDragOver(file.id, $event)"
+            @dragleave="onGridDragLeave(file.id)"
+            @drop.prevent="onGridDrop(index)"
+            @dragend="onGridDragEnd"
+          >
             <!-- `downloadable=false`: the tile's own action menu now carries the explicit
                  Download (#178), so the viewer's built-in one would be a second, unlabelled
                  control on the same card — the duplicate #181 removed from the dialog. -->
@@ -1244,6 +1585,13 @@ onUnmounted(() => {
             />
             <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
+              <span
+                v-if="gridReorderEnabled && gridRenamingId !== file.id"
+                class="file-card-drag-handle"
+                :title="t('ui.file_view.reorder_handle')"
+              >
+                <i class="pi pi-bars" aria-hidden="true" />
+              </span>
               <InputText
                 v-if="gridRenamingId === file.id"
                 v-model="gridRenameValue"
@@ -1274,7 +1622,19 @@ onUnmounted(() => {
               </FileActionMenu>
             </div>
           </div>
-          <div v-else class="file-preview-card file-preview-generic">
+          <div
+            v-else
+            class="file-preview-card file-preview-generic"
+            :class="{ 'file-card-drag-over': gridDragOverId === file.id }"
+            @mousedown="onGridCardMouseDown"
+            @mouseup="onGridCardDisarm"
+            @mouseleave="onGridCardDisarm"
+            @dragstart="onGridDragStart(index, $event)"
+            @dragover="onGridDragOver(file.id, $event)"
+            @dragleave="onGridDragLeave(file.id)"
+            @drop.prevent="onGridDrop(index)"
+            @dragend="onGridDragEnd"
+          >
             <!-- The icon stage AND the filename label are one keyboard-focusable button
                  that opens the in-app preview — NOT a link to the original file URL, which
                  the backend serves as a download (#144). The action buttons below are
@@ -1291,6 +1651,13 @@ onUnmounted(() => {
               <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             </button>
             <div class="file-card-actions">
+              <span
+                v-if="gridReorderEnabled && gridRenamingId !== file.id"
+                class="file-card-drag-handle"
+                :title="t('ui.file_view.reorder_handle')"
+              >
+                <i class="pi pi-bars" aria-hidden="true" />
+              </span>
               <InputText
                 v-if="gridRenamingId === file.id"
                 v-model="gridRenameValue"
@@ -1685,6 +2052,33 @@ onUnmounted(() => {
   row-gap: 0.125rem;
   min-width: 0;
 }
+/* Drag handle (#211). It sits at the LEFT end of the action row (`margin-right: auto`
+   against the row's flex-end justification) so the action cluster keeps the right end it has
+   always had, and it is a plain span rather than a button: it is a pointer-only affordance
+   (native HTML5 drag), exactly like the list's PrimeVue reorder handle, and a focusable
+   control that no key can operate would be worse than none. It is deliberately NOT counted
+   by e2e/file-list-geometry.spec.ts, which measures the `button, a` controls of the cluster. */
+.file-card-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  margin-right: auto;
+  padding: 0 0.25rem;
+  min-width: 1.5rem;
+  color: var(--p-text-muted-color);
+  cursor: grab;
+}
+.file-card-drag-handle:active {
+  cursor: grabbing;
+}
+/* The drop target under the pointer. Inset outline rather than a border: the card clips its
+   overflow and has a fixed-height preview stage, so a border would shift the whole tile. */
+.file-card-drag-over {
+  outline: 2px dashed var(--p-primary-color);
+  outline-offset: -2px;
+}
+
 .grid-rename-input {
   width: 100%;
   font-size: 0.8125rem;
