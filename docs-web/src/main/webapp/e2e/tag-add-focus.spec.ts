@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
 
 async function apiCreateDocument(request: APIRequestContext, title: string): Promise<string> {
   const res = await request.put('/api/document', { form: { title, language: 'eng' } })
@@ -23,7 +23,7 @@ async function apiDocTagIds(request: APIRequestContext, docId: string): Promise<
 // keyboard add (ArrowDown, Enter) then commits — a partial or multi-match name would
 // let it commit the wrong tag.
 function tagName(): string {
-  return unique('focustag').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return uniqueTag('focustag').replace(/[^a-z0-9]/gi, '').toLowerCase()
 }
 
 async function expectFilterFocused(page: import('@playwright/test').Page): Promise<void> {

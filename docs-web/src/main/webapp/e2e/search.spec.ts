@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { uniqueTag, createDocument, confirmDanger } from './helpers'
 
 // Full-text search: a created document is found by a title term and by a tag:
 // operator, and the search-help popover lists the supported operators.
 
 test('full-text and tag: operator search find a document; help popover lists operators', async ({ page }) => {
-  const tagName = unique('srch-tag')
+  const tagName = uniqueTag('srch-tag')
   await page.goto('/#/tag')
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()

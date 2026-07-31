@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, openNav, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, openNav, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
 
 // v3.6.0 UI bundle e2e (#57 title/favicon, #61 settings regroup, #52 items-per-page,
 // #50 right-click tags in gallery). Each test drives the real running instance and
@@ -74,7 +74,7 @@ test('items-per-page selection persists across a reload (#52)', async ({ page, r
 // desktop project covers it.
 test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance (no mobile touch equivalent)')
-  const tagName = unique('rc-tag').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const tagName = uniqueTag('rc-tag').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const title = unique('rc-doc')
   const tagId = await apiCreateTag(request, tagName)
   cleanup.defer('delete the seeded tag', () => deleteTagApi(page.request, tagId))

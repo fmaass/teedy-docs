@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, deleteDocApi, deleteTagApi } from './helpers'
 
 // #39: the gallery VIEW MODE. A pure render mode over the SAME paginated list — the
 // list⇄gallery toggle persists to localStorage, cards render the document thumbnail
@@ -181,7 +181,7 @@ test('gallery mode persists across a reload and re-renders a tag-filtered set (#
   request,
   cleanup,
 }) => {
-  const tagName = unique('galtag')
+  const tagName = uniqueTag('galtag')
   const inTitle = unique('gal-in')
   const outTitle = unique('gal-out')
 

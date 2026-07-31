@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, openNav, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, openNav, deleteDocApi, deleteTagApi } from './helpers'
 
 // #12: the facet (co-occurrence) tree bounds dense children — a node with more
 // than 20 eligible children shows the top 19 by co-occurrence plus one terminal,
@@ -45,7 +45,10 @@ async function apiCreateDocumentWithTags(
 }
 
 test('a dense facet root caps children at 19 + a non-interactive overflow node (#12)', async ({ page, request, cleanup }) => {
-  const prefix = unique('fo')
+  // uniqueTag, not unique: each of these 22 names carries a further "-NN" suffix and
+  // still has to clear TagResource's 36-character cap — that 3-character worst case is
+  // exactly the headroom uniqueTag reserves (TAG_SUFFIX_BUDGET).
+  const prefix = uniqueTag('fo')
   const tagNames = Array.from({ length: TAG_COUNT }, (_, i) => `${prefix}-${String(i).padStart(2, '0')}`)
   const tagIds: string[] = []
 

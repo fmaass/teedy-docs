@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures'
 import type { Locator } from '@playwright/test'
-import { unique, createDocument, confirmDanger, deleteDocApi, deleteTagByNameApi } from './helpers'
+import { unique, uniqueTag, createDocument, confirmDanger, deleteDocApi, deleteTagByNameApi } from './helpers'
 
 // Bulk operations over a multi-selection: add a tag, set a language, delete.
 // Teedy has no bulk endpoint — each action fans out over single-doc endpoints and
@@ -50,7 +50,7 @@ async function clickApplyUnobstructed(popover: Locator): Promise<void> {
 
 test('bulk add tag, set language, then delete a multi-selection', async ({ page, cleanup }) => {
   // Seed a tag and two documents so we have a selection to act on.
-  const tagName = unique('bulk-tag')
+  const tagName = uniqueTag('bulk-tag')
   await page.goto('/#/tag')
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
@@ -195,10 +195,9 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
 // popover opens, with no second click), a coloured chip for the pick, and — the part
 // batching depends on — exactly ONE tag per Apply.
 test('the bulk tag picker is filterable, keyboard-operable and applies exactly one tag', async ({ page, cleanup }) => {
-  // Short prefixes on purpose: unique() appends ~26 chars (epoch + pid + counter) and
-  // TagResource caps a tag name at 36, so anything over ~10 chars here 400s on create
-  // once the per-worker counter reaches three digits.
-  const tagName = unique('bkt')
+  // uniqueTag (not unique) fits TagResource's 36-character cap by construction, so the
+  // prefix no longer has to be hand-shortened to stay under it.
+  const tagName = uniqueTag('bkt')
   await page.goto('/#/tag')
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
@@ -206,7 +205,7 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   cleanup.defer('delete the seeded tag', () => deleteTagByNameApi(page.request, tagName))
 
   // A second tag the filter must winnow away, proving the filter box actually filters.
-  const otherTag = unique('bko')
+  const otherTag = uniqueTag('bko')
   await page.getByPlaceholder('Tag name').fill(otherTag)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.locator('.tag-tree').getByText(otherTag, { exact: true })).toBeVisible()

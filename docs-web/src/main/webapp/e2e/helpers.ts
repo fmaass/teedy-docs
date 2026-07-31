@@ -148,6 +148,96 @@ export function unique(prefix: string): string {
   return `${prefix}-${Date.now()}-${process.pid}-${counter++}`
 }
 
+// --- Tag names: the same uniqueness, inside the server's length cap ----------
+// TagResource caps a tag name at 36 characters — `add` and `update` both run
+// `ValidationUtil.validateLength(name, "name", 1, 36)` (TagResource.java:225 / :318) —
+// so an over-long generated name is a 400 at SEED time, surfacing as an unrelated
+// "create tag" failure rather than as the real cause. unique() itself cannot be
+// clamped: it also names documents, where a deliberately long title is the POINT
+// (responsive.spec.ts:141 pins a 69-character title prefix to overrun the slide-over
+// header). Tag names therefore get their own generator with the cap designed in, and
+// #182's answer — hand-shortening individual prefixes — stops being load-bearing.
+
+// The server's cap (TagResource.java:225, :318).
+export const MAX_TAG_NAME_LENGTH = 36
+
+// Specs derive further tag names from a generated one by appending a short suffix, and
+// the DERIVED name has to clear the cap too. The longest such suffix in the suite is 3
+// characters — facets.spec.ts:52 `${prefix}-${String(i).padStart(2, '0')}` ("-00").
+// The others are tags.spec.ts:19's rename target `${name}-r` and documents.spec.ts:72's
+// `${runId}-${n}` (both 2). Every generated tag name reserves the longest.
+export const TAG_SUFFIX_BUDGET = 3
+
+// Worst-case bounds on the three fields of the unique tail. These are the assumptions
+// the length budget below rests on, so the self-check (e2e/unique-names.check.ts) sizes
+// BOTH constructions from these same numbers rather than from its own copies.
+export const TAG_TAIL_BOUNDS = {
+  // Comfortably past the lifetime of this suite, and still 8 base-36 digits (the width
+  // only grows at 36**8 ms ≈ 2059-05-25).
+  maxEpochMs: Date.UTC(2050, 0, 1),
+  // Linux caps pid_max at 2**22.
+  maxPid: 4_194_304,
+  // 36**3 - 1 generated names per worker process — two orders of magnitude past the
+  // busiest spec file.
+  maxCounter: 46_655,
+} as const
+
+// "-<ts>-<pid>-<counter>" in base 36. The '-' separators are what make the tail
+// INJECTIVE: the fields are base-36 digits and can never contain one, so no two
+// distinct (timestamp, pid, counter) triples can encode to the same tail even though
+// the fields are variable-width. (A hash would be shorter and NOT injective —
+// collisions there would reappear as the same 400-flake class, one layer down.)
+export const TAG_TAIL_MAX_LENGTH =
+  1 +
+  TAG_TAIL_BOUNDS.maxEpochMs.toString(36).length +
+  1 +
+  TAG_TAIL_BOUNDS.maxPid.toString(36).length +
+  1 +
+  TAG_TAIL_BOUNDS.maxCounter.toString(36).length
+
+// What is left for the caller's prefix once the tail and the suffix budget are reserved.
+export const MAX_TAG_PREFIX_LENGTH = MAX_TAG_NAME_LENGTH - TAG_SUFFIX_BUDGET - TAG_TAIL_MAX_LENGTH
+
+/**
+ * A unique TAG name that fits the server's 36-character cap with room to spare for the
+ * short suffixes specs append (see TAG_SUFFIX_BUDGET).
+ *
+ * Uniqueness is structural, exactly as in unique(): the monotonic counter separates
+ * calls within a worker process, process.pid separates parallel workers, and the
+ * timestamp separates runs. Only the ENCODING changes — base 36 instead of decimal,
+ * which is what buys the headroom.
+ *
+ * An over-long prefix THROWS at generation time rather than being truncated: truncating
+ * would silently eat the unique tail and reintroduce cross-worker collisions, which is a
+ * far worse failure than a loud error naming the file to fix.
+ */
+export function uniqueTag(prefix: string): string {
+  if (prefix.length > MAX_TAG_PREFIX_LENGTH) {
+    throw new Error(
+      `uniqueTag("${prefix}"): prefix is ${prefix.length} characters, at most ${MAX_TAG_PREFIX_LENGTH} fit — ` +
+        `the server caps a tag name at ${MAX_TAG_NAME_LENGTH} (TagResource#add/#update), of which the unique tail ` +
+        `takes up to ${TAG_TAIL_MAX_LENGTH} and the derived-suffix budget ${TAG_SUFFIX_BUDGET}. Shorten the prefix.`,
+    )
+  }
+
+  const name = `${prefix}-${Date.now().toString(36)}-${process.pid.toString(36)}-${(counter++).toString(36)}`
+
+  // Belt and braces, deliberately an AGGREGATE check: it fires on any call whose total
+  // would break the budget — the only externally visible failure. A field quietly
+  // outgrowing its assumed width on a shorter-prefix call stays harmless: the separators
+  // keep names injective at any field width, and every call re-checks the total, so no
+  // over-cap name can reach the server regardless of which field drifted.
+  const budget = MAX_TAG_NAME_LENGTH - TAG_SUFFIX_BUDGET
+  if (name.length > budget) {
+    throw new Error(
+      `uniqueTag("${prefix}") produced "${name}" (${name.length} characters), over the ${budget}-character budget ` +
+        `(${MAX_TAG_NAME_LENGTH}-character server cap minus the ${TAG_SUFFIX_BUDGET}-character derived-suffix budget). ` +
+        `The timestamp, pid or counter has outgrown the width assumed for it.`,
+    )
+  }
+  return name
+}
+
 // Create a document via the real Add-document form. Returns the new document id
 // (parsed from the /document/view/<id> URL the save routes to) plus the title.
 export async function createDocument(

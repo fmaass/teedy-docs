@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, tagTreePanel, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, tagTreePanel, deleteDocApi, deleteTagApi } from './helpers'
 
 // #34: tag chips on a document view are clickable filter actions. Clicking a tag
 // chip in the document header applies a positive filter for that tag and lands on
@@ -38,7 +38,7 @@ async function apiCreateDocument(
 }
 
 test('clicking a tag chip in the document view filters the list by that tag (#34)', async ({ page, request, cleanup }) => {
-  const tagName = unique('chip-tag')
+  const tagName = uniqueTag('chip-tag')
   const taggedTitle = unique('chip-tagged')
   const untaggedTitle = unique('chip-untagged')
 

@@ -1,7 +1,7 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique } from './helpers'
+import { unique, uniqueTag } from './helpers'
 
 // Documentation screenshot capture (D3). Runs against the REAL e2e Docker
 // container (scripts/e2e-run.sh boots the prod WAR on port 8080, embedded H2,
@@ -161,7 +161,7 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request,
 //    and the rotation controls on the PDF preview.
 // ============================================================================
 test('document view: relations + PDF rotation controls', async ({ page, request }) => {
-  const tInvoice = await apiCreateTag(request, unique('inv').replace(/[^a-z0-9]/gi, ''), '#e67e22')
+  const tInvoice = await apiCreateTag(request, uniqueTag('inv').replace(/[^a-z0-9]/gi, ''), '#e67e22')
   const mainId = await apiCreateDocument(request, {
     title: 'ACME invoice 2026-0042',
     description:
@@ -254,7 +254,7 @@ test('document list bulk-select bar and the trash view', async ({ page, request 
 // 4. Saved-filters dropdown in the search bar.
 // ============================================================================
 test('saved-filters dropdown in the search bar', async ({ page, request }) => {
-  const tag = unique('sf-tag').replace(/[^a-z0-9-]/gi, '')
+  const tag = uniqueTag('sf-tag').replace(/[^a-z0-9-]/gi, '')
   const tagId = await apiCreateTag(request, tag)
   await apiCreateDocument(request, { title: 'Saved-filter demo doc', tagIds: [tagId] })
 
@@ -416,7 +416,7 @@ test('settings vocabulary with doc-type entries', async ({ page, request }) => {
 // 7. Settings → Tag rules: one rule (tag + rule type + regex pattern).
 // ============================================================================
 test('settings tag rules with a content-regex rule', async ({ page, request }) => {
-  const tag = unique('rule-tag').replace(/[^a-z0-9-]/gi, '')
+  const tag = uniqueTag('rule-tag').replace(/[^a-z0-9-]/gi, '')
   const tagId = await apiCreateTag(request, tag, '#e67e22')
   // Seed the rule via API for determinism (CONTENT_REGEX matching "invoice").
   const ruleRes = await request.put('/api/tagmatchrule', {

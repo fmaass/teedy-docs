@@ -1,6 +1,7 @@
 import { test, expect, type Page } from './fixtures'
 import {
   unique,
+  uniqueTag,
   confirmDanger,
   login,
   deleteDocApi,
@@ -44,7 +45,7 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
   const username = unique('tagacl').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const email = `${username}@example.com`
   const password = 'Password1e2e'
-  const tagName = unique('taclt')
+  const tagName = uniqueTag('taclt')
   const docTitle = unique('tacl-doc')
 
   const userCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
@@ -122,7 +123,7 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
 })
 
 test('the tag owner base permissions are immutable (no remove button)', async ({ page, cleanup }) => {
-  const tagName = unique('taclown')
+  const tagName = uniqueTag('taclown')
   await createTag(page, tagName)
   cleanup.defer('delete the tag', () => deleteTagByNameApi(page.request, tagName))
   await openTagPermissions(page, tagName)

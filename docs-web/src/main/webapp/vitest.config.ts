@@ -15,6 +15,9 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.spec.ts'],
+    // `e2e/**/*.check.ts` are PURE unit checks over e2e helper logic (no browser, no
+    // server): Playwright collects `*.spec.ts`/`*.test.ts` only, so a `.check.ts` file
+    // belongs to vitest alone and cannot be run twice or block on a running app.
+    include: ['src/**/*.spec.ts', 'e2e/**/*.check.ts'],
   },
 })

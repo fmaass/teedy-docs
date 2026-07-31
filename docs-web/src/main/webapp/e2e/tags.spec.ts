@@ -1,6 +1,7 @@
 import { test, expect } from './fixtures'
 import {
   unique,
+  uniqueTag,
   confirmDanger,
   toggleTagFilter,
   expectTagNodeState,
@@ -14,7 +15,7 @@ import {
 
 test.describe('tag management', () => {
   test('creates, edits, and deletes a tag', async ({ page }) => {
-    const name = unique('e2e-tag')
+    const name = uniqueTag('e2e-tag')
     const renamed = `${name}-r`
 
     await page.goto('/#/tag')
@@ -75,8 +76,8 @@ test.describe('tag filter panel', () => {
     // a state carrying BOTH `tags=` AND `exclude=` at once, so seed TWO tags — one
     // to include, one to exclude — and a document carrying both so they render with
     // counts in the panel.
-    const includeTag = unique('flt-inc')
-    const excludeTag = unique('flt-exc')
+    const includeTag = uniqueTag('flt-inc')
+    const excludeTag = uniqueTag('flt-exc')
     await createTag(page, includeTag)
     cleanup.defer('delete the included tag', () => deleteTagByNameApi(page.request, includeTag))
     await createTag(page, excludeTag)
@@ -142,7 +143,7 @@ test.describe('tag filter panel', () => {
   })
 
   test('tri-state include -> exclude -> clear on a single tag', async ({ page, cleanup }) => {
-    const tagName = unique('tri')
+    const tagName = uniqueTag('tri')
     await createTag(page, tagName)
     cleanup.defer('delete the tri-state tag', () => deleteTagByNameApi(page.request, tagName))
 
@@ -222,10 +223,10 @@ test.describe('tag pickers (behavior C)', () => {
 
   test('document-edit tag MultiSelect: filter box winnows options and a selection renders as a colored chip', async ({ page, cleanup }) => {
     // Two distinctly-named tags so the filter has something to include AND exclude.
-    // Short prefixes: unique() appends ~26 chars and TagResource caps a tag name at 36,
-    // so an 11-char prefix 400s on create once the per-worker counter hits three digits.
-    const keepTag = unique('cfk')
-    const dropTag = unique('cfd')
+    // uniqueTag (not unique) keeps both inside TagResource's 36-character cap by
+    // construction — it throws on a prefix that cannot fit instead of 400ing at seed time.
+    const keepTag = uniqueTag('cfk')
+    const dropTag = uniqueTag('cfd')
     await createTag(page, keepTag)
     cleanup.defer('delete the kept tag', () => deleteTagByNameApi(page.request, keepTag))
     await createTag(page, dropTag)
@@ -271,10 +272,9 @@ test.describe('tag pickers (behavior C)', () => {
 
   test('tag-edit parent Select has a working filter box', async ({ page, cleanup }) => {
     // Need at least two candidate parents so filtering is observable.
-    // Short prefixes for the same 36-char tag-name cap as above.
-    const parentKeep = unique('cpk')
-    const parentDrop = unique('cpd')
-    const child = unique('cchild')
+    const parentKeep = uniqueTag('cpk')
+    const parentDrop = uniqueTag('cpd')
+    const child = uniqueTag('cchild')
     await createTag(page, parentKeep)
     cleanup.defer('delete the kept parent tag', () => deleteTagByNameApi(page.request, parentKeep))
     await createTag(page, parentDrop)

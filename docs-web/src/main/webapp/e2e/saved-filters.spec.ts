@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures'
-import { unique, confirmDanger, toggleTagFilter } from './helpers'
+import { unique, uniqueTag, confirmDanger, toggleTagFilter } from './helpers'
 
 // #42: per-user saved filters. A user builds a filter (an included tag + free-text
 // search), SAVES it by name, CLEARS the filter, RE-APPLIES it from the search-bar
@@ -46,7 +46,7 @@ async function createPlainDoc(page: Page, title: string) {
 }
 
 test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42, #81 de-flaked)', async ({ page }) => {
-  const tag = unique('sf-tag')
+  const tag = uniqueTag('sf-tag')
   const term = unique('sfterm')
   const matchTitle = `${term}-match`
   const otherTitle = unique('sf-other')

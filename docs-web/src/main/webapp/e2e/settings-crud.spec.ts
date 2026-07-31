@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, confirmDanger } from './helpers'
+import { unique, uniqueTag, confirmDanger } from './helpers'
 
 // Admin CRUD smoke for the settings screens: create one of each entity, see it
 // listed, delete it. Each test is self-contained and cleans up after itself.
@@ -74,7 +74,7 @@ test('api keys: create, list, delete', async ({ page }) => {
 
 test('tag rules: create, list, delete', async ({ page }) => {
   // A rule needs an existing tag; seed one, create the rule against it, clean up.
-  const tagName = unique('rule-tag')
+  const tagName = uniqueTag('rule-tag')
   await page.goto('/#/tag')
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()

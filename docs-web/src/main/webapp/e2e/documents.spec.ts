@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, deleteDocApi, deleteTagApi } from './helpers'
 
 // Runs authenticated. Creates a document via the real Add-document form. On save,
 // Teedy routes to the full document view (DocumentEdit -> document-view). We then
@@ -68,7 +68,7 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   // list row deterministically overflows (>3 tags). The tags are named so their
   // creation order is stable; the first 3 render inline, the last 2 collapse.
   const base = baseURL!
-  const runId = unique('Dtag')
+  const runId = uniqueTag('Dtag')
   const tagNames = [1, 2, 3, 4, 5].map((n) => `${runId}-${n}`)
   const tagIds: string[] = []
   for (const name of tagNames) {
