@@ -68,12 +68,27 @@ function hide() {
   popover.value?.hide()
 }
 
-// autoFilterFocus only lands focus in the filter when the Select's overlay opens,
-// which otherwise takes a click. Opening it on the popover's `show` gives keyboard
-// tag entry with no click (#171). No-op when every tag is assigned (Select absent).
+// Opening the Select on the popover's `show` gives keyboard tag entry with no click
+// (#171) — the filter only takes focus once that overlay is up. No-op when every tag is
+// already assigned (no Select rendered).
+//
+// The focus is landed HERE instead of by the Select's own `autoFilterFocus` (#204).
+// PrimeVue 4.5.4 defers that focus by one unguarded timer —
+// `setTimeout(() => focus(this.$refs.filterInput.$el), 1)` in `onOverlayEnter` — while
+// the same overlay-enter scrolls `.app-content`, which is exactly what the Popover's
+// scroll handler dismisses on. When the dismissal wins that 1 ms race the Select is
+// already unmounted and the timer throws `Cannot read properties of null` into the
+// console. Focusing from here puts every hop behind `?.`, so a popover that goes away
+// mid-open simply skips the focus instead of throwing. The popover closing is the
+// expected outcome of that scroll either way.
 async function onPopoverShow() {
   await nextTick()
   tagSelect.value?.show()
+  // The overlay — and with it the filter input — mounts a tick later; either can already
+  // be gone if the popover was dismissed in between.
+  await nextTick()
+  const filterInput = tagSelect.value?.$refs?.filterInput?.$el as HTMLElement | undefined
+  filterInput?.focus()
 }
 
 function onSelect(tagId: string | null) {
@@ -128,7 +143,7 @@ defineExpose({ show, hide })
           :filterPlaceholder="t('ui.tag_menu.search')"
           :placeholder="t('ui.tag_menu.search')"
           class="tqm-select"
-          :autoFilterFocus="true"
+          :autoFilterFocus="false"
           @update:modelValue="onSelect"
         />
         <span v-else class="tqm-empty">{{ t('ui.tag_menu.all_assigned') }}</span>

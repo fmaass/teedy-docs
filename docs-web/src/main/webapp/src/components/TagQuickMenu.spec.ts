@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import TagQuickMenu from './TagQuickMenu.vue'
@@ -42,6 +42,46 @@ function makeRouter() {
   })
 }
 
+// Stub Popover so its content renders inline (no teleport/overlay in jsdom), and expose
+// show/hide so the component's defineExpose contract still works. Declared out here so a
+// test can grab the instance and emit the popover's own `show`/`hide` events.
+const PopoverStub = {
+  template: '<div class="popover-stub"><slot /></div>',
+  methods: { show() {}, hide() {}, toggle() {} },
+}
+
+// Records the auto-open (#171) the component performs on the Select through its ref.
+const selectShow = vi.fn()
+
+// Whether the stubbed Select mounts its filter input when opened. Set false to model the
+// overlay never coming up (a popover dismissed mid-open), which is the state the #204
+// focus step must survive.
+let selectMountsFilterInput = true
+
+// Stands in for the InputText the real Select exposes as `$refs.filterInput` — a
+// component ref, so the app reaches its element through `.$el` exactly as in production.
+const FilterInputStub = { template: '<input class="stub-filter-input" />' }
+
+// Stub Select so we can read the `options` it is handed without booting the full overlay;
+// expose an update button to simulate a selection, and a `show()` matching the real
+// component's imperative open (which mounts the filter one tick later).
+const SelectStub = {
+  props: ['options', 'modelValue'],
+  emits: ['update:modelValue'],
+  components: { FilterInputStub },
+  data() {
+    return { opened: false }
+  },
+  methods: {
+    show(this: { opened: boolean }) {
+      selectShow()
+      this.opened = selectMountsFilterInput
+    },
+  },
+  template:
+    '<div class="select-stub" :data-count="options.length"><FilterInputStub v-if="opened" ref="filterInput" /><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
+}
+
 function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {}) {
   return mount(TagQuickMenu, {
     props: {
@@ -52,25 +92,15 @@ function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> =
     },
     global: {
       plugins: [PrimeVue, makeRouter()],
-      stubs: {
-        // Stub Popover so its content renders inline (no teleport/overlay in jsdom),
-        // and expose show/hide so the component's defineExpose contract still works.
-        Popover: {
-          template: '<div class="popover-stub"><slot /></div>',
-          methods: { show() {}, hide() {}, toggle() {} },
-        },
-        // Stub Select so we can read the `options` it is handed without booting the
-        // full overlay; expose an update button to simulate a selection.
-        Select: {
-          props: ['options', 'modelValue'],
-          emits: ['update:modelValue'],
-          template:
-            '<div class="select-stub" :data-count="options.length"><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
-        },
-      },
+      stubs: { Popover: PopoverStub, Select: SelectStub },
     },
   })
 }
+
+beforeEach(() => {
+  selectShow.mockClear()
+  selectMountsFilterInput = true
+})
 
 describe('TagQuickMenu', () => {
   it('offers only assignable (not-yet-assigned) tags in the search select', () => {
@@ -136,6 +166,34 @@ describe('TagQuickMenu', () => {
   it('renders no "open in new tab" link when there is no document bound', () => {
     const wrapper = mountMenu({ document: null })
     expect(wrapper.find('a.tqm-open-link').exists()).toBe(false)
+  })
+
+  it('opens the tag select on popover show and puts focus in its filter itself (#171, #204)', async () => {
+    // The focus is the component's own job now, not the Select's `autoFilterFocus` —
+    // PrimeVue's version of it fires from an unguarded timer that throws when the popover
+    // is dismissed first.
+    const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
+    const wrapper = mountMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+    await flushPromises()
+    expect(selectShow).toHaveBeenCalledTimes(1)
+    expect(focusSpy).toHaveBeenCalledTimes(1)
+    expect(focusSpy.mock.instances[0]).toBe(wrapper.find('input.stub-filter-input').element)
+    focusSpy.mockRestore()
+  })
+
+  it('reaches for no filter at all when the overlay never came up (#204)', async () => {
+    // What a mid-open dismissal leaves behind: the Select is opened but its overlay (and
+    // filter input) is gone by the time the focus step runs. It must skip, not throw.
+    selectMountsFilterInput = false
+    const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
+    const wrapper = mountMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+    await flushPromises()
+    expect(selectShow).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('input.stub-filter-input').exists()).toBe(false)
+    expect(focusSpy).not.toHaveBeenCalled()
+    focusSpy.mockRestore()
   })
 
   it('shows an all-assigned notice and no chips when every tag is already on the doc', () => {
