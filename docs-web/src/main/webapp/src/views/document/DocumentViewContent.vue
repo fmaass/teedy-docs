@@ -1199,7 +1199,7 @@ onUnmounted(() => {
                 :aria-label="t('ui.rotate_right')"
               />
             </div>
-            <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
               <InputText
                 v-if="gridRenamingId === file.id"
@@ -1242,7 +1242,7 @@ onUnmounted(() => {
               :downloadable="false"
               @rotate="(deg: number) => persistRotation(file, deg)"
             />
-            <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
               <InputText
                 v-if="gridRenamingId === file.id"
@@ -1288,7 +1288,7 @@ onUnmounted(() => {
               <div class="generic-preview-stage">
                 <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
               </div>
-              <div class="file-preview-label">{{ displayName(file.name, t) }}</div>
+              <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             </button>
             <div class="file-card-actions">
               <InputText

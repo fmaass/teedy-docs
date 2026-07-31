@@ -104,6 +104,19 @@ describe('FileListTable', () => {
     expect(pdfRows[0].text()).toContain('ui.file_view.untitled')
   })
 
+  // #207 — the name cell is ellipsized by CSS (.file-name-text), so a long file name is
+  // unreadable in the list with no way to recover it. The full name rides along as a native
+  // title; the visible text stays CSS-truncated (this asserts the attribute, not geometry).
+  it('carries the full file name in a native title on the ellipsized name cell', () => {
+    const long = 'Q3-2026-consolidated-financial-statements-and-management-commentary-final-v7.pdf'
+    const cell = mountTable([makeFile({ id: 'f1', name: long })]).find('.file-name-text')
+    expect(cell.attributes('title')).toBe(long)
+    // A null-named file shows the localized fallback on screen, so the title must carry
+    // that same label — not an empty tooltip contradicting the visible cell.
+    const untitled = mountTable([makeFile({ id: 'f2', name: null })]).find('.file-name-text')
+    expect(untitled.attributes('title')).toBe('ui.file_view.untitled')
+  })
+
   it('renames via double-click on the name cell (Enter commits, emits fileId + new name)', async () => {
     const wrapper = mountTable(twoFiles)
     const name = wrapper.findAll('.file-name-text')[0]

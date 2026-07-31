@@ -357,10 +357,12 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
               @keyup.escape="cancelRename"
               @blur="commitRename(data.id)"
             />
+            <!-- The cell ellipsizes, so the full name is only recoverable on hover (#207). -->
             <span
               v-else
               class="file-name-text"
               tabindex="0"
+              :title="displayName(data.name, t)"
               @dblclick.stop="startRename(data)"
               @keydown="onNameKeydown($event, data)"
             >{{ displayName(data.name, t) }}</span>

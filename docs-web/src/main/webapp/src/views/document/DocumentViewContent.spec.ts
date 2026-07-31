@@ -583,3 +583,33 @@ describe('DocumentViewContent — #178 preview + download from the tile action m
     expect(labels).not.toContain('ui.remove_file')
   })
 })
+
+// #207 — the tile's filename label is ellipsized by CSS (.file-preview-label), so a long name
+// is unreadable with no way to recover it. The grid duplicates that label per MIME branch
+// (image / PDF / generic), so a single-branch assertion would let two branches stay silently
+// unwired — all three are asserted, each against its OWN name.
+describe('DocumentViewContent — full file name in a native title (#207)', () => {
+  beforeEach(() => localStorage.clear())
+
+  const LONG_IMG = 'scan-of-the-2026-quarterly-board-meeting-minutes-appendix-b-page-14.jpeg'
+  const LONG_PDF = 'Q3-2026-consolidated-financial-statements-and-management-commentary-v7.pdf'
+  const LONG_ZIP = 'archive-of-every-supporting-workpaper-referenced-by-the-year-end-audit.zip'
+
+  it('every grid tile branch carries its own full file name in a native title', () => {
+    const { wrapper } = mountView(
+      makeDoc({
+        relations: [],
+        files: [
+          { id: 'f-img', name: LONG_IMG, mimetype: 'image/jpeg', size: 1, version: 0, create_date: 0, creator: 'admin' },
+          { id: 'f-pdf', name: LONG_PDF, mimetype: 'application/pdf', size: 1, version: 0, create_date: 0, creator: 'admin' },
+          { id: 'f-zip', name: LONG_ZIP, mimetype: 'application/zip', size: 1, version: 0, create_date: 0, creator: 'admin' },
+        ],
+      } as unknown as Partial<DocumentDetail>),
+    ) // grid is the default view mode
+    const labels = wrapper.findAll('.file-preview-label')
+    expect(labels.length).toBe(3)
+    expect(labels.map((l) => l.attributes('title'))).toEqual([LONG_IMG, LONG_PDF, LONG_ZIP])
+    // The rendered text is unchanged — truncation stays purely CSS.
+    expect(labels.map((l) => l.text())).toEqual([LONG_IMG, LONG_PDF, LONG_ZIP])
+  })
+})
