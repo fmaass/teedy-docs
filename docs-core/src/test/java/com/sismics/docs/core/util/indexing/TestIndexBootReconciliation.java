@@ -31,6 +31,7 @@ import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
@@ -105,13 +106,12 @@ public class TestIndexBootReconciliation extends BaseTest {
      * The other half of the contract: an index that still holds the corpus schedules NOTHING. Without it the
      * reconciliation would re-index the whole corpus on every single restart.
      *
-     * <p>Asserted against a genuinely populated index — the one the boot's own rebuild just produced — rather
-     * than across two boots. A second boot cannot reach this branch on today's code: {@code initLucene}
-     * creates the {@code IndexWriter} and only then constructs {@code new CheckIndex(directory)}, whose
-     * constructor obtains the SAME write lock (verified in the {@code lucene-core} 10.5.0 bytecode:
-     * {@code CheckIndex(Directory)} calls {@code Directory.obtainLock}). Any boot over a non-empty index
-     * therefore throws {@code "Lock held by this virtual machine"} and lands in the corrupt-index recovery
-     * instead. That is a pre-existing defect independent of this change, reported separately.</p>
+     * <p>This is the DIRECT branch test: it calls the check a second time against the index the boot's own
+     * rebuild just produced, so the "index is not empty" predicate is exercised on its own, in isolation from
+     * anything a boot does. {@link #restartOverTheSameIndexDirectoryRebuildsNothingAndKeepsServing()} covers
+     * the same contract end to end across a real restart — it became reachable only once #222 moved the
+     * index health check ahead of the index writer, so both are kept: this one pins the predicate, that one
+     * pins the restart.</p>
      */
     @Test
     public void reconciliationOverAnIndexThatHoldsTheCorpusSchedulesNothing() throws Exception {
@@ -132,6 +132,61 @@ public class TestIndexBootReconciliation extends BaseTest {
 
         Assertions.assertEquals(1, rebuilds.get(),
                 "an index that still holds the corpus must not schedule another rebuild");
+    }
+
+    /**
+     * The whole restart contract, end to end: an instance boots, its index fills, it stops, and it boots
+     * AGAIN over the same on-disk index directory. The second boot must be a no-op — the index passes its
+     * health check, so there is no recovery, no reconciliation, no rebuild event of any kind — and the
+     * carried-over index must keep serving search.
+     *
+     * <p>Proven by BOTH observable consequences of a recovery, because a recovery is exactly what used to
+     * happen here (#222): it posts a rebuild event, and before doing so it DELETES the index directory. So
+     * the assertions are "no event at all" and "the commit point written by the first boot is still BYTE FOR
+     * BYTE the file on disk".</p>
+     *
+     * <p>Byte-identity, not mere existence: a recovery's rebuild replays the same commit sequence, so it
+     * regenerates a commit point with the SAME {@code segments_N} name (verified — a filename-only check
+     * false-passes here). Content cannot be faked, because Lucene stamps every segment and commit with a
+     * freshly generated random id, so a rebuilt index never reproduces the original bytes.</p>
+     */
+    @Test
+    public void restartOverTheSameIndexDirectoryRebuildsNothingAndKeepsServing() throws Exception {
+        String term = uniqueTerm();
+        seedDocument(term);
+        useLuceneStorage("FILE");
+        emptyLuceneDirectory();
+
+        // First boot: the empty directory is reconciled and the rebuild commits a real index.
+        bootAppContext();
+        Assertions.assertEquals(1, search(term).size(), "precondition: the first boot populated the index");
+        shutDownAppContext();
+
+        Path commitPoint = onlyCommitPoint();
+        byte[] commitBytes = Files.readAllBytes(commitPoint);
+        long commitSize = commitBytes.length;
+        FileTime commitModified = Files.getLastModifiedTime(commitPoint);
+
+        AtomicInteger rebuilds = countRebuildsOnTheRealBus();
+        bootAppContext();
+
+        Assertions.assertEquals(0, rebuilds.get(),
+                "a restart over a healthy, populated index must schedule no rebuild — neither the"
+                        + " corrupt-index recovery's nor the absent-index reconciliation's");
+        Assertions.assertTrue(Files.exists(commitPoint),
+                "the first boot's commit point must survive the restart: " + commitPoint.getFileName()
+                        + " (a recovery would have deleted the index directory)");
+        Assertions.assertEquals(commitSize, Files.size(commitPoint),
+                "the first boot's commit point must not have been rewritten (size changed): "
+                        + commitPoint.getFileName());
+        Assertions.assertArrayEquals(commitBytes, Files.readAllBytes(commitPoint),
+                () -> "the first boot's commit point must survive the restart BYTE FOR BYTE: "
+                        + commitPoint.getFileName() + " — same name with different content means the index was"
+                        + " deleted and rebuilt, since Lucene stamps each commit with a fresh random id"
+                        + " (first boot wrote it at " + commitModified + ", now "
+                        + lastModifiedQuietly(commitPoint) + ")");
+        Assertions.assertEquals(1, search(term).size(),
+                "and the carried-over index must still serve search after the restart");
     }
 
     /**
@@ -315,16 +370,42 @@ public class TestIndexBootReconciliation extends BaseTest {
     }
 
     /**
+     * The index's single commit point (a {@code segments_N} file), asserting there is exactly one so the
+     * caller's identity check cannot be fooled by a leftover.
+     */
+    private Path onlyCommitPoint() throws Exception {
+        List<Path> commitPoints = commitPoints();
+        Assertions.assertEquals(1, commitPoints.size(),
+                "expected exactly one commit point in the index directory, found " + commitPoints);
+        return commitPoints.get(0);
+    }
+
+    /**
+     * Last-modified time for a diagnostic message, or the reason it could not be read — never throws, so it
+     * is safe inside an assertion's failure-message supplier.
+     */
+    private String lastModifiedQuietly(Path path) {
+        try {
+            return Files.getLastModifiedTime(path).toString();
+        } catch (Exception e) {
+            return "unreadable (" + e + ")";
+        }
+    }
+
+    private List<Path> commitPoints() throws Exception {
+        Path luceneDirectory = DirectoryUtil.getLuceneDirectory();
+        try (Stream<Path> files = Files.list(luceneDirectory)) {
+            return files.filter(path -> path.getFileName().toString().startsWith("segments"))
+                    .collect(Collectors.toList());
+        }
+    }
+
+    /**
      * Overwrites the index's commit point, so opening the index writer over it fails the way a truncated or
      * partially written index does — the failure {@code startUp()} classifies as corruption.
      */
     private void corruptIndexCommitPoint() throws Exception {
-        Path luceneDirectory = DirectoryUtil.getLuceneDirectory();
-        List<Path> commitPoints;
-        try (Stream<Path> files = Files.list(luceneDirectory)) {
-            commitPoints = files.filter(path -> path.getFileName().toString().startsWith("segments"))
-                    .collect(Collectors.toList());
-        }
+        List<Path> commitPoints = commitPoints();
         Assertions.assertFalse(commitPoints.isEmpty(),
                 "precondition: a committed index must exist before it can be corrupted");
         for (Path commitPoint : commitPoints) {

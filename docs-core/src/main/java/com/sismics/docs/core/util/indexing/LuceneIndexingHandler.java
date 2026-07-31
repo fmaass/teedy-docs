@@ -208,13 +208,13 @@ public class LuceneIndexingHandler implements IndexingHandler {
             directory = new NIOFSDirectory(luceneDirectory);
         }
 
-        // Create an index writer
-        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
-        config.setCommitOnClose(true);
-        config.setMergeScheduler(new ConcurrentMergeScheduler());
-        indexWriter = new IndexWriter(directory, config);
-
-        // Check index version and rebuild it if necessary
+        // Check index version and health, and rebuild it if necessary. This runs BEFORE the index writer is
+        // opened, and the order is load-bearing: CheckIndex takes the directory's WRITE LOCK in its
+        // constructor (CheckIndex(Directory) delegates to Directory.obtainLock). Validating after the writer
+        // existed therefore made every boot over an existing index fail with "Lock held by this virtual
+        // machine" — a failure startUp() then classified as corruption, so a perfectly healthy index was
+        // deleted and fully rebuilt on EVERY restart, and the health check never actually ran (#222).
+        // try-with-resources releases the lock again before the writer below claims it.
         if (DirectoryReader.indexExists(directory)) {
             log.info("Checking index health and version");
             try (CheckIndex checkIndex = new CheckIndex(directory)) {
@@ -224,6 +224,12 @@ public class LuceneIndexingHandler implements IndexingHandler {
                 }
             }
         }
+
+        // Create an index writer
+        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
+        config.setCommitOnClose(true);
+        config.setMergeScheduler(new ConcurrentMergeScheduler());
+        indexWriter = new IndexWriter(directory, config);
     }
 
     @Override
