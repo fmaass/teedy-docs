@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, watch } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -53,6 +53,54 @@ const downloadHref = computed(() => {
   if (!d) return undefined
   if (d.file_count > 1) return getDocumentZipUrl(d.id)
   return d.file_id ? getFileUrl(d.file_id) : undefined
+})
+
+// #206 — the header identifies the document with its cover thumbnail, the same raster the
+// list and gallery rows already show: `file_id` is the SERVED cover pointer the backend
+// reconciles (the explicit cover if one is set, else the first file, else null —
+// DocumentDao.reconcileServingCover), and `file_rotation` varies the URL so a rotated cover
+// isn't served from the long-lived raster cache.
+//
+// The no-file state is handled HERE, client-side, and cannot be delegated to the server's
+// placeholder raster: that branch lives behind a file lookup (FileResource's findFile), so a
+// document with no files has no id to ask about and never reaches it. A failed thumb (a
+// raster still being generated, a deleted file) degrades to the same placeholder rather than
+// leaving a broken-image glyph — mirroring the list/gallery consumers.
+//
+// The cover can change under an in-flight raster request — a cover swap, a file delete, a
+// rotation, or a cycle back to a cover already shown — and the replaced <img> can still fire a
+// LATE `error` from its detached node. The GUARD against that is ELEMENT IDENTITY: only the
+// element currently mounted here may record a failure, and a detached node can never be that
+// element, whatever url it carries. Weaker discriminators all leak: a shared boolean lets any
+// stale error hide the live cover; the url alone fails an A→B→A cycle, where the first A
+// element's late error names a url that is live again by the time it arrives.
+//
+// The handler must NOT read `doc.file_id` either — Vue caches inline event handlers, so one
+// shared closure serves every render and would read whatever the cover is at CALL time.
+const thumbEl = ref<HTMLImageElement | null>(null)
+const failedThumbUrl = ref<string | null>(null)
+function onThumbError(event: Event) {
+  // A stale/detached element is not the live one: its failure is about a cover that is no
+  // longer on screen and must not change what is.
+  if (event.target !== thumbEl.value) return
+  const src = (event.target as HTMLImageElement).getAttribute('src')
+  if (src) failedThumbUrl.value = src
+}
+watch(
+  () => doc.value?.file_id,
+  () => {
+    // STILL LOAD-BEARING, not made dead by the element guard: the failure is remembered by
+    // url, so without this a cover that failed once would keep its placeholder when the user
+    // cycles back to it. Clearing on a cover change retries it (a raster mid-generation
+    // succeeds on the next look).
+    failedThumbUrl.value = null
+  },
+)
+const coverThumbUrl = computed(() => {
+  const d = doc.value
+  if (!d?.file_id) return null
+  const url = getFileUrl(d.file_id, 'thumb', undefined, d.file_rotation)
+  return url === failedThumbUrl.value ? null : url
 })
 
 watch(error, (err) => {
@@ -140,6 +188,20 @@ function handleDelete() {
     <template v-else-if="doc">
       <!-- Header -->
       <header class="doc-header">
+        <!-- Cover thumbnail (#206). Decorative: the title beside it is the document's
+             accessible name, so an alt text here would only repeat it. -->
+        <div class="doc-header-thumb">
+          <img
+            v-if="coverThumbUrl"
+            ref="thumbEl"
+            :key="coverThumbUrl ?? 'placeholder'"
+            :src="coverThumbUrl"
+            alt=""
+            @error="onThumbError"
+          />
+          <i v-else class="pi pi-file" aria-hidden="true" />
+        </div>
+
         <div class="doc-header-main">
           <h1>{{ doc.title }}</h1>
           <p class="doc-header-meta">
@@ -273,6 +335,29 @@ function handleDelete() {
   margin-bottom: 1.25rem;
   padding-bottom: 1.25rem;
   border-bottom: 1px solid var(--p-content-border-color);
+}
+
+/* #206 — same square-tile treatment as the list row's `.doc-thumb`, at header scale: the
+   raster fills the tile (cropping rather than letterboxing), and the placeholder icon is
+   centred in the same box so the header's geometry does not shift between the two states. */
+.doc-header-thumb {
+  flex: 0 0 auto;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--p-content-hover-background);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--p-text-muted-color);
+  font-size: 1.25rem;
+}
+
+.doc-header-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .doc-header-main {
