@@ -211,16 +211,23 @@ public class GroupResource extends BaseResource {
         }
         checkBaseFunction(BaseFunction.ADMIN);
         
-        // Get the group, locking the row FOR UPDATE exactly as the rename path above does. #202: this is
-        // the deletion half of the group-vs-route-start serialization. RouteResource.start locks every
-        // GROUP-typed step target's row (ascending id) BEFORE it creates the steps, so with this lock
-        // held a concurrent start either commits its steps before the lock is granted here — and the
-        // cancel scan below, which runs strictly after this acquisition in the SAME request transaction,
-        // therefore sees them — or parks on this row and fails closed once this deletion commits.
-        // Reading the row unlocked let a start slip between the scan and the delete: its steps landed
-        // after the scan had already run, stranding an open step on a group that no longer exists.
+        // Get the group, locking FOR UPDATE — in ascending id order — every GROUP row this deletion
+        // writes: the target itself AND its active children, whose rows GroupDao.delete detaches
+        // (#217). Locking only the target let two deletions of groups that are each other's parent take
+        // those two rows in opposite directions and deadlock; the union is acquired up front so both
+        // walk them the same way. See GroupDao.getActiveByNameWithChildrenForUpdate for why the child
+        // set is discovered unlocked and not re-chased.
+        //
+        // #202: the target half of that acquisition is also the deletion half of the
+        // group-vs-route-start serialization. RouteResource.start locks every GROUP-typed step target's
+        // row (ascending id) BEFORE it creates the steps, so with this lock held a concurrent start
+        // either commits its steps before the lock is granted here — and the cancel scan below, which
+        // runs strictly after this acquisition in the SAME request transaction, therefore sees them — or
+        // parks on this row and fails closed once this deletion commits. Reading the row unlocked let a
+        // start slip between the scan and the delete: its steps landed after the scan had already run,
+        // stranding an open step on a group that no longer exists.
         GroupDao groupDao = new GroupDao();
-        Group group = groupDao.getActiveByNameForUpdate(groupName);
+        Group group = groupDao.getActiveByNameWithChildrenForUpdate(groupName);
         if (group == null) {
             throw new NotFoundException();
         }
@@ -239,11 +246,12 @@ public class GroupResource extends BaseResource {
         // change — endRoute writes status/end-date, endAllOpenSteps writes end-date/transition/comment,
         // the ACL and membership sweeps write only delete dates. T_ACL, T_AUDIT_LOG and T_USER_GROUP
         // declare no foreign keys at all. So this path acquires no row implicitly after the GROUP phase;
-        // the only rows it takes are the group above and, inside the cancel scan, the route documents in
-        // ascending id (GROUP -> DOCUMENT). The one acquisition NOT covered by an explicit order is
-        // GroupDao.delete's "detach my children" update (T_GROUP rows other than this one): pre-existing
-        // and unchanged here, reachable only if two concurrently deleted groups are each other's parent,
-        // which needs a parent cycle.
+        // the only rows it takes are the groups locked above and, inside the cancel scan, the route
+        // documents in ascending id (GROUP -> DOCUMENT). GroupDao.delete's "detach my children" update
+        // (T_GROUP rows other than the target) was the one acquisition not covered by an explicit order
+        // — the #217 deadlock when two concurrently deleted groups are each other's parent. Those rows
+        // are now part of the ordered union taken above, so it writes only rows this transaction already
+        // holds.
         //
         // Gracefully handle workflow references (never blocks): collect affected route models and
         // cancel active routes with an open step targeting this group.

@@ -17,8 +17,6 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -30,8 +28,9 @@ import java.util.function.BooleanSupplier;
  * <p>Two invariants are pinned here:</p>
  * <ul>
  *   <li><b>Order.</b> GROUP rows are acquired in ascending group ID order by every multi-group lock
- *       site — {@code RouteResource.start}'s step targets and {@code RouteModelStepUtil.lockGroupsByName}
- *       alike — and groups sit between users and documents in the global order
+ *       site — {@code RouteResource.start}'s step targets, {@code RouteModelStepUtil.lockGroupsByName}
+ *       and {@code GroupResource.delete}'s target-plus-children union (#217) alike — and groups sit
+ *       between users and documents in the global order
  *       USER -&gt; GROUP -&gt; DOCUMENT -&gt; ROUTE. Ordering by NAME (what lockGroupsByName did before
  *       #202) while the start ordered by id would let the two sites walk the same pair of group rows in
  *       opposite directions and deadlock, so the ordering tests deliberately use a fixture whose name
@@ -141,6 +140,24 @@ public class TestGroupDeleteRouteLockOrdering extends BaseJerseyTest {
         /** The row an ID-ordered acquisition takes LAST (the higher id — the name-FIRST group). */
         String higherId() {
             return nameFirstId;
+        }
+    }
+
+    /**
+     * Two groups that are each other's PARENT (#217), keyed by the id order an ascending acquisition
+     * must follow — NOT by name, which is irrelevant to this fixture.
+     */
+    private static final class MutualParentPair {
+        private final String lowerIdName;
+        private final String lowerId;
+        private final String higherIdName;
+        private final String higherId;
+
+        private MutualParentPair(String lowerIdName, String lowerId, String higherIdName, String higherId) {
+            this.lowerIdName = lowerIdName;
+            this.lowerId = lowerId;
+            this.higherIdName = higherIdName;
+            this.higherId = higherId;
         }
     }
 
@@ -591,6 +608,136 @@ public class TestGroupDeleteRouteLockOrdering extends BaseJerseyTest {
     }
 
     // ----------------------------------------------------------------------------------------------------
+    // (v) delete-vs-delete: groups that are each other's parent (#217)
+    // ----------------------------------------------------------------------------------------------------
+
+    /**
+     * {@code DELETE /group/:name} acquires every GROUP row it writes — the target AND its active children,
+     * whose rows the child-detach UPDATE sets {@code parentId = null} on — in ascending group id order,
+     * before it writes any of them (#217).
+     *
+     * <p>Deterministic probe, the same shape as the start/route-model ordering tests above: build a
+     * mutual-parent pair, gate the HIGHER-id row, and delete the HIGHER-id group. While the deletion is
+     * parked on the gated target row its child — the LOWER-id group — must ALREADY be held, because
+     * ascending order puts the child first.</p>
+     *
+     * <p>Against the pre-#217 code the deletion locks its target by NAME first and reaches the child only
+     * later, inside {@code GroupDao.delete}: it parks on the gated row holding no other group row at all,
+     * so the lower-id row is still free and this assertion fails. That is precisely the descending
+     * acquisition that deadlocks against the mirror-image deletion of the other group.</p>
+     */
+    @Test
+    public void groupDeleteLocksItsChildrenAndTargetInAscendingIdOrder() throws Exception {
+        Assumptions.assumeTrue(EMF.isDriverPostgresql(),
+                "asserts PostgreSQL row-lock ordering semantics — H2 cannot model them");
+        String adminToken = adminToken();
+        MutualParentPair pair = createMutualParentPair("gdrlmutorder");
+
+        AtomicReference<Integer> deleteStatus = new AtomicReference<>();
+        Thread deleteThread = new Thread(() -> deleteStatus.set(target().path("/group/" + pair.higherIdName)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete().getStatus()));
+
+        Gate gate = new Gate();
+        try {
+            gate.lockForUpdate("T_GROUP", "GRP_ID_C", pair.higherId);
+
+            deleteThread.start();
+            gate.awaitCondition(() -> gate.blockedSessions() >= 1,
+                    "the group deletion to park on the gated (higher-id) target row");
+
+            // INVARIANT (#217): parked on the higher-id target, the deletion ALREADY holds its lower-id
+            // child — the whole set of group rows it writes is taken in ascending id order, up front.
+            Assertions.assertFalse(rowIsLockable("T_GROUP", "GRP_ID_C", pair.lowerId),
+                    "the lower-id child group must already be locked while the deletion is parked on the"
+                            + " higher-id target row (the deletion acquires target + children in ascending"
+                            + " group id order, #217)");
+        } finally {
+            gate.release();
+        }
+
+        deleteThread.join(JOIN_TIMEOUT_MS);
+        Assertions.assertFalse(deleteThread.isAlive(), "the group deletion must complete");
+        Assertions.assertEquals(Status.OK.getStatusCode(), deleteStatus.get().intValue(),
+                "the group deletion must succeed once the gate releases");
+        Assertions.assertEquals(1L, count(
+                "select count(*) from T_GROUP where GRP_ID_C = :v and GRP_DELETEDATE_D is not null",
+                Map.of("v", pair.higherId)), "the target group is soft-deleted");
+        Assertions.assertEquals(1L, count(
+                "select count(*) from T_GROUP where GRP_ID_C = :v and GRP_IDPARENT_C is null"
+                        + " and GRP_DELETEDATE_D is null", Map.of("v", pair.lowerId)),
+                "the surviving child is detached from the deleted parent");
+    }
+
+    /**
+     * The #217 defect signature itself: two groups that are each other's parent, deleted CONCURRENTLY,
+     * must serialize rather than deadlock. Each deletion writes both rows, so before the fix one held its
+     * own row and reached for the other's while its counterpart did the mirror image — a cycle the engine
+     * can only break by aborting a transaction, surfacing as a failed request.
+     *
+     * <p>Deterministic interleaving instead of a repro loop: gate the LOWER-id row, then start the
+     * deletion of the LOWER-id group first and the HIGHER-id one second, so both are parked and queued on
+     * that one row before either can proceed. Releasing the gate then runs them back-to-back with maximal
+     * overlap. Post-fix both deletions discover the SAME two ids and take the lower one first, so the
+     * second simply waits for the first; pre-fix the higher-id deletion is already holding its own target
+     * row when it queues here, and the cycle closes the moment the lower-id deletion is granted the row
+     * and reaches for the child it must detach.</p>
+     *
+     * <p>Asserted as invariants, not as a winner: no engine-level deadlock, both requests succeed, both
+     * groups end up soft-deleted.</p>
+     */
+    @Test
+    public void concurrentDeletesOfMutualParentGroupsSerializeWithoutDeadlock() throws Exception {
+        Assumptions.assumeTrue(EMF.isDriverPostgresql(),
+                "asserts PostgreSQL row-lock wait semantics — H2 cannot model them");
+        String adminToken = adminToken();
+        MutualParentPair pair = createMutualParentPair("gdrlmutrace");
+
+        long deadlocksBefore = databaseDeadlockCount();
+
+        AtomicReference<Integer> lowerStatus = new AtomicReference<>();
+        Thread deleteLower = new Thread(() -> lowerStatus.set(target().path("/group/" + pair.lowerIdName)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete().getStatus()));
+
+        AtomicReference<Integer> higherStatus = new AtomicReference<>();
+        Thread deleteHigher = new Thread(() -> higherStatus.set(target().path("/group/" + pair.higherIdName)
+                .request().cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete().getStatus()));
+
+        Gate gate = new Gate();
+        try {
+            gate.lockForUpdate("T_GROUP", "GRP_ID_C", pair.lowerId);
+
+            deleteLower.start();
+            gate.awaitCondition(() -> gate.blockedSessions() >= 1,
+                    "the lower-id group's deletion to park on the gated row");
+
+            deleteHigher.start();
+            gate.awaitCondition(() -> gate.blockedSessions() >= 2,
+                    "the higher-id group's deletion to park on the gated row as well");
+        } finally {
+            gate.release();
+        }
+
+        deleteLower.join(JOIN_TIMEOUT_MS);
+        deleteHigher.join(JOIN_TIMEOUT_MS);
+        Assertions.assertFalse(deleteLower.isAlive(), "the lower-id group's deletion must complete");
+        Assertions.assertFalse(deleteHigher.isAlive(), "the higher-id group's deletion must complete");
+
+        // INVARIANT (#217): mutually-parented groups deleted concurrently do not deadlock.
+        Assertions.assertEquals(deadlocksBefore, databaseDeadlockCount(),
+                "concurrent deletions of two groups that are each other's parent must not deadlock (#217)");
+        Assertions.assertEquals(Status.OK.getStatusCode(), lowerStatus.get().intValue(),
+                "the lower-id group's deletion must succeed");
+        Assertions.assertEquals(Status.OK.getStatusCode(), higherStatus.get().intValue(),
+                "the higher-id group's deletion must succeed");
+        Assertions.assertEquals(2L, count(
+                "select count(*) from T_GROUP where GRP_ID_C in (:a, :b) and GRP_DELETEDATE_D is not null",
+                Map.of("a", pair.lowerId, "b", pair.higherId)), "both groups are soft-deleted");
+    }
+
+    // ----------------------------------------------------------------------------------------------------
     // helpers
     // ----------------------------------------------------------------------------------------------------
 
@@ -639,32 +786,86 @@ public class TestGroupDeleteRouteLockOrdering extends BaseJerseyTest {
     }
 
     /**
-     * Creates groups until two of them are found whose name order is the REVERSE of their id order (ids
-     * are random UUIDs, so roughly every second pair qualifies; with this many candidates the probability
-     * that no inversion exists is under 1/700).
+     * Builds the name-order/id-order inversion by CONSTRUCTION rather than by search (#221): create two
+     * groups under throwaway names, read back the ids the database assigned, then assign the final names
+     * INVERSELY to that observed order — the alphabetically first name goes to the higher id. The
+     * inversion is therefore a property of the fixture, not of the draw.
      *
-     * @param prefix Group-name prefix (alphanumeric; the suffix keeps creation order == name order)
+     * <p>The previous version created six groups and hunted for a pair whose random UUIDs happened to
+     * sort against their names, which left a real (if small) chance of finding none — an observed flake.
+     * Two groups and two renames replace it with a certainty.</p>
+     *
+     * @param prefix Group-name prefix (alphanumeric; the final names are {@code prefix + "a"} and
+     *               {@code prefix + "b"}, which sort in that order)
      * @return the inverted pair
      */
     private InvertedGroupPair createInvertedGroupPair(String prefix) {
-        List<String> names = new ArrayList<>();
-        List<String> ids = new ArrayList<>();
-        for (int i = 0; i < 6; i++) {
-            String name = prefix + i;
-            clientUtil.createGroup(name);
-            names.add(name);
-            ids.add(groupId(name));
+        String adminToken = adminToken();
+        String seedA = prefix + "seeda";
+        String seedB = prefix + "seedb";
+        clientUtil.createGroup(seedA);
+        clientUtil.createGroup(seedB);
+        String seedAId = groupId(seedA);
+        String seedBId = groupId(seedB);
+
+        boolean seedAIsHigher = seedAId.compareTo(seedBId) > 0;
+        String higherIdSeed = seedAIsHigher ? seedA : seedB;
+        String higherId = seedAIsHigher ? seedAId : seedBId;
+        String lowerIdSeed = seedAIsHigher ? seedB : seedA;
+        String lowerId = seedAIsHigher ? seedBId : seedAId;
+
+        // The name that sorts FIRST goes to the group with the HIGHER id — that is the inversion.
+        String nameFirst = prefix + "a";
+        String nameSecond = prefix + "b";
+        updateGroup(adminToken, higherIdSeed, nameFirst, null);
+        updateGroup(adminToken, lowerIdSeed, nameSecond, null);
+
+        return new InvertedGroupPair(nameFirst, higherId, nameSecond, lowerId);
+    }
+
+    /**
+     * Builds the #217 fixture: two groups that are each other's PARENT. Deleting either one writes BOTH
+     * rows — its own (the soft-delete) and its child's (the parent detach) — so a deletion of each,
+     * concurrently, is the pair of transactions that must not be able to take those two rows in opposite
+     * directions.
+     *
+     * @param prefix Group-name prefix (alphanumeric)
+     * @return the pair, keyed by observed id order
+     */
+    private MutualParentPair createMutualParentPair(String prefix) {
+        String adminToken = adminToken();
+        String first = prefix + "a";
+        String second = prefix + "b";
+        clientUtil.createGroup(first);
+        clientUtil.createGroup(second, first);       // second.parent = first
+        updateGroup(adminToken, first, first, second); // first.parent = second — the cycle is now closed
+
+        String firstId = groupId(first);
+        String secondId = groupId(second);
+        return firstId.compareTo(secondId) < 0
+                ? new MutualParentPair(first, firstId, second, secondId)
+                : new MutualParentPair(second, secondId, first, firstId);
+    }
+
+    /**
+     * {@code POST /group/:name} as admin, requiring success. A null {@code parentName} clears the parent
+     * (the endpoint treats an absent parent as "no parent").
+     *
+     * @param adminToken Admin auth token
+     * @param currentName The group's current name (the path segment)
+     * @param newName The name to set (unchanged for a pure re-parent)
+     * @param parentName The parent group's name, or null for none
+     */
+    private void updateGroup(String adminToken, String currentName, String newName, String parentName) {
+        Form form = new Form().param("name", newName);
+        if (parentName != null) {
+            form.param("parent", parentName);
         }
-        for (int i = 0; i < names.size(); i++) {
-            for (int j = i + 1; j < names.size(); j++) {
-                // names.get(i) < names.get(j) alphabetically by construction; require the id order to be
-                // the opposite.
-                if (ids.get(i).compareTo(ids.get(j)) > 0) {
-                    return new InvertedGroupPair(names.get(i), ids.get(i), names.get(j), ids.get(j));
-                }
-            }
-        }
-        throw new AssertionError("no name-order/id-order inversion among the candidate groups");
+        Response response = target().path("/group/" + currentName).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(form));
+        Assertions.assertEquals(Status.OK.getStatusCode(), response.getStatus(),
+                "the group update must succeed (" + currentName + " -> " + newName + ")");
     }
 
     /** Assert a start was rejected with the typed invalid-target error. */

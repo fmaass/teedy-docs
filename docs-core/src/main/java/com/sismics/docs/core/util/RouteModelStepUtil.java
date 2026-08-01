@@ -50,9 +50,10 @@ import java.util.TreeSet;
  * group id, and groups sit between users and documents in the global order
  * USER -&gt; GROUP -&gt; DOCUMENT -&gt; ROUTE ({@code RouteResource} states it in full). This util is
  * not the only multi-group lock site any more — {@code RouteResource.start} locks its GROUP step
- * targets by id — so the ordering key has to be one both sites can compute: the row id, never the
+ * targets by id, and {@code GroupResource.delete} locks its deletion union the same way — so the
+ * ordering key has to be one all sites can compute: the row id, never the
  * mutable name. A site that locks exactly one group row may still resolve it by name
- * ({@code GroupResource.update} / {@code GroupResource.delete}) — a single acquisition has no internal
+ * ({@code GroupResource.update}) — a single acquisition has no internal
  * order to get wrong.
  *
  * @author teedy

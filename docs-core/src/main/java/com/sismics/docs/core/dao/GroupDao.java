@@ -95,6 +95,87 @@ public class GroupDao {
     }
 
     /**
+     * Resolves an active group by name and acquires — FOR UPDATE, in ascending id order — every GROUP row
+     * that {@link #delete(String, String)} of that group writes: the target row itself, and the rows of
+     * its ACTIVE children, which the child-detach UPDATE sets {@code parentId = null} on.
+     *
+     * <p>#217: locking only the target (what the deletion used to do, via
+     * {@link #getActiveByNameForUpdate(String)}) let two concurrent deletions of groups that are each
+     * other's PARENT deadlock — each held its own row and then reached for the other's through the detach.
+     * Ordering the detach itself, or pre-locking only the children, cannot fix that: with a single child
+     * on each side there is nothing left to order. Only ONE acquisition of the whole union
+     * {target} u {active children}, taken in ascending id order — the same discipline as every other
+     * multi-group lock site (#202: {@code RouteResource.start}, {@code RouteModelStepUtil.lockGroupsByName})
+     * — removes the cycle, because two deletions of a mutual pair discover the SAME two ids and therefore
+     * walk them in the same direction.</p>
+     *
+     * <p><b>Scope of the guarantee.</b> Discovery is deliberately UNLOCKED, and the child set is not
+     * chased once the locks are held. Among concurrent DELETIONS — the defect this closes — the discovered
+     * set can only SHRINK by the time the locks are taken: a child deleted meanwhile gains a deleteDate,
+     * {@link #getActiveByIdForUpdate(String)} then returns null for it so its row is simply not locked,
+     * and the detach UPDATE's own {@code deleteDate is null} filter skips it. A lock held over a row that
+     * turned out not to need one is harmless. The set can only GROW through a create/update that attaches
+     * a parent edge, and those paths do not lock the parent they attach to (the group resource resolves it
+     * with an unlocked read, and the parent column carries no foreign key) — a PRE-EXISTING defect of its
+     * own, tracked separately and NOT closed here. Growth is deliberately not chased: taking a
+     * newly-discovered LOWER id while already holding higher ones is a descending acquisition, which would
+     * reintroduce exactly the cycle class this method exists to remove.</p>
+     *
+     * <p>Returns null when the name does not resolve to an active group, or no longer resolves to the same
+     * one once the locks are held (a concurrent rename or deletion) — so callers keep their "group not
+     * found" behaviour rather than deleting a row the caller did not name.</p>
+     *
+     * @param name Group name
+     * @return The locked active group, or null if the name does not (still) resolve to one
+     */
+    public Group getActiveByNameWithChildrenForUpdate(String name) {
+        // Discovery, unlocked: the target and the children whose rows the deletion will write.
+        Group target = getActiveByName(name);
+        if (target == null) {
+            return null;
+        }
+        String targetId = target.getId();
+        SortedSet<String> lockIdSet = new TreeSet<>(findActiveChildIds(targetId));
+        lockIdSet.add(targetId);
+
+        // Ordered acquisition: ascending id, one pass, before any group row is written.
+        Group lockedTarget = null;
+        for (String lockId : lockIdSet) {
+            Group locked = getActiveByIdForUpdate(lockId);
+            if (targetId.equals(lockId)) {
+                lockedTarget = locked;
+            }
+        }
+        if (lockedTarget == null) {
+            // The target was deleted between discovery and its lock.
+            return null;
+        }
+
+        // Re-validate under the locks: the name must still resolve to the row now held, or a concurrent
+        // rename has moved it and this request no longer names what it locked.
+        Group current = getActiveByName(name);
+        if (current == null || !targetId.equals(current.getId())) {
+            return null;
+        }
+        return lockedTarget;
+    }
+
+    /**
+     * The IDs of a group's ACTIVE children — exactly the rows {@link #delete(String, String)}'s
+     * child-detach UPDATE writes.
+     *
+     * @param groupId Parent group ID
+     * @return Active child group IDs, empty when the group has none
+     */
+    private List<String> findActiveChildIds(String groupId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<String> q = em.createQuery(
+                "select g.id from Group g where g.parentId = :groupId and g.deleteDate is null", String.class);
+        q.setParameter("groupId", groupId);
+        return q.getResultList();
+    }
+
+    /**
      * Returns a group by ID.
      *
      * @param id Group ID

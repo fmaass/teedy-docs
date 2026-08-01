@@ -52,7 +52,8 @@ import java.util.TreeSet;
  * resolves names to ids for exactly this reason).</p>
  *
  * <p>Nothing runs the order backwards. The only sites that lock a GROUP row are
- * {@code GroupResource.update} / {@code GroupResource.delete} (one row each, by name, before any
+ * {@code GroupResource.update} (one row, by name, before any document row),
+ * {@code GroupResource.delete} (the target and its active children, ascending by id, before any
  * document row), {@code GroupDao.addMember} (one row, before a {@code T_USER_GROUP} insert — that table
  * carries no foreign key, so the insert locks no user row) and the two ascending-id sites above. None of
  * them holds a USER or DOCUMENT row while reaching for a group, so USER -&gt; GROUP and
@@ -140,7 +141,7 @@ public class RouteResource extends BaseResource {
         // #202 GLOBAL LOCK ORDER: GROUP after USER, before DOCUMENT. Lock the GROUP-typed step targets'
         // active rows FOR UPDATE (deduplicated, ascending id) — the same rows, in the same ascending-id
         // order, that RouteModelStepUtil.lockGroupsByName takes, and that GroupResource.delete takes
-        // (a single row, by name) before it scans for the routes to cancel. Without it a group
+        // (the target group and its active children, ascending id) before it scans for the routes to cancel. Without it a group
         // deletion could commit between this start's target resolution and its step INSERTs: the
         // deletion's cancel scan sees only persisted rows, so the steps land after the scan and the
         // route is stranded on a principal that no longer exists, with no route to cancel it.
@@ -339,9 +340,10 @@ public class RouteResource extends BaseResource {
      *
      * <p>Uses the same {@link CredentialLifecycleUtil#lockActiveGroup} facade primitive (over
      * {@code GroupDao.getActiveByIdForUpdate}) — and the same ascending-id acquisition order — as
-     * {@code RouteModelStepUtil.lockGroupsByName}, the other multi-group lock site; {@code GroupDao.addMember}
-     * and {@code GroupResource.delete} each lock a single group row — the latter by name, before its
-     * route-cancel scan. Going through the util keeps this resource off the frozen legacy
+     * {@code RouteModelStepUtil.lockGroupsByName}, another multi-group lock site; {@code GroupDao.addMember}
+     * locks a single group row, and {@code GroupResource.delete} locks its deletion union (target +
+     * active children) ascending by id before its route-cancel scan. Going through the util keeps
+     * this resource off the frozen legacy
      * {@code rest.resource -> core.dao} edge, exactly as the user half does.</p>
      *
      * <p>Held to commit, these locks serialize a start against the deletion of any of its group targets
