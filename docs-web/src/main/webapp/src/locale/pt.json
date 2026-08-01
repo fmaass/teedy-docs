@@ -252,7 +252,15 @@
       "copy_link": "Copiar ligação para o ficheiro",
       "link_copied": "Ligação do ficheiro copiada para a área de transferência",
       "link_copy_failed": "Não foi possível copiar a ligação do ficheiro",
-      "link_not_found": "Esse ficheiro já não faz parte deste documento."
+      "link_not_found": "Esse ficheiro já não faz parte deste documento.",
+      "sort_label": "Ordenar ficheiros",
+      "sort_manual": "Ordem manual",
+      "sort_name_asc": "Nome (A–Z)",
+      "sort_name_desc": "Nome (Z–A)",
+      "sort_date_asc": "Criado (mais antigos primeiro)",
+      "sort_date_desc": "Criado (mais recentes primeiro)",
+      "sort_size_asc": "Tamanho (mais pequenos primeiro)",
+      "sort_size_desc": "Tamanho (maiores primeiro)"
     },
     "pdf_organizer": {
       "edit_pages": "Editar páginas",

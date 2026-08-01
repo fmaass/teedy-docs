@@ -252,7 +252,15 @@
       "copy_link": "Kopjo lidhjen e skedarit",
       "link_copied": "Lidhja e skedarit u kopjua në kujtesën e fragmenteve",
       "link_copy_failed": "Lidhja e skedarit nuk u kopjua dot",
-      "link_not_found": "Ky skedar nuk është më pjesë e këtij dokumenti."
+      "link_not_found": "Ky skedar nuk është më pjesë e këtij dokumenti.",
+      "sort_label": "Rendit skedarët",
+      "sort_manual": "Renditje manuale",
+      "sort_name_asc": "Emri (A–Z)",
+      "sort_name_desc": "Emri (Z–A)",
+      "sort_date_asc": "Krijuar (më të vjetrat në fillim)",
+      "sort_date_desc": "Krijuar (më të rejat në fillim)",
+      "sort_size_asc": "Madhësia (më të voglat në fillim)",
+      "sort_size_desc": "Madhësia (më të mëdhatë në fillim)"
     },
     "pdf_organizer": {
       "edit_pages": "Redakto faqet",

@@ -252,7 +252,15 @@
       "copy_link": "Kopiuj link do pliku",
       "link_copied": "Link do pliku skopiowany do schowka",
       "link_copy_failed": "Nie udało się skopiować linku do pliku",
-      "link_not_found": "Ten plik nie należy już do tego dokumentu."
+      "link_not_found": "Ten plik nie należy już do tego dokumentu.",
+      "sort_label": "Sortuj pliki",
+      "sort_manual": "Kolejność ręczna",
+      "sort_name_asc": "Nazwa (A–Z)",
+      "sort_name_desc": "Nazwa (Z–A)",
+      "sort_date_asc": "Utworzono (najstarsze najpierw)",
+      "sort_date_desc": "Utworzono (najnowsze najpierw)",
+      "sort_size_asc": "Rozmiar (najmniejsze najpierw)",
+      "sort_size_desc": "Rozmiar (największe najpierw)"
     },
     "pdf_organizer": {
       "edit_pages": "Edytuj strony",

@@ -38,6 +38,33 @@ function installStorage(target: typeof globalThis | Window) {
 installStorage(globalThis)
 if (typeof window !== 'undefined') installStorage(window)
 
+// jsdom implements no `window.matchMedia`, and several PrimeVue components probe it at mount for
+// their responsive overlay (Select, Tabs). It used to be stubbed per spec; DocumentViewContent's
+// grid sort control (#211) put a Select on a component five spec files mount, so the stub lives
+// here instead of being copied into each. Installed ONLY when absent, so a spec that needs
+// specific media answers (DocumentSlideOver.spec.ts forces a desktop match) still overrides it.
+function installMatchMedia(target: Window) {
+  if (typeof target.matchMedia === 'function') return
+  Object.defineProperty(target, 'matchMedia', {
+    configurable: true,
+    // Writable, or a spec that overrides with a plain assignment (rather than another
+    // defineProperty) hits a read-only property — defineProperty defaults writable to false.
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
+if (typeof window !== 'undefined') installMatchMedia(window)
+
 // PrimeVue's `v-tooltip` directive is registered globally in src/main.ts, but component
 // tests mount in isolation without the full app plugin. Register a no-op tooltip stub on
 // the Vue Test Utils global config so components using `v-tooltip` don't emit

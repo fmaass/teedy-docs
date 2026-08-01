@@ -98,6 +98,7 @@ vi.mock('../../composables/usePreviewQueue', () => ({
   }),
 }))
 
+import Select from 'primevue/select'
 import DocumentViewContent from './DocumentViewContent.vue'
 import FilePreviewDialog from '../../components/FilePreviewDialog.vue'
 
@@ -970,5 +971,150 @@ describe('DocumentViewContent — full file name in a native title (#207)', () =
     expect(labels.map((l) => l.attributes('title'))).toEqual([LONG_IMG, LONG_PDF, LONG_ZIP])
     // The rendered text is unchanged — truncation stays purely CSS.
     expect(labels.map((l) => l.text())).toEqual([LONG_IMG, LONG_PDF, LONG_ZIP])
+  })
+})
+
+// #211 (second half): the list view has a transient column sort; the grid had none, so the two
+// views of the same files could not be ordered the same way. The grid's sort is a CLONED
+// PROJECTION over the manual order — it never persists, never touches POST /file/reorder, and
+// suspends the drag handles for as long as it is active (a drop into a sorted view has no
+// meaningful target index, and the endpoint needs the complete MANUAL order).
+describe('DocumentViewContent — grid transient sort (#211)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    reorderFilesMock.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+  })
+
+  type Wrapper = ReturnType<typeof mountView>['wrapper']
+
+  function file(id: string, name: string | null, size: number, create_date: number) {
+    return { id, name, mimetype: 'text/plain', size, version: 0, create_date, creator: 'admin' }
+  }
+
+  // Deliberately cross-cutting: the manual order is neither name- nor size- nor date-ordered,
+  // so each criterion produces a DIFFERENT sequence and no assertion can pass by accident.
+  function sortDoc(writable = true) {
+    return makeDoc({
+      relations: [],
+      writable,
+      files: [
+        file('f1', 'charlie.txt', 300, 20),
+        file('f2', 'alpha.txt', 100, 30),
+        file('f3', 'bravo.txt', 200, 10),
+      ],
+    } as unknown as Partial<DocumentDetail>)
+  }
+
+  function tileNames(wrapper: Wrapper) {
+    return wrapper.findAll('.file-preview-grid .file-preview-label').map((l) => l.text())
+  }
+
+  function sortSelect(wrapper: Wrapper) {
+    return wrapper.findAllComponents(Select).find((s) => s.classes().includes('grid-sort-select'))!
+  }
+
+  async function chooseSort(wrapper: Wrapper, value: string) {
+    sortSelect(wrapper).vm.$emit('update:modelValue', value)
+    await wrapper.vm.$nextTick()
+  }
+
+  const MANUAL = ['charlie.txt', 'alpha.txt', 'bravo.txt']
+
+  it('offers the sort control only in grid mode, defaulting to the manual order', async () => {
+    const { wrapper } = mountView(sortDoc()) // grid is the default view mode
+    expect(sortSelect(wrapper)).toBeTruthy()
+    expect(sortSelect(wrapper).props('modelValue')).toBe('manual')
+    expect(tileNames(wrapper)).toEqual(MANUAL)
+  })
+
+  it('sorts by name in BOTH directions', async () => {
+    const { wrapper } = mountView(sortDoc())
+    await chooseSort(wrapper, 'name:asc')
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'charlie.txt'])
+    await chooseSort(wrapper, 'name:desc')
+    expect(tileNames(wrapper)).toEqual(['charlie.txt', 'bravo.txt', 'alpha.txt'])
+  })
+
+  it('sorts by size in BOTH directions', async () => {
+    const { wrapper } = mountView(sortDoc())
+    await chooseSort(wrapper, 'size:asc')
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'charlie.txt'])
+    await chooseSort(wrapper, 'size:desc')
+    expect(tileNames(wrapper)).toEqual(['charlie.txt', 'bravo.txt', 'alpha.txt'])
+  })
+
+  it('sorts by date in BOTH directions', async () => {
+    const { wrapper } = mountView(sortDoc())
+    await chooseSort(wrapper, 'create_date:asc')
+    expect(tileNames(wrapper)).toEqual(['bravo.txt', 'charlie.txt', 'alpha.txt'])
+    await chooseSort(wrapper, 'create_date:desc')
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'charlie.txt', 'bravo.txt'])
+  })
+
+  it('clearing the sort restores the MANUAL order', async () => {
+    const { wrapper } = mountView(sortDoc())
+    await chooseSort(wrapper, 'name:asc')
+    expect(tileNames(wrapper)).not.toEqual(MANUAL)
+    await chooseSort(wrapper, 'manual')
+    expect(tileNames(wrapper)).toEqual(MANUAL)
+  })
+
+  it('withdraws the drag handles while a sort is active and returns them when it is cleared', async () => {
+    const { wrapper } = mountView(sortDoc())
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(3)
+
+    await chooseSort(wrapper, 'name:asc')
+    // A drop into a sorted projection has no meaningful target index, and POST /file/reorder
+    // needs the complete MANUAL order — so the affordance goes away rather than lying.
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+
+    await chooseSort(wrapper, 'manual')
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(3)
+  })
+
+  it('is view-only: sorting never persists an order', async () => {
+    const { wrapper } = mountView(sortDoc())
+    await chooseSort(wrapper, 'name:asc')
+    await chooseSort(wrapper, 'size:desc')
+    await chooseSort(wrapper, 'manual')
+    await flushPromises()
+    expect(reorderFilesMock).not.toHaveBeenCalled()
+  })
+
+  it('does not mutate the manual order: a refetch arriving while sorted still re-seeds it, and clearing shows the SERVER order', async () => {
+    const { wrapper, docRef } = mountView(sortDoc())
+    await chooseSort(wrapper, 'name:asc')
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'charlie.txt'])
+
+    // Nothing is frozen (no drag, no persist in flight), so the refresh is authoritative and
+    // lands on the MANUAL order underneath the projection.
+    docRef.value = {
+      ...docRef.value,
+      files: [
+        file('f3', 'bravo.txt', 200, 10),
+        file('f1', 'charlie.txt', 300, 20),
+        file('f2', 'alpha.txt', 100, 30),
+      ],
+    } as unknown as DocumentDetail
+    await wrapper.vm.$nextTick()
+    // The projection re-derives over the new manual order — same sorted sequence.
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'charlie.txt'])
+
+    await chooseSort(wrapper, 'manual')
+    expect(tileNames(wrapper)).toEqual(['bravo.txt', 'charlie.txt', 'alpha.txt'])
+  })
+
+  it('a null-named file sorts LAST by name in both directions', async () => {
+    const { wrapper } = mountView(
+      makeDoc({
+        relations: [],
+        writable: true,
+        files: [file('f1', 'bravo.txt', 1, 1), file('f2', null, 2, 2), file('f3', 'alpha.txt', 3, 3)],
+      } as unknown as Partial<DocumentDetail>),
+    )
+    await chooseSort(wrapper, 'name:asc')
+    expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'ui.file_view.untitled'])
+    await chooseSort(wrapper, 'name:desc')
+    expect(tileNames(wrapper)).toEqual(['bravo.txt', 'alpha.txt', 'ui.file_view.untitled'])
   })
 })

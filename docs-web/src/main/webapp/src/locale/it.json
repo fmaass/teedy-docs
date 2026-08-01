@@ -252,7 +252,15 @@
       "copy_link": "Copia il link al file",
       "link_copied": "Link del file copiato negli appunti",
       "link_copy_failed": "Impossibile copiare il link del file",
-      "link_not_found": "Questo file non fa più parte di questo documento."
+      "link_not_found": "Questo file non fa più parte di questo documento.",
+      "sort_label": "Ordina file",
+      "sort_manual": "Ordine manuale",
+      "sort_name_asc": "Nome (A–Z)",
+      "sort_name_desc": "Nome (Z–A)",
+      "sort_date_asc": "Creato (prima i più vecchi)",
+      "sort_date_desc": "Creato (prima i più recenti)",
+      "sort_size_asc": "Dimensione (prima i più piccoli)",
+      "sort_size_desc": "Dimensione (prima i più grandi)"
     },
     "pdf_organizer": {
       "edit_pages": "Modifica pagine",

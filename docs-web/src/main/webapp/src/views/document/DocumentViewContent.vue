@@ -29,6 +29,7 @@ import InputText from 'primevue/inputtext'
 import AutoComplete from 'primevue/autocomplete'
 import Dialog from 'primevue/dialog'
 import SelectButton from 'primevue/selectbutton'
+import Select from 'primevue/select'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
@@ -42,6 +43,7 @@ import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { usePreviewQueue } from '../../composables/usePreviewQueue'
 import { useAuthStore } from '../../stores/auth'
 import { formatDate } from '../../utils/formatters'
+import { sortFiles, type FileSortField, type FileSortDirection } from '../../utils/fileSort'
 import { injectDocument } from './documentKey'
 
 const doc = injectDocument()
@@ -783,12 +785,58 @@ function releaseGridRefresh() {
   if (fresh) gridOrderedFiles.value = fresh
 }
 
+// --- Grid transient sort (#211) -------------------------------------------------------
+// The list view has a transient column sort (FileListTable:103); the grid had none, so the same
+// files could not be ordered the same way in the two views. This is that missing half, and it is
+// deliberately the SAME KIND of thing: view-only, never persisted, never near POST /file/reorder,
+// and cleared back to the manual order by an explicit choice.
+//
+// It is a PROJECTION, not a second order: `gridOrderedFiles` — the optimistic manual order the
+// whole reorder contract above is built on — is read, cloned and sorted, never written. Every
+// freeze/refresh/confirm/rollback path therefore keeps working on the manual order exactly as
+// before, and the projection simply re-derives afterwards. With no sort active the projection IS
+// the manual array (same reference), so the tile indices the drag handlers take stay indices into
+// `gridOrderedFiles`.
+const GRID_SORT_MANUAL = 'manual'
+type GridSortKey = typeof GRID_SORT_MANUAL | `${FileSortField}:${FileSortDirection}`
+
+// The criteria the LIST offers as sortable columns (FileListTable's `sortable` Columns) minus
+// Uploader, which no tile displays — the grid card shows a name, a size-free preview and a date,
+// so an uploader sort would reorder tiles by something invisible on them.
+const gridSortKey = ref<GridSortKey>(GRID_SORT_MANUAL)
+const gridSortOptions = computed(() => [
+  { value: GRID_SORT_MANUAL as GridSortKey, label: t('ui.file_view.sort_manual') },
+  { value: 'name:asc' as GridSortKey, label: t('ui.file_view.sort_name_asc') },
+  { value: 'name:desc' as GridSortKey, label: t('ui.file_view.sort_name_desc') },
+  { value: 'create_date:asc' as GridSortKey, label: t('ui.file_view.sort_date_asc') },
+  { value: 'create_date:desc' as GridSortKey, label: t('ui.file_view.sort_date_desc') },
+  { value: 'size:asc' as GridSortKey, label: t('ui.file_view.sort_size_asc') },
+  { value: 'size:desc' as GridSortKey, label: t('ui.file_view.sort_size_desc') },
+])
+
+const gridSort = computed<{ field: FileSortField; direction: FileSortDirection } | null>(() => {
+  if (gridSortKey.value === GRID_SORT_MANUAL) return null
+  const [field, direction] = gridSortKey.value.split(':') as [FileSortField, FileSortDirection]
+  return { field, direction }
+})
+
+// Returning `gridOrderedFiles.value` UNWRAPPED (not a copy) in the manual case is load-bearing,
+// not an optimisation: the drag handlers index into the manual order, so the rendered list has to
+// be that very array whenever a drag is possible at all.
+const gridDisplayFiles = computed(() =>
+  gridSort.value
+    ? sortFiles(gridOrderedFiles.value, gridSort.value.field, gridSort.value.direction)
+    : gridOrderedFiles.value,
+)
+
 // Eligibility parity with the list (FileListTable:157): a writable document, the COMPLETE
-// order (the grid has neither quick filter nor sort, so what it shows is always the complete
-// unfiltered/unsorted order), under the size threshold, and no persist in flight.
+// unfiltered/unsorted order, under the size threshold, and no persist in flight. The sort clause
+// is the grid's analogue of the list's `!sortField` — a drop into a sorted projection has no
+// meaningful target index, and the endpoint needs the complete MANUAL order.
 const gridReorderEnabled = computed(
   () =>
     !!doc.value?.writable &&
+    !gridSort.value &&
     gridOrderedFiles.value.length <= GRID_REORDER_LIMIT &&
     !gridReorderPending.value,
 )
@@ -1436,6 +1484,22 @@ onUnmounted(() => {
     <div v-if="doc.files?.length" class="file-panel">
       <div class="file-panel-header">
         <h3>{{ t('ui.files_count', { count: doc.files.length }) }}</h3>
+        <!-- Grid-only transient sort (#211). The LIST carries its own sort in its column
+             headers, so offering a second control for it here would be two ways to set one
+             thing; the grid has no headers to click, hence a compact Select. It is a control
+             rather than a gesture, so it is the sort affordance that works on a phone, where
+             the drag handle is the awkward one. -->
+        <Select
+          v-if="fileViewMode === 'grid' && doc.files.length > 1"
+          v-model="gridSortKey"
+          :options="gridSortOptions"
+          optionLabel="label"
+          optionValue="value"
+          size="small"
+          class="grid-sort-select"
+          data-testid="grid-sort"
+          :aria-label="t('ui.file_view.sort_label')"
+        />
         <SelectButton
           :model-value="fileViewMode"
           :options="fileViewOptions"
@@ -1460,9 +1524,11 @@ onUnmounted(() => {
            carries the shared FileActionMenu, so the per-file action menu (and the
            #file-extra mount point) is present in BOTH views.
 
-           Tiles render `gridOrderedFiles` — the local optimistic order (#211) — not
-           `doc.files` directly, so a drag reorders immediately and a rejected persist can be
-           rolled back here. The click listener is on the CONTAINER and in the CAPTURE phase
+           Tiles render `gridDisplayFiles` — the local optimistic order (#211), projected
+           through the transient sort when one is active — not `doc.files` directly, so a drag
+           reorders immediately and a rejected persist can be rolled back here. With no sort the
+           projection IS the manual array, which is what keeps `index` below a position in the
+           order the drop persists. The click listener is on the CONTAINER and in the CAPTURE phase
            because it has to swallow the post-drop click before the tile control under the
            pointer (preview, rotation, action menu) ever sees it. -->
       <div
@@ -1470,7 +1536,7 @@ onUnmounted(() => {
         class="file-preview-grid"
         @click.capture="onGridClickCapture"
       >
-        <template v-for="(file, index) in gridOrderedFiles" :key="file.id">
+        <template v-for="(file, index) in gridDisplayFiles" :key="file.id">
           <div
             v-if="isImage(file.mimetype)"
             class="file-preview-card"
@@ -1976,17 +2042,24 @@ onUnmounted(() => {
 .file-panel {
   margin-top: 1rem;
 }
+/* The header carries the heading plus TWO controls in grid mode (the transient sort and the
+   grid⇄list toggle, #211). `space-between` alone would strand the sort in the middle of the
+   row, so the heading claims the slack instead and the controls stay a pair on the right —
+   and they wrap onto their own line rather than squeezing on a phone. */
 .file-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+  flex-wrap: wrap;
 }
 .file-panel-header h3 {
-  margin: 0;
+  margin: 0 auto 0 0;
   font-size: 1rem;
   font-weight: 600;
+}
+.grid-sort-select {
+  max-width: 13rem;
 }
 .file-view-label {
   margin-left: 0.35rem;

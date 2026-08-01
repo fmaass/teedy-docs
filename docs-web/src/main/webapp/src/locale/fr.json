@@ -252,7 +252,15 @@
       "copy_link": "Copier le lien du fichier",
       "link_copied": "Lien du fichier copié dans le presse-papiers",
       "link_copy_failed": "Impossible de copier le lien du fichier",
-      "link_not_found": "Ce fichier ne fait plus partie de ce document."
+      "link_not_found": "Ce fichier ne fait plus partie de ce document.",
+      "sort_label": "Trier les fichiers",
+      "sort_manual": "Ordre manuel",
+      "sort_name_asc": "Nom (A–Z)",
+      "sort_name_desc": "Nom (Z–A)",
+      "sort_date_asc": "Créé (plus ancien d’abord)",
+      "sort_date_desc": "Créé (plus récent d’abord)",
+      "sort_size_asc": "Taille (plus petit d’abord)",
+      "sort_size_desc": "Taille (plus grand d’abord)"
     },
     "pdf_organizer": {
       "edit_pages": "Modifier les pages",

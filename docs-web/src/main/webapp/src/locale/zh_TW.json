@@ -252,7 +252,15 @@
       "copy_link": "複製檔案連結",
       "link_copied": "檔案連結已複製到剪貼簿",
       "link_copy_failed": "無法複製檔案連結",
-      "link_not_found": "該檔案已不在此文件中。"
+      "link_not_found": "該檔案已不在此文件中。",
+      "sort_label": "檔案排序",
+      "sort_manual": "手動排序",
+      "sort_name_asc": "名稱（A–Z）",
+      "sort_name_desc": "名稱（Z–A）",
+      "sort_date_asc": "建立時間（由舊到新）",
+      "sort_date_desc": "建立時間（由新到舊）",
+      "sort_size_asc": "大小（由小到大）",
+      "sort_size_desc": "大小（由大到小）"
     },
     "pdf_organizer": {
       "edit_pages": "編輯頁面",

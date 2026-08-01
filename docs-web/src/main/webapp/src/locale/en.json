@@ -252,7 +252,15 @@
       "copy_link": "Copy link to file",
       "link_copied": "File link copied to clipboard",
       "link_copy_failed": "Could not copy the file link",
-      "link_not_found": "That file is no longer part of this document."
+      "link_not_found": "That file is no longer part of this document.",
+      "sort_label": "Sort files",
+      "sort_manual": "Manual order",
+      "sort_name_asc": "Name (A–Z)",
+      "sort_name_desc": "Name (Z–A)",
+      "sort_date_asc": "Created (oldest first)",
+      "sort_date_desc": "Created (newest first)",
+      "sort_size_asc": "Size (smallest first)",
+      "sort_size_desc": "Size (largest first)"
     },
     "pdf_organizer": {
       "edit_pages": "Edit pages",

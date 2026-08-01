@@ -252,7 +252,15 @@
       "copy_link": "复制文件链接",
       "link_copied": "文件链接已复制到剪贴板",
       "link_copy_failed": "无法复制文件链接",
-      "link_not_found": "该文件已不在此文档中。"
+      "link_not_found": "该文件已不在此文档中。",
+      "sort_label": "文件排序",
+      "sort_manual": "手动排序",
+      "sort_name_asc": "名称（A–Z）",
+      "sort_name_desc": "名称（Z–A）",
+      "sort_date_asc": "创建时间（从旧到新）",
+      "sort_date_desc": "创建时间（从新到旧）",
+      "sort_size_asc": "大小（从小到大）",
+      "sort_size_desc": "大小（从大到小）"
     },
     "pdf_organizer": {
       "edit_pages": "编辑页面",

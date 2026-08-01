@@ -207,6 +207,52 @@ test('grid drag-handle reorder persists the file order and matches the list view
   await expect(page.locator('.file-data-table tbody tr .file-name-text')).toHaveText(afterDrag)
 })
 
+// #211 (second half) — the grid's TRANSIENT sort. The list sorts from its column headers; the
+// grid has none, so it sorts from a control. What this pins is that the sort is a view, not an
+// order: it reorders the tiles, it withdraws the drag handles while it is on (a drop into a
+// sorted projection has no meaningful target index), and clearing it puts the document's own
+// order back — with nothing persisted along the way.
+test('grid sort reorders the tiles transiently and restores the manual order', async ({
+  page,
+  cleanup,
+}) => {
+  // Seeded so the manual (upload) order is neither name- nor reverse-name-ordered: sorting by
+  // name MUST move the first tile, which an already-sorted seed could not prove.
+  const id = await seedDoc(page.request, unique('gridsort'), [
+    txtFile('c-gamma.txt'),
+    txtFile('a-alpha.txt'),
+    txtFile('b-beta.txt'),
+  ])
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+  await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
+  await page.goto(`/#/document/view/${id}/content`)
+  await expect(page.locator('.file-preview-grid')).toBeVisible()
+
+  const names = page.locator('.file-preview-grid .file-preview-label')
+  const MANUAL = ['c-gamma.txt', 'a-alpha.txt', 'b-beta.txt']
+  await expect(names).toHaveText(MANUAL)
+  await expect(page.locator('.file-card-drag-handle')).toHaveCount(3)
+
+  // Sort by name ascending.
+  await page.getByTestId('grid-sort').click()
+  await page.getByRole('option', { name: /^Name \(A/ }).click()
+  await expect(names).toHaveText(['a-alpha.txt', 'b-beta.txt', 'c-gamma.txt'])
+  // The handles go with it — the reorder contract needs the complete MANUAL order.
+  await expect(page.locator('.file-card-drag-handle')).toHaveCount(0)
+
+  // Clear it: the document's own order returns, and so do the handles.
+  await page.getByTestId('grid-sort').click()
+  await page.getByRole('option', { name: /^Manual/ }).click()
+  await expect(names).toHaveText(MANUAL)
+  await expect(page.locator('.file-card-drag-handle')).toHaveCount(3)
+
+  // View-only: nothing was persisted at any point. A reload — which re-reads the server's order —
+  // still shows the manual sequence, and no order-saved toast ever appeared.
+  await expect(page.getByText('File order saved')).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.file-preview-grid .file-preview-label')).toHaveText(MANUAL)
+})
+
 test('the client-side quick filter narrows the list by name and mimetype', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('filter'), [
     txtFile('alpha.txt'),
