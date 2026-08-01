@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from './fixtures'
+import { test, expect, type APIRequestContext, type Locator, type Page } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -52,6 +52,257 @@ function pdfFile(name: string) {
 
 function zipFile(name: string) {
   return { name, mimeType: 'application/zip', path: zip }
+}
+
+// #229 — what gates a reorder spec is the order the SERVER stored, never the toast.
+//
+// The toast is a self-dismissing element (`life: 2000` in DocumentViewContent's reorder
+// handler), so an assertion that only starts looking for it after `dragTo` resolves is a race
+// the test can lose while the reorder itself succeeded: on a contended runner the drop/POST
+// timing shifts and the 2s window closes before the first poll samples the DOM. That is a false
+// red — four consecutive desktop failures in tag-run context, green on push runs and locally.
+// The stored order cannot evaporate, so it is what gates; the toast is still asserted, but from
+// a recording armed BEFORE the drag, so it cannot lose a race it has already won.
+
+const REORDER_SAVED = 'File order saved'
+
+/**
+ * The document's file order as the server stores it: `/api/file/list` returns rows ordered by
+ * the persisted `order` column, which is exactly what a reorder writes.
+ */
+async function persistedFileOrder(
+  request: APIRequestContext,
+  documentId: string,
+): Promise<string[]> {
+  const res = await request.get(`/api/file/list?id=${documentId}`)
+  const files = (await res.json()).files as Array<{ name: string }>
+  return files.map((f) => f.name)
+}
+
+/**
+ * Record every toast that appears, armed before the page's own scripts run — so it is in place
+ * ahead of any drag, survives a reload, and keeps its record after the toast auto-dismisses.
+ * PrimeVue mounts each toast as a `.p-toast-message` carrying a `.p-toast-summary`; each element
+ * is stamped once, and the array it fills outlives the element. `characterData` is observed too:
+ * an element inserted before its text is patched would otherwise be recorded blank or missed,
+ * which would trade the flake being fixed here for a new one.
+ */
+async function armToastRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen: string[] = []
+    ;(window as unknown as { __toastsSeen: string[] }).__toastsSeen = seen
+    const recorded = new WeakSet<Element>()
+    const record = () => {
+      for (const el of Array.from(document.querySelectorAll('.p-toast-message'))) {
+        if (recorded.has(el)) continue
+        const summary = el.querySelector('.p-toast-summary')?.textContent?.trim()
+        // Text not patched in yet: leave the element unstamped so a later mutation records it
+        // properly instead of burning it as an empty string.
+        if (!summary) continue
+        recorded.add(el)
+        seen.push(summary)
+      }
+    }
+    const start = () => {
+      new MutationObserver(record).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      })
+      record()
+    }
+    if (document.documentElement) start()
+    else document.addEventListener('DOMContentLoaded', start, { once: true })
+  })
+}
+
+/**
+ * Toast summaries recorded since the current page load. Throws rather than reporting an empty
+ * list when the recorder is not installed: "armed, and no toast fired" and "never armed" both
+ * look like `[]`, so without this the NEGATIVE assertion below would pass vacuously.
+ */
+function toastsSeen(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const seen = (window as unknown as { __toastsSeen?: string[] }).__toastsSeen
+    if (!seen) throw new Error('the toast recorder was never armed on this page')
+    return seen
+  })
+}
+
+// #229 (second half) — the drop itself is what the contended runner loses.
+//
+// Both views make a row/tile a drag source IMPERATIVELY, from the mousedown handler: PrimeVue's
+// DataTable sets `draggable` on the row when the press originates on the reorder handle
+// (datatable/index.mjs:5580), and the grid does the same for its card. So the gesture only becomes
+// a drag if the app's mousedown handler has already run when the pointer starts moving. Under a
+// 2-core pin it frequently has not: the element is still `draggable=false`, Chromium starts no
+// drag at all, and NOTHING happens — no dragstart, no POST, no toast. `dragTo` cannot express
+// that wait, which is why it loses the drop; the sequence below presses, WAITS for the arming to
+// land in the DOM, and only then moves.
+const REORDER_FAILED = 'Failed to save file order'
+
+function countToast(toasts: string[], summary: string): number {
+  return toasts.filter((t) => t === summary).length
+}
+
+/** Everything the drop is judged against, sampled once before the first drag. */
+interface ReorderBaseline {
+  order: string[]
+  saved: number
+  failed: number
+}
+
+async function reorderBaseline(page: Page, documentId: string): Promise<ReorderBaseline> {
+  const toasts = await toastsSeen(page)
+  return {
+    order: await persistedFileOrder(page.request, documentId),
+    saved: countToast(toasts, REORDER_SAVED),
+    failed: countToast(toasts, REORDER_FAILED),
+  }
+}
+
+type DropState = 'none' | 'registered' | 'failed'
+
+/**
+ * What the product has done since `base` — always the ORIGINAL baseline, never a fresher one.
+ * A failure outcome outranks everything: it is a product signal, so it must neither be retried
+ * away nor overtaken by a success that a later attempt produced.
+ */
+async function dropStateSince(
+  page: Page,
+  documentId: string,
+  base: ReorderBaseline,
+): Promise<DropState> {
+  const toasts = await toastsSeen(page)
+  if (countToast(toasts, REORDER_FAILED) > base.failed) return 'failed'
+  if (countToast(toasts, REORDER_SAVED) > base.saved) return 'registered'
+  const now = await persistedFileOrder(page.request, documentId)
+  return now.join(' ') !== base.order.join(' ') ? 'registered' : 'none'
+}
+
+/**
+ * A point that is inside `locator` AND inside the viewport. `page.mouse` takes raw viewport
+ * coordinates and — unlike `dragTo`/`click` — scrolls nothing, so an element's own centre is
+ * useless when it hangs below the fold: a grid tile is ~500px tall, and pressing its handle's
+ * true centre lands on nothing at all (measured: `elementFromPoint` → null, so no mousedown, no
+ * arming, no drag). Clamping to the visible rectangle keeps the whole gesture on screen, which
+ * also avoids the mid-drag scroll that cancels the drop.
+ */
+async function visiblePoint(page: Page, locator: Locator, what: string) {
+  const box = await locator.boundingBox()
+  if (!box) throw new Error(`${what} is not laid out (no bounding box)`)
+  const vp = page.viewportSize()
+  if (!vp) return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  const left = Math.max(box.x, 0)
+  const right = Math.min(box.x + box.width, vp.width)
+  const top = Math.max(box.y, 0)
+  const bottom = Math.min(box.y + box.height, vp.height)
+  if (right <= left || bottom <= top) {
+    throw new Error(`${what} is entirely outside the viewport — cannot drive a pointer to it`)
+  }
+  return { x: (left + right) / 2, y: (top + bottom) / 2 }
+}
+
+/**
+ * One drag attempt: press the handle, wait for the app to arm the row/tile, then move in small
+ * steps. Two moves onto the target, because a single one need not produce the `dragover` the
+ * drop position is computed from.
+ */
+async function dragOnce(page: Page, source: Locator, handle: Locator, target: Locator) {
+  // Both ends must be on screen BEFORE the press — scrolling mid-drag cancels the drop. The
+  // source is scrolled last so its handle is certainly visible; the target is then adjacent.
+  await target.scrollIntoViewIfNeeded()
+  await source.scrollIntoViewIfNeeded()
+  const from = await visiblePoint(page, handle, 'the drag handle')
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  // The deterministic readiness signal — not a sleep.
+  await expect(
+    source,
+    'the press armed the row/tile as a drag source before the pointer moved',
+  ).toHaveAttribute('draggable', 'true')
+  const to = await visiblePoint(page, target, 'the drop target')
+  await page.mouse.move(to.x, to.y, { steps: 12 })
+  await page.mouse.move(to.x, to.y, { steps: 2 })
+  await page.mouse.up()
+}
+
+/**
+ * Drag `handle` onto `target` and return only once the drop has REGISTERED — i.e. the product
+ * reacted: a reorder outcome toast was recorded, or the stored order changed.
+ *
+ * A registered drop is never retried, whatever its outcome: a POST that fired and failed is a
+ * product signal, and this throws on it rather than dragging again. A retry happens only when
+ * nothing whatsoever registered (no outcome toast AND a byte-identical stored order), which can
+ * only be the harness losing the gesture.
+ *
+ * Every judgement is made against one immutable baseline taken before the first drag, so an
+ * outcome that lands after its attempt's window still counts: the next attempt re-checks before
+ * it drags, and a late failure fails the test instead of being retried past.
+ */
+async function dragHandleWithRetry(
+  page: Page,
+  opts: { source: Locator; handle: Locator; target: Locator; documentId: string },
+): Promise<{ attempts: number; lost: number }> {
+  const { source, handle, target, documentId } = opts
+  const maxAttempts = 3
+  const windowMs = 6000
+  // Sampled ONCE, before the first drag, and never re-sampled. A per-attempt baseline would
+  // absorb an outcome that arrived late from a PREVIOUS attempt: the retry would start from a
+  // baseline that already contained it, so a genuine product failure could vanish behind a retry
+  // that happens to succeed. Because this baseline never moves, a late outcome is still a delta
+  // whenever it surfaces.
+  const base = await reorderBaseline(page, documentId)
+  let lost = 0
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      // Whatever is visible now belongs to the PREVIOUS attempt - it merely arrived after that
+      // attempt's window closed. Settle it before dragging anything again.
+      const late = await dropStateSince(page, documentId, base)
+      if (late === 'failed') {
+        throw new Error(
+          `the reorder POST failed: attempt ${attempt - 1} reported "${REORDER_FAILED}" after its ` +
+            `${windowMs}ms window closed. A product failure is never retried away.`,
+        )
+      }
+      if (late === 'registered') {
+        lost--
+        console.log(
+          `[#229 drag] LATE REGISTRATION: attempt ${attempt - 1} did land, after its ${windowMs}ms ` +
+            `window closed - not retrying`,
+        )
+        return { attempts: attempt - 1, lost }
+      }
+    }
+
+    await dragOnce(page, source, handle, target)
+
+    const deadline = Date.now() + windowMs
+    let state: DropState = 'none'
+    for (;;) {
+      state = await dropStateSince(page, documentId, base)
+      if (state !== 'none' || Date.now() >= deadline) break
+      await page.waitForTimeout(150)
+    }
+    if (state === 'failed') {
+      throw new Error(
+        `the reorder POST failed ("${REORDER_FAILED}") - a product failure is never retried away.`,
+      )
+    }
+    if (state === 'registered') return { attempts: attempt, lost }
+
+    lost++
+    console.log(
+      `[#229 drag] LOST DROP: attempt ${attempt}/${maxAttempts} on document ${documentId} ` +
+        `produced no reorder outcome toast and left the stored order unchanged - retrying`,
+    )
+    await page.waitForTimeout(250)
+  }
+  throw new Error(
+    `the reorder drag never registered after ${maxAttempts} attempts - the harness lost every ` +
+      `drop (no dragstart), which is a test-harness failure, not a product one`,
+  )
 }
 
 test('grid is the default file view; the toggle switches to list and persists per user', async ({ page, cleanup }) => {
@@ -139,20 +390,41 @@ test('drag-handle reorder persists the file order and survives a reload', async 
     txtFile('c-third.txt'),
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+  await armToastRecorder(page)
   await page.goto(`/#/document/view/${id}/content`)
   await openFileList(page)
 
+  const UPLOADED = ['a-first.txt', 'b-second.txt', 'c-third.txt']
   const names = page.locator('.file-data-table tbody tr .file-name-text')
-  await expect(names).toHaveText(['a-first.txt', 'b-second.txt', 'c-third.txt'])
+  await expect(names).toHaveText(UPLOADED)
 
   const rows = page.locator('.file-data-table tbody tr')
-  const handle = rows.nth(0).locator('.p-datatable-reorderable-row-handle')
-  await handle.dragTo(rows.nth(2))
+  await dragHandleWithRetry(page, {
+    source: rows.nth(0),
+    handle: rows.nth(0).locator('.p-datatable-reorderable-row-handle'),
+    target: rows.nth(2),
+    documentId: id,
+  })
 
-  await expect(page.getByText('File order saved').first()).toBeVisible()
-  // The dragged row moved down; the order is no longer the original upload order.
+  // The dragged row moved down; the order is no longer the original upload order. This also
+  // waits out the optimistic re-render, so the sequence read next is the settled one.
   await expect(names.first()).not.toHaveText('a-first.txt')
   const afterDrag = await names.allInnerTexts()
+  expect(afterDrag, 'the drag produced a genuinely different order').not.toEqual(UPLOADED)
+
+  // THE GATE: the server stored what the table is showing. A reorder whose POST never landed
+  // (or was rolled back) leaves the stored order at the upload sequence and fails here.
+  await expect
+    .poll(() => persistedFileOrder(page.request, id), {
+      message: 'the reorder is persisted server-side in the order the table shows',
+    })
+    .toEqual(afterDrag)
+
+  // The toast is covered too, from the pre-armed recording rather than a post-hoc poll of a
+  // 2-second element (#229).
+  await expect
+    .poll(() => toastsSeen(page), { message: 'the reorder raised its saved toast' })
+    .toContain(REORDER_SAVED)
 
   // The saved order survives a full reload (it was persisted server-side).
   await page.reload()
@@ -178,22 +450,40 @@ test('grid drag-handle reorder persists the file order and matches the list view
   // Grid is the default, but the mode is a per-user localStorage preference and an earlier spec
   // may have left "list" there — pin it so this test measures the grid.
   await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
+  await armToastRecorder(page)
   await page.goto(`/#/document/view/${id}/content`)
   await expect(page.locator('.file-preview-grid')).toBeVisible()
 
+  const UPLOADED = ['a-first.txt', 'b-second.txt', 'c-third.txt']
   const names = page.locator('.file-preview-grid .file-preview-label')
-  await expect(names).toHaveText(['a-first.txt', 'b-second.txt', 'c-third.txt'])
+  await expect(names).toHaveText(UPLOADED)
 
   const cards = page.locator('.file-preview-card')
   // Onto the NEIGHBOUR, not across the grid: a tile is ~500px tall, so at the mobile project's
   // 393×851 single-column viewport any further target sits below the fold, and the scroll
   // Playwright would need mid-drag cancels the drag (measured: the drop never lands). The
   // neighbour is a real reorder at both viewports, which is what this spec is about.
-  await cards.nth(0).locator('.file-card-drag-handle').dragTo(cards.nth(1))
+  await dragHandleWithRetry(page, {
+    source: cards.nth(0),
+    handle: cards.nth(0).locator('.file-card-drag-handle'),
+    target: cards.nth(1),
+    documentId: id,
+  })
 
-  await expect(page.getByText('File order saved').first()).toBeVisible()
   await expect(names.first()).not.toHaveText('a-first.txt')
   const afterDrag = await names.allInnerTexts()
+  expect(afterDrag, 'the drag produced a genuinely different order').not.toEqual(UPLOADED)
+
+  // THE GATE: the grid's drop persisted server-side, in the order the tiles show (#229).
+  await expect
+    .poll(() => persistedFileOrder(page.request, id), {
+      message: 'the grid reorder is persisted server-side in the order the tiles show',
+    })
+    .toEqual(afterDrag)
+
+  await expect
+    .poll(() => toastsSeen(page), { message: 'the grid reorder raised its saved toast' })
+    .toContain(REORDER_SAVED)
 
   // A completed drop must not also open the preview of whatever tile it landed on.
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -225,6 +515,7 @@ test('grid sort reorders the tiles transiently and restores the manual order', a
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
   await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
+  await armToastRecorder(page)
   await page.goto(`/#/document/view/${id}/content`)
   await expect(page.locator('.file-preview-grid')).toBeVisible()
 
@@ -246,9 +537,16 @@ test('grid sort reorders the tiles transiently and restores the manual order', a
   await expect(names).toHaveText(MANUAL)
   await expect(page.locator('.file-card-drag-handle')).toHaveCount(3)
 
-  // View-only: nothing was persisted at any point. A reload — which re-reads the server's order —
-  // still shows the manual sequence, and no order-saved toast ever appeared.
-  await expect(page.getByText('File order saved')).toHaveCount(0)
+  // View-only: nothing was persisted at any point. The server's own order is still the manual
+  // sequence, and no order-saved toast ever appeared — asserted from the recording armed at page
+  // start, because a toast that had fired and self-dismissed would leave a bare DOM count at 0
+  // and pass this vacuously (#229: the same 2s lifetime, failing the other way round).
+  expect(await persistedFileOrder(page.request, id), 'a transient sort persisted nothing').toEqual(
+    MANUAL,
+  )
+  expect(await toastsSeen(page), 'a transient sort raised no order-saved toast').not.toContain(
+    REORDER_SAVED,
+  )
   await page.reload()
   await expect(page.locator('.file-preview-grid .file-preview-label')).toHaveText(MANUAL)
 })
