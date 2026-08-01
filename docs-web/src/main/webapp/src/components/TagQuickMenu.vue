@@ -8,6 +8,7 @@ import { type Tag } from '../api/tag'
 import { type DocumentListItem } from '../api/document'
 import TagBadge from './TagBadge.vue'
 import { assignableTags, topUsedTags } from '../utils/tagQuickMenu'
+import { nextFrame } from '../utils/nextFrame'
 
 /**
  * Compact right-click "tags" menu (#71). Replaces the former full-tag-tree context
@@ -59,12 +60,73 @@ const quickAddTags = computed(() => topUsedTags(assignable.value, props.tagCount
 
 const assignedTags = computed(() => props.document?.tags ?? [])
 
-function show(event: Event) {
+// Opened one rendering step late, deliberately (#213). PrimeVue's Popover binds a scroll
+// listener on every scrollable ancestor of its anchor the moment it mounts and treats one
+// scroll event as "my anchor moved, dismiss". The right-click that opens this menu is
+// routinely preceded by a scroll — the user (or Playwright, bringing the row into view)
+// scrolls `.app-content`, and the browser queues that `scroll` event for the next rendering
+// update rather than firing it on the spot. Open the popover inline and a busy frame delivers
+// that already-finished scroll into the freshly bound listener, so the menu closes itself
+// before the user can type (measured: 10 of 15 pinned-CPU runs). `nextFrame()` moves the open
+// past that delivery point, so the popover only ever sees scrolls that come after it. A real
+// scroll while it is open still dismisses it, unchanged.
+//
+// Deferring makes the open CANCELLABLE, so it needs a latest-request token. For that one
+// frame the popover does not exist yet, which means PrimeVue's own dismissal (outside
+// click, Escape) has nothing to act on: without the token a menu the user dismissed inside
+// the window would still appear afterwards, and a second right-click would stack a second
+// open. Every call claims a token; the frame callback proceeds only while its token is
+// still the current one, and anything that supersedes the request bumps it.
+let openToken = 0
+
+function cancelPendingOpen() {
+  openToken++
+}
+
+async function show(event: Event) {
   pendingTag.value = null
-  popover.value?.show(event)
+  // `currentTarget` is only live while the event is being dispatched — read the anchor now,
+  // not after the await.
+  const anchor = (event.currentTarget ?? event.target) as HTMLElement | null
+  if (!anchor) return
+  const token = ++openToken
+
+  // Stand in for the dismissal PrimeVue cannot do yet: a press or an Escape inside the
+  // deferred window is the user acting on a menu that is not up, and must cancel it rather
+  // than be overtaken by it. Capture phase, so it is seen before any handler can stop it;
+  // both listeners come off again the moment the frame resolves.
+  const supersede = (superseding: Event) => {
+    if (superseding instanceof KeyboardEvent && superseding.key !== 'Escape') return
+    cancelPendingOpen()
+  }
+  document.addEventListener('pointerdown', supersede, true)
+  document.addEventListener('keydown', supersede, true)
+  try {
+    await nextFrame()
+  } finally {
+    document.removeEventListener('pointerdown', supersede, true)
+    document.removeEventListener('keydown', supersede, true)
+  }
+
+  // Superseded by a newer right-click, or cancelled by hide()/a dismissing interaction.
+  if (token !== openToken) return
+  // The list behind this menu is a live query: a refetch landing inside the deferred window
+  // replaces the row, leaving the captured anchor detached — positioning against it would
+  // put the menu somewhere the row no longer is. The document can be gone with it (the
+  // parent resolves it by id from that same list), and a tag menu with nothing to tag has
+  // nothing to do. Either way the right outcome is no menu at all, silently.
+  if (!anchor.isConnected || !props.document) return
+
+  // PrimeVue takes placement from the second argument and its "was the anchor itself
+  // clicked?" test from the event's `currentTarget`; hand the captured anchor to both so
+  // deferring changes nothing but the timing.
+  popover.value?.show({ currentTarget: anchor } as unknown as Event, anchor)
 }
 
 function hide() {
+  // Also cancels an open still waiting for its frame — "make it go away" has to win over a
+  // menu that has not appeared yet, or it appears right after.
+  cancelPendingOpen()
   popover.value?.hide()
 }
 
@@ -73,10 +135,10 @@ function hide() {
 // already assigned (no Select rendered).
 //
 // The focus is landed HERE instead of by the Select's own `autoFilterFocus` (#204).
-// PrimeVue 4.5.4 defers that focus by one unguarded timer —
-// `setTimeout(() => focus(this.$refs.filterInput.$el), 1)` in `onOverlayEnter` — while
-// the same overlay-enter scrolls `.app-content`, which is exactly what the Popover's
-// scroll handler dismisses on. When the dismissal wins that 1 ms race the Select is
+// PrimeVue 4.5.5 defers that focus by one unguarded timer —
+// `setTimeout(() => focus(this.$refs.filterInput.$el), 1)` in `onOverlayEnter` — and any
+// scroll of `.app-content` delivered inside that window dismisses the popover, which is
+// what the Popover's scroll handler does. When the dismissal wins that 1 ms race the Select is
 // already unmounted and the timer throws `Cannot read properties of null` into the
 // console. Focusing from here puts every hop behind `?.`, so a popover that goes away
 // mid-open simply skips the focus instead of throwing. The popover closing is the

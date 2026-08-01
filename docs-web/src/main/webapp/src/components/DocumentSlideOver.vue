@@ -9,6 +9,7 @@ import { languageLabel } from '../constants/languages'
 import { formatDate, formatFileSize } from '../utils/formatters'
 import { displayName } from '../utils/fileName'
 import { useResizablePanel, type ClampCfg } from '../composables/useResizablePanel'
+import { nextFrame } from '../utils/nextFrame'
 import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
@@ -46,9 +47,34 @@ const tagSelect = ref()
 // PrimeVue 4's Select has no autofocus-on-mount, so opening its overlay when the
 // tag-add row appears is what lets autoFilterFocus put the caret in the filter —
 // keyboard tag entry with no click (#171). nextTick waits for the v-if'd ref.
+//
+// The open then waits one further rendering step (#213, see utils/nextFrame). An open
+// Select dismisses on a scroll of its scrollable ancestor — here the drawer body, which
+// scrolls as soon as the document has a preview image or a longer description (verified:
+// a `scroll` on `.p-drawer-content` closes this overlay). A scroll made just before the
+// tag-add row appears has its event still queued at that point, so opening inline can hand
+// the fresh listener a scroll the user already finished, tearing the overlay down before
+// its filter can take focus. nextFrame() lets the queued event land first.
+//
+// The wait makes the open cancellable, so it carries the same latest-request token as the
+// quick menu's (TagQuickMenu.vue): closing the row again — the X, a chosen tag, or the
+// drawer switching documents — bumps it, and a request that is no longer the current one
+// stops. Without it, toggling the row off and on inside one frame leaves two pending opens
+// racing to reopen an overlay the user closed.
+let tagAddToken = 0
+
 watch(slideOverTagAdding, async (adding) => {
-  if (!adding) return
+  if (!adding) {
+    tagAddToken++
+    return
+  }
+  const token = ++tagAddToken
   await nextTick()
+  await nextFrame()
+  if (token !== tagAddToken) return
+  // No detached-anchor check is needed here (unlike the quick menu, which captures a DOM
+  // node): this reaches the Select through its ref, which Vue nulls when the row unmounts
+  // and repoints when a new row mounts — always the live one, or none.
   tagSelect.value?.show()
 })
 

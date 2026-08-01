@@ -49,15 +49,7 @@ async function keyboardAddTag(page: import('@playwright/test').Page, name: strin
   await page.keyboard.press('Enter')
 }
 
-// QUARANTINED (@flaky, #213). The auto-opened Select overlay intermittently self-dismisses
-// before its filter input mounts, so `.p-select-overlay input.p-select-filter` never appears
-// and this test reds a required CI job on a coin flip. The behaviour it covers is real and the
-// assertions are sound — the QUARANTINE is on the flake, not on the feature — so the tag comes
-// off as soon as #213 (the overlay self-dismissal) is fixed, with no other change to this test.
-// Semantics of the tag: scripts/e2e-run.sh excludes `@flaky` from every default run (the
-// release-gating e2e job in build-deploy.yml), while the nightly Scheduled Regression sets
-// E2E_INCLUDE_FLAKY=1 (regression.yml) so the flake stays visible for triage.
-test('@flaky right-click tag menu focuses the filter and adds a tag by keyboard alone (#171, quarantined #213)', async ({ page, request, cleanup }) => {
+test('right-click tag menu focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
   const name = tagName()
   const title = unique('tqm-focus-doc')
@@ -85,25 +77,170 @@ test('@flaky right-click tag menu focuses the filter and adds a tag by keyboard 
     .toContain(tagId)
 })
 
+// PADDING (both #213 tests): the document list only scrolls once it is longer than the
+// viewport, and an API-created fixture document rarely makes it so. Both tests REPLAY a
+// scroll, so they pad the page first — and they do it inside the SAME evaluate as the
+// scroll, because a Vue re-render in between drops a foreign child of `.app-content`
+// (observed: padding one step earlier left the control test with nothing to scroll).
+// Each test asserts the page really moved, so an unpadded page fails loudly instead of
+// passing vacuously.
+
+// #213 — the quick menu must survive a scroll the user FINISHED before right-clicking.
+//
+// MECHANISM: setting `scrollTop` moves the page immediately but does NOT dispatch the
+// `scroll` event there; the browser queues it and fires it at the start of the next
+// rendering update. PrimeVue's Popover binds a dismiss-on-scroll listener on its anchor's
+// scrollable ancestors (`.app-content` here) the moment it mounts — which, for a popover
+// opened in the same task as the scroll, happens on the very next microtask checkpoint,
+// i.e. BEFORE that queued event is delivered. The already-finished scroll then lands in the
+// fresh listener and the menu closes itself. In the wild this needs a loaded machine (the
+// scroll delivery has to slip past the open); scrolling and right-clicking inside ONE task
+// produces the same ordering on any machine, which is what makes this deterministic
+// without a CPU pin. The fix arms the popover one rendering step later (utils/nextFrame),
+// so the queued event is delivered first and only later scrolls can reach it.
+test('a scroll finished BEFORE the right-click does not dismiss the quick menu (#213)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+  // At least one assignable tag, or no Select is rendered and the menu is a different shape.
+  const name = tagName()
+  const title = unique('tqm-stale-scroll-doc')
+  const tagId = await apiCreateTag(request, name)
+  cleanup.defer('delete the stale-scroll tag', () => deleteTagApi(request, tagId))
+  const docId = await apiCreateDocument(request, title)
+  cleanup.defer('purge the stale-scroll document', () => deleteDocApi(request, docId))
+
+  await page.goto('/#/document')
+  const row = page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+  await expect(row).toBeVisible()
+
+  const moved = await page.evaluate((docTitle: string) => {
+    const scroller = document.querySelector('.app-content') as HTMLElement
+    if (scroller.scrollHeight <= scroller.clientHeight) {
+      const spacer = document.createElement('div')
+      spacer.style.height = '2000px'
+      scroller.appendChild(spacer)
+    }
+    const target = Array.from(document.querySelectorAll('tbody tr')).find((tr) =>
+      tr.textContent?.includes(docTitle),
+    ) as HTMLElement
+    const flags = window as unknown as { __tqmScrollDelivered?: boolean }
+    flags.__tqmScrollDelivered = false
+    scroller.addEventListener('scroll', () => (flags.__tqmScrollDelivered = true), { once: true })
+
+    const before = scroller.scrollTop
+    // Toward whichever end has room: the page may already sit at one end of its range.
+    scroller.scrollTop = before > 0 ? before - 40 : before + 40
+    const didMove = scroller.scrollTop !== before
+    // SAME TASK: no await between the scroll and the right-click, so the browser has had no
+    // rendering step in which to deliver the scroll event.
+    const box = target.getBoundingClientRect()
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: Math.round(box.left + box.width / 2),
+        clientY: Math.round(box.top + box.height / 2),
+      }),
+    )
+
+    return didMove
+  }, title)
+
+  // REALNESS: "the menu is still open" is only meaningful if the page really scrolled AND
+  // the browser really delivered that scroll — otherwise there was no dismissal to survive.
+  expect(moved, 'the page actually scrolled before the right-click').toBe(true)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as unknown as { __tqmScrollDelivered?: boolean }).__tqmScrollDelivered === true,
+        ),
+      { message: 'the browser delivered the queued scroll event' },
+    )
+    .toBe(true)
+
+  // The verdict is read off a POSITIVE end state rather than waited out on a timer: a menu
+  // that survived goes on to complete its open and land focus in the tag filter (#171), and
+  // a dismissed one never gets there. Asserting only "a .p-popover exists" would not be
+  // enough — a dismissed popover is still in the DOM while it plays its leave transition.
+  await expectFilterFocused(page)
+  await expect(
+    page.locator('.p-popover'),
+    'the quick menu survived a scroll that finished before it opened',
+  ).toHaveCount(1)
+})
+
+// The other half of the contract: suppressing the stale scroll must not have suppressed the
+// dismissal itself. A popover anchored to a row has to go away when that row scrolls out
+// from under it, so a scroll made AFTER the menu is up still closes it.
+test('a scroll made while the quick menu is open still dismisses it (#213)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+  const title = unique('tqm-live-scroll-doc')
+  const docId = await apiCreateDocument(request, title)
+  cleanup.defer('purge the live-scroll document', () => deleteDocApi(request, docId))
+
+  await page.goto('/#/document')
+  const row = page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+  await expect(row).toBeVisible()
+
+  await row.click({ button: 'right' })
+  await expect(page.locator('.p-popover')).toBeVisible()
+
+  const scrolled = await page.evaluate(() => {
+    const scroller = document.querySelector('.app-content') as HTMLElement
+    if (scroller.scrollHeight <= scroller.clientHeight) {
+      const spacer = document.createElement('div')
+      spacer.style.height = '2000px'
+      scroller.appendChild(spacer)
+    }
+    const before = scroller.scrollTop
+    // Toward whichever end has room: opening the menu scrolled the row into view, which
+    // can leave the page parked at the far end of a short scroll range.
+    scroller.scrollTop = before > 0 ? before - 40 : before + 40
+    return {
+      moved: scroller.scrollTop !== before,
+      range: scroller.scrollHeight - scroller.clientHeight,
+    }
+  })
+  expect(
+    scrolled.moved,
+    `the page actually scrolled under the open menu (scrollable range ${scrolled.range}px)`,
+  ).toBe(true)
+  await expect(page.locator('.p-popover'), 'the live scroll dismissed the quick menu').toHaveCount(0)
+})
+
 // #204 — the auto-open (#171) must not throw when the popover is dismissed while the
 // Select's overlay is coming up.
 //
-// MECHANISM: opening the quick menu opens the Select, whose overlay-enter work scrolls
-// `.app-content` (the app's page scroller). That scroll is exactly what the Popover's
-// ConnectedOverlayScrollHandler dismisses on, so the popover tears its own Select down
-// while PrimeVue 4.5.4 still has an unguarded `setTimeout(() => focus(this.$refs
+// MECHANISM: the quick menu's popover dismisses on any scroll of `.app-content` (the app's
+// page scroller) — that is what its ConnectedOverlayScrollHandler listens for. When such a
+// scroll is delivered while the popover is opening its Select, the popover tears that Select
+// down while PrimeVue 4.5.5 still has an unguarded `setTimeout(() => focus(this.$refs
 // .filterInput.$el), 1)` in flight — the timer then dereferences a null ref and the page
 // throws `TypeError: Cannot read properties of null (reading '$el')`.
 //
 // The popover CLOSING is expected product behaviour; the defect is console-only, so the
 // assertion here is "nothing threw", which no other spec in this file makes.
 //
-// DETERMINISM: in the wild the dismissal only wins that race on a loaded machine (the
-// pinned-CPU harness reproduces it ~6 runs in 8, which is precisely why it surfaced as a
-// flake). Hoping for the interleaving would make this spec as load-sensitive as the bug.
-// Instead a MutationObserver fires a `scroll` on `.app-content` the instant the Select's
-// overlay is inserted — the same handler, the same dismissal, landing inside the same
-// window the focus timer is armed in, on every run.
+// DETERMINISM: in the wild the dismissal only wins that race on a loaded machine, which is
+// precisely why it surfaced as a flake. Hoping for the interleaving would make this spec as
+// load-sensitive as the bug. Instead a MutationObserver fires a `scroll` on `.app-content`
+// the instant the Select's overlay is inserted — the same handler, the same dismissal,
+// landing inside the same window the focus timer is armed in, on every run. That is still a
+// scroll delivered AFTER the popover opened, so #213's fix (arming the popover a rendering
+// step later, so a scroll from BEFORE the open can no longer reach it) leaves it intact.
 test('a scroll dismissal during the quick-menu auto-open raises no page error (#204)', async ({
   page,
   request,
@@ -137,9 +274,10 @@ test('a scroll dismissal during the quick-menu auto-open raises no page error (#
         for (const node of Array.from(record.addedNodes)) {
           if (node instanceof HTMLElement && node.classList.contains('p-select-overlay')) {
             observer.disconnect()
-            // The real dismissal arrives as a `scroll` event on this element from the
-            // overlay's own scroll-into-view; dispatching it directly reproduces that
-            // wakeup without depending on machine load or popover geometry.
+            // The real dismissal arrives as a `scroll` event on this element — a scroll the
+            // page had already queued, delivered once the popover's handler is bound.
+            // Dispatching one directly reproduces that wakeup at the one instant that
+            // matters, without depending on machine load or popover geometry.
             scroller?.dispatchEvent(new Event('scroll'))
             ;(window as unknown as { __tqmOverlayDismissed?: boolean }).__tqmOverlayDismissed = true
             return
@@ -174,12 +312,10 @@ test('a scroll dismissal during the quick-menu auto-open raises no page error (#
   expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toEqual([])
 })
 
-// QUARANTINED (@flaky, #213) — the same exposure as the right-click test above, reached
-// through the slide-over instead of the context menu: both drive expectFilterFocused, so the
-// overlay self-dismissing before its filter input mounts reds this one identically. Quarantining
-// only its sibling would leave the flake free to red the nightly from here. Same terms: the tag
-// comes off when #213 is fixed, with no other change to this test.
-test('@flaky slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171, quarantined #213)', async ({ page, request, cleanup }) => {
+// The same exposure as the right-click test above, reached through the slide-over instead of
+// the context menu: both drive expectFilterFocused, so an overlay that self-dismisses before
+// its filter input mounts reds this one identically.
+test('slide-over tag-add focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
   const name = tagName()
   const title = unique('slide-focus-doc')
   const tagId = await apiCreateTag(request, name)

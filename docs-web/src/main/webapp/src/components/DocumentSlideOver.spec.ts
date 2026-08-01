@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
+import Select from 'primevue/select'
 import DocumentSlideOver from './DocumentSlideOver.vue'
 import type { DocumentDetail } from '../api/document'
 
@@ -191,6 +192,60 @@ describe('DocumentSlideOver — delete action (#172)', () => {
     delBtn.click()
     await flushPromises()
     expect(wrapper.emitted('deleteDocument')).toEqual([['doc-42']])
+    wrapper.unmount()
+  })
+})
+
+describe('DocumentSlideOver — tag-add overlay arming (#213)', () => {
+  beforeEach(() => {
+    forceDesktop()
+  })
+
+  it('opens the tag Select a rendering step after the row appears, never in the same task', async () => {
+    // An open Select dismisses on the first scroll of its scrollable ancestor — here the
+    // drawer body. Opening it in the click's own task hands the fresh listener any scroll
+    // event still queued from before the click, which tears the overlay down before its
+    // filter can take focus (#171's keyboard entry). The wait for an animation frame is
+    // what puts the open after that delivery (see utils/nextFrame).
+    const wrapper = mountSlideOver(makeDoc())
+    await flushPromises()
+    const addBtn = document.querySelector('.tag-add-btn') as HTMLElement
+    expect(addBtn).not.toBeNull()
+    addBtn.click()
+    await flushPromises()
+
+    const select = wrapper.findComponent(Select)
+    expect(select.exists(), 'the tag-add row rendered its Select').toBe(true)
+    expect(
+      (select.vm as unknown as { overlayVisible: boolean }).overlayVisible,
+      'the overlay is still closed after the ticks the click resolves in',
+    ).toBe(false)
+
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await flushPromises()
+    expect((select.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('opens the Select once when the row is toggled off and on inside one frame', async () => {
+    // The wait makes the open cancellable, so the requests need a latest-wins token:
+    // without one, both pending opens would fire and the second would reopen an overlay on
+    // behalf of a request the user had already withdrawn.
+    const selectMethods = (Select as unknown as { methods: Record<string, () => void> }).methods
+    const showSpy = vi.spyOn(selectMethods, 'show')
+    const wrapper = mountSlideOver(makeDoc())
+    await flushPromises()
+    ;(document.querySelector('.tag-add-btn') as HTMLElement).click()
+    await flushPromises()
+    ;(document.querySelector('.tag-add-row button:last-of-type') as HTMLElement).click()
+    await flushPromises()
+    ;(document.querySelector('.tag-add-btn') as HTMLElement).click()
+    await flushPromises()
+
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await flushPromises()
+    expect(showSpy, 'only the surviving request opens the Select').toHaveBeenCalledTimes(1)
+    showSpy.mockRestore()
     wrapper.unmount()
   })
 })
