@@ -62,6 +62,13 @@
 //                         (ii) candidate manifest: the subset passing every eligibility rule,
 //                              which includes being inside REPAIR_SCOPE.
 //   --execute --manifest F -- transactional repair of exactly the rows in F, three-state per row.
+//
+// MANDATORY POST-STEP after a production --execute: reconcile the Lucene search index. The
+// repairable columns (document titles, file names) are both copied into the index, and direct SQL
+// writes emit no reindex events, so search keeps serving the pre-repair tokens. Restarting alone
+// does NOT reconcile a populated index. Either POST /api/app/batch/reindex as an admin, or stop
+// the app, move the lucene data directory aside, and start it -- an empty index over a populated
+// database triggers the automatic boot rebuild.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -329,6 +336,12 @@ function printUsage() {
 
   repair exactly the rows of an approved manifest:
     node scripts/repair-mojibake.mjs --execute --manifest FILE [--allow-flagged] [--out-dir DIR]
+
+  MANDATORY after a production --execute: reconcile the Lucene search index. Titles and file
+  names are indexed, and direct SQL writes emit no reindex events, so search keeps serving the
+  pre-repair tokens; a plain restart does not fix a populated index. Either POST
+  /api/app/batch/reindex as an admin, or stop the app, move the lucene data directory aside, and
+  start it (an empty index over a populated database triggers the automatic boot rebuild).
 
 Connection parameters come from those flags or from PGHOST/PGPORT/PGUSER/PGDATABASE, are validated
 whatever their source, and are the only ones psql sees: every other PG* variable is dropped, and
