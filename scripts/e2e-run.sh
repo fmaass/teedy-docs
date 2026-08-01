@@ -184,8 +184,27 @@ if [ "${E2E_VISUAL_ONLY:-}" = "1" ]; then
   echo "Running @visual specs in ${pw_image} (shared netns with ${container}, base http://localhost:8080)..."
   # --ipc=host avoids Chromium /dev/shm exhaustion; --network container: shares the
   # app's netns; mount the repo so the specs + committed baselines are visible.
+  #
+  # --user pins the runner to the INVOKING host identity (#219). This container writes
+  # into the bind-mounted repo — test-results/, playwright-report/, e2e/.auth/admin.json
+  # (global setup runs here too) and e2e-artifacts/ — and as root every one of those came
+  # out root:root, so the next HOST-side `npx playwright test` died with EACCES and the
+  # files could only be removed by another root container. Owning them as the caller is
+  # what prevents that, and it covers every path the run touches rather than a list of
+  # the three we happen to know about.
+  #
+  # HOME is pinned alongside it because the image's only passwd entry in this range is
+  # uid 1000 (`pwuser`): the GitHub runner calls as uid 1001, Docker finds no entry and
+  # falls back to HOME=/, which the unprivileged process cannot write. That is a guard,
+  # not a fix for an observed break — the @visual suite was run at uid 1001 both with and
+  # without it and passed 28/28 either way, because the browsers come from the image's
+  # world-readable /ms-playwright (PLAYWRIGHT_BROWSERS_PATH) and neither npx nor Chromium
+  # needed to write a home directory. It costs one flag to stop that from being load-
+  # bearing on a Playwright bump.
   docker run --rm --ipc=host --network "container:${container}" \
+    --user "$(id -u):$(id -g)" \
     -v "${repo_root}:/work" -w /work/docs-web/src/main/webapp \
+    -e HOME=/tmp \
     -e PLAYWRIGHT_BASE_URL="http://localhost:8080" \
     -e CI="${CI:-}" \
     "${pw_image}" \

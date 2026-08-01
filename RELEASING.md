@@ -22,9 +22,11 @@ Authoritative workflow: **`.github/workflows/build-deploy.yml`** ("Build and Pub
 Required jobs, each present and successful for the exact release SHA:
 `test`, `test-postgres`, `test-web-postgres`, `docs-importer`, `build`, `codeql`, `trivy-fs`,
 `candidate-image`, `trivy-image`, `sbom`, `e2e`, `e2e-visual`, `smoke`, and — on a publishing ref —
-`publish`. The `build` job runs, in order: version consistency (`check-version-consistency.sh`),
+`publish`. The `build` job runs, in order: the checker self-tests
+(`run-checker-self-tests.sh`), version consistency (`check-version-consistency.sh`),
 **OpenAPI spec parity** (`check-openapi-parity.mjs`), i18n key parity (`npm run i18n:check`),
-frontend lint, frontend unit tests, then the `-Pprod` Maven build; `e2e`/`e2e-visual` run
+frontend lint, the e2e typecheck (`npm run typecheck:e2e`), frontend unit tests, then the
+`-Pprod` Maven build; `e2e`/`e2e-visual` run
 Playwright against the single candidate image; `smoke` boots that image; `codeql`/`trivy-fs`/
 `trivy-image`/`sbom` are the security gates. The `publish` job (tag/main only) needs
 `smoke` + every security gate and promotes the exact signed+verified candidate digest to the release
@@ -43,6 +45,11 @@ one that needs a tag to compare against. None of them can be failed by a unit te
 | `codeql-known.json` coordinates | the triaged sink lines | `scripts/check-codeql-baseline-drift.mjs` | **no — pre-push only** |
 | `Dockerfile` `ENV JETTY_VERSION` | pom `<org.eclipse.jetty.version>` | `scripts/check-jetty-version.sh` | **no — pre-push only** |
 | poms + `package.json` | the release tag | `scripts/check-version-consistency.sh vX.Y.Z` | yes — `build` job, tag pushes only |
+
+Each of these checkers has a fixture self-test (`scripts/test-check-*.sh`) that plants a defect and
+asserts the checker still fires. The `build` job runs all of them through
+`scripts/run-checker-self-tests.sh`, which discovers them by glob — a self-test added later joins
+that gate by existing, and an empty glob is a failure, not a pass.
 
 The two pre-push-only gates have no CI backstop at all, which is the point: the CodeQL baseline
 keyed to line coordinates and the two independent Jetty pins (the pom property governs only the

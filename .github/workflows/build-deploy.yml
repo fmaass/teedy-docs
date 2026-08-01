@@ -229,6 +229,15 @@ jobs:
         with:
           node-version: "22"
 
+      # The mirror gates below (and check-db-version.sh in the `test` job) are
+      # hand-written checkers no unit test exercises; each has a fixture self-test that
+      # plants a defect and asserts the checker still fires. Until #220 nothing ran them,
+      # so a checker could rot into a permanent green with its own alarm sitting unarmed
+      # in the tree. Run them FIRST, before the checkers they vouch for. Discovery is by
+      # glob, so a self-test added later joins by existing.
+      - name: Run mirror-gate checker self-tests
+        run: bash scripts/run-checker-self-tests.sh
+
       - name: Check version consistency (tag == pom == package.json)
         if: startsWith(github.ref, 'refs/tags/v')
         run: bash scripts/check-version-consistency.sh "${GITHUB_REF_NAME}"
@@ -250,6 +259,14 @@ jobs:
       # equally clean.
       - name: Check the e2e teardown lint guardrail still fires
         run: cd docs-web/src/main/webapp && npm run lint:teardown-rule
+
+      # The app's tsconfig.json includes src/** only, so `vue-tsc` in `npm run build` has
+      # never seen the e2e tree and type errors there shipped unnoticed (#212). ESLint's
+      # type-unaware pass does not substitute. The e2e tree gets its OWN project rather
+      # than a widened app include, so tsconfig.json is untouched and no e2e file enters
+      # the program `vue-tsc` compiles during the Maven build below.
+      - name: Typecheck the e2e tree
+        run: cd docs-web/src/main/webapp && npm run typecheck:e2e
 
       - name: Run frontend unit tests
         run: cd docs-web/src/main/webapp && npm run test:unit

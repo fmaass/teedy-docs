@@ -1,0 +1,20 @@
+{
+  // Typecheck project for the e2e tree ONLY (#212). The app's ../tsconfig.json
+  // deliberately includes just `src/**`, so nothing ever typechecked these files and
+  // real errors (implicit `any` in a node callback, a mistyped Playwright API) shipped
+  // silently. Widening the app config instead would drag the e2e tree into `vue-tsc`
+  // during `npm run build`, so the e2e tree gets its own project and ../tsconfig.json is
+  // left untouched — no e2e file enters the program the app build compiles.
+  //
+  // `types` is a whole-value OVERRIDE, not a merge, so the inherited ["vite/client"]
+  // allowlist has to be restated here alongside `node`. Naming `node` is deliberate
+  // even though @types/node currently also reaches the program transitively — the
+  // shipped playwright-core types import bare 'fs'/'stream'/'child_process' — because
+  // that is a third party's type-import style, not a contract. Playwright runs these
+  // files under Node, so the e2e project declares its own ambient environment.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": ["**/*.ts"]
+}
