@@ -9,7 +9,7 @@
 // The heading tracks MAJOR.MINOR only: a patch release reuses the current minor's
 // bullets and does not need to touch this file. A new minor (or major) release
 // with fresh bullets bumps this to match.
-export const HIGHLIGHTS_VERSION = '3.7.0'
+export const HIGHLIGHTS_VERSION = '3.8.0'
 
 /**
  * The MAJOR.MINOR prefix of a semantic version ("3.5.2" -> "3.5"). Returns the
@@ -34,15 +34,16 @@ export function headingVersion(currentVersion: string | null | undefined): strin
 }
 
 // Each entry is an i18n key so the bullets translate. The list is intentionally
-// short and accurate to the 3.7 line, which folds in everything since 3.6.1:
-// account-level dark mode, a fully browsable activity log, complete translations
-// for every shipped language, correct handling of accented upload file names, and
-// the CSRF / share-link / credential-revocation hardening.
+// short and accurate to the 3.8 line: imported mail keeps its original .eml, the
+// file preview goes fullscreen, the document header shows its cover thumbnail,
+// the grid view gained sorting and drag reordering, a missing search index
+// rebuilds itself at startup (and no longer rebuilds a healthy one), and
+// truncated file names reveal themselves on hover.
 export const HIGHLIGHT_KEYS = [
-  'ui.about.highlights.dark_mode_account',
-  'ui.about.highlights.activity_history',
-  'ui.about.highlights.complete_translations',
-  'ui.about.highlights.accented_filenames',
-  'ui.about.highlights.csrf_and_sharing',
-  'ui.about.highlights.credential_revocation',
+  'ui.about.highlights.email_original_attached',
+  'ui.about.highlights.preview_fullscreen',
+  'ui.about.highlights.cover_in_header',
+  'ui.about.highlights.grid_sort_and_reorder',
+  'ui.about.highlights.index_self_repair',
+  'ui.about.highlights.filename_tooltips',
 ] as const

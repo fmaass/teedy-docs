@@ -1088,12 +1088,12 @@
       "whats_new_title": "Novità in {version}",
       "view_releases": "Visualizza tutte le versioni",
       "highlights": {
-        "dark_mode_account": "La tua scelta della modalità scura viene salvata nel tuo account, così un nuovo dispositivo adotta subito il tema che usi già.",
-        "activity_history": "Il registro attività di un documento non è più limitato alle voci più recenti: carica le attività precedenti per vedere la cronologia completa.",
-        "complete_translations": "Tutte le lingue incluse sono ora tradotte integralmente, quindi l'interfaccia non torna più all'inglese a metà schermata.",
-        "accented_filenames": "I nomi dei file caricati mantengono accenti, dieresi e segni più, invece di arrivare illeggibili.",
-        "csrf_and_sharing": "Protezione rafforzata contro il cross-site request forgery (CSRF), e i link di condivisione non rivelano più documenti oltre a quelli che concedono.",
-        "credential_revocation": "Cambiare una password o revocare una chiave API ora chiude subito le sessioni interessate."
+        "email_original_attached": "La posta importata nella posta in arrivo conserva ora il messaggio originale come allegato .eml, non più solo un estratto di testo: le installazioni esistenti lo attivano nelle impostazioni della posta in arrivo.",
+        "preview_fullscreen": "L'anteprima dei file può passare a schermo intero, così un PDF o un'immagine di grandi dimensioni sfrutta finalmente tutto lo schermo.",
+        "cover_in_header": "L'intestazione di un documento mostra ora la miniatura della sua copertina, per capire a colpo d'occhio che cosa hai aperto.",
+        "grid_sort_and_reorder": "La vista a griglia si può ora ordinare per nome, data o dimensione, e i file si riordinano trascinandoli.",
+        "index_self_repair": "Un indice di ricerca mancante viene ricostruito automaticamente all'avvio — ed è sparito il bug vecchio di anni che a ogni riavvio cancellava e ricostruiva un indice perfettamente integro.",
+        "filename_tooltips": "Passando il mouse su un nome di file troncato se ne legge il nome completo, sia nell'elenco sia nella griglia."
       }
     },
     "sso_failed": "Single sign-on non riuscito. Puoi riprovare o accedere con un account locale.",

@@ -1088,12 +1088,12 @@
       "whats_new_title": "{version} 的新功能",
       "view_releases": "檢視所有版本",
       "highlights": {
-        "dark_mode_account": "您的深色模式設定會儲存到帳號中，換用新裝置時會直接沿用您已經在用的佈景主題。",
-        "activity_history": "文件的活動記錄不再只顯示最近的項目——可以載入更早的活動，檢視完整的歷程。",
-        "complete_translations": "所有隨附的語言現已完整翻譯，介面不會再在頁面中途退回英文。",
-        "accented_filenames": "上傳的檔案名稱會保留重音符號、變音符號和加號，不再出現亂碼。",
-        "csrf_and_sharing": "強化了對跨網站請求偽造（CSRF）的防護，分享連結也不會再洩漏其授權範圍之外的文件。",
-        "credential_revocation": "變更密碼或撤銷 API 金鑰後，受影響的工作階段會立即結束。"
+        "email_original_attached": "匯入收件箱的郵件現在會把原始郵件保留為 .eml 附件，而不再只有一段文字摘要——既有安裝可在收件箱設定中開啟。",
+        "preview_fullscreen": "檔案預覽可以切換到全螢幕，大尺寸的 PDF 或圖片終於能用滿整個畫面。",
+        "cover_in_header": "文件標頭現在會顯示封面縮圖，一眼就能看出開啟的是什麼。",
+        "grid_sort_and_reorder": "格狀檢視現在可以依名稱、日期或大小排序，檔案也可以拖曳排成想要的順序。",
+        "index_self_repair": "搜尋索引遺失時會在啟動時自動重建；同時修正了一個存在多年的缺陷：每次重新啟動都會刪除並重建原本完好的索引。",
+        "filename_tooltips": "將滑鼠移到被截斷的檔案名稱上就會顯示完整名稱，清單檢視與格狀檢視皆可。"
       }
     },
     "sso_failed": "單一登入失敗。您可以再試一次，或使用本機帳號登入。",

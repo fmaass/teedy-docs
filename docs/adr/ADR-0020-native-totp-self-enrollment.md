@@ -3,7 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-07-24
 - **Issue:** #169 ("Let users set up two-factor authentication themselves")
-- **Shipped in:** (pending release) — migration `dbupdate-061-0.sql`, db.version 60 → 61
+- **Shipped in:** v3.8.0 — migration `dbupdate-061-0.sql`, db.version 60 → 61
 - **Supersedes:** ADR-0011 in part. ADR-0011 recorded Authelia as the recommended MFA front door and
   treated in-app TOTP as legacy/discouraged. This ADR keeps Authelia as the recommended posture for
   reverse-proxied deployments but restores a first-class, self-service native TOTP path for

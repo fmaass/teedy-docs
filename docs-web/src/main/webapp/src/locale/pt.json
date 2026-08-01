@@ -1088,12 +1088,12 @@
       "whats_new_title": "Novidades na {version}",
       "view_releases": "Ver todas as versões",
       "highlights": {
-        "dark_mode_account": "A sua preferência de modo escuro fica guardada na sua conta, por isso um dispositivo novo assume logo o tema que já utiliza.",
-        "activity_history": "O registo de atividade de um documento já não está limitado às entradas mais recentes — carregue a atividade mais antiga para ver o histórico completo.",
-        "complete_translations": "Todos os idiomas incluídos estão agora totalmente traduzidos, pelo que a interface já não volta ao inglês a meio do ecrã.",
-        "accented_filenames": "Os nomes dos ficheiros carregados mantêm os acentos, tremas e sinais de mais, em vez de chegarem com carateres ilegíveis.",
-        "csrf_and_sharing": "Reforço contra a falsificação de pedidos entre sítios (CSRF), e as ligações de partilha já não revelam documentos além do que concedem.",
-        "credential_revocation": "Alterar uma palavra-passe ou revogar uma chave de API termina agora de imediato as sessões afetadas."
+        "email_original_attached": "O correio importado para a caixa de entrada mantém agora a mensagem original como anexo .eml e não apenas um excerto de texto — as instalações existentes ativam-no nas definições da caixa de entrada.",
+        "preview_fullscreen": "A pré-visualização de ficheiros pode passar a ecrã inteiro, pelo que um PDF ou uma imagem grandes aproveitam finalmente todo o ecrã.",
+        "cover_in_header": "O cabeçalho de um documento mostra agora a miniatura da sua capa, para ver de relance o que foi aberto.",
+        "grid_sort_and_reorder": "A vista em grelha já pode ser ordenada por nome, data ou tamanho, e os ficheiros reordenam-se arrastando-os.",
+        "index_self_repair": "Um índice de pesquisa em falta é reconstruído automaticamente no arranque — e desapareceu o erro com anos que apagava e reconstruía um índice perfeitamente saudável em cada reinício.",
+        "filename_tooltips": "Ao passar o rato sobre um nome de ficheiro cortado, o nome completo é revelado, tanto na lista como na grelha."
       }
     },
     "sso_failed": "O início de sessão único falhou. Pode tentar novamente ou iniciar sessão com uma conta local.",

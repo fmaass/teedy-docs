@@ -1088,12 +1088,12 @@
       "whats_new_title": "Nouveautés de {version}",
       "view_releases": "Voir toutes les versions",
       "highlights": {
-        "dark_mode_account": "Votre choix de mode sombre est enregistré dans votre compte, de sorte qu'un nouvel appareil reprend directement le thème que vous utilisez déjà.",
-        "activity_history": "Le journal d'activité d'un document n'est plus limité aux entrées les plus récentes : chargez les activités plus anciennes pour consulter tout son historique.",
-        "complete_translations": "Toutes les langues fournies sont désormais entièrement traduites, l'interface ne repasse donc plus à l'anglais au milieu d'un écran.",
-        "accented_filenames": "Les noms des fichiers envoyés conservent leurs accents, trémas et signes plus, au lieu d'arriver déformés.",
-        "csrf_and_sharing": "Renforcement contre la falsification de requête intersites (CSRF), et les liens de partage ne révèlent plus de documents au-delà de ce qu'ils autorisent.",
-        "credential_revocation": "Changer un mot de passe ou révoquer une clé API met désormais fin immédiatement aux sessions concernées."
+        "email_original_attached": "Les messages importés dans la boîte de réception conservent désormais l'e-mail d'origine en pièce jointe .eml, et plus seulement un extrait de texte — les installations existantes l'activent dans les paramètres de la boîte de réception.",
+        "preview_fullscreen": "L'aperçu de fichier passe en plein écran, si bien qu'un PDF ou une image de grande taille occupe enfin tout l'écran.",
+        "cover_in_header": "L'en-tête d'un document affiche désormais la miniature de sa couverture, pour voir d'un coup d'œil ce que vous avez ouvert.",
+        "grid_sort_and_reorder": "La vue en grille peut désormais être triée par nom, date ou taille, et les fichiers se réorganisent par glisser-déposer.",
+        "index_self_repair": "Un index de recherche manquant se reconstruit automatiquement au démarrage — et le bogue vieux de plusieurs années qui supprimait et reconstruisait un index parfaitement sain à chaque redémarrage a disparu.",
+        "filename_tooltips": "Survoler un nom de fichier tronqué en révèle le nom complet, aussi bien dans la liste que dans la grille."
       }
     },
     "sso_failed": "L'authentification unique a échoué. Vous pouvez réessayer ou vous connecter avec un compte local.",

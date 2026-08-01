@@ -1088,12 +1088,12 @@
       "whats_new_title": "Çfarë ka të re në {version}",
       "view_releases": "Shiko të gjitha versionet",
       "highlights": {
-        "dark_mode_account": "Zgjedhja juaj për modalitetin e errët ruhet në llogarinë tuaj, kështu që një pajisje e re merr menjëherë temën që përdorni tashmë.",
-        "activity_history": "Regjistri i aktivitetit të një dokumenti nuk kufizohet më te hyrjet më të fundit — ngarkoni aktivitetin e mëparshëm për të parë historikun e plotë.",
-        "complete_translations": "Të gjitha gjuhët e përfshira tani janë përkthyer plotësisht, ndaj ndërfaqja nuk kthehet më në anglisht në mes të ekranit.",
-        "accented_filenames": "Emrat e skedarëve të ngarkuar i ruajnë theksat, umlautet dhe shenjat plus, në vend që të mbërrijnë të shtrembëruar.",
-        "csrf_and_sharing": "Mbrojtje e forcuar ndaj cross-site request forgery (CSRF), dhe lidhjet e ndarjes nuk zbulojnë më dokumente përtej atyre që lejojnë.",
-        "credential_revocation": "Ndryshimi i një fjalëkalimi ose revokimi i një çelësi API tani i mbyll menjëherë seancat e prekura."
+        "email_original_attached": "Posta e importuar në kutinë hyrëse tani e ruan mesazhin origjinal si bashkëngjitje .eml dhe jo vetëm një fragment teksti — instalimet ekzistuese e aktivizojnë këtë te cilësimet e kutisë hyrëse.",
+        "preview_fullscreen": "Pamja paraprake e skedarit mund të kalojë në ekran të plotë, kështu që një PDF ose imazh i madh e shfrytëzon më në fund të gjithë ekranin.",
+        "cover_in_header": "Kreu i një dokumenti tani shfaq miniaturën e kopertinës së tij, që të duket me një shikim çfarë keni hapur.",
+        "grid_sort_and_reorder": "Pamja në rrjetë tani mund të renditet sipas emrit, datës ose madhësisë, dhe skedarët riorganizohen duke i zvarritur.",
+        "index_self_repair": "Një indeks kërkimi që mungon rindërtohet automatikisht në nisje — dhe gabimi shumëvjeçar që fshinte e rindërtonte një indeks krejtësisht të shëndoshë në çdo rinisje është zhdukur.",
+        "filename_tooltips": "Kalimi i miut mbi një emër skedari të shkurtuar e shfaq atë të plotë, si në listë ashtu edhe në rrjetë."
       }
     },
     "sso_failed": "Identifikimi me një hyrje (SSO) dështoi. Mund të provoni përsëri ose të hyni me një llogari lokale.",

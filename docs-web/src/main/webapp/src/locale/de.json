@@ -1088,12 +1088,12 @@
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
       "highlights": {
-        "dark_mode_account": "Deine Einstellung für den Dark Mode wird im Konto gespeichert und auf neuen Geräten automatisch übernommen.",
-        "activity_history": "Im Aktivitätsprotokoll kannst du jetzt auch ältere Einträge nachladen und so den gesamten Verlauf eines Dokuments ansehen.",
-        "complete_translations": "Die Oberfläche ist jetzt in allen mitgelieferten Sprachen vollständig übersetzt – ohne englische Textreste auf einzelnen Seiten.",
-        "accented_filenames": "Umlaute, Akzente und Pluszeichen in Dateinamen bleiben beim Hochladen jetzt erhalten.",
-        "csrf_and_sharing": "teedy ist jetzt besser vor CSRF-Angriffen geschützt. Freigabelinks machen nur noch tatsächlich freigegebene Dokumente sichtbar.",
-        "credential_revocation": "Änderst du ein Passwort oder widerrufst du einen API-Schlüssel, beendet teedy die zugehörigen Sitzungen sofort."
+        "email_original_attached": "E-Mails, die in den Posteingang importiert werden, behalten jetzt die Originalnachricht als .eml-Anhang statt nur eines Textauszugs – bestehende Installationen schalten das in den Posteingangs-Einstellungen ein.",
+        "preview_fullscreen": "Die Dateivorschau lässt sich auf Vollbild schalten, sodass große PDFs und Bilder endlich den ganzen Bildschirm nutzen.",
+        "cover_in_header": "Der Dokumentkopf zeigt jetzt das Titelbild als Vorschau, sodass du auf einen Blick siehst, was du geöffnet hast.",
+        "grid_sort_and_reorder": "Die Rasteransicht lässt sich jetzt nach Name, Datum oder Größe sortieren, und Dateien lassen sich per Ziehen in die gewünschte Reihenfolge bringen.",
+        "index_self_repair": "Ein fehlender Suchindex wird beim Start automatisch neu aufgebaut – und der jahrealte Fehler, der bei jedem Neustart auch einen intakten Index gelöscht und neu aufgebaut hat, ist behoben.",
+        "filename_tooltips": "Abgeschnittene Dateinamen zeigen beim Überfahren mit der Maus den vollständigen Namen – in der Listen- wie in der Rasteransicht."
       }
     },
     "sso_failed": "Die Anmeldung per Single Sign-On ist fehlgeschlagen. Versuche es erneut oder melde dich mit einem lokalen Konto an.",

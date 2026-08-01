@@ -16,6 +16,148 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.8.0] - 2026-08-01
+
+A minor release. **Five additive migrations apply on first boot and raise `db.version` from 59 to
+64**: 060 (explicit document cover), 061 (pending TOTP key), 062 (audit-feed indexes), 063 (duplicate
+group-membership repair, then a uniqueness constraint), 064 (inbox `.eml` toggle, seeded off for
+existing installations). Take the usual backup first; each migration is retry-safe against a
+partially applied run.
+
+### Added
+
+- Email imported into the inbox now keeps the original message. Both ingresses attach the raw
+  RFC822 message as a `.eml` file (typed `message/rfc822`) beside the text excerpt the description
+  already carried; previously the message itself was parsed and discarded. Existing installations
+  keep today's behavior until an operator switches the new inbox setting on — migration 064 seeds it
+  off — while a fresh installation gets it on and the explicit upload endpoint always attaches. The
+  raw file is attached last, so hitting the quota costs the attachment and never the document. There
+  is no retroactive backfill: the source messages are gone (#197).
+- The file preview can go fullscreen. The dialog was pinned to a 960px width and 70vh media caps, so
+  large PDFs and images stayed small on any screen; its maximize control now lifts both constraints
+  while maximized, and the windowed layout is unchanged (#205).
+- The document header shows the cover file's thumbnail, with a placeholder tile for documents that
+  have no files (#206).
+- The grid view gained sorting **and** drag reordering. Files sort by name, date or size with the
+  same collation, fields and empties-last behavior the list view applies, or are dragged into a
+  persisted order through a dedicated handle. Sorting is transient: drag handles disable while a sort
+  is active and clearing it returns to the stored order. Desktop pointer only for now (#211).
+- A missing search index is rebuilt automatically at startup. Corruption already recovered itself,
+  but a wholly absent index silently became a fresh, empty, valid one — the database kept its
+  documents and search simply returned nothing until an admin found the manual reindex endpoint. The
+  rebuild fires once, is logged, and is failure-contained so it can never prevent boot (#208).
+- Truncated file titles reveal their full name on hover, in both the list and the grid view (#207).
+- A document's cover file can be chosen explicitly. The thumbnail was silently recomputed as the
+  first file by attachment order, so reordering files changed the cover as a side effect; an explicit
+  cover now takes precedence, and a dangling one falls back to the derived first file (#174,
+  migration 060).
+- A file can be moved to another document, which previously meant download, delete and re-upload.
+  The move relinks the file's active version chain in one transaction, so versions, content MACs and
+  history survive; both documents are audited and the search index re-points (#175).
+- Self-service two-factor enrollment for internal accounts. Enrollment is two-phase — enable
+  generates a pending secret shown as a QR code and manual key, and only a verified code activates it
+  — so a half-finished enrollment can no longer lock an account. Accounts originating from an
+  external identity provider delegate MFA to that provider and are refused enrollment (#169,
+  migration 061, ADR-0020, which supersedes ADR-0011 in part).
+- A document can be duplicated: a requester-owned deep copy of metadata, description, language,
+  readable tags, custom metadata, per-file rotation, the explicit cover and every file (#184).
+- A global history view over the existing audit endpoint, with type, class, user and date filters
+  AND-composed into every branch of both the fetch and the count. The document Activity tab shares
+  the same table and now shows file and comment targets by name instead of raw ids (#177, #195).
+- Saved filters gained sorting, name search, rename, and saving over an existing filter (#193).
+- A document URL can deep-link one of its files: the content route carries the file id and stays
+  synchronized both ways with the preview, and every file action menu gained a copy-link
+  control (#192).
+- Document rows carry native new-tab affordances — middle-click and ctrl-click navigate, shift plus
+  right-click reaches the browser context menu, and the quick menu gained an explicit
+  open-in-new-tab entry (#194).
+- A relation's direction can be swapped from either side, instead of deleting the link and re-adding
+  it from the other document (#191).
+- Preview and download are offered from the shared per-file action menu in both the list and the grid
+  view (#178).
+- The document slide-over gained a Delete action for writable documents (#172).
+
+### Changed
+
+- Zip downloads keep the original filenames. Every entry used to carry a positional index prefix,
+  forcing a rename after each download; only real basename collisions now get the smallest free
+  ` (N)` suffix (#173).
+- Deleting a user requires a reassignment target only when the departing account actually owns
+  content — decided under that user's row lock, with the server-side refusal remaining the
+  authority (#180).
+- The file list flows with the page instead of scrolling inside its own 480-pixel window, and the
+  long-deferred column redesign landed with it: the name column ellipsizes against a floor, metadata
+  columns collapse as the row narrows, and the action cluster wraps inside its own column so every
+  control stays visible and operable at 360px and up (#196, #170).
+- The bulk action bar and the document editor share one tag picker, so bulk tagging finally has
+  chips, filtering and keyboard reach (#182).
+- The audit feed gained two covering indexes, turning both history fetches into pure index scans; the
+  un-cursored count keeps its full-scan cost as a known ceiling (migration 062).
+- Group membership writes serialize under the group's row lock, and the database now enforces at most
+  one active row per (user, group) pair after repairing existing duplicates (#190, migration 063).
+- Test and CI hardening: end-to-end teardown moved out of `finally` blocks into a deferred-cleanup
+  fixture with a lint rule banning the old shape, the named flake mechanisms behind the rotating
+  full-suite failures were fixed, and the forked test JVM is now locale-hermetic (#183, #186, #187,
+  #199, #200, #203).
+
+### Fixed
+
+- A healthy search index was deleted and fully rebuilt on **every** boot, for as long as this code
+  has existed. Startup constructed the IndexWriter before validating the index, so `CheckIndex`
+  always collided with the writer's own `write.lock` and every restart was misdiagnosed as
+  corruption; search served nothing while each rebuild ran, and the validation itself never actually
+  executed. Validation now runs before the writer is constructed (#222).
+- Starting a workflow route while a group was being deleted could strand a step silently: the
+  deletion's cancel-scan saw only persisted rows and the raced step's ACL grant checked nothing.
+  Route start now locks GROUP targets, the deletion side reads the group for update, and every
+  multi-group acquisition follows one ascending order (#202).
+- The tag menu's filter threw in the console when the popover was dismissed by its own
+  scroll-into-view before PrimeVue's unguarded 1ms focus timer fired (#204).
+- The published `docs-importer` image crashed with `MODULE_NOT_FOUND` on every documented
+  invocation — the build stage copied only `main.js`, and no CI job built the image. It now ships its
+  complete require graph and is smoke-built in CI by a job that provably fails on the old
+  Dockerfile (#201).
+- The document header remembered a failed cover thumbnail forever, so rotating a file away from a
+  failed angle and back to it left a permanent placeholder on a document with a perfectly servable
+  cover. A changed candidate URL now clears the failure record and makes one honest retry (#206).
+- A deep link to a file could be lost when it overtook the router's still-settling first navigation;
+  the end-to-end suite now serializes on that first navigation so the class fails by name (#215). The
+  remaining product-side window is tracked in #216.
+- A tag created concurrently with its owner's deletion could commit active under a soft-deleted
+  user — invisible to reassignment and eligible for the storage purge, the historical tag-loss class.
+  Tag creation now acquires the active owner row for update and fails closed (#185).
+- Deleting a principal could deadlock against workflow route creation: self-delete took tag locks
+  before the document locks the same transaction needed later, while tag linking held documents and
+  waited on tags. Both delete paths now lock documents in one ascending sequence before any tag lock,
+  and route start resolves and locks its targets before taking its document lock (#189).
+- Previews refresh automatically when file processing finishes, instead of caching the placeholder
+  raster until a manual reload (#176).
+- The preview dialog offered two download controls for a file with no preview; the footer link is now
+  the single download affordance (#181).
+- PrimeVue's built-in strings — confirm Yes/No across every dialog, password strength,
+  empty-dropdown messages, the date picker — follow the active locale instead of staying English in
+  every other language (#168).
+- The tag filter is focused as soon as tag editing opens, in the quick menu and in the slide-over, so
+  tags can be added keyboard-only (#171).
+- A successful file move left its dialog up, pointer-blocking the app until three cache refetches
+  completed, and a failed refetch never closed it at all (#175).
+
+### Security
+
+- Jetty moves to **12.0.37 in both pins**. The pom property governs only the embedded dev server;
+  production downloads jetty-home from the Dockerfile's own version and checksum pins, a divergence
+  nothing guarded — a future Jetty CVE fix applied to the pom alone would have been inert in the
+  shipped image. A new mirror gate (`scripts/check-jetty-version.sh`) now holds the two pins equal.
+- Hibernate moves to 6.6.54 and Jersey to 3.1.11. Jersey stops there deliberately: 3.1.12's test
+  bundle references an unpublished artifact. H2 stays on the 2.3 line because 2.4 drops `DATETIME`
+  (#218). PrimeVue moves to 4.5.5, the final MIT-licensed release, also a deliberate stop.
+- `postcss` is bumped past GHSA-r28c-9q8g-f849 (HIGH, source-map path traversal), transitively via
+  Vite and `@vue/compiler-sfc`.
+- The importer's glob consumers move onto the patched `brace-expansion` line — `minimatch` to the
+  major that consumes it natively, and `recursive-readdir`'s embedded `minimatch@3` chain collapsed
+  onto the same hoisted copy — with a functional filter suite pinning every surviving glob path and
+  no scanner suppression added (#198).
+
 ## [3.7.2] - 2026-07-23
 
 No database migration required; `db.version` remains 59 (unchanged from v3.7.1).
@@ -388,7 +530,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...v3.8.0
 [3.7.2]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/fmaass/teedy-docs/compare/v3.6.7...v3.7.0

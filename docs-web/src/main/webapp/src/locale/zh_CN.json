@@ -1088,12 +1088,12 @@
       "whats_new_title": "{version} 的新功能",
       "view_releases": "查看所有版本",
       "highlights": {
-        "dark_mode_account": "您的深色模式设置会保存到帐号中，换用新设备时会直接沿用您已经在用的主题。",
-        "activity_history": "文档的活动记录不再只显示最近的条目——可以加载更早的活动，查看完整历史。",
-        "complete_translations": "所有随附语言现已完成翻译，界面不会再在页面中途回退到英文。",
-        "accented_filenames": "上传的文件名会保留重音符号、变音符号和加号，不再出现乱码。",
-        "csrf_and_sharing": "加强了对跨站请求伪造（CSRF）的防护，共享链接也不会再泄露其授权范围之外的文档。",
-        "credential_revocation": "更改密码或吊销 API 密钥后，受影响的会话会立即结束。"
+        "email_original_attached": "导入收件箱的邮件现在会把原始邮件作为 .eml 附件保留，而不再只有一段文本摘要——已有安装可在收件箱设置中开启。",
+        "preview_fullscreen": "文件预览可以切换到全屏，大幅面的 PDF 或图片终于能用满整个屏幕。",
+        "cover_in_header": "文档标题区现在会显示封面缩略图，一眼就能看出打开的是什么。",
+        "grid_sort_and_reorder": "网格视图现在可以按名称、日期或大小排序，文件也可以拖动排成想要的顺序。",
+        "index_self_repair": "搜索索引缺失时会在启动时自动重建；同时修复了一个存在多年的缺陷：每次重启都会删除并重建原本完好的索引。",
+        "filename_tooltips": "把鼠标悬停在被截断的文件名上就会显示完整名称，列表视图和网格视图都支持。"
       }
     },
     "sso_failed": "单点登录失败。您可以重试，或使用本地帐号登录。",

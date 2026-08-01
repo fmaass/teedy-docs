@@ -18,34 +18,37 @@ vi.mock('../composables/useAppInfo', () => ({
 
 import AboutDialog from './AboutDialog.vue'
 
-// --- About dialog "What's new" must reflect the 3.7 release ---
+// --- About dialog "What's new" must reflect the 3.8 release ---
 //
-// The bullets are hand-curated per release (account-level dark mode, the fully
-// browsable activity log, complete translations for every shipped language,
-// accented upload file names, and the CSRF / share-link / credential-revocation
-// hardening). The heading is pinned to that release and must stay in step with the
-// project's MAJOR.MINOR — the final test guards against the heading drifting behind
-// a minor bump, which is exactly how the 3.1.0 bullets survived unchanged to 3.4.0.
+// The bullets are hand-curated per release (imported mail keeping its original
+// .eml, the fullscreen file preview, the cover thumbnail in the document header,
+// grid-view sorting and drag reordering, the self-rebuilding search index, and
+// full file names on hover). The heading is pinned to that release and must stay in
+// step with the project's MAJOR.MINOR — the final test guards against the heading
+// drifting behind a minor bump, which is exactly how the 3.1.0 bullets survived
+// unchanged to 3.4.0.
 
 describe('AboutDialog highlights', () => {
-  it('pins the What\'s-new heading to the 3.7 highlights', () => {
-    expect(HIGHLIGHTS_VERSION).toBe('3.7.0')
+  it('pins the What\'s-new heading to the 3.8 highlights', () => {
+    expect(HIGHLIGHTS_VERSION).toBe('3.8.0')
   })
 
-  it('surfaces concrete 3.7 highlights in both locales', () => {
+  it('surfaces concrete 3.8 highlights in both locales', () => {
     const enText = HIGHLIGHT_KEYS.map((k) => resolve(en, k).toLowerCase()).join(' ')
     const deText = HIGHLIGHT_KEYS.map((k) => resolve(de, k).toLowerCase()).join(' ')
-    // Account-level dark mode + the uncapped activity log are two load-bearing 3.7 additions.
-    expect(enText).toContain('dark-mode')
-    expect(enText).toContain('activity log')
-    // The German bullet keeps the interface's "Dark Mode" label (spaced), not the
-    // English "dark-mode" hyphenation.
-    expect(deText).toContain('dark mode')
-    expect(deText).toContain('aktivitätsprotokoll')
-    // The stale 3.6.0 bullets (fuzzy search, deleted-user reassignment) must be gone.
-    expect(enText).not.toContain('typo')
-    expect(enText).not.toContain('delete a user')
-    expect(deText).not.toContain('tippfehler')
+    // The retained .eml original and the fullscreen preview are two load-bearing 3.8 additions.
+    expect(enText).toContain('.eml')
+    expect(enText).toContain('fullscreen')
+    expect(enText).toContain('cover thumbnail')
+    // The German bullets use the interface's own labels — "Vollbild" for fullscreen
+    // and "Titelbild" for the cover — not the English words.
+    expect(deText).toContain('.eml')
+    expect(deText).toContain('vollbild')
+    expect(deText).toContain('titelbild')
+    // The stale 3.7 bullets (account dark mode, the uncapped activity log) must be gone.
+    expect(enText).not.toContain('dark-mode')
+    expect(enText).not.toContain('activity log')
+    expect(deText).not.toContain('aktivitätsprotokoll')
   })
 
   it('every highlight key resolves in both locales (no missing bullet)', () => {

@@ -32,26 +32,36 @@ tag. `e2e-harness` runs but is **non-gating** (#76). Full pipeline runbook: **`d
 
 ## Mirror gates and the pre-push guardrail
 
-Four gates compare a hand-maintained mirror against its source of truth. None of them can be
-failed by a unit test, and all four run only in the CI `build` job:
+Six gates compare a hand-maintained mirror against its source of truth — five that always run and
+one that needs a tag to compare against. None of them can be failed by a unit test:
 
-| Mirror | Source of truth | Gate |
-|---|---|---|
-| `apidoc/openapi.json` | JAX-RS resource annotations | `scripts/check-openapi-parity.mjs` |
-| locale JSONs | `en.json` key set | `npm run i18n:check` |
-| `db.version` (3 overlays) | newest `dbupdate-NNN` migration | `scripts/check-db-version.sh` |
-| poms + `package.json` | the release tag | `scripts/check-version-consistency.sh vX.Y.Z` |
+| Mirror | Source of truth | Gate | Also run by CI |
+|---|---|---|---|
+| `apidoc/openapi.json` | JAX-RS resource annotations | `scripts/check-openapi-parity.mjs` | yes — `build` job |
+| locale JSONs | `en.json` key set | `npm run i18n:check` | yes — `build` job |
+| `db.version` (3 overlays) | newest `dbupdate-NNN` migration | `scripts/check-db-version.sh` | yes — `test` job |
+| `codeql-known.json` coordinates | the triaged sink lines | `scripts/check-codeql-baseline-drift.mjs` | **no — pre-push only** |
+| `Dockerfile` `ENV JETTY_VERSION` | pom `<org.eclipse.jetty.version>` | `scripts/check-jetty-version.sh` | **no — pre-push only** |
+| poms + `package.json` | the release tag | `scripts/check-version-consistency.sh vX.Y.Z` | yes — `build` job, tag pushes only |
 
-Because they are push-only, drift stays invisible to local verification until the build fails —
-and on a tag push that is a failed release build on an already-public tag. v3.6.7 lost its first
-tag exactly this way: the #139 audit-log query params and the #147 `dark_mode` form param were
+The two pre-push-only gates have no CI backstop at all, which is the point: the CodeQL baseline
+keyed to line coordinates and the two independent Jetty pins (the pom property governs only the
+embedded dev server; production downloads jetty-home from the Dockerfile's own version and checksum)
+both drift silently, and a Jetty CVE fix applied to the pom alone would leave the shipped image
+inert. Nothing else catches either one.
+
+For the four gates CI does run, drift still stays invisible to local verification until the build
+fails — and on a tag push that is a failed release build on an already-public tag. v3.6.7 lost its
+first tag exactly this way: the #139 audit-log query params and the #147 `dark_mode` form param were
 added to the resources but never mirrored into `openapi.json`, so a fully green local run
 (backend suite, frontend unit, lint, i18n) still produced a red release build.
 
-Run all four at once with **`scripts/check-release-mirrors.sh [vX.Y.Z]`** (the tag argument adds
-the version-consistency gate). **`.githooks/pre-push`** runs it automatically on every push and
-passes the tag name when a `v*` tag is pushed. Enable the hook once per clone — `scripts/dev_setup.sh`
-does it, or `git config core.hooksPath .githooks`. Deliberate override: `SKIP_RELEASE_MIRRORS=1`.
+Run all six at once with **`scripts/check-release-mirrors.sh [vX.Y.Z]`** (the tag argument adds
+the version-consistency gate; without it that one gate is skipped and the other five still run).
+**`.githooks/pre-push`** runs the wrapper automatically on every push and passes the tag name when a
+`v*` tag is pushed — so the pre-push hook, not CI, is the only place the full set runs together.
+Enable the hook once per clone — `scripts/dev_setup.sh` does it, or
+`git config core.hooksPath .githooks`. Deliberate override: `SKIP_RELEASE_MIRRORS=1`.
 
 ## Pre-tag regression (standing rule)
 

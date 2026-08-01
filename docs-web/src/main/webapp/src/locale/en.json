@@ -1088,12 +1088,12 @@
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
       "highlights": {
-        "dark_mode_account": "Your dark-mode choice is saved to your account, so a new device picks up the theme you already use.",
-        "activity_history": "A document's activity log is no longer capped at the most recent entries — load older activity to see its full history.",
-        "complete_translations": "Every shipped language is now fully translated, so the interface no longer falls back to English part-way down a screen.",
-        "accented_filenames": "Uploaded file names keep their accents, umlauts and plus signs instead of arriving garbled.",
-        "csrf_and_sharing": "Hardened against cross-site request forgery, and share links no longer reveal documents beyond what they grant.",
-        "credential_revocation": "Changing a password or revoking an API key now ends the affected sessions straight away."
+        "email_original_attached": "Mail imported into the inbox now keeps the original message as an .eml attachment instead of only a text excerpt — existing installations turn it on in the inbox settings.",
+        "preview_fullscreen": "The file preview can go fullscreen, so a large PDF or image finally uses the whole screen instead of a fixed window.",
+        "cover_in_header": "A document's header now shows its cover thumbnail, so you can see at a glance what you opened.",
+        "grid_sort_and_reorder": "The grid view can now be sorted by name, date or size, and files can be dragged into the order you want.",
+        "index_self_repair": "A missing search index now rebuilds itself at startup — and the years-old bug that deleted and rebuilt a perfectly healthy index on every restart is gone.",
+        "filename_tooltips": "Hovering a shortened file name reveals the full name, in both the list and the grid view."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",

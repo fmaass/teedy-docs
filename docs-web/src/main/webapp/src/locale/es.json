@@ -1088,12 +1088,12 @@
       "whats_new_title": "Novedades de {version}",
       "view_releases": "Ver todas las versiones",
       "highlights": {
-        "dark_mode_account": "Su preferencia de modo oscuro se guarda en su cuenta, de modo que un dispositivo nuevo adopta enseguida el tema que ya utiliza.",
-        "activity_history": "El registro de actividad de un documento ya no se limita a las entradas más recientes: cargue la actividad anterior para ver su historial completo.",
-        "complete_translations": "Todos los idiomas incluidos están ahora traducidos por completo, así que la interfaz ya no vuelve al inglés a media pantalla.",
-        "accented_filenames": "Los nombres de los archivos subidos conservan sus acentos, diéresis y signos de suma, en lugar de llegar con caracteres corruptos.",
-        "csrf_and_sharing": "Refuerzo frente a la falsificación de peticiones entre sitios (CSRF), y los enlaces compartidos ya no revelan documentos más allá de lo que conceden.",
-        "credential_revocation": "Cambiar una contraseña o revocar una clave de API ahora cierra de inmediato las sesiones afectadas."
+        "email_original_attached": "El correo importado a la bandeja de entrada conserva ahora el mensaje original como adjunto .eml, y no solo un extracto de texto: las instalaciones existentes lo activan en los ajustes de la bandeja de entrada.",
+        "preview_fullscreen": "La vista previa de archivos puede pasar a pantalla completa, así que un PDF o una imagen grandes aprovechan por fin toda la pantalla.",
+        "cover_in_header": "La cabecera de un documento muestra ahora la miniatura de su portada, para ver de un vistazo qué se ha abierto.",
+        "grid_sort_and_reorder": "La vista de cuadrícula ya se puede ordenar por nombre, fecha o tamaño, y los archivos se reordenan arrastrándolos.",
+        "index_self_repair": "Un índice de búsqueda ausente se reconstruye automáticamente al iniciar, y ha desaparecido el fallo de hace años que borraba y reconstruía en cada reinicio un índice en perfecto estado.",
+        "filename_tooltips": "Al pasar el ratón por un nombre de archivo recortado se muestra completo, tanto en la lista como en la cuadrícula."
       }
     },
     "sso_failed": "El inicio de sesión único falló. Puede intentarlo de nuevo o iniciar sesión con una cuenta local.",

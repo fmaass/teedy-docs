@@ -1088,12 +1088,12 @@
       "whats_new_title": "Co nowego w {version}",
       "view_releases": "Zobacz wszystkie wydania",
       "highlights": {
-        "dark_mode_account": "Twój wybór trybu ciemnego jest zapisywany na koncie, więc nowe urządzenie od razu przejmuje motyw, którego już używasz.",
-        "activity_history": "Dziennik aktywności dokumentu nie jest już ograniczony do najnowszych wpisów — doładuj starsze wpisy, aby zobaczyć pełną historię.",
-        "complete_translations": "Wszystkie dołączone języki są teraz w pełni przetłumaczone, więc interfejs nie przełącza się już w połowie ekranu na angielski.",
-        "accented_filenames": "Nazwy przesyłanych plików zachowują znaki diakrytyczne, umlauty i plusy, zamiast docierać zniekształcone.",
-        "csrf_and_sharing": "Wzmocniona ochrona przed atakami cross-site request forgery (CSRF), a linki udostępniania nie ujawniają już dokumentów wykraczających poza przyznane uprawnienia.",
-        "credential_revocation": "Zmiana hasła lub unieważnienie klucza API natychmiast kończy objęte tym sesje."
+        "email_original_attached": "Poczta importowana do skrzynki wejściowej zachowuje teraz oryginalną wiadomość jako załącznik .eml, a nie tylko fragment tekstu — istniejące instalacje włączają to w ustawieniach skrzynki wejściowej.",
+        "preview_fullscreen": "Podgląd pliku można przełączyć w tryb pełnoekranowy, więc duży PDF lub obraz wreszcie wykorzystuje cały ekran.",
+        "cover_in_header": "Nagłówek dokumentu pokazuje teraz miniaturę okładki, więc od razu widać, co zostało otwarte.",
+        "grid_sort_and_reorder": "Widok siatki można teraz sortować według nazwy, daty lub rozmiaru, a pliki da się przeciągać w wybraną kolejność.",
+        "index_self_repair": "Brakujący indeks wyszukiwania odbudowuje się automatycznie przy starcie, a wieloletni błąd, który przy każdym restarcie usuwał i odbudowywał całkowicie sprawny indeks, zniknął.",
+        "filename_tooltips": "Najechanie na skróconą nazwę pliku pokazuje ją w całości — zarówno na liście, jak i w siatce."
       }
     },
     "sso_failed": "Logowanie jednokrotne (SSO) nie powiodło się. Możesz spróbować ponownie lub zalogować się przy użyciu konta lokalnego.",
