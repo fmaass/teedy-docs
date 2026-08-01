@@ -63,6 +63,13 @@ the version-consistency gate; without it that one gate is skipped and the other 
 Enable the hook once per clone — `scripts/dev_setup.sh` does it, or
 `git config core.hooksPath .githooks`. Deliberate override: `SKIP_RELEASE_MIRRORS=1`.
 
+Before tagging, run the issue-close-comment gate: every issue closed by this release must already
+carry its close comment.
+
+```
+scripts/check-issue-close-comments.sh <prev-release-tag>
+```
+
 ## Pre-tag regression (standing rule)
 
 Every rc/version closeout runs, in addition to CI: the Playwright suites AND the **full**
