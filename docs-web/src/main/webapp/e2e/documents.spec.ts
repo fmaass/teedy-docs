@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, type BrowserContext, type Locator, type Page } from './fixtures'
 import {
   unique,
   uniqueTag,
@@ -143,15 +143,45 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   await expect(panel.getByText(tagNames[0], { exact: true })).toHaveCount(0)
 })
 
+/**
+ * Middle-click `link` and return the tab it opens, retrying the click a bounded number of times.
+ *
+ * #223: on a CPU-contended run, Playwright can lose a popup's navigation signals — two surfaces,
+ * one cause. Sometimes the popup's `page` event never reaches the test at all (measured: still
+ * absent 55s after the click, while the popup's own requests — app bundle, /api/user,
+ * /api/document/<id> — all completed against the server, so waiting longer is not a remedy).
+ * Sometimes the page does arrive but its top-level request is never reported as finished, which
+ * leaves a pending document on the frame; every frame-gated matcher (locator queries,
+ * toHaveURL, waitForLoadState) then queues behind "waiting for … navigation to finish" until it
+ * times out. The popup itself is healthy in both cases: an in-page probe during a stalled run
+ * read document.readyState "complete", a PerformanceNavigationTiming with responseEnd ~7ms and
+ * loadEventEnd ~74ms, the target route hash and the rendered heading.
+ *
+ * A retry is therefore the honest remedy for the first surface (a fresh popup gets fresh
+ * bookkeeping) and evaluate() for the second. Neither weakens the test: a title that is not a
+ * real link opens no tab on ANY attempt, and there is nothing for evaluate() to read.
+ */
+async function middleClickNewTab(context: BrowserContext, link: Locator): Promise<Page> {
+  const attempts = 3
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    // Registered BEFORE the click so the event cannot be missed between the two.
+    const opened = context.waitForEvent('page', { timeout: 4_000 }).catch(() => null)
+    await link.click({ button: 'middle' })
+    const newTab = await opened
+    if (newTab) return newTab
+  }
+  throw new Error(`middle-clicking the document title opened no new tab in ${attempts} attempts`)
+}
+
 // --- #194: the document title is a REAL link, so the browser's own new-tab
 //     affordances work on it. Middle-click is the one that is purely native (no app
 //     code runs beyond the modifier guard declining to intercept), so it is the
 //     honest end-to-end proof: a genuinely-navigable href reached the browser.
 //
 // REALNESS: the assertion is on the SECOND page the browser context opens and on
-// ITS url + heading. Rendering the title as a <span> (the pre-#194 markup), or
-// preventDefault-ing unconditionally, opens no page at all and the waitForEvent
-// times out — there is no way to satisfy this without a working link.
+// ITS route + heading. Rendering the title as a <span> (the pre-#194 markup), or
+// preventDefault-ing unconditionally, opens no page at all and middleClickNewTab
+// throws — there is no way to satisfy this without a working link.
 test('middle-clicking a document title opens the full view in a new tab (#194)', async ({
   page,
   context,
@@ -170,14 +200,34 @@ test('middle-clicking a document title opens the full view in a new tab (#194)',
   // The href is the document's own full-view route — not "#" or a JS placeholder.
   await expect(link).toHaveAttribute('href', new RegExp(`#/document/view/${docId}$`))
 
-  const [newTab] = await Promise.all([
-    context.waitForEvent('page'),
-    link.click({ button: 'middle' }),
-  ])
-  await newTab.waitForLoadState('domcontentloaded')
-  await expect(newTab).toHaveURL(new RegExp(`#/document/view/${docId}`))
-  await expect(newTab.getByRole('heading', { name: title })).toBeVisible()
-  await newTab.close()
+  const newTab = await middleClickNewTab(context, link)
+
+  // The popup's rendered route and its own heading — the same two facts the URL matcher and the
+  // heading locator asserted before, read out of the live document instead of behind the
+  // navigation barrier (see middleClickNewTab). A poll, because the first evaluate can still
+  // land on the popup's initial about:blank.
+  const popupState = () =>
+    newTab
+      .evaluate(() => ({
+        hash: location.hash,
+        headings: Array.from(document.querySelectorAll('h1')).map((h) => (h.textContent ?? '').trim()),
+      }))
+      .catch(() => ({ hash: '', headings: [] as string[] }))
+  await expect
+    .poll(async () => (await popupState()).hash, {
+      message: "the new tab is on the document's own full-view route",
+    })
+    .toMatch(new RegExp(`#/document/view/${docId}`))
+  await expect
+    .poll(async () => (await popupState()).headings, {
+      message: 'the new tab rendered the document view for THIS document',
+    })
+    .toContain(title)
+
+  // Close whatever the middle clicks opened (a retried attempt can leave a second tab).
+  for (const openTab of context.pages()) {
+    if (openTab !== page) await openTab.close()
+  }
 
   // The originating list did NOT navigate and did NOT open the slide-over — a middle
   // click must not be treated as the plain-click "open slide-over" gesture.

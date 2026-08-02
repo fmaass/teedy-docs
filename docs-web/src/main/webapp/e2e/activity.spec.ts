@@ -188,14 +188,37 @@ test('#113 the event-type filter can be cleared to all rows with the keyboard', 
   await page.getByRole('option', { name: 'Updated', exact: true }).click()
   await expect(typeCells.filter({ hasText: 'Created' })).toHaveCount(0)
 
+  // #227: that pointer selection blurs the control, and PrimeVue's Select.onBlur defers
+  // `focused = false; focusedOptionIndex = -1` by 100ms while its hide() refocuses the control
+  // synchronously — so the reset lands ~100ms later on a control that is focused again, and
+  // wipes the roving option focus with it. Recorded timeline of a failing run (ms):
+  // focusout 1080, refocus 1082, Enter/open 1134, Home 1166 (roving focus moves to "All event
+  // types"), reset 1182, Enter 1185 -> with no focused option PrimeVue selects NOTHING and just
+  // closes the list, so the previous filter survives the keyboard clear. The root's `p-focus`
+  // class is bound to that same flag, so its removal is the vendor's own proof that the deferred
+  // reset has already run: gate the keyboard sequence on it and nothing is left pending to land
+  // mid-sequence (no further blur happens before the commit).
+  await expect(page.locator('.activity-type-filter')).not.toHaveClass(/(^|\s)p-focus(\s|$)/)
+
   // KEYBOARD CLEAR: focus the combobox, open it, move to the first option
   // ("All types") and select it — no pointer, no clear icon.
+  const allTypes = page.getByRole('option', { name: 'All event types', exact: true })
   await combo.focus()
   await expect(combo).toBeFocused()
   await combo.press('Enter')
-  await expect(page.getByRole('option', { name: 'All event types', exact: true })).toBeVisible()
+  await expect(allTypes).toBeVisible()
   await combo.press('Home')
+  // Enter commits whichever option PrimeVue currently marks as focused, so pin that handoff
+  // rather than racing it. `data-p-focused` is the readable form here: aria-activedescendant is
+  // rendered only while the component's own focus flag is true, and the reset above leaves it
+  // false even though the control holds DOM focus.
+  await expect(allTypes).toHaveAttribute('data-p-focused', 'true')
   await combo.press('Enter')
+
+  // #227: the COMMIT itself, read back from the combobox before any downstream effect, so a
+  // keystroke that commits nothing (or the previous selection) is named here instead of
+  // surfacing as a missing row further down.
+  await expect(combo).toHaveText('All event types')
 
   // Every row returns, including the Created row the filter had hidden.
   await expect(typeCells.filter({ hasText: 'Created' }).first()).toBeVisible()

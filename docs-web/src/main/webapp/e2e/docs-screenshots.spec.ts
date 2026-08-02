@@ -331,7 +331,9 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
   await expect(stepCards).toHaveCount(2)
   await configureStep(page, stepCards.nth(1), { name: 'Manager approval', type: 'Approve', groupName })
 
-  // Capture the filled editor BEFORE saving (both steps visible with types+targets).
+  // Capture the filled editor BEFORE saving (both steps visible with types+targets). Nothing in
+  // this flow raises a toast — the group is seeded over the API and the editor only toasts on
+  // Save, which happens after this shot — so there is nothing to drain here.
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'workflow-editor')
 
@@ -354,23 +356,41 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
   // one to start, so pick the first rather than tripping strict mode on the duplicate.
   await page.getByRole('option', { name: modelName, exact: true }).first().click()
   await page.getByRole('button', { name: 'Start', exact: true }).click()
-  // DURABLE-STATE instead of the transient "Workflow started" toast: the route now renders
-  // the Current-step panel with the first (Accounting check / VALIDATE) step as the current
-  // step. This is a single document's workflow view (one current step), so no strict-mode
-  // concern here.
+  // The success toast (DocumentViewWorkflow.vue:67, life 2000ms) parks over the top-right corner
+  // and was baked into the committed workflow-pending.png. Waiting for it to be GONE is only
+  // meaningful once it has been HERE: handleStart awaits its refetch before adding the toast, so
+  // the Current-step panel below can render first and a bare "no toast" check would pass on a
+  // toast that has not been enqueued yet — and then pop into frame during the shot. Observe it,
+  // then drain it. (Toasts are the only overlay in this flow; the second shot further down adds
+  // no interaction of its own, so this one drain covers both captures.)
+  const startedToast = page.locator('.p-toast-message').filter({ hasText: 'Workflow started' })
+  await expect(startedToast).toHaveCount(1)
+  // DURABLE-STATE instead of that transient toast: the route now renders the Current-step panel
+  // with the first (Accounting check / VALIDATE) step as the current step. This is a single
+  // document's workflow view (one current step), so no strict-mode concern here.
   await expect(page.getByRole('heading', { name: 'Current step' })).toBeVisible()
   await expect(page.locator('.wf-step-name')).toHaveText('Accounting check')
+  // Transitions are killed in beforeEach, so the toast leaves the DOM as soon as its life
+  // expires; no toast of any kind may be in the frame of either shot.
+  await expect(page.locator('.p-toast-message')).toHaveCount(0)
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'workflow-pending')
 
-  // The act buttons + comment field on the pending step. The VALIDATE step shows a
-  // Validate button and a comment box; capture the current-step panel.
-  const stepPanel = page.locator('.wf-current-step, .wf-step-actions').first()
-  if (await stepPanel.count()) {
-    await shootElement(page, stepPanel, 'workflow-actions')
-  } else {
-    await shootViewport(page, 'workflow-actions')
-  }
+  // The act buttons + comment field on the pending step, clipped to the panel that
+  // docs/workflows.md's alt text describes: "the current-step panel with an optional comment
+  // field and the Validate button". That is `.wf-current` (DocumentViewWorkflow.vue), which
+  // wraps the step name/assignee (`.wf-current-main`) and the act controls (`.wf-act`).
+  //
+  // #228: the pre-fix selector named `.wf-current-step, .wf-step-actions` — neither class exists
+  // in any template, so `count()` was always 0 and every run silently fell back to a viewport
+  // shot, i.e. workflow-actions.png was a second copy of workflow-pending.png. There is no
+  // fallback any more: this spec asserts the UI on every run (the write is what is gated on
+  // E2E_UPDATE_SCREENSHOTS), so a missing panel must FAIL rather than quietly widen the frame.
+  const stepPanel = page.locator('.wf-current')
+  await expect(stepPanel).toBeVisible()
+  await expect(stepPanel.locator('.wf-comment')).toBeVisible()
+  await expect(stepPanel.getByRole('button', { name: 'Validate', exact: true })).toBeVisible()
+  await shootElement(page, stepPanel, 'workflow-actions')
 })
 
 async function configureStep(
