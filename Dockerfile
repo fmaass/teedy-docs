@@ -10,7 +10,7 @@ ENV LC_ALL=C.UTF-8
 ARG TARGETARCH=amd64
 ENV JAVA_HOME=/usr/lib/jvm/java-25-openjdk-${TARGETARCH}/
 ENV JAVA_OPTIONS="-Dfile.encoding=UTF-8 -Xms512m -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-ENV JETTY_VERSION=12.0.37
+ENV JETTY_VERSION=12.1.11
 ENV JETTY_HOME=/opt/jetty
 
 RUN apt-get update && \
@@ -50,9 +50,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN dpkg-reconfigure -f noninteractive tzdata
 
-# SHA-512 pinned for JETTY_VERSION 12.0.37 (cross-checked against Maven Central .sha512).
+# SHA-512 pinned for JETTY_VERSION 12.1.11 (cross-checked against Maven Central .sha512).
 # Bump this when JETTY_VERSION changes, or the build fails closed.
-ENV JETTY_SHA512=ceabdf09187234b52b2c7fac099ba399abb148760436f71272f7eded925ca8a9dc390b05a22ef6a4c9de7ab169c21f05bcb62a93d82e71a3fa32a1d52e853df9
+ENV JETTY_SHA512=352e2237f2f6dc393b494cacd00c7069b2553f3f8227ca60ac3c0c05a77b10d94491a29a2f2fee97e38548454eb1c163f8bb40d5b758ece01d32501d3f2d877d
 RUN wget -nv -O /tmp/jetty.tar.gz \
     "https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-home/${JETTY_VERSION}/jetty-home-${JETTY_VERSION}.tar.gz" \
     && echo "${JETTY_SHA512}  /tmp/jetty.tar.gz" | sha512sum -c - \
