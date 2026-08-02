@@ -107,7 +107,7 @@ function resetSecret() {
 </script>
 
 <template>
-  <div>
+  <div class="oidc-settings">
     <h2>{{ t('ui.oidc.title') }}</h2>
     <p class="section-hint">{{ t('ui.oidc.description') }}</p>
 

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, login, confirmDanger, deleteUserApi } from './helpers'
+import { unique, login, confirmDanger, deleteUserApi, ROUTE_ROOT, gotoRaw, gotoRouteReady } from './helpers'
 // unique, login, confirmDanger are used by both the non-admin guard test and the
 // behavior-B disabled-user tests below.
 
@@ -14,7 +14,7 @@ test('non-admin is redirected away from admin routes but can reach account setti
   const email = `${username}@example.com`
 
   // --- As admin: create the non-admin user. ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)
@@ -32,17 +32,19 @@ test('non-admin is redirected away from admin routes but can reach account setti
   // A non-admin route is reachable. Assert on the account page's own H2 (main
   // content, present at both viewports) rather than the brand link, which is
   // hidden inside the closed Drawer on mobile.
-  await userPage.goto('/#/settings/account')
+  await gotoRouteReady(userPage, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   await expect(userPage).toHaveURL(/#\/settings\/account/)
   await expect(userPage.getByRole('heading', { name: 'User account' })).toBeVisible()
 
   // Admin-only /settings/ldap: the guard bounces to the documents list.
-  await userPage.goto('/#/settings/ldap')
+  // raw: the nav guard BOUNCES this request — the landing route is deliberately not the requested one.
+  await gotoRaw(userPage, '/#/settings/ldap')
   await expect(userPage).toHaveURL(/#\/document$/)
   await expect(userPage.locator('#ldap-host')).toHaveCount(0)
 
   // A second admin-only route (/settings/users) is likewise blocked.
-  await userPage.goto('/#/settings/users')
+  // raw: the nav guard BOUNCES this request — the landing route is deliberately not the requested one.
+  await gotoRaw(userPage, '/#/settings/users')
   await expect(userPage).toHaveURL(/#\/document$/)
 
   await userContext.close()
@@ -65,7 +67,7 @@ test('an admin can disable a user (login denied) and re-enable them (login resto
   const email = `${username}@example.com`
 
   // --- As admin: create the user. ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const addDialog = page.getByRole('dialog')
   await addDialog.locator('#add-user-name').fill(username)
@@ -98,7 +100,7 @@ test('an admin can disable a user (login denied) and re-enable them (login resto
   {
     const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const p = await ctx.newPage()
-    await p.goto('/#/login')
+    await gotoRouteReady(p, '/#/login', ROUTE_ROOT.login)
     await p.getByLabel('Username').fill(username)
     await p.locator('#login-pass').fill(password)
     await p.getByRole('button', { name: 'Sign in' }).click()
@@ -137,7 +139,7 @@ test('the disable/enable toggle is hidden for the guest and admin rows', async (
   const password = 'TogglePass123'
   const email = `${username}@example.com`
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const addDialog = page.getByRole('dialog')
   await addDialog.locator('#add-user-name').fill(username)

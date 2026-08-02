@@ -2,7 +2,15 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from '.
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, login, openFileList, deleteDocApi, deleteUserApi } from './helpers'
+import {
+  unique,
+  login,
+  openFileList,
+  deleteDocApi,
+  deleteUserApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // #58 — the enriched file panel: a grid⇄list toggle (grid default, per-user), and in
 // list mode a DataTable with optional columns, inline rename (double-click + F2 +
@@ -308,7 +316,7 @@ async function dragHandleWithRetry(
 test('grid is the default file view; the toggle switches to list and persists per user', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('panel'), [txtFile('alpha.txt'), txtFile('beta.txt')])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   // Grid is the default view.
   await expect(page.locator('.file-preview-grid')).toBeVisible()
   await expect(page.locator('.file-data-table')).toHaveCount(0)
@@ -325,7 +333,7 @@ test('grid is the default file view; the toggle switches to list and persists pe
 test('list shows Name+Created+Size by default with Uploader optional', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('cols'), [txtFile('alpha.txt')])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   const heads = page.locator('.file-data-table thead')
@@ -356,7 +364,7 @@ test('list shows Name+Created+Size by default with Uploader optional', async ({ 
 test('rename a file inline via double-click, F2 and the pencil', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('rename'), [txtFile('original.txt')])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   // 1. Double-click the name cell → inline editor → Enter commits.
@@ -391,7 +399,7 @@ test('drag-handle reorder persists the file order and survives a reload', async 
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
   await armToastRecorder(page)
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   const UPLOADED = ['a-first.txt', 'b-second.txt', 'c-third.txt']
@@ -451,7 +459,7 @@ test('grid drag-handle reorder persists the file order and matches the list view
   // may have left "list" there — pin it so this test measures the grid.
   await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
   await armToastRecorder(page)
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.file-preview-grid')).toBeVisible()
 
   const UPLOADED = ['a-first.txt', 'b-second.txt', 'c-third.txt']
@@ -516,7 +524,7 @@ test('grid sort reorders the tiles transiently and restores the manual order', a
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
   await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
   await armToastRecorder(page)
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.file-preview-grid')).toBeVisible()
 
   const names = page.locator('.file-preview-grid .file-preview-label')
@@ -557,7 +565,7 @@ test('the client-side quick filter narrows the list by name and mimetype', async
     { name: 'beta.png', mimeType: 'image/png', path: png },
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   const rows = page.locator('.file-data-table tbody tr')
@@ -578,7 +586,7 @@ test('the client-side quick filter narrows the list by name and mimetype', async
 test('a read-only viewer sees files but no rename/delete/upload affordances', async ({ page, browser, cleanup }) => {
   const username = unique('rouser').replace(/[^a-z0-9]/gi, '').toLowerCase()
   // Create a second user.
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog', { name: 'Add user' })
   await dialog.locator('#add-user-name').fill(username)
@@ -594,7 +602,7 @@ test('a read-only viewer sees files but no rename/delete/upload affordances', as
   // Admin seeds and therefore OWNS the document; the viewer only ever gets a READ ACL, so
   // the admin context is the one that can permanently delete it.
   cleanup.defer('purge the shared document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/permissions`)
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   const addForm = page.locator('.add-acl-form', { hasText: 'Add permission' })
   await addForm.locator('input').first().fill(username)
   await page.getByRole('option', { name: new RegExp(username) }).click()
@@ -605,7 +613,7 @@ test('a read-only viewer sees files but no rename/delete/upload affordances', as
   const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const viewer = await ctx.newPage()
   await login(viewer, username, 'Password1e2e')
-  await viewer.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(viewer, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
 
   // The file is visible (grid default) but there is NO upload dropzone / camera.
   await expect(viewer.locator('.file-preview-grid')).toBeVisible()
@@ -635,7 +643,7 @@ test('opening a file previews it in-app; only Download targets the original (#14
     zipFile('archive.zip'),
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.file-preview-grid')).toBeVisible()
 
   // Images load through the preview queue (blob URLs), not direct API links.
@@ -724,7 +732,7 @@ test('opening a file previews it in-app; only Download targets the original (#14
 test('the single Download is reachable AND activatable by keyboard alone (#181)', async ({ page, cleanup }) => {
   const id = await seedDoc(page.request, unique('kbd-dl'), [zipFile('archive.zip')])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   // Pinned by class: the tile's action menu offers a preview control with the same
   // accessible name since #178, so role+name alone is ambiguous here.
   await page.locator('.generic-open', { hasText: 'archive.zip' }).click()

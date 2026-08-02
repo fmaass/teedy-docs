@@ -1,7 +1,15 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, uniqueTag } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  ROUTE_ROOT,
+  expectRouteReady,
+  gotoDocumentList,
+  gotoRaw,
+  gotoRouteReady,
+} from './helpers'
 
 // Documentation screenshot capture (D3). Runs against the REAL e2e Docker
 // container (scripts/e2e-run.sh boots the prod WAR on port 8080, embedded H2,
@@ -126,7 +134,7 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request,
   await apiCreateDocument(request, { title: 'Onboarding handbook', tagIds: [tReport] })
 
   // The documents list: rows carry tag chips; the left panel shows the filter tree.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // These are readiness barriers before the shot, not uniqueness checks. This spec
   // seeds fixed, realistic titles by design, and CI reruns the whole serial file on a
   // retry — which re-seeds the same titles on top of the first attempt's, so the list
@@ -148,7 +156,7 @@ test('doc list, tag facets, and the first-login screen', async ({ page, request,
   cleanup.defer('close the anonymous first-login screenshot context', () => context.close())
   const anon = await context.newPage()
   await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
-  await anon.goto('/#/login?local=1')
+  await gotoRouteReady(anon, '/#/login?local=1', ROUTE_ROOT.login)
   await expect(anon.getByLabel('Username')).toBeVisible()
   await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await anon.waitForLoadState('networkidle')
@@ -189,7 +197,7 @@ test('document view: relations + PDF rotation controls', async ({ page, request 
 
   // Content tab of the invoice: description, the PDF preview with rotate controls,
   // and the related-documents section.
-  await page.goto(`/#/document/view/${mainId}/content`)
+  await gotoRouteReady(page, `/#/document/view/${mainId}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'ACME invoice 2026-0042' })).toBeVisible()
 
   // Wait for the PDF canvas to actually paint (pdf.js renders into a <canvas>).
@@ -219,7 +227,7 @@ test('document list bulk-select bar and the trash view', async ({ page, request 
   const idB = await apiCreateDocument(request, { title: 'Bulk demo — payslip April' })
   await apiCreateDocument(request, { title: 'Bulk demo — payslip May' })
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // Readiness barrier, not a uniqueness check: a serial-file retry / --repeat-each run
   // re-seeds these fixed titles on the same H2, so the list legitimately holds several
   // matching rows. Match the first so a duplicate can't trip strict mode (cf. :135).
@@ -239,7 +247,7 @@ test('document list bulk-select bar and the trash view', async ({ page, request 
   // restore / permanent-delete actions.
   const delRes = await request.delete(`/api/document/${idA}`)
   expect(delRes.ok()).toBeTruthy()
-  await page.goto('/#/document/trash')
+  await gotoRouteReady(page, '/#/document/trash', ROUTE_ROOT.documentTrash)
   await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible()
   // A retry / --repeat-each re-seed soft-deletes another "…payslip March", so trash can
   // hold several matching rows — scope to the first row + its status tag to avoid strict mode.
@@ -258,7 +266,7 @@ test('saved-filters dropdown in the search bar', async ({ page, request }) => {
   const tagId = await apiCreateTag(request, tag)
   await apiCreateDocument(request, { title: 'Saved-filter demo doc', tagIds: [tagId] })
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // Readiness barrier: a retry / --repeat-each re-seed adds more "Saved-filter demo doc"
   // rows on the same H2, so match the first to stay clear of strict mode (cf. :135).
   await expect(page.getByText('Saved-filter demo doc', { exact: true }).first()).toBeVisible()
@@ -310,7 +318,7 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
   expect(addAdmin.ok()).toBeTruthy()
 
   // Build the model in the real editor.
-  await page.goto('/#/settings/workflow')
+  await gotoRouteReady(page, '/#/settings/workflow', ROUTE_ROOT.settingsWorkflow)
   await expect(page.getByRole('heading', { name: 'Workflows' })).toBeVisible()
   await page.getByRole('button', { name: 'New workflow' }).click()
   const dialog = page.getByRole('dialog', { name: 'New workflow' })
@@ -337,8 +345,9 @@ test('workflow editor, a running route, and the act buttons', async ({ page, req
 
   // Start the route on a document and capture the mid-flight pending step.
   const docId = await apiCreateDocument(request, { title: 'ACME invoice 2026-0042 (approval)' })
-  await page.goto(`/#/document/view/${docId}/workflow`)
+  await gotoRaw(page, `/#/document/view/${docId}/workflow`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${docId}/workflow`, ROUTE_ROOT.documentWorkflow)
   await expect(page.getByRole('heading', { name: 'Start a workflow' })).toBeVisible()
   await page.locator('.wf-start-select').click()
   // A retry re-seed can leave several models named "Invoice Approval"; any is a valid
@@ -398,7 +407,7 @@ test('settings vocabulary with doc-type entries', async ({ page, request }) => {
     await request.put('/api/vocabulary', { form: { name: ns, value: entries[i], order: String(i) } }).catch(() => {})
   }
 
-  await page.goto('/#/settings/vocabulary')
+  await gotoRouteReady(page, '/#/settings/vocabulary', ROUTE_ROOT.settingsVocabulary)
   await expect(page.getByRole('heading', { name: 'Vocabularies' })).toBeVisible()
   // Select the seeded namespace.
   await page.locator('#vocabulary-name').click()
@@ -424,7 +433,7 @@ test('settings tag rules with a content-regex rule', async ({ page, request }) =
   })
   expect(ruleRes.ok(), 'create tag-match rule').toBeTruthy()
 
-  await page.goto('/#/settings/tag-rules')
+  await gotoRouteReady(page, '/#/settings/tag-rules', ROUTE_ROOT.settingsTagRules)
   await expect(page.getByRole('heading', { name: /Auto-tagging rules/i })).toBeVisible()
   // A retry / --repeat-each re-seed adds another rule with the same "invoice" pattern, so
   // several rows match — assert the first to stay clear of strict mode.
@@ -437,7 +446,7 @@ test('settings tag rules with a content-regex rule', async ({ page, request }) =
 // 8. Settings → Webhooks: a webhook with its event dropdown.
 // ============================================================================
 test('settings webhooks with the event dropdown open', async ({ page }) => {
-  await page.goto('/#/settings/webhooks')
+  await gotoRouteReady(page, '/#/settings/webhooks', ROUTE_ROOT.settingsWebhooks)
   await expect(page.getByRole('heading', { name: /Webhooks/i })).toBeVisible()
 
   await page.getByRole('button', { name: 'Add webhook' }).click()
@@ -455,7 +464,7 @@ test('settings webhooks with the event dropdown open', async ({ page }) => {
 // 9. Settings → Inbox: enable toggle + IMAP connection fields.
 // ============================================================================
 test('settings inbox with the connection fields revealed', async ({ page }) => {
-  await page.goto('/#/settings/inbox')
+  await gotoRouteReady(page, '/#/settings/inbox', ROUTE_ROOT.settingsInbox)
   await expect(page.getByRole('heading', { name: /Inbox/i })).toBeVisible()
 
   // Turn scanning on to reveal the IMAP fields, then fill a plausible host so the
@@ -474,7 +483,7 @@ test('settings inbox with the connection fields revealed', async ({ page }) => {
 // ============================================================================
 test('OIDC settings, SSO login screen, footer links, and the users list', async ({ page, request, cleanup }) => {
   // --- OIDC settings shot: enable + fill fields, masked secret ---
-  await page.goto('/#/settings/oidc')
+  await gotoRouteReady(page, '/#/settings/oidc', ROUTE_ROOT.settingsOidc)
   await expect(page.getByRole('heading', { name: 'OIDC authentication' })).toBeVisible()
   await page.locator('#oidc-enabled').click()
   await expect(page.locator('#oidc-issuer')).toBeVisible()
@@ -510,7 +519,7 @@ test('OIDC settings, SSO login screen, footer links, and the users list', async 
     form: { username: userName, password: 'Password123', email: `${userName}@example.com`, storage_quota: '1000000000' },
   })
   expect(userRes.ok(), 'create demo user').toBeTruthy()
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
   await expect(page.getByRole('row', { name: /admin/ })).toBeVisible()
   await expect(page.getByRole('row', { name: new RegExp(userName) })).toBeVisible()
@@ -535,7 +544,7 @@ test('OIDC settings, SSO login screen, footer links, and the users list', async 
   await anon.addStyleTag({ content: `*, *::before, *::after { transition: none !important; animation: none !important; }` }).catch(() => {})
   // ?local=1 suppresses the auto-redirect so BOTH the local form and the SSO
   // button render together (matches the docs description).
-  await anon.goto('/#/login?local=1')
+  await gotoRouteReady(anon, '/#/login?local=1', ROUTE_ROOT.login)
   await expect(anon.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await expect(anon.getByRole('button', { name: /SSO/i })).toBeVisible()
   await expect(anon.getByRole('link', { name: 'Imprint' })).toBeVisible()
@@ -546,7 +555,7 @@ test('OIDC settings, SSO login screen, footer links, and the users list', async 
   // Cleanup the global config so a re-run / other specs see defaults.
   await request.post('/api/app/footer_links', { form: { links: JSON.stringify([]) } }).catch(() => {})
   // Disable OIDC again (save a disabled config).
-  await page.goto('/#/settings/oidc')
+  await gotoRouteReady(page, '/#/settings/oidc', ROUTE_ROOT.settingsOidc)
   await expect(page.getByRole('heading', { name: 'OIDC authentication' })).toBeVisible()
   const enabledToggle = page.locator('#oidc-enabled')
   // If it's on, click to turn off.
@@ -569,7 +578,7 @@ test('cookbook: an invoice document with its auto-applied tag', async ({ page, r
   })
   await apiAttachFile(request, id, invoicePdf, 'invoice-2026-0042.pdf')
 
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'ACME invoice 2026-0042' })).toBeVisible()
   // The auto-applied tag chip in the header.
   await expect(page.locator('.doc-header-tags').getByRole('button', { name: /invoice-auto/ })).toBeVisible()
@@ -581,7 +590,8 @@ test('cookbook: an invoice document with its auto-applied tag', async ({ page, r
 // 12. /apidoc Swagger UI page.
 // ============================================================================
 test('apidoc swagger UI', async ({ page }) => {
-  await page.goto('/apidoc/')
+  // raw: /apidoc/ is a real static path (vendored Swagger UI), not an SPA hash route.
+  await gotoRaw(page, '/apidoc/')
   await expect(page.getByRole('heading', { name: 'Teedy API' })).toBeVisible()
   await page.waitForLoadState('networkidle')
   await shootViewport(page, 'apidoc')

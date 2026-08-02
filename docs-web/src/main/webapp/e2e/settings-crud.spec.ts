@@ -1,12 +1,12 @@
 import { test, expect } from './fixtures'
-import { unique, uniqueTag, confirmDanger } from './helpers'
+import { unique, uniqueTag, confirmDanger, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Admin CRUD smoke for the settings screens: create one of each entity, see it
 // listed, delete it. Each test is self-contained and cleans up after itself.
 
 test('groups: create, list, delete', async ({ page }) => {
   const name = unique('grp').replace(/[^a-z0-9]/gi, '').toLowerCase()
-  await page.goto('/#/settings/groups')
+  await gotoRouteReady(page, '/#/settings/groups', ROUTE_ROOT.settingsGroups)
   await page.getByRole('button', { name: 'Add group' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-group-name').fill(name)
@@ -22,7 +22,7 @@ test('groups: create, list, delete', async ({ page }) => {
 
 test('custom metadata: create, list, delete', async ({ page }) => {
   const name = unique('meta')
-  await page.goto('/#/settings/metadata')
+  await gotoRouteReady(page, '/#/settings/metadata', ROUTE_ROOT.settingsMetadata)
   await page.getByRole('button', { name: 'Add field' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#metadata-name').fill(name)
@@ -38,7 +38,7 @@ test('custom metadata: create, list, delete', async ({ page }) => {
 
 test('webhooks: create, list, delete', async ({ page }) => {
   const url = `https://example.com/hook-${Date.now()}`
-  await page.goto('/#/settings/webhooks')
+  await gotoRouteReady(page, '/#/settings/webhooks', ROUTE_ROOT.settingsWebhooks)
   await page.getByRole('button', { name: 'Add webhook' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#webhook-url').fill(url)
@@ -54,7 +54,7 @@ test('webhooks: create, list, delete', async ({ page }) => {
 
 test('api keys: create, list, delete', async ({ page }) => {
   const name = unique('key')
-  await page.goto('/#/settings/api-keys')
+  await gotoRouteReady(page, '/#/settings/api-keys', ROUTE_ROOT.settingsApiKeys)
   await page.getByRole('button', { name: 'Create key' }).click()
   const createDialog = page.getByRole('dialog', { name: 'Create API key' })
   await createDialog.locator('#key-name').fill(name)
@@ -75,13 +75,13 @@ test('api keys: create, list, delete', async ({ page }) => {
 test('tag rules: create, list, delete', async ({ page }) => {
   // A rule needs an existing tag; seed one, create the rule against it, clean up.
   const tagName = uniqueTag('rule-tag')
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Tag created')).toBeVisible()
 
   const pattern = `invoice-${Date.now()}`
-  await page.goto('/#/settings/tag-rules')
+  await gotoRouteReady(page, '/#/settings/tag-rules', ROUTE_ROOT.settingsTagRules)
   await page.getByRole('button', { name: 'Add rule' }).click()
   const dialog = page.getByRole('dialog', { name: 'New rule' })
   // Tag Select.
@@ -98,7 +98,7 @@ test('tag rules: create, list, delete', async ({ page }) => {
   await expect(page.getByRole('row', { name: new RegExp(pattern) })).toHaveCount(0)
 
   // Cleanup the seeded tag.
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.locator('.tag-tree').getByText(tagName, { exact: true }).click()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)

@@ -9,6 +9,8 @@ import {
   isMobileViewport,
   expectRouteReady,
   ROUTE_ROOT,
+  gotoRaw,
+  gotoRouteReady,
 } from './helpers'
 
 const fileFixture = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample.txt')
@@ -36,7 +38,7 @@ test("a document's activity tab shows audit entries scoped to that document", as
   const decoy = await createDocument(page, decoyTitle)
   const decoyId = decoy.id
   cleanup.defer('purge the decoy document', () => deleteDocApi(page.request, decoyId))
-  await page.goto(`/#/document/edit/${decoyId}`)
+  await gotoRouteReady(page, `/#/document/edit/${decoyId}`, ROUTE_ROOT.documentEdit)
   await expect(page.locator('#edit-title')).toBeVisible()
   await fillDescription(page, `decoy-edit-${Date.now()}`)
   await page.getByRole('button', { name: 'Save' }).click()
@@ -48,14 +50,14 @@ test("a document's activity tab shows audit entries scoped to that document", as
   cleanup.defer('purge the target document', () => deleteDocApi(page.request, targetId))
 
   // Baseline: the create already produced at least one row for the target.
-  await page.goto(`/#/document/view/${targetId}/activity`)
+  await gotoRouteReady(page, `/#/document/view/${targetId}/activity`, ROUTE_ROOT.documentActivity)
   await expect(page.locator('.p-datatable')).toBeVisible()
   await expect(page.getByText('No activity recorded')).toHaveCount(0)
   await expect(rowsFor().first()).toBeVisible()
   const baselineCount = await rowsFor().count()
 
   // Edit the target — this writes another audit row scoped to the target.
-  await page.goto(`/#/document/edit/${targetId}`)
+  await gotoRouteReady(page, `/#/document/edit/${targetId}`, ROUTE_ROOT.documentEdit)
   await expect(page.locator('#edit-title')).toBeVisible()
   await fillDescription(page, `target-edit-${Date.now()}`)
   await page.getByRole('button', { name: 'Save' }).click()
@@ -64,8 +66,9 @@ test("a document's activity tab shows audit entries scoped to that document", as
   // Back on the Activity tab (reload, not SPA-navigate, so the cached auditlog query
   // refetches): an extra row is present, rows are attributed to admin, the TARGET's
   // title IS shown, and the DECOY's title is ABSENT — the scoping guarantee.
-  await page.goto(`/#/document/view/${targetId}/activity`)
+  await gotoRaw(page, `/#/document/view/${targetId}/activity`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${targetId}/activity`, ROUTE_ROOT.documentActivity)
   const table = page.locator('.p-datatable')
   await expect(rowsFor()).toHaveCount(baselineCount + 1)
   await expect(table.getByText('admin', { exact: true }).first()).toBeVisible()
@@ -88,13 +91,14 @@ const rowsSelector = '.p-datatable tbody tr'
 
 async function seedActivityDoc(page: import('@playwright/test').Page, title: string): Promise<string> {
   const doc = await createDocument(page, title)
-  await page.goto(`/#/document/edit/${doc.id}`)
+  await gotoRouteReady(page, `/#/document/edit/${doc.id}`, ROUTE_ROOT.documentEdit)
   await expect(page.locator('#edit-title')).toBeVisible()
   await fillDescription(page, `edit-${Date.now()}`)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(new RegExp(`#/document/view/${doc.id}`))
-  await page.goto(`/#/document/view/${doc.id}/activity`)
+  await gotoRaw(page, `/#/document/view/${doc.id}/activity`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${doc.id}/activity`, ROUTE_ROOT.documentActivity)
   await expect(page.locator('.p-datatable')).toBeVisible()
   await expect(page.locator(rowsSelector).first()).toBeVisible()
   return doc.id
@@ -220,7 +224,7 @@ test('#113 empty activity response renders the empty state', async ({ page, clea
   // belongs after it — a barrier asserted on the goto is discarded with the document the
   // reload replaces (#203).
   const activityUrl = `/#/document/view/${docId}/activity`
-  await page.goto(activityUrl)
+  await gotoRaw(page, activityUrl)
   await page.reload()
   await expectRouteReady(page, activityUrl, ROUTE_ROOT.documentActivity)
   await expect(page.getByText('No activity recorded')).toBeVisible()
@@ -237,15 +241,16 @@ test('#195 a File activity row shows the bare file name, not the id-prefixed mes
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, docId))
 
   // Upload a file — this writes the File audit row whose message carries the id prefix.
-  await page.goto(`/#/document/view/${docId}/content`)
+  await gotoRouteReady(page, `/#/document/view/${docId}/content`, ROUTE_ROOT.documentContent)
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(fileFixture)
   // WAIT for the upload to land before navigating away: the audit row is written by the upload
   // request, so leaving the tab first races the very row this test asserts on (it passed only by
   // timing luck until the desktop project caught it).
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
 
-  await page.goto(`/#/document/view/${docId}/activity`)
+  await gotoRaw(page, `/#/document/view/${docId}/activity`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${docId}/activity`, ROUTE_ROOT.documentActivity)
   await expect(page.locator('.p-datatable')).toBeVisible()
 
   // The file name is shown on its own...

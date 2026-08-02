@@ -1,4 +1,5 @@
 import { test, expect, type ConsoleMessage, type Request } from './fixtures'
+import { gotoRaw } from './helpers'
 
 // /apidoc/ serves the vendored Swagger UI (swagger-ui-dist) + the build-time
 // static OpenAPI spec (issue #15). It is a REAL path (not the SPA hash router),
@@ -31,7 +32,8 @@ test.describe('/apidoc Swagger UI', () => {
       if (!url.startsWith(ownOrigin)) externalRequests.push(url)
     })
 
-    await page.goto('/apidoc/')
+    // raw: /apidoc/ is a real static path (vendored Swagger UI), not an SPA hash route.
+    await gotoRaw(page, '/apidoc/')
 
     // Swagger UI has rendered the spec: the API title from openapi.json info.title.
     await expect(page.getByRole('heading', { name: 'Teedy API' })).toBeVisible()
@@ -56,7 +58,8 @@ test.describe('/apidoc Swagger UI', () => {
   test('an operation expands and "Try it out" against GET /app hits the live /api base', async ({
     page,
   }) => {
-    await page.goto('/apidoc/')
+    // raw: /apidoc/ is a real static path (vendored Swagger UI), not an SPA hash route.
+    await gotoRaw(page, '/apidoc/')
     await expect(page.getByRole('heading', { name: 'Teedy API' })).toBeVisible()
 
     // Expand the "app" tag group, then the GET /app operation.

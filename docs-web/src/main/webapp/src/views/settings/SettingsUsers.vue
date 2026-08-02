@@ -283,7 +283,7 @@ function canToggleDisabled(data: UserListItem): boolean {
 </script>
 
 <template>
-  <div>
+  <div class="users-settings">
     <div class="users-header">
       <h2>{{ t('ui.users.title') }}</h2>
       <Button :label="t('ui.users.add_user')" icon="pi pi-plus" size="small" @click="openAddDialog" />

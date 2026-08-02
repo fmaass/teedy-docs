@@ -1359,7 +1359,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="doc">
+  <div v-if="doc" class="doc-content-view">
     <!-- Description -->
     <div v-if="doc.description" class="doc-description" v-html="sanitizedDescription" />
 

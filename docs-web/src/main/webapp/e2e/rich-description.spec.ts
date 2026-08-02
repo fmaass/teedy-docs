@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #38: rich (sanitized) HTML descriptions with server-side sanitization.
 //
@@ -27,7 +27,7 @@ async function apiPutDocument(
 test('authored rich formatting survives a refresh (#38)', async ({ page, cleanup }) => {
   const title = unique('rich-desc')
 
-  await page.goto('/#/document/add')
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
   await page.locator('#edit-title').fill(title)
 
@@ -93,7 +93,7 @@ test('request-level hostile payload is stored and rendered inert (#38)', async (
 
   // Rendered detail view: no script executed (the sentinel global stays unset) and no
   // live event-handler attribute is present in the rendered description markup.
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   const desc = page.locator('.doc-description')
   await expect(desc).toBeVisible()
   await expect(desc).toContainText('safeword')

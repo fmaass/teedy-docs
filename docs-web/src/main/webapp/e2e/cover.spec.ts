@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi } from './helpers'
+import { unique, openFileList, deleteDocApi, ROUTE_ROOT, gotoDocumentList, gotoRouteReady } from './helpers'
 
 // #174 — explicit per-document cover. Picking a non-first file as the cover overrides the default
 // first-file-by-order thumbnail the list/gallery render; clearing restores it.
@@ -64,7 +64,7 @@ test('set a non-first file as cover: the badge appears and the gallery/table ren
   expect(await coverFileId(page.request, id)).toBeNull()
   await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   const secondRow = page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
@@ -77,18 +77,18 @@ test('set a non-first file as cover: the badge appears and the gallery/table ren
   await expect.poll(() => coverFileId(page.request, id)).toBe(ids['second.png'])
   await expect.poll(() => servedFileId(page.request, id)).toBe(ids['second.png'])
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(page.locator(thumbOf(ids['second.png'])).first()).toBeVisible()
   await expect(page.locator(thumbOf(ids['first.png']))).toHaveCount(0)
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
   await page.locator('.file-data-table tbody tr', { hasText: 'second.png' })
     .getByRole('button', { name: 'Remove as cover' }).click()
   await expect.poll(() => coverFileId(page.request, id)).toBeNull()
   await expect.poll(() => servedFileId(page.request, id)).toBe(ids['first.png'])
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(page.locator(thumbOf(ids['first.png'])).first()).toBeVisible()
   await expect(page.locator(thumbOf(ids['second.png']))).toHaveCount(0)
 })

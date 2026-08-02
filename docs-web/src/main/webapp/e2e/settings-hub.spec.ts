@@ -1,5 +1,14 @@
 import { test, expect } from './fixtures'
-import { unique, login, deleteUserApi, openNav, closeNav } from './helpers'
+import {
+  unique,
+  login,
+  deleteUserApi,
+  openNav,
+  closeNav,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 // #64: /settings is a landing HUB (a grouped, annotated list), not the old redirect
 // to the Account form. These specs assert, against the real app:
@@ -10,7 +19,7 @@ import { unique, login, deleteUserApi, openNav, closeNav } from './helpers'
 // The default project is logged in as admin, so all three admin groups are visible.
 
 test('the /settings landing renders the hub, not the account form', async ({ page }) => {
-  await page.goto('/#/settings')
+  await gotoRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
   // Stays on /settings (no redirect to /settings/account).
   await expect(page).toHaveURL(/#\/settings$/)
 
@@ -32,7 +41,7 @@ test('the /settings landing renders the hub, not the account form', async ({ pag
 })
 
 test('a hub entry navigates to its leaf settings route', async ({ page }) => {
-  await page.goto('/#/settings')
+  await gotoRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
   // Click the Users entry (an admin group leaf) — a real router-link.
   await page.getByRole('link', { name: /Users/ }).first().click()
   await expect(page).toHaveURL(/#\/settings\/users$/)
@@ -47,7 +56,7 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
   const password = 'HubPass123'
   const email = `${username}@example.com`
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)
@@ -61,7 +70,7 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
   const userPage = await ctx.newPage()
   await login(userPage, username, password)
 
-  await userPage.goto('/#/settings')
+  await gotoRouteReady(userPage, '/#/settings', ROUTE_ROOT.settingsHub)
   await expect(userPage).toHaveURL(/#\/settings$/)
   // The hub renders for the non-admin: its H1 + the Personal section.
   await expect(userPage.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
@@ -79,7 +88,7 @@ test('a non-admin sees the hub with only the Personal section', async ({ page, b
 // the settings/tag (admin) context — not in the documents view. Works on both the
 // desktop aside and the mobile nav Drawer.
 test('the app version sits above the sidebar footer buttons on settings, absent in documents (#62)', async ({ page }) => {
-  await page.goto('/#/settings')
+  await gotoRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
   const nav = await openNav(page)
 
   const version = nav.locator('.panel-footer-version')
@@ -94,7 +103,7 @@ test('the app version sits above the sidebar footer buttons on settings, absent 
   await closeNav(page)
 
   // Gated to the admin (settings/tag) context — absent in the documents sidebar.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const docNav = await openNav(page)
   await expect(docNav.locator('.panel-footer-version')).toHaveCount(0)
   await closeNav(page)

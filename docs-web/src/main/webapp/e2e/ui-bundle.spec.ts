@@ -1,5 +1,15 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, uniqueTag, openNav, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  openNav,
+  isMobileViewport,
+  deleteDocApi,
+  deleteTagApi,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 // v3.6.0 UI bundle e2e (#57 title/favicon, #61 settings regroup, #52 items-per-page,
 // #50 right-click tags in gallery). Each test drives the real running instance and
@@ -26,7 +36,7 @@ async function apiDocTagIds(request: APIRequestContext, docId: string): Promise<
 
 // #61 — the settings admin nav renders THREE labelled groups with the right membership.
 test('settings admin nav shows three labelled groups (#61)', async ({ page }) => {
-  await page.goto('/#/settings/account')
+  await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   // The admin nav renders in the desktop side panel OR the mobile Drawer — openNav
   // opens the Drawer on mobile so the same assertions hold at both viewports.
   const container = await openNav(page)
@@ -51,7 +61,7 @@ test('items-per-page selection persists across a reload (#52)', async ({ page, r
   const id = await apiCreateDocument(request, title)
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // Pick "50 / page" from the items-per-page Select.
   await page.locator('.per-page-select').click()
   await page.getByRole('option', { name: '50', exact: true }).click()
@@ -84,7 +94,7 @@ test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, 
   // The document starts with no tags.
   expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // Switch to gallery mode (the right-click surface #50 targets).
   await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
   const card = page.locator('article.doc-card').filter({
@@ -158,7 +168,7 @@ test('browser tab title reflects the configured theme name (#57)', async ({ page
   })
   expect(set.ok(), 'set theme name').toBeTruthy()
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // The top-level branding composable applies the theme name to document.title.
   await expect.poll(() => page.title(), { message: 'tab title tracks theme name' }).toBe(themeName)
 })

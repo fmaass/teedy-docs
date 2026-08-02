@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Locator, type APIRequestContext } from './fixtures'
-import { isMobileViewport } from './helpers'
+import { isMobileViewport, ROUTE_ROOT, expectRouteReady, gotoRaw } from './helpers'
 
 // REAL visual-regression + multi-language (EN/DE) gate over the key screens most
 // prone to layout / overflow, at BOTH viewports (the `desktop` and `mobile`
@@ -164,8 +164,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
     test.describe(`locale=${locale}`, () => {
       test(`document list [${locale}]`, async ({ page, request }) => {
         await ensureCorpus(request)
-        await page.goto('/#/document')
+        await gotoRaw(page, '/#/document')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
         // Wait on the shell anchor visible at BOTH viewports (Logout header button).
         // NB: index.logout is "Logout" in de.json too (untranslated), so it's stable
         // across locales — a good locale-agnostic settle anchor.
@@ -178,9 +179,10 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
       test(`gallery view [${locale}]`, async ({ page, request }) => {
         await ensureCorpus(request)
         // Seed the view-mode preference so the list boots straight into gallery.
-        await page.goto('/#/document')
+        await gotoRaw(page, '/#/document')
         await page.evaluate(() => localStorage.setItem('teedy_document_view_mode', 'gallery'))
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
         await expect(page.locator('.doc-gallery')).toBeVisible()
         await expect(
           page.locator('.doc-gallery').getByText('ACME invoice 2026-0042', { exact: true }).first(),
@@ -193,8 +195,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
 
       test(`document view / slide-over long title [${locale}]`, async ({ page, request }) => {
         await ensureCorpus(request)
-        await page.goto('/#/document')
+        await gotoRaw(page, '/#/document')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
         await page.getByRole('cell', { name: LONG_TITLE }).first().click()
         const slideOver = page.getByRole('dialog')
         await expect(slideOver).toBeVisible()
@@ -206,8 +209,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
       })
 
       test(`settings hub [${locale}]`, async ({ page }) => {
-        await page.goto('/#/settings')
+        await gotoRaw(page, '/#/settings')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
         await expect(
           page.getByRole('heading', { name: locale === 'de' ? 'Einstellungen' : 'Settings' }),
         ).toBeVisible()
@@ -216,8 +220,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
       })
 
       test(`settings config form [${locale}]`, async ({ page }) => {
-        await page.goto('/#/settings/config')
+        await gotoRaw(page, '/#/settings/config')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/settings/config', ROUTE_ROOT.settingsConfig)
         // The Config screen renders section headings (h2). Wait on the SMTP/email
         // section which is present regardless of env-managed state.
         await expect(page.locator('.settings-config, form, .p-card').first()).toBeVisible()
@@ -227,8 +232,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
       })
 
       test(`rich description editor with ordered+unordered lists [${locale}]`, async ({ page }) => {
-        await page.goto('/#/document/add')
+        await gotoRaw(page, '/#/document/add')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
         await expect(page.locator('#edit-desc .ql-editor')).toBeVisible()
         const editor = page.locator('#edit-desc .ql-editor')
         // Build an ordered list then an unordered list — the #70 area (double-marker
@@ -256,8 +262,9 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
       })
 
       test(`about dialog [${locale}]`, async ({ page }) => {
-        await page.goto('/#/document')
+        await gotoRaw(page, '/#/document')
         await setLocale(page, locale)
+        await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
         // The About header action renders at both viewports (see responsive.spec).
         await page.getByRole('button', { name: locale === 'de' ? 'Über' : 'About', exact: true }).click()
         const dialog = page.getByRole('dialog')
@@ -289,8 +296,9 @@ test.describe('German layout — no overflow (functional)', () => {
   }
 
   test('German header action buttons stay within the viewport width', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoRaw(page, '/#/document')
     await setLocale(page, 'de')
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
     const vw = page.viewportSize()!.width
     // The always-visible header actions in German (Aktivitätsverlauf=Activity history,
     // Papierkorb=Trash, Über=About; Logout stays "Logout" — untranslated). Each must render
@@ -307,8 +315,9 @@ test.describe('German layout — no overflow (functional)', () => {
   })
 
   test('German nav labels stay within their nav container', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoRaw(page, '/#/document')
     await setLocale(page, 'de')
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
     // The nav container is the desktop left panel or the mobile Drawer. The shared
     // openNav() helper hardcodes the English "Menu" hamburger label, but in German
     // the app (correctly) localizes it to "Menü" — so open the nav here in a
@@ -343,8 +352,9 @@ test.describe('German layout — no overflow (functional)', () => {
   })
 
   test('German settings-hub section cards do not overflow the page', async ({ page }) => {
-    await page.goto('/#/settings')
+    await gotoRaw(page, '/#/settings')
     await setLocale(page, 'de')
+    await expectRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
     await expect(page.getByRole('heading', { name: 'Einstellungen' })).toBeVisible()
     const vw = page.viewportSize()!.width
     // Each hub nav link card must sit within the viewport width (long German labels

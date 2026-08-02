@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, uniqueTag, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, deleteDocApi, deleteTagApi, gotoDocumentList } from './helpers'
 
 // #39: the gallery VIEW MODE. A pure render mode over the SAME paginated list — the
 // list⇄gallery toggle persists to localStorage, cards render the document thumbnail
@@ -147,7 +147,7 @@ test('@flaky gallery renders cards; real thumb vs placeholder is proven on fetch
   const otherFileId = await apiAttachFile(request, otherId, placeholderZip, 'archive.zip', 'application/zip')
 
   // Switch to gallery mode and assert both cards render (browse/open surface).
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
   await expect(card(page, imageTitle)).toBeVisible()
   await expect(card(page, otherTitle)).toBeVisible()
@@ -192,7 +192,7 @@ test('gallery mode persists across a reload and re-renders a tag-filtered set (#
   const outId = await apiCreateDocument(request, outTitle)
   cleanup.defer('purge the untagged document', () => deleteDocApi(request, outId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
   await expect(card(page, inTitle)).toBeVisible()
   await expect(card(page, outTitle)).toBeVisible()
@@ -247,7 +247,7 @@ test('a list multi-selection does NOT leave the bulk toolbar reachable in galler
 
   // Start in list mode (default) and select a row via its checkbox — the bulk
   // toolbar appears (it renders solely from the selection count).
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const rowA = page.getByRole('row', { name: new RegExp(titleA) })
   await expect(rowA).toBeVisible()
   await rowA.getByRole('checkbox').first().check()

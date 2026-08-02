@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures'
-import { login, deleteUser } from './helpers'
+import { login, deleteUser, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Regression gate for issue #86 (two buttons broken at the mobile viewport in German):
 //   1. Tag create button ("Erstellen") is squeezed by its flex row and clips its label.
@@ -88,7 +88,7 @@ test.describe('mobile button label overflow (#86)', () => {
   test('tag create button ("Erstellen") stays within its row and never clips its label', async ({
     page,
   }) => {
-    await page.goto('/#/tag')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     // Gate on the German heading so measurement waits for the `de` chunk to swap in.
     await expect(page.getByRole('heading', { name: 'Tag erstellen' })).toBeVisible()
 
@@ -156,7 +156,7 @@ test.describe('mobile button label overflow (#86)', () => {
   test('metadata "Feld hinzufügen" button fits without clipping or crowding the heading', async ({
     page,
   }) => {
-    await page.goto('/#/settings/metadata')
+    await gotoRouteReady(page, '/#/settings/metadata', ROUTE_ROOT.settingsMetadata)
     await expect(page.getByRole('heading', { name: 'Benutzerdefinierte Metadaten' })).toBeVisible()
 
     const button = page.locator('.section-header .p-button')
@@ -232,7 +232,7 @@ test('#177 a long username never overlaps the header Logout button', async ({ pa
   const username = `longname${Date.now()}`.slice(0, 30).toLowerCase()
   const password = 'LongNamePass123'
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)

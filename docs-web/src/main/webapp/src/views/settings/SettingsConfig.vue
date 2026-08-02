@@ -252,7 +252,7 @@ function handleReindex() {
 </script>
 
 <template>
-  <div>
+  <div class="config-settings">
     <h2>{{ t('ui.config.title') }}</h2>
 
     <Card class="mb-4" style="max-width: 520px"><template #content>

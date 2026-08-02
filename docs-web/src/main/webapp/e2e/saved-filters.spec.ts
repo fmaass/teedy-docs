@@ -1,5 +1,13 @@
 import { test, expect, type Page } from './fixtures'
-import { unique, uniqueTag, confirmDanger, toggleTagFilter, gotoRouteReady, ROUTE_ROOT } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  confirmDanger,
+  toggleTagFilter,
+  gotoRouteReady,
+  ROUTE_ROOT,
+  gotoDocumentList,
+} from './helpers'
 
 // #42: per-user saved filters. A user builds a filter (an included tag + free-text
 // search), SAVES it by name, CLEARS the filter, RE-APPLIES it from the search-bar
@@ -21,7 +29,7 @@ function rowFor(page: Page, title: string) {
 }
 
 async function createTag(page: Page, name: string) {
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(name)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Tag created')).toBeVisible()
@@ -41,7 +49,7 @@ async function createDocWithTag(page: Page, title: string, tag: string) {
 }
 
 async function createPlainDoc(page: Page, title: string) {
-  await page.goto('/#/document/add')
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(title)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
@@ -60,7 +68,7 @@ test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42, #8
   // The other document matches neither the tag nor the term.
   await createPlainDoc(page, otherTitle)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const matchRow = rowFor(page, matchTitle)
   const otherRow = rowFor(page, otherTitle)
   await expect(matchRow).toBeVisible()
@@ -188,7 +196,7 @@ test('sort toggle, name search, rename and confirmed overwrite (#193)', async ({
   const omega = `${prefix}-omega`
   const renamed = `${prefix}-renamed`
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await saveCurrentFilterAs(page, `${prefix}-one`, alpha)
   await saveCurrentFilterAs(page, `${prefix}-two`, omega)
 

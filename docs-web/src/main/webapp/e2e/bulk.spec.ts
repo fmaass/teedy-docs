@@ -1,6 +1,18 @@
 import { test, expect } from './fixtures'
 import type { Locator } from '@playwright/test'
-import { unique, uniqueTag, createDocument, confirmDanger, deleteDocApi, deleteTagByNameApi } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  createDocument,
+  confirmDanger,
+  deleteDocApi,
+  deleteTagByNameApi,
+  ROUTE_ROOT,
+  expectRouteReady,
+  gotoDocumentList,
+  gotoRaw,
+  gotoRouteReady,
+} from './helpers'
 
 // Bulk operations over a multi-selection: add a tag, set a language, delete.
 // Teedy has no bulk endpoint — each action fans out over single-doc endpoints and
@@ -51,7 +63,7 @@ async function clickApplyUnobstructed(popover: Locator): Promise<void> {
 test('bulk add tag, set language, then delete a multi-selection', async ({ page, cleanup }) => {
   // Seed a tag and two documents so we have a selection to act on.
   const tagName = uniqueTag('bulk-tag')
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Tag created')).toBeVisible()
@@ -68,7 +80,7 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
   const docB = await createDocument(page, titleB)
   cleanup.defer('purge the second seeded document', () => deleteDocApi(page.request, docB.id))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const rowA = page.getByRole('row', { name: new RegExp(titleA) })
   const rowB = page.getByRole('row', { name: new RegExp(titleB) })
   await expect(rowA).toBeVisible()
@@ -153,12 +165,13 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
   // reload forces a fresh GET /api/document/<id> — the SPA otherwise serves the
   // tag-less detail cached when the doc was created (the bulk op invalidates the
   // list + facet caches, not each document-detail query).
-  await page.goto(`/#/document/view/${docA.id}`)
+  await gotoRaw(page, `/#/document/view/${docA.id}/content`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${docA.id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.doc-header-tags').getByText(tagName, { exact: true })).toBeVisible()
 
   // Bulk set language.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await selectBoth()
   await bulkPick('Set language', 'Français')
   await expect(page.getByText('Bulk action complete').first()).toBeVisible()
@@ -167,12 +180,13 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
   // PROVE it: open the affected document (hard reload for a fresh detail read) and
   // assert its language badge now reads the French label (the header .lang-badge
   // renders languageLabel('fra')).
-  await page.goto(`/#/document/view/${docA.id}`)
+  await gotoRaw(page, `/#/document/view/${docA.id}/content`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${docA.id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.lang-badge')).toHaveText('Français')
 
   // Bulk delete.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await selectBoth()
   await bar.getByRole('button', { name: 'Delete' }).click()
   await confirmDanger(page)
@@ -182,7 +196,7 @@ test('bulk add tag, set language, then delete a multi-selection', async ({ page,
   await expect(page.getByText(titleB, { exact: true })).toHaveCount(0)
 
   // Cleanup the seeded tag.
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.locator('.tag-tree').getByText(tagName, { exact: true }).click()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
@@ -198,7 +212,7 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   // uniqueTag (not unique) fits TagResource's 36-character cap by construction, so the
   // prefix no longer has to be hand-shortened to stay under it.
   const tagName = uniqueTag('bkt')
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.locator('.tag-tree').getByText(tagName, { exact: true })).toBeVisible()
@@ -215,7 +229,7 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   const doc = await createDocument(page, title)
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, doc.id))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', { name: new RegExp(title) })
   await expect(row).toBeVisible()
   await row.getByRole('checkbox').check()
@@ -273,8 +287,9 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   await expect(bar).toBeHidden()
 
   // PROVE the mutation: exactly the picked tag landed on the document, and only it.
-  await page.goto(`/#/document/view/${doc.id}`)
+  await gotoRaw(page, `/#/document/view/${doc.id}/content`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${doc.id}/content`, ROUTE_ROOT.documentContent)
   const headerTags = page.locator('.doc-header-tags')
   await expect(headerTags.getByText(tagName, { exact: true })).toBeVisible()
   await expect(headerTags.getByText(otherTag, { exact: true })).toHaveCount(0)

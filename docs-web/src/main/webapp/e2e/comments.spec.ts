@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Add and delete a comment on a document (the Comments tab of the document view).
 
@@ -8,7 +8,7 @@ test('add and delete a comment on a document', async ({ page }) => {
   const { id } = await createDocument(page, title)
   const commentText = `e2e comment ${Date.now()}`
 
-  await page.goto(`/#/document/view/${id}/comments`)
+  await gotoRouteReady(page, `/#/document/view/${id}/comments`, ROUTE_ROOT.documentComments)
   // The comment textarea is labelled "Add a comment".
   const box = page.getByLabel('Add a comment')
   await expect(box).toBeVisible()
@@ -25,7 +25,7 @@ test('add and delete a comment on a document', async ({ page }) => {
   await expect(page.locator('.comment-item', { hasText: commentText })).toHaveCount(0)
 
   // Cleanup the document.
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 })

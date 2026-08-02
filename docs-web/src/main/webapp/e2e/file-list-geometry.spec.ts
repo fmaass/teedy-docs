@@ -2,7 +2,15 @@ import { test, expect, type APIRequestContext, type Page, type Locator } from '.
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, login, openFileList, deleteDocApi, deleteUserApi } from './helpers'
+import {
+  unique,
+  login,
+  openFileList,
+  deleteDocApi,
+  deleteUserApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // #196 + #170 + #192 — the file panel's ROW/CARD GEOMETRY, measured against the running app.
 //
@@ -243,7 +251,7 @@ test.describe('file list row geometry (#170)', () => {
       { name: LONG_TXT, mimeType: 'text/plain', path: txt },
     ])
     cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-    await page.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await openFileList(page)
 
     for (const width of WIDTHS) {
@@ -292,7 +300,7 @@ test.describe('file list row geometry (#170)', () => {
     cleanup,
   }) => {
     const username = unique('geomro').replace(/[^a-z0-9]/gi, '').toLowerCase()
-    await page.goto('/#/settings/users')
+    await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
     await page.getByRole('button', { name: 'Add user' }).click()
     const dialog = page.getByRole('dialog', { name: 'Add user' })
     await dialog.locator('#add-user-name').fill(username)
@@ -306,7 +314,7 @@ test.describe('file list row geometry (#170)', () => {
       { name: LONG_PDF, mimeType: 'application/pdf', path: pdf },
     ])
     cleanup.defer('purge the shared document', () => deleteDocApi(page.request, id))
-    await page.goto(`/#/document/view/${id}/permissions`)
+    await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
     const addForm = page.locator('.add-acl-form', { hasText: 'Add permission' })
     await addForm.locator('input').first().fill(username)
     await page.getByRole('option', { name: new RegExp(username) }).click()
@@ -320,7 +328,7 @@ test.describe('file list row geometry (#170)', () => {
     cleanup.defer('close the read-only viewer context', () => ctx.close())
     const viewer = await ctx.newPage()
     await login(viewer, username, 'Password1e2e')
-    await viewer.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(viewer, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await openFileList(viewer)
 
     for (const width of WIDTHS) {
@@ -368,7 +376,7 @@ test.describe('file list row geometry (#170)', () => {
     cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
     await page.setViewportSize({ width: UPLOADER_WIDTHS[0], height: 800 })
-    await page.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await openFileList(page)
 
     // Enable it the way a user does. The chooser itself is only offered above 640px, and
@@ -447,7 +455,7 @@ test.describe('file grid card geometry (#192)', () => {
     // Grid is the default view, but the mode is remembered per user in localStorage and an
     // earlier spec may have left "list" there — pin it so this test measures the grid.
     await page.addInitScript(() => localStorage.setItem('teedy_file_view_mode:admin', 'grid'))
-    await page.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await expect(page.locator('.file-preview-grid')).toBeVisible()
 
     for (const width of [360, 393] as const) {
@@ -614,7 +622,7 @@ test('a >100-file document renders every row and never grows an inner scroll con
   await page.addInitScript(() => {
     for (const key of ['teedy_file_view_mode:admin']) localStorage.setItem(key, 'list')
   })
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.locator('.file-data-table')).toBeVisible()
   await expect(page.locator('.file-data-table tbody tr').first()).toBeVisible()
 

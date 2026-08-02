@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #83 regression: LDAP connection settings must survive a disable and REPOPULATE the admin form
 // after the settings page is reloaded. The bug: GET /app/config_ldap returned only {enabled:false}
@@ -18,7 +19,7 @@ const EMAIL = 'ldap-default@persist.example.com'
 test.describe('LDAP settings persistence (#83)', () => {
   test('retained settings repopulate the form after disable + reload', async ({ page, cleanup }) => {
     // 1. Configure and enable LDAP through the UI.
-    await page.goto('/#/settings/ldap')
+    await gotoRouteReady(page, '/#/settings/ldap', ROUTE_ROOT.settingsLdap)
     await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
     await page.locator('#ldap-enabled').click()
 
@@ -27,7 +28,7 @@ test.describe('LDAP settings persistence (#83)', () => {
     // There is no config API teardown path here — the disable is the same admin UI the
     // test drives.
     cleanup.defer('leave LDAP disabled so this spec does not affect others', async () => {
-      await page.goto('/#/settings/ldap')
+      await gotoRouteReady(page, '/#/settings/ldap', ROUTE_ROOT.settingsLdap)
       const enabled = page.locator('#ldap-enabled')
       if (await enabled.isChecked().catch(() => false)) {
         await enabled.click()

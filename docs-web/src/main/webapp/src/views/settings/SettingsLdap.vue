@@ -85,7 +85,7 @@ function onSave() {
 </script>
 
 <template>
-  <div>
+  <div class="ldap-settings">
     <h2>{{ t('ui.ldap.title') }}</h2>
     <p class="section-hint">{{ t('ui.ldap.description') }}</p>
 

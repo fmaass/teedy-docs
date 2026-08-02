@@ -1,5 +1,5 @@
 import { test, expect, request as playwrightRequest } from './fixtures'
-import { unique } from './helpers'
+import { unique, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // API-key bearer authentication, end to end against the REAL server.
 //
@@ -32,7 +32,7 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
   const keyName = unique('e2e-apikey')
 
   // --- Mint the key through the real UI and capture the one-time token ---
-  await page.goto('/#/settings/api-keys')
+  await gotoRouteReady(page, '/#/settings/api-keys', ROUTE_ROOT.settingsApiKeys)
   await page.getByRole('button', { name: 'Create key' }).click()
   const createDialog = page.getByRole('dialog', { name: 'Create API key' })
   await createDialog.locator('#key-name').fill(keyName)
@@ -52,7 +52,7 @@ test('an API key token authenticates as its owner; garbage and revoked tokens ar
   // ones that merely swallowed a failing click are gone, so a broken teardown now
   // reports instead of passing silently.
   cleanup.defer('remove any leftover API key', async () => {
-    await page.goto('/#/settings/api-keys')
+    await gotoRouteReady(page, '/#/settings/api-keys', ROUTE_ROOT.settingsApiKeys)
     const leftover = page.getByRole('row', { name: new RegExp(keyName) })
     if (await leftover.count().catch(() => 0)) {
       await leftover.getByRole('button', { name: 'Delete API key' }).click()

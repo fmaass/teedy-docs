@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, login, deleteDocApi, deleteUserApi } from './helpers'
+import { unique, login, deleteDocApi, deleteUserApi, ROUTE_ROOT, gotoRaw, gotoRouteReady } from './helpers'
 
 // #40: admin-only global statistics dashboard. As admin, seed a document (so the totals and
 // the documents-created series are non-empty), open the dashboard, assert the totals row and a
@@ -31,7 +31,7 @@ test('admin opens the stats dashboard, sees totals and charts, and switches wind
   const initial = page.waitForResponse(
     (r) => r.url().includes('/api/app/stats') && r.url().includes('window=7') && r.status() === 200,
   )
-  await page.goto('/#/settings/stats')
+  await gotoRouteReady(page, '/#/settings/stats', ROUTE_ROOT.settingsStats)
   await initial
 
   // Totals row: the five labelled cards are present (scoped to the totals grid so the
@@ -73,7 +73,7 @@ test('a non-admin gets 403 from the stats API and is redirected away from the ro
   const email = `${username}@example.com`
 
   // As admin: create the non-admin user.
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)
@@ -96,7 +96,8 @@ test('a non-admin gets 403 from the stats API and is redirected away from the ro
   expect(body).not.toContain('"totals"')
 
   // Direct-URL navigation to the admin route bounces to the documents list (no dashboard).
-  await userPage.goto('/#/settings/stats')
+  // raw: the nav guard BOUNCES this request — the landing route is deliberately not the requested one.
+  await gotoRaw(userPage, '/#/settings/stats')
   await expect(userPage).toHaveURL(/#\/document$/)
   await expect(userPage.locator('.chart-canvas-wrap canvas')).toHaveCount(0)
 

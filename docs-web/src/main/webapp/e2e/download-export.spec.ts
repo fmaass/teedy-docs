@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, ROUTE_ROOT, gotoDocumentList, gotoRouteReady } from './helpers'
 
 // #89 — surface the three EXISTING download/export capabilities on the UI:
 //   89a  the per-document header Download button links to the whole-document ZIP
@@ -84,7 +84,7 @@ test('89a: multi-file document Download links to the whole-document ZIP', async 
   ])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   // The header Download affordance points at the document ZIP endpoint (all files),
@@ -110,7 +110,7 @@ test('89a: single-file document keeps the direct file download (unchanged)', asy
   // The single-file href IS the served pointer, so the seed must have one before the view loads.
   await awaitServingPointer(page.request, id)
 
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   const dl = page.locator('.doc-header-actions a[href*="api/file"]')
@@ -136,7 +136,7 @@ test('89b: bulk Download ZIP zips the union of every selected document\'s files'
   ])
   cleanup.defer('purge document B', () => deleteDocApi(page.request, b.id))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(page.getByRole('row', { name: new RegExp(titleA) })).toBeVisible()
   await expect(page.getByRole('row', { name: new RegExp(titleB) })).toBeVisible()
 
@@ -163,7 +163,7 @@ test('89c: Settings account exports all documents as a ZIP with a manifest', asy
   ])
   cleanup.defer('purge the exported document', () => deleteDocApi(page.request, id))
 
-  await page.goto('/#/settings/account')
+  await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   const exportBtn = page.getByRole('button', { name: 'Export my documents' })
   await expect(exportBtn).toBeVisible()
 

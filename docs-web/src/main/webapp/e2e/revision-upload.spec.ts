@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi } from './helpers'
+import { unique, openFileList, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #117 — the file-revision upload UI:
 //   117.1  a per-file "Upload new version" action (FileExtraActions, in every file
@@ -64,7 +64,7 @@ test('uploading a new version of a file creates v2, not a second file', async ({
   const id = await seedDoc(page.request, unique('rev'), [{ name: 'report.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
   await expect(page.locator('.file-data-table tbody tr')).toHaveCount(1)
 
@@ -86,7 +86,7 @@ test('a new version can be uploaded from the versions dialog', async ({ page, cl
   const id = await seedDoc(page.request, unique('vdlg'), [{ name: 'report.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
   const dialog = await openVersions(page)
   await expect(dialog.getByText('v1')).toBeVisible()
@@ -108,7 +108,7 @@ test('a name-conflicting drop offers, and applies, "add as new version"', async 
   const id = await seedDoc(page.request, unique('conf-ver'), [{ name: 'dup.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await dropOnUploadBar(page, [{ name: 'dup.txt', from: txtV2 }])
 
   const dialog = page.getByRole('dialog', { name: 'File already exists' })
@@ -126,7 +126,7 @@ test('a name-conflicting drop can be kept as a separate file', async ({ page, cl
   const id = await seedDoc(page.request, unique('conf-keep'), [{ name: 'dup.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await dropOnUploadBar(page, [{ name: 'dup.txt', from: txtV2 }])
 
   const dialog = page.getByRole('dialog', { name: 'File already exists' })
@@ -143,7 +143,7 @@ test('a name-conflicting drop can be cancelled, leaving the file untouched', asy
   const id = await seedDoc(page.request, unique('conf-cancel'), [{ name: 'dup.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await dropOnUploadBar(page, [{ name: 'dup.txt', from: txtV2 }])
 
   const dialog = page.getByRole('dialog', { name: 'File already exists' })
@@ -162,7 +162,7 @@ test('a mixed multi-drop uploads fresh files and applies one choice to every con
   const id = await seedDoc(page.request, unique('conf-multi'), [{ name: 'a.txt' }, { name: 'b.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   // a.txt + b.txt collide with the seeded files; c.txt is fresh.
   await dropOnUploadBar(page, [
     { name: 'a.txt', from: txtV2 },
@@ -188,7 +188,7 @@ test('a second drop is blocked while a conflict is being resolved; the first bat
   const id = await seedDoc(page.request, unique('reentry'), [{ name: 'dup.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await dropOnUploadBar(page, [{ name: 'dup.txt', from: txtV2 }])
 
   const dialog = page.getByRole('dialog', { name: 'File already exists' })
@@ -212,7 +212,7 @@ test('a camera capture uploads immediately with no conflict dialog, even on a na
   const id = await seedDoc(page.request, unique('cam'), [{ name: 'shot.png' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   // Capture a photo whose name collides with the existing file. Camera capture
   // bypasses the manual-upload-bar conflict prompt entirely.
   await page.locator('input.camera-input').setInputFiles({
@@ -233,7 +233,7 @@ test('a version upload against a stale base surfaces the reload path', async ({ 
   const id = await seedDoc(page.request, unique('stale'), [{ name: 'race.txt' }])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
   const row = page.locator('.file-data-table tbody tr', { hasText: 'race.txt' })
   await expect(row).toHaveCount(1)

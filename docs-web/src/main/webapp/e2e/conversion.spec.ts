@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, confirmDanger, openFileList } from './helpers'
+import { unique, createDocument, confirmDanger, openFileList, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // End-to-end acceptance for the office-document -> PDF conversion pipeline behind
 // PdfUtil.convertToPdf (the XDocReport ODT/DOCX converters + the text/CSV writer).
@@ -40,7 +40,7 @@ for (const { label, fixture } of CASES) {
     const { id } = await createDocument(page, title)
 
     // Upload the fixture through the advanced FileUpload dropzone (auto customUpload).
-    await page.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(fixturePath)
 
     // UI success surface: the upload toast appears and the file is listed, with no
@@ -64,7 +64,7 @@ for (const { label, fixture } of CASES) {
     expect(body.includes(Buffer.from('%%EOF')), `${label} exported PDF has an EOF trailer`).toBe(true)
 
     // Cleanup the document.
-    await page.goto(`/#/document/view/${id}`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     await page.getByRole('button', { name: 'Delete', exact: true }).click()
     await confirmDanger(page)
   })

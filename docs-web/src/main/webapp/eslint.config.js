@@ -6,6 +6,50 @@ import vueParser from 'vue-eslint-parser'
 import tsParser from '@typescript-eslint/parser'
 import tsPlugin from '@typescript-eslint/eslint-plugin'
 
+// #187 — the teardown-in-`finally` ban (rationale in the e2e block below). Hoisted to a
+// constant because a flat-config entry REPLACES a rule's options rather than merging them:
+// the spec-only entry that adds the #224 selector has to restate these three, and a copy
+// would be a second place to forget.
+const TEARDOWN_IN_FINALLY = [
+  {
+    selector:
+      "TryStatement > BlockStatement.finalizer > ExpressionStatement > :not(CallExpression[callee.name='guardedTeardown'], AwaitExpression)",
+    message:
+      'No teardown in `finally` (#187): a cleanup call here supersedes the body\'s real failure — and wrapping it in `&&`, `?:`, `,` or `void` does not change that. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+  },
+  {
+    selector:
+      "TryStatement > BlockStatement.finalizer > ExpressionStatement > AwaitExpression > :not(CallExpression[callee.name='guardedTeardown'])",
+    message:
+      'No teardown in `finally` (#187): an awaited cleanup call here supersedes the body\'s real failure — `await` of anything but a direct `guardedTeardown(...)` call is banned, including `await (cond && cleanup())`. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
+  },
+  {
+    selector: 'TryStatement > BlockStatement.finalizer > :not(ExpressionStatement)',
+    message:
+      'No teardown in `finally` (#187): a `finally` block may contain only `guardedTeardown(...)` calls — conditionals, loops and declarations there are teardown logic that belongs in `cleanup.defer(label, fn)`.',
+  },
+]
+
+// #224 — no bare navigation in a spec. `page.goto` resolves on `load`, which on a contended
+// runner lands INSIDE vue-router's first navigation: the URL then reads as the new route
+// while the app keeps rendering the old one, and the next locator times out mute, blaming an
+// element instead of the navigation that never happened (#215/#203). Every spec navigation
+// therefore goes through a readiness helper that also asserts the destination route mounted.
+//
+// The selector matches the MEMBER CALL, not the identifier `page`: secondary page objects are
+// named `anon`, `anonPage`, `userPage`, `guestPage`, `viewer`, `departingPage`, `p` … and a
+// rule keyed on `page` would wave every one of them through.
+//
+// Sanctioned escape: `gotoRaw(page, url)` (e2e/helpers.ts) — a named, greppable wrapper for
+// the cases where raw navigation IS the subject (a static non-SPA path, a guard bounce, a
+// deep link whose query param is consumed during mount, a goto whose readiness belongs after
+// a following reload). e2e/helpers.ts is not a spec file, so the wrapper itself is exempt.
+const BARE_GOTO_IN_SPEC = {
+  selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='goto']",
+  message:
+    'No bare navigation in a spec (#224): `.goto()` resolves before vue-router has finalized the route, so the next action can run against the PREVIOUS page. Use `gotoRouteReady(page, url, ROUTE_ROOT.<route>)` (or `gotoDocumentList(page)`), `expectRouteReady(page, url, root)` after a reload — or, when raw navigation is genuinely the subject, `gotoRaw(page, url)` with a one-line reason.',
+}
+
 export default [
   {
     ignores: ['dist/**', 'node_modules/**', 'scripts/**', '*.config.*'],
@@ -64,26 +108,16 @@ export default [
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
     },
     rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector:
-            "TryStatement > BlockStatement.finalizer > ExpressionStatement > :not(CallExpression[callee.name='guardedTeardown'], AwaitExpression)",
-          message:
-            'No teardown in `finally` (#187): a cleanup call here supersedes the body\'s real failure — and wrapping it in `&&`, `?:`, `,` or `void` does not change that. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
-        },
-        {
-          selector:
-            "TryStatement > BlockStatement.finalizer > ExpressionStatement > AwaitExpression > :not(CallExpression[callee.name='guardedTeardown'])",
-          message:
-            'No teardown in `finally` (#187): an awaited cleanup call here supersedes the body\'s real failure — `await` of anything but a direct `guardedTeardown(...)` call is banned, including `await (cond && cleanup())`. Register it with `cleanup.defer(label, fn)` instead, or wrap it in `guardedTeardown(label, fn)`.',
-        },
-        {
-          selector: 'TryStatement > BlockStatement.finalizer > :not(ExpressionStatement)',
-          message:
-            'No teardown in `finally` (#187): a `finally` block may contain only `guardedTeardown(...)` calls — conditionals, loops and declarations there are teardown logic that belongs in `cleanup.defer(label, fn)`.',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...TEARDOWN_IN_FINALLY],
+    },
+  },
+  // Spec files carry the #224 bare-goto ban ON TOP of the #187 selectors. The teardown
+  // selectors are restated (not inherited) because this entry replaces the rule's whole
+  // options array for the files it matches.
+  {
+    files: ['e2e/**/*.spec.ts'],
+    rules: {
+      'no-restricted-syntax': ['error', ...TEARDOWN_IN_FINALLY, BARE_GOTO_IN_SPEC],
     },
   },
   {

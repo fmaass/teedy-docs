@@ -287,7 +287,7 @@ async function handleExport() {
 </script>
 
 <template>
-  <div>
+  <div class="account-settings">
     <h2>{{ t('ui.account.title') }}</h2>
     <p class="text-sm text-muted mb-4">
       {{ t('ui.account.logged_in_as', { username: auth.username }) }}

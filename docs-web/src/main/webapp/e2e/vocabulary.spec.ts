@@ -1,5 +1,12 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, createDocument, confirmDanger, deleteDocApi } from './helpers'
+import {
+  unique,
+  createDocument,
+  confirmDanger,
+  deleteDocApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // Delete every remaining entry of a vocabulary namespace via the admin API. A
 // vocabulary ceases to exist once it has no entries, so this fully removes `name`.
@@ -38,7 +45,7 @@ test('admin vocabulary CRUD: create namespace, entries, rename, reorder, delete'
   // it covers a failure at any point in the body.
   cleanup.defer('purge any surviving entries of the test vocabulary', () => purgeVocabulary(request, ns))
 
-  await page.goto('/#/settings/vocabulary')
+  await gotoRouteReady(page, '/#/settings/vocabulary', ROUTE_ROOT.settingsVocabulary)
   await expect(page.getByRole('heading', { name: 'Vocabularies' })).toBeVisible()
 
   // --- Create a new vocabulary namespace with its first entry ---
@@ -126,7 +133,7 @@ test('deleting a referenced vocabulary entry warns with the usage count and proc
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, docId))
 
   // --- Delete the entry through the admin UI; the confirm must carry the count ---
-  await page.goto('/#/settings/vocabulary')
+  await gotoRouteReady(page, '/#/settings/vocabulary', ROUTE_ROOT.settingsVocabulary)
   await page.locator('#vocabulary-name').click()
   await page.getByRole('option', { name: ns, exact: true }).click()
 
@@ -151,7 +158,7 @@ test('a vocabulary value backs the document Type dropdown', async ({ page, clean
   // editor's Type Select offers it as an option. Cleaned up afterwards.
   const typeValue = `e2e-type-${Date.now()}`
 
-  await page.goto('/#/settings/vocabulary')
+  await gotoRouteReady(page, '/#/settings/vocabulary', ROUTE_ROOT.settingsVocabulary)
   await page.locator('#vocabulary-name').click()
   await page.getByRole('option', { name: 'type', exact: true }).click()
 
@@ -166,7 +173,7 @@ test('a vocabulary value backs the document Type dropdown', async ({ page, clean
   // built-in namespace permanently. There is no API teardown path for a single entry of a
   // built-in namespace, so this stays the admin UI the test itself drives.
   cleanup.defer('remove the added `type` vocabulary value', async () => {
-    await page.goto('/#/settings/vocabulary')
+    await gotoRouteReady(page, '/#/settings/vocabulary', ROUTE_ROOT.settingsVocabulary)
     await page.locator('#vocabulary-name').click()
     await page.getByRole('option', { name: 'type', exact: true }).click()
     const row = page.getByRole('row', { name: new RegExp(typeValue) })
@@ -179,15 +186,33 @@ test('a vocabulary value backs the document Type dropdown', async ({ page, clean
   // Open a fresh document editor and assert the Type Select surfaces the new value.
   const { id } = await createDocument(page, unique('voc-doc'))
   cleanup.defer('delete the seeded document', async () => {
-    await page.goto(`/#/document/view/${id}`)
-    const del = page.getByRole('button', { name: 'Delete', exact: true })
-    if (await del.isVisible().catch(() => false)) {
-      await del.click()
-      await confirmDanger(page)
+    // Go through the readiness barrier, on the post-redirect URL. A bare goto here would leave the
+    // Delete probe racing the route transition: `isVisible()` reads ONCE, so on a slow transition
+    // it reads the PREVIOUS route's DOM, answers false, and the document leaks silently.
+    //
+    // A readiness failure is VERIFIED before it is tolerated, never assumed. The one acceptable
+    // cause is a document the body already deleted, and the API is authoritative for that:
+    // `GET /api/document/:id` answers 200 while the document is alive and 404 once it is trashed,
+    // purged or absent (measured; same read-back deleteDocApi uses before accepting a failed
+    // delete). Absent -> return quietly. Present -> rethrow, so a lost route or a view that never
+    // mounts stays a LOUD cleanup failure instead of being filed as "already gone".
+    try {
+      await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
+    } catch (readyError: unknown) {
+      const readBack = await page.request.get(`/api/document/${id}`)
+      if (!readBack.ok()) return
+      const detail = readyError instanceof Error ? (readyError.stack ?? readyError.message) : String(readyError)
+      throw new Error(
+        `teardown: the document view never became ready for ${id}, and GET /api/document/${id} ` +
+          `answered ${readBack.status()} — the document is still there, so this is a real ` +
+          `readiness failure, not a document the body had already deleted.\n${detail}`,
+      )
     }
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await confirmDanger(page)
   })
 
-  await page.goto(`/#/document/edit/${id}`)
+  await gotoRouteReady(page, `/#/document/edit/${id}`, ROUTE_ROOT.documentEdit)
   await expect(page.locator('#edit-title')).toBeVisible()
   // The Type Select lives in the collapsible "Additional metadata" section.
   await page.getByRole('button', { name: 'Additional metadata' }).click()

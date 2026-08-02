@@ -8,6 +8,8 @@ import {
   expectResponseOk,
   gotoDocumentList,
   openFileList,
+  ROUTE_ROOT,
+  gotoRouteReady,
 } from './helpers'
 
 // #143 / #207 — the standing encoding guardrail.
@@ -122,7 +124,7 @@ for (const fx of CLASSES) {
     const { id } = await createDocument(page, title)
     cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-    await page.goto(`/#/document/view/${id}/content`)
+    await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
     // The hidden input of the advanced dropzone: selecting a file uploads it immediately
     // (customUpload), through the app's own FormData PUT — the #143 code path.
     await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles({

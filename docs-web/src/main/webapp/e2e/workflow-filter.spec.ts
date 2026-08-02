@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, gotoDocumentList } from './helpers'
 
 // #28: the "Assigned to me" (workflow=me) document-list filter must round-trip
 // through the URL — toggling it activates the filter and puts `workflow=me` in the
@@ -69,7 +69,7 @@ test('the "Assigned to me" filter round-trips through open + in-app Back (#28)',
   })
   expect(startRes.ok(), 'start route on assigned doc').toBeTruthy()
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const assignedRow = rowFor(page, assignedTitle)
   const otherRow = rowFor(page, otherTitle)
   // Unfiltered list: both rows render.

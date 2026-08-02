@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi } from './helpers'
+import { unique, openFileList, deleteDocApi, ROUTE_ROOT, gotoDocumentList, gotoRouteReady } from './helpers'
 
 // rc.8 Phase G (#131/#132): the backend serializes a file `name` via JsonUtil.nullable, so a
 // name-less file must render a stable localized fallback ("Untitled file") — never a blank cell /
@@ -55,7 +55,7 @@ test('file panel (grid + list) shows the Untitled-file fallback for a name-less 
   const id = await seedEmptyNameDoc(page.request, unique('nullname-panel'))
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
 
   // Grid (default): the name-less file's label is the localized fallback, not an empty node.
   const gridLabel = page.locator('.file-preview-label')
@@ -71,7 +71,7 @@ test('slide-over files tab shows the Untitled-file fallback for a name-less file
   const id = await seedEmptyNameDoc(page.request, title)
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // A single click on the row opens the slide-over drawer.
   await page.getByText(title, { exact: true }).click()
   const drawer = page.getByRole('dialog')
@@ -97,7 +97,7 @@ test('anonymous share view shows the Untitled-file fallback for a name-less file
 
   const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const anon = await anonCtx.newPage()
-  await anon.goto(`/#/share/${id}/${shareId}`)
+  await gotoRouteReady(anon, `/#/share/${id}/${shareId}`, ROUTE_ROOT.shareView)
   await expect(anon.getByRole('heading', { name: title })).toBeVisible()
 
   // The share-file card renders the fallback (never a blank name).

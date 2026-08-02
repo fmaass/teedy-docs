@@ -1,5 +1,11 @@
 import { test, expect } from './fixtures'
-import { createDocument, deleteCurrentDocument } from './helpers'
+import {
+  createDocument,
+  deleteCurrentDocument,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 // #53 forgiving search + client-side quick filter.
 //
@@ -19,7 +25,7 @@ test('a bare partial term finds a longer compound; the quick-filter box narrows 
   const compound = await createDocument(page, compoundTitle)
   await createDocument(page, otherTitle)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const search = page.getByPlaceholder('Search')
 
   // Forgiving search: a bare PARTIAL of the compound (not the whole token, no wildcard)
@@ -48,9 +54,9 @@ test('a bare partial term finds a longer compound; the quick-filter box narrows 
 
   // Cleanup both documents.
   await search.fill('')
-  await page.goto(`/#/document/view/${compound.id}`)
+  await gotoRouteReady(page, `/#/document/view/${compound.id}/content`, ROUTE_ROOT.documentContent)
   await deleteCurrentDocument(page)
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await search.fill(otherTitle)
   await page.getByText(otherTitle, { exact: true }).click()
   await page.getByRole('button', { name: 'Open', exact: true }).click()
@@ -69,7 +75,7 @@ test('a partial hyphenated identifier finds the document in a multi-token query'
 
   const doc = await createDocument(page, title)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const search = page.getByPlaceholder('Search')
 
   // Drop the last three characters of the identifier: a whole-term match is impossible, only
@@ -79,6 +85,6 @@ test('a partial hyphenated identifier finds the document in a multi-token query'
 
   // Cleanup.
   await search.fill('')
-  await page.goto(`/#/document/view/${doc.id}`)
+  await gotoRouteReady(page, `/#/document/view/${doc.id}/content`, ROUTE_ROOT.documentContent)
   await deleteCurrentDocument(page)
 })

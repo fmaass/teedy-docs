@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { gotoDocumentList } from './helpers'
 
 // Dark-mode toggle via the REAL header control (AppHeader "Dark mode" button).
 // Asserts a COMPUTED style change, not just a class attribute: teedy-theme.css maps
@@ -27,7 +28,7 @@ async function bodyBackground(page: import('@playwright/test').Page): Promise<st
 
 test('toggling dark mode changes the computed body background, persists, and toggles back', async ({ page, cleanup }) => {
   const toggle = page.getByRole('button', { name: 'Dark mode' })
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(toggle).toBeVisible()
 
   // Ensure dark mode is off for later specs even if an assertion failed while on.

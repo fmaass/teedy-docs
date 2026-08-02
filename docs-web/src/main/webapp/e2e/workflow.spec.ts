@@ -1,5 +1,13 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
-import { unique, createDocument, confirmDanger, deleteDocApi, deleteGroupApi } from './helpers'
+import {
+  unique,
+  createDocument,
+  confirmDanger,
+  deleteDocApi,
+  deleteGroupApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // Workflow (route model + document routing) end to end. Proves the admin route-model
 // editor (SettingsWorkflow) AND the per-document act flow (DocumentViewWorkflow):
@@ -24,7 +32,7 @@ import { unique, createDocument, confirmDanger, deleteDocApi, deleteGroupApi } f
 // both assigned to `groupName` via the target typeahead. Returns after the "saved"
 // toast confirms persistence and the model is listed as complete (not "Incomplete").
 async function createReviewModel(page: Page, name: string, groupName: string): Promise<void> {
-  await page.goto('/#/settings/workflow')
+  await gotoRouteReady(page, '/#/settings/workflow', ROUTE_ROOT.settingsWorkflow)
   await expect(page.getByRole('heading', { name: 'Workflows' })).toBeVisible()
 
   await page.getByRole('button', { name: 'New workflow' }).click()
@@ -82,7 +90,7 @@ async function configureStep(
 
 // Delete a route model from the SettingsWorkflow list by name.
 async function deleteModel(page: Page, name: string): Promise<void> {
-  await page.goto('/#/settings/workflow')
+  await gotoRouteReady(page, '/#/settings/workflow', ROUTE_ROOT.settingsWorkflow)
   const row = page.getByRole('row', { name: new RegExp(name) })
   if ((await row.count()) === 0) return
   await row.getByRole('button', { name: 'Delete workflow' }).click()
@@ -117,7 +125,7 @@ test('admin builds a workflow, runs it to DONE, and a second run halts on REJECT
   // ---- Run A: validate then approve -> DONE ----
   const docA = await createDocument(page, unique('wf-approve'))
   cleanup.defer('purge the approve-run document', () => deleteDocApi(page.request, docA.id))
-  await page.goto(`/#/document/view/${docA.id}/workflow`)
+  await gotoRouteReady(page, `/#/document/view/${docA.id}/workflow`, ROUTE_ROOT.documentWorkflow)
   await startModel(page, modelName)
 
   // Step 1 is a VALIDATE step: the current step shows a Validate button.
@@ -142,7 +150,7 @@ test('admin builds a workflow, runs it to DONE, and a second run halts on REJECT
   // ---- Run B: validate then reject -> REJECTED, no advance ----
   const docB = await createDocument(page, unique('wf-reject'))
   cleanup.defer('purge the reject-run document', () => deleteDocApi(page.request, docB.id))
-  await page.goto(`/#/document/view/${docB.id}/workflow`)
+  await gotoRouteReady(page, `/#/document/view/${docB.id}/workflow`, ROUTE_ROOT.documentWorkflow)
   await startModel(page, modelName)
 
   // Validate step 1.
@@ -178,7 +186,7 @@ test('SettingsWorkflow ACL editing still grants and revokes (AclEditor regressio
   cleanup.defer('delete the route model', () => deleteModel(page, modelName))
 
   // Re-open the model editor; the Sharing section (AclEditor) renders for an existing model.
-  await page.goto('/#/settings/workflow')
+  await gotoRouteReady(page, '/#/settings/workflow', ROUTE_ROOT.settingsWorkflow)
   await page.getByRole('row', { name: new RegExp(modelName) })
     .getByRole('button', { name: 'Edit workflow' }).click()
   const dialog = page.getByRole('dialog', { name: 'Edit workflow' })

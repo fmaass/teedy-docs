@@ -16,5 +16,10 @@ const docId = computed(() => doc.value?.id ?? null)
 </script>
 
 <template>
-  <ActivityTable scope="document" :document-id="docId" link-targets />
+  <!-- `doc-activity-view` is this tab's readiness root (e2e ROUTE_ROOT.documentActivity). It falls
+       through to ActivityTable's single root element, so it marks the mounted tab without adding a
+       wrapper. It is needed because the tab outlet's own DataTable is NOT activity-specific: the
+       Content tab renders FileListTable, also a DataTable, so a selector keyed on the table would
+       still match the PREVIOUS tab during a transition. -->
+  <ActivityTable scope="document" :document-id="docId" link-targets class="doc-activity-view" />
 </template>

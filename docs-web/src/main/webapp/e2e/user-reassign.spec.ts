@@ -1,6 +1,6 @@
 import { test, expect, type Page } from './fixtures'
 import { resolve } from 'node:path'
-import { unique, login, openFileList, deleteDocApi } from './helpers'
+import { unique, login, openFileList, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 const here = new URL('.', import.meta.url).pathname
 const sampleFile = resolve(here, 'fixtures/sample.txt')
@@ -24,7 +24,7 @@ const sampleFile = resolve(here, 'fixtures/sample.txt')
 test('deleting a user who owns nothing needs no reassignment target', async ({ page }) => {
   const username = unique('emptyuser').replace(/[^a-z0-9]/gi, '').toLowerCase()
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const userDialog = page.getByRole('dialog', { name: 'Add user' })
   await userDialog.locator('#add-user-name').fill(username)
@@ -62,7 +62,7 @@ test('deleting a user reassigns their document to a chosen target, whose file st
   const docTitle = unique('reassign-doc')
 
   // --- 1. Admin creates the departing user ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const userDialog = page.getByRole('dialog', { name: 'Add user' })
   await userDialog.locator('#add-user-name').fill(username)
@@ -79,7 +79,7 @@ test('deleting a user reassigns their document to a chosen target, whose file st
   const departingPage: Page = await departingContext.newPage()
   await login(departingPage, username, password)
 
-  await departingPage.goto('/#/document/add')
+  await gotoRouteReady(departingPage, '/#/document/add', ROUTE_ROOT.documentEdit)
   await departingPage.locator('#edit-title').fill(docTitle)
   await departingPage.getByRole('button', { name: 'Save' }).click()
   await expect(departingPage).toHaveURL(/#\/document\/view\//)
@@ -95,7 +95,7 @@ test('deleting a user reassigns their document to a chosen target, whose file st
   await departingContext.close()
 
   // --- 3. Admin deletes the departing user, reassigning to admin ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   const userRow = page.getByRole('row', { name: new RegExp(username) })
   await expect(userRow).toBeVisible()
   await userRow.getByRole('button', { name: 'Delete' }).click()
@@ -110,7 +110,7 @@ test('deleting a user reassigns their document to a chosen target, whose file st
 
   // --- 4. The document now belongs to admin and its file still opens ---
   // Admin can open the reassigned document (ownership + READ/WRITE ACL granted).
-  await page.goto(`/#/document/view/${docId}`)
+  await gotoRouteReady(page, `/#/document/view/${docId}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: docTitle })).toBeVisible()
 
   // The reassigned file downloads with non-empty, intact content (decryption still

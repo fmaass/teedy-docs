@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, uniqueTag, openNav, deleteDocApi, deleteTagApi } from './helpers'
+import { unique, uniqueTag, openNav, deleteDocApi, deleteTagApi, gotoDocumentList } from './helpers'
 
 // #12: the facet (co-occurrence) tree bounds dense children — a node with more
 // than 20 eligible children shows the top 19 by co-occurrence plus one terminal,
@@ -62,7 +62,7 @@ test('a dense facet root caps children at 19 + a non-interactive overflow node (
   const docId = await apiCreateDocumentWithTags(request, unique('fo-doc'), tagIds)
   cleanup.defer('purge the dense document', () => deleteDocApi(page.request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
 
   // The tag panel lives in the desktop side panel OR the mobile Drawer; openNav
   // resolves to the live container (opening the Drawer on mobile) so the facet

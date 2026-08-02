@@ -1,5 +1,13 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger, deleteDocApi, deleteUserApi } from './helpers'
+import {
+  unique,
+  createDocument,
+  confirmDanger,
+  deleteDocApi,
+  deleteUserApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // Document permissions (ACL) end to end via DocumentViewPermissions:
 //   1. Admin creates a second user (SettingsUsers).
@@ -13,7 +21,7 @@ test('grant READ on a document to a second user, see it listed, then revoke it',
   const email = `${username}@example.com`
 
   // --- Create the second user ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const userDialog = page.getByRole('dialog', { name: 'Add user' })
   await userDialog.locator('#add-user-name').fill(username)
@@ -32,7 +40,7 @@ test('grant READ on a document to a second user, see it listed, then revoke it',
   // createDocument drives the ADMIN page, so admin owns the document and the admin
   // context is the one that can purge it — permanent delete is owner-scoped server-side.
   cleanup.defer('purge the ACL document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/permissions`)
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   await expect(page.getByRole('heading', { name: 'Direct permissions' })).toBeVisible()
   // A fresh document already lists the owner's own READ/WRITE ACLs; the second user
   // is NOT among them yet.

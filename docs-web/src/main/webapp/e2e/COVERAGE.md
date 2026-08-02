@@ -186,6 +186,49 @@ run is split by a `@visual` grep tag (on the pixel-comparison `describe` in
 | `encoding-guardrail.spec.ts` | **Non-ASCII ingest guardrail (#143 / #207)**: a document created through the real add form and a file uploaded through the real dropzone both carry a non-ASCII name (umlauts + ß, and CJK), and EVERY surface that name reaches is compared to the source literal character for character — no normalization, no substring match. Per fixture class: the API bytes (`GET /api/document/:id` title, `GET /api/file/list` name), the download name the browser would save under (`Content-Disposition` RFC 5987 `filename*`), the file panel in BOTH modes (grid label, list cell), the list cell's native `title` tooltip (the #207 mechanism — `FileListTable.vue`, where hover is the only way to read a name the cell has ellipsized), the document-list title cell, and fulltext search driven by a non-ASCII term (`Prüfung` / `日本語`) MUST-combined with a run token, so a hit proves the non-ASCII term itself matched the index. Closes the regression-test gap #143 shipped with. |
 | `visual.spec.ts` | **Standing visual-regression + i18n gate**: the six key screens most prone to layout/overflow (document list, gallery, slide-over with a long title, settings hub + Config form, rich-text editor with ordered+unordered lists (#70), About dialog) captured in **English and German** under **both** the `desktop` and `mobile` projects (4 combos/screen) against committed `*-linux.png` baselines; volatile regions (dates, version badge) masked; animations disabled. Plus three **functional German-overflow** assertions (header buttons / nav labels / settings-hub cards stay within their container at both viewports) — the German hard gate. Default-on (no `E2E_VISUAL`); a missing Linux baseline fails loudly. |
 
+## Route readiness — every navigation goes through a helper (#215 / #203 / #224)
+
+`page.goto` resolves on `load`, which on a contended runner fires while vue-router's FIRST
+navigation is still pending. vue-router attaches its history listener only once that
+navigation finalizes, so a hash navigation issued inside that window updates `location` and
+is never observed: **the URL reads as the new route while the app keeps rendering the old
+one, permanently.** The next locator then times out MUTE, blaming an element instead of the
+navigation that never happened. An in-app hash navigation has the sibling race — `goto` to a
+same-document URL resolves the moment `location` changes, before the destination component
+has mounted, so a spec that reads the destination reads the PREVIOUS route's DOM.
+
+`e2e/helpers.ts` answers both with the same assertion — do not proceed until the URL is the
+expected one AND the destination route's own root is on screen:
+
+- **`ROUTE_ROOT`** — the route-root selector map. Each entry is that route's own root
+  element, verified destination-exclusive against `src/` (a selector shared with another
+  route would make readiness pass on the wrong page). Keys cover every route the suite
+  navigates to: `documentList`, `documentTrash`, `documentEdit`, `documentContent`,
+  `documentPermissions`, `documentWorkflow`, `documentActivity`, `documentComments`,
+  `history`, `tagList`, `login`, `shareView`, and `settings*` for each settings leaf.
+- **`gotoRouteReady(page, url, routeRoot)`** — navigate AND wait for that route to mount.
+  The default for a spec that navigates and then acts.
+- **`gotoDocumentList(page)`** — the documents list, route-ready (the most common target).
+- **`expectRouteReady(page, url, routeRoot)`** — the barrier on its own. A spec that
+  RELOADS re-runs the whole first-navigation sequence, so its readiness belongs AFTER the
+  reload; a barrier asserted before it is discarded with the document the reload replaces.
+- **`gotoRaw(page, url)`** — the sanctioned escape hatch: raw navigation, no barrier. Named
+  and greppable so a deliberate raw goto is visibly deliberate. Every call site carries a
+  one-line reason. Current legitimate classes: a real non-SPA path (`/apidoc/`), a nav-guard
+  BOUNCE (the landing route is deliberately not the requested one), a deep link whose
+  `?file=` param is consumed during mount, and the goto half of a goto-then-reload pair.
+
+A route that REDIRECTS (`/#/document/view/:id` → `…/content`) is addressed by its
+post-redirect URL, because `expectRouteReady` pins the FINAL hash.
+
+### The guard
+
+`eslint.config.js` bans any direct `.goto()` member call in `e2e/**/*.spec.ts`
+(`no-restricted-syntax`, alongside the #187 finalizer rules). It matches the member call,
+not the identifier `page`, so secondary page objects (`anon`, `userPage`, `viewer`,
+`departingPage`, …) are covered too. `npm run lint` fails on a new bare goto; `helpers.ts`
+and `global-setup.ts` are not spec files and stay exempt.
+
 ## Not covered by Playwright (by design)
 
 - **OIDC / SSO login** — the CI e2e container is booted with no OIDC properties, so

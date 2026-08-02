@@ -1,11 +1,21 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger, login, deleteDocApi, deleteUserApi } from './helpers'
+import {
+  unique,
+  createDocument,
+  confirmDanger,
+  login,
+  deleteDocApi,
+  deleteUserApi,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 test('deleting from the slide-over removes the document and closes the pane (#172)', async ({ page }) => {
   const title = unique('slideover-del')
   await createDocument(page, title)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const titleCell = page.getByText(title, { exact: true })
   await expect(titleCell).toBeVisible()
   await titleCell.click()
@@ -25,7 +35,7 @@ test('a READ-only user sees no Delete button in the slide-over (#172)', async ({
   const password = 'ReadOnly123'
   const email = `${username}@example.com`
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const userDialog = page.getByRole('dialog', { name: 'Add user' })
   await userDialog.locator('#add-user-name').fill(username)
@@ -40,7 +50,7 @@ test('a READ-only user sees no Delete button in the slide-over (#172)', async ({
   // The document is admin-owned (created through the admin page context), so the
   // owner-scoped permanent delete must run from that same context.
   cleanup.defer('purge the shared document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/permissions`)
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   await expect(page.getByRole('heading', { name: 'Direct permissions' })).toBeVisible()
   const addForm = page.locator('.add-acl-form', { hasText: 'Add permission' })
   await addForm.locator('input').first().fill(username)

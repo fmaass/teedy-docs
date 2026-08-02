@@ -1,5 +1,13 @@
 import { test, expect, request as pwRequest } from './fixtures'
-import { unique, totpCode, login, expectResponseOk, describeApiFailure } from './helpers'
+import {
+  unique,
+  totpCode,
+  login,
+  expectResponseOk,
+  describeApiFailure,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // The activation code is recomputed from the secret the page itself shows and verified by the REAL
 // server, so a regression in enrollment, activation, the login challenge, or disable fails an assertion
@@ -56,7 +64,7 @@ test.describe('Two-factor enrollment (behavior A, self-service)', () => {
     cleanup.defer('delete the 2FA seed user', () => deleteUser(baseURL!, username))
 
     await login(page, username, password)
-    await page.goto('/#/settings/account')
+    await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
     const card = page.locator('[data-test="two-factor-card"]')
     await expect(card).toBeVisible()
 
@@ -84,7 +92,7 @@ test.describe('Two-factor enrollment (behavior A, self-service)', () => {
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page).toHaveURL(/#\/document$/)
 
-    await page.goto('/#/settings/account')
+    await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
     await expect(page.locator('[data-test="totp-disable"]')).toBeVisible()
     await page.locator('#totp-disable-pass').fill(password)
     await page.locator('[data-test="totp-disable"]').click()

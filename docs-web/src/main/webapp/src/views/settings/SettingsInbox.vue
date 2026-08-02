@@ -110,7 +110,7 @@ async function onSaveAndTest() {
 </script>
 
 <template>
-  <div>
+  <div class="inbox-settings">
     <h2>{{ t('ui.inbox.title') }}</h2>
     <p class="section-hint">{{ t('ui.inbox.description') }}</p>
 

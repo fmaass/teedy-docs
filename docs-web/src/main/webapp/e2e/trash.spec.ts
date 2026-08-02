@@ -1,5 +1,12 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import {
+  unique,
+  createDocument,
+  confirmDanger,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 // Trash lifecycle: delete a document to trash, restore it, permanent-delete, and
 // empty trash. Also asserts the retention countdown column renders (auto-purge
@@ -15,7 +22,7 @@ test('delete to trash, restore, then permanent-delete', async ({ page }) => {
   await expect(page).toHaveURL(/#\/document$/)
 
   // The trash page lists it, with the retention countdown column populated.
-  await page.goto('/#/document/trash')
+  await gotoRouteReady(page, '/#/document/trash', ROUTE_ROOT.documentTrash)
   await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible()
   const row = page.getByRole('row', { name: new RegExp(title) })
   await expect(row).toBeVisible()
@@ -28,7 +35,7 @@ test('delete to trash, restore, then permanent-delete', async ({ page }) => {
   await expect(page.getByText('Document restored').first()).toBeVisible()
   await expect(page.getByRole('row', { name: new RegExp(title) })).toHaveCount(0)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(page.getByText(title, { exact: true })).toBeVisible()
 
   // Delete again, then permanent-delete from trash.
@@ -38,7 +45,7 @@ test('delete to trash, restore, then permanent-delete', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 
-  await page.goto('/#/document/trash')
+  await gotoRouteReady(page, '/#/document/trash', ROUTE_ROOT.documentTrash)
   const row2 = page.getByRole('row', { name: new RegExp(title) })
   await expect(row2).toBeVisible()
   await row2.getByRole('button', { name: 'Delete' }).click()
@@ -58,7 +65,7 @@ test('empty trash removes all trashed documents', async ({ page }) => {
     await expect(page).toHaveURL(/#\/document$/)
   }
 
-  await page.goto('/#/document/trash')
+  await gotoRouteReady(page, '/#/document/trash', ROUTE_ROOT.documentTrash)
   for (const title of titles) {
     await expect(page.getByRole('row', { name: new RegExp(title) })).toBeVisible()
   }

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { createDocument, unique } from './helpers'
+import { createDocument, unique, ROUTE_ROOT, expectRouteReady, gotoRaw, gotoRouteReady } from './helpers'
 
 // PrimeVue renders its own Yes/No on the shared danger-confirm dialog (App.vue's
 // ConfirmDialog, which sets no custom accept/reject labels). Those labels come from
@@ -61,8 +61,9 @@ test('delete confirm renders Ja/Nein when the app BOOTS with a persisted German 
   // Persist German and reload: main.ts now runs its initial (un-awaited) setLocale('de')
   // BEFORE registering PrimeVue — the startup race the locale bridge must survive.
   await page.evaluate(() => localStorage.setItem('teedy-locale', 'de'))
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRaw(page, `/#/document/view/${id}/content`)
   await page.reload()
+  await expectRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
 
   // German UI is active (header delete button localized) before we open the confirm.
   await expect(page.getByRole('button', { name: DE.deleteBtn, exact: true }).first()).toBeVisible()
@@ -76,11 +77,11 @@ test('delete confirm renders Ja/Nein after a RUNTIME switch to German via Settin
 
   // Switch the UI language through the real Settings → Account control (same path as
   // i18n.spec.ts), which calls setLocale at runtime and must re-apply the PrimeVue locale.
-  await page.goto('/#/settings/account')
+  await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   await page.locator('#account-locale').click()
   await page.getByRole('option', { name: 'Deutsch', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Benutzerkonto' })).toBeVisible()
 
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await assertGermanDeleteConfirm(page)
 })

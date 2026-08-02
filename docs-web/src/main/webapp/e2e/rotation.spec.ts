@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // v3.5.2 — PERSISTED, non-destructive PDF/image rotation. Rotation is stored per file and baked
 // into the served `_web`/`_thumb` rasters (images) or applied by pdf.js from the stored value (PDF).
@@ -66,7 +66,7 @@ test('image rotation persists to the server and survives a reload', async ({ pag
   const title = unique('rotate-img')
   const { id } = await createDocument(page, title)
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
 
   const input = page.locator('.p-fileupload-advanced input[type="file"]')
   await input.setInputFiles(widePng)
@@ -113,7 +113,7 @@ test('image rotation persists to the server and survives a reload', async ({ pag
   await expect(afterReload).toHaveAttribute('src', /^blob:/)
 
   // Cleanup.
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 })
@@ -126,7 +126,7 @@ test('a second session sees the persisted image rotation (server-stored, not per
   const title = unique('rotate-img-2')
   const { id } = await createDocument(page, title)
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(widePng)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
   await expect.poll(() => processingDone(page.request, id)).toBe(true)
@@ -146,7 +146,7 @@ test('a second session sees the persisted image rotation (server-stored, not per
   expect(body.files[0].rotation).toBe(90)
 
   // Cleanup.
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 })
@@ -155,7 +155,7 @@ test('PDF rotation persists to the server and re-renders the canvas landscape', 
   const title = unique('rotate-pdf')
   const { id } = await createDocument(page, title)
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(samplePdf)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
   await expect.poll(() => processingDone(page.request, id)).toBe(true)
@@ -198,7 +198,7 @@ test('PDF rotation persists to the server and re-renders the canvas landscape', 
     .toBe(true)
 
   // Cleanup.
-  await page.goto(`/#/document/view/${id}`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 })

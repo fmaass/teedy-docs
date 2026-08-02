@@ -180,7 +180,7 @@ async function handleForgot() {
 </script>
 
 <template>
-  <div class="teedy-login">
+  <div class="teedy-login login-page">
     <div class="teedy-login-card">
       <div class="teedy-login-brand">
         <h1>teedy</h1>

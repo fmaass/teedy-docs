@@ -1,5 +1,13 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { unique, uniqueTag, tagTreePanel, deleteDocApi, deleteTagApi } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  tagTreePanel,
+  deleteDocApi,
+  deleteTagApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // #34: tag chips on a document view are clickable filter actions. Clicking a tag
 // chip in the document header applies a positive filter for that tag and lands on
@@ -52,7 +60,7 @@ test('clicking a tag chip in the document view filters the list by that tag (#34
   cleanup.defer('purge the untagged document', () => deleteDocApi(request, untaggedId))
 
   // Open the tagged document's full view. Its header renders the tag as a chip.
-  await page.goto(`/#/document/view/${taggedId}`)
+  await gotoRouteReady(page, `/#/document/view/${taggedId}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: taggedTitle })).toBeVisible()
 
   // The header tag chip is a real filter button (aria-label "Filter by tag …").

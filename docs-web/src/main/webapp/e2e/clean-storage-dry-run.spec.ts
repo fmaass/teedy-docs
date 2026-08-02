@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #60: the admin Config maintenance "Clean storage" action must first show a dry-run summary
 // confirm ("delete N file(s), reclaim ~X") BEFORE the real cleanup runs. This proves the
@@ -7,7 +8,7 @@ import { test, expect } from './fixtures'
 // real cleanup (success toast). The dry-run request is observed on the wire so the test fails
 // if the UI ever deletes without previewing first.
 test('clean storage shows the dry-run summary confirm before deleting', async ({ page }) => {
-  await page.goto('/#/settings/config')
+  await gotoRouteReady(page, '/#/settings/config', ROUTE_ROOT.settingsConfig)
 
   // The maintenance danger zone renders the Clean storage button.
   const cleanupBtn = page.getByRole('button', { name: 'Clean storage' })

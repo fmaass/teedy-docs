@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from './fixtures'
-import { createDocument, unique } from './helpers'
+import { createDocument, unique, gotoDocumentList } from './helpers'
 
 // Mobile / responsive coverage. This spec runs ONLY under the `mobile`
 // project (Pixel 5 viewport; the `desktop` project testIgnores this file), so every
@@ -61,7 +61,7 @@ async function waitForDrawerSettled(page: import('@playwright/test').Page, drawe
 
 test.describe('mobile layout (Pixel 5 viewport)', () => {
   test('desktop side-panel is hidden and the hamburger toggle is shown', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
     // Shell up: the header Logout action renders at both viewports (unlike the brand
     // link, which is hidden inside the closed Drawer on mobile).
     await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
@@ -82,7 +82,7 @@ test.describe('mobile layout (Pixel 5 viewport)', () => {
   })
 
   test('opening the drawer reveals the nav and a nav link stays inside the viewport', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
     const hamburger = page.getByRole('button', { name: 'Menu', exact: true })
     await expect(hamburger).toBeVisible()
 
@@ -106,7 +106,7 @@ test.describe('mobile layout (Pixel 5 viewport)', () => {
   })
 
   test('header action icons (#67) all stay visible and never overlap in the narrow bar', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
 
     // The four header action buttons (#67 pinned flex-shrink:0 so they hold their
     // token width and don't collapse). All must be visible AND inside the viewport.
@@ -144,7 +144,7 @@ test.describe('mobile layout (Pixel 5 viewport)', () => {
 
     // Back to the list; open the document's slide-over. A single click on the row
     // (list view) opens the slide-over after the 250 ms click-debounce.
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
     await page.getByRole('cell', { name: longTitle }).click()
 
     // The right-position Drawer (doc-slide-over) opens. Its header holds the title

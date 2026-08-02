@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Per-user storage quota (#37): the create and edit dialogs expose a quota field, and editing
 // a user's quota is reflected in the users table after save (post-refresh barrier). Runs as the
@@ -7,7 +8,7 @@ import { test, expect } from './fixtures'
 
 test.describe('User storage quota', () => {
   test('the create dialog exposes a quota field defaulting to ~1GB', async ({ page }) => {
-    await page.goto('/#/settings/users')
+    await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Add user' }).click()
@@ -21,7 +22,7 @@ test.describe('User storage quota', () => {
   })
 
   test('editing a user quota is reflected in the users table after save', async ({ page }) => {
-    await page.goto('/#/settings/users')
+    await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
 
     // Open the edit dialog for the guest row (present in every install).

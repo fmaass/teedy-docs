@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #119 content-hash duplicate detection — the SPA hint. When the backend has a dedup master secret
 // (DOCS_DEDUP_MASTER_KEY / _FILE) it flags a content-identical upload with duplicateKind='content', and
@@ -32,7 +32,7 @@ test('a renamed identical upload shows the non-blocking content-duplicate hint',
   const id = await seedDocWithFile(page.request, unique('dedup'), 'original.txt')
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   // Drop the SAME bytes under a DIFFERENT (non-conflicting) name so it uploads straight away and the
   // backend recognises the identical content within this document.
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles({

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger, deleteDocApi } from './helpers'
+import { unique, createDocument, confirmDanger, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Document relations end to end via the "Related documents" section on the
 // document Content tab (DocumentViewContent):
@@ -22,7 +22,7 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   cleanup.defer('purge document B', () => deleteDocApi(page.request, idB))
 
   // --- Add the relation A → B from A's Content tab ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   const addRow = page.locator('.relation-add')
   await addRow.locator('input').first().fill(titleB)
@@ -51,7 +51,7 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   await expect(linkedFromInApp.locator('.relation-row', { hasText: titleA })).toBeVisible()
 
   // --- Assert on A's view after a fresh reload: B under "Links to", removable ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   const linksToGroup = page.locator('.relation-group', { hasText: 'Links to' })
   await expect(linksToGroup).toBeVisible()
   const outgoingRow = linksToGroup.locator('.relation-row', { hasText: titleB })
@@ -59,7 +59,7 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   await expect(outgoingRow.getByRole('button', { name: 'Remove relation' })).toBeVisible()
 
   // --- Assert on B's view after a fresh reload: A under "Linked from", NO remove control ---
-  await page.goto(`/#/document/view/${idB}`)
+  await gotoRouteReady(page, `/#/document/view/${idB}/content`, ROUTE_ROOT.documentContent)
   const linkedFromGroup = page.locator('.relation-group', { hasText: 'Linked from' })
   await expect(linkedFromGroup).toBeVisible()
   const incomingRow = linkedFromGroup.locator('.relation-row', { hasText: titleA })
@@ -68,7 +68,7 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   await expect(incomingRow.getByRole('button', { name: 'Remove relation' })).toHaveCount(0)
 
   // --- Remove the relation from A (the last one) ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   await page
     .locator('.relation-group', { hasText: 'Links to' })
     .locator('.relation-row', { hasText: titleB })
@@ -78,11 +78,11 @@ test('add a relation A→B, see it on both views, then remove the last relation'
   await expect(relationsToast).toBeVisible()
 
   // --- After a fresh reload it is gone from BOTH views ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   await expect(page.locator('.relation-group', { hasText: 'Links to' })).toHaveCount(0)
 
-  await page.goto(`/#/document/view/${idB}`)
+  await gotoRouteReady(page, `/#/document/view/${idB}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   await expect(page.locator('.relation-group', { hasText: 'Linked from' })).toHaveCount(0)
 })
@@ -104,7 +104,7 @@ test('swap a relation direction from both groups — the groups exchange members
   const swapToast = page.getByRole('alert').filter({ hasText: 'Relation direction reversed' })
 
   // --- Seed A → B from A's Content tab ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   const addRow = page.locator('.relation-add')
   await addRow.locator('input').first().fill(titleB)
@@ -129,7 +129,7 @@ test('swap a relation direction from both groups — the groups exchange members
   await expect(swapToast).toBeHidden({ timeout: 3_000 })
 
   // --- B now OWNS the link: it appears under "Links to" there, with a remove control ---
-  await page.goto(`/#/document/view/${idB}`)
+  await gotoRouteReady(page, `/#/document/view/${idB}/content`, ROUTE_ROOT.documentContent)
   const linksToB = page.locator('.relation-group', { hasText: 'Links to' })
   await expect(linksToB).toBeVisible()
   await expect(linksToB.locator('.relation-row', { hasText: titleA })).toBeVisible()
@@ -139,7 +139,7 @@ test('swap a relation direction from both groups — the groups exchange members
   await expect(page.locator('.relation-group', { hasText: 'Linked from' })).toHaveCount(0)
 
   // --- Swap BACK from the INCOMING group on A: the reverse argument order must work too ---
-  await page.goto(`/#/document/view/${idA}`)
+  await gotoRouteReady(page, `/#/document/view/${idA}/content`, ROUTE_ROOT.documentContent)
   await page
     .locator('.relation-group', { hasText: 'Linked from' })
     .locator('.relation-row', { hasText: titleB })
@@ -152,7 +152,7 @@ test('swap a relation direction from both groups — the groups exchange members
   ).toBeVisible()
 
   // --- And it stuck server-side: B is back to the read-only incoming side after a reload ---
-  await page.goto(`/#/document/view/${idB}`)
+  await gotoRouteReady(page, `/#/document/view/${idB}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
   await expect(page.locator('.relation-group', { hasText: 'Links to' })).toHaveCount(0)
   const incomingB = page.locator('.relation-group', { hasText: 'Linked from' }).locator('.relation-row', { hasText: titleA })

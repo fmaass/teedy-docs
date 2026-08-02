@@ -193,7 +193,7 @@ function getMutationError(error: unknown, fallback: string): string {
 </script>
 
 <template>
-  <div>
+  <div class="groups-settings">
     <div class="groups-header">
       <h2>{{ t('ui.groups.title') }}</h2>
       <Button :label="t('ui.groups.add_group')" icon="pi pi-plus" size="small" @click="openAddDialog" />

@@ -132,7 +132,7 @@ function getTagName(tagId: string) {
 </script>
 
 <template>
-  <div>
+  <div class="tag-rules-settings">
     <div class="flex items-center justify-between mb-4">
       <h2 style="margin: 0">{{ t('ui.tag_rules.title') }}</h2>
       <Button :label="t('ui.tag_rules.add_rule')" icon="pi pi-plus" size="small" @click="openCreate" />

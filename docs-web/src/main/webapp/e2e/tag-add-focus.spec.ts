@@ -1,5 +1,12 @@
 import { test, expect, type APIRequestContext, type ConsoleMessage } from './fixtures'
-import { unique, uniqueTag, isMobileViewport, deleteDocApi, deleteTagApi } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  isMobileViewport,
+  deleteDocApi,
+  deleteTagApi,
+  gotoDocumentList,
+} from './helpers'
 
 async function apiCreateDocument(request: APIRequestContext, title: string): Promise<string> {
   const res = await request.put('/api/document', { form: { title, language: 'eng' } })
@@ -60,7 +67,7 @@ test('right-click tag menu focuses the filter and adds a tag by keyboard alone (
 
   expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', {
     name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   })
@@ -112,7 +119,7 @@ test('a scroll finished BEFORE the right-click does not dismiss the quick menu (
   const docId = await apiCreateDocument(request, title)
   cleanup.defer('purge the stale-scroll document', () => deleteDocApi(request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', {
     name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   })
@@ -189,7 +196,7 @@ test('a scroll made while the quick menu is open still dismisses it (#213)', asy
   const docId = await apiCreateDocument(request, title)
   cleanup.defer('purge the live-scroll document', () => deleteDocApi(request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', {
     name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   })
@@ -261,7 +268,7 @@ test('a scroll dismissal during the quick-menu auto-open raises no page error (#
   const docId = await apiCreateDocument(request, title)
   cleanup.defer('purge the dismissal-race document', () => deleteDocApi(request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', {
     name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   })
@@ -325,7 +332,7 @@ test('slide-over tag-add focuses the filter and adds a tag by keyboard alone (#1
 
   expect(await apiDocTagIds(request, docId)).not.toContain(tagId)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await page.getByRole('cell', { name: title }).first().click()
   const slideOver = page.getByRole('dialog')
   await expect(slideOver).toBeVisible()

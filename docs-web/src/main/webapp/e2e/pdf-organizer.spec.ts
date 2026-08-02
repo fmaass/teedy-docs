@@ -2,7 +2,15 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, login, openFileList, deleteDocApi, deleteUserApi } from './helpers'
+import {
+  unique,
+  login,
+  openFileList,
+  deleteDocApi,
+  deleteUserApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+} from './helpers'
 
 // #73 — the PDF page organizer: an "Edit pages" launcher in the #58 file panel that opens a
 // client-rendered (pdf.js) thumbnail grid; reorder / rotate / delete pages, then save as a new
@@ -38,7 +46,7 @@ test('Edit pages launches a populated organizer for a PDF; a non-PDF file has no
   const id = await seedDoc(page.request, unique('org'), [pdfFile, txtFile])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   // Exactly one "Edit pages" control: the PDF row has it, the .txt row does not.
@@ -63,7 +71,7 @@ test('reorder + rotate + delete saves a new version and preserves the original',
   const id = await seedDoc(page.request, unique('org-save'), [pdfFile])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   // Capture the manifest the client posts, then let the REAL backend create the new version.
@@ -116,7 +124,7 @@ test('a stale base is surfaced distinctly and keeps the organizer open', async (
   const id = await seedDoc(page.request, unique('org-stale'), [pdfFile])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   // Force the version-chain conflict the backend returns when the base is no longer current.
@@ -148,7 +156,7 @@ test('a read-only viewer has no Edit pages control', async ({ page, browser, cle
   const username = unique('rouser').replace(/[^a-z0-9]/gi, '').toLowerCase()
 
   // A second user granted READ on a document that has a PDF.
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const addDialog = page.getByRole('dialog', { name: 'Add user' })
   await addDialog.locator('#add-user-name').fill(username)
@@ -162,7 +170,7 @@ test('a read-only viewer has no Edit pages control', async ({ page, browser, cle
 
   const id = await seedDoc(page.request, unique('ro-pdf'), [pdfFile])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/permissions`)
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   const addForm = page.locator('.add-acl-form', { hasText: 'Add permission' })
   await addForm.locator('input').first().fill(username)
   await page.getByRole('option', { name: new RegExp(username) }).click()
@@ -172,7 +180,7 @@ test('a read-only viewer has no Edit pages control', async ({ page, browser, cle
   const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const viewer = await ctx.newPage()
   await login(viewer, username, 'Password1e2e')
-  await viewer.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(viewer, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(viewer)
 
   // Version history (read-only affordance) is present, but Edit pages (a write action) is not.

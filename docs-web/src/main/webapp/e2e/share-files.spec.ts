@@ -42,7 +42,7 @@ test('anonymous share view renders files read-only and grid-only', async ({ page
   // Anonymous (logged-out) visitor.
   const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const anon = await anonCtx.newPage()
-  await anon.goto(shareUrl.substring(shareUrl.indexOf('#')))
+  await gotoRouteReady(anon, shareUrl.substring(shareUrl.indexOf('#')), ROUTE_ROOT.shareView)
   await expect(anon.getByRole('heading', { name: title })).toBeVisible()
 
   // GRID-ONLY: file cards render in the grid, and BOTH files are present (image +

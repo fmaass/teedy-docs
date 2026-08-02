@@ -2,7 +2,15 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi, gotoDocumentList } from './helpers'
+import {
+  unique,
+  openFileList,
+  deleteDocApi,
+  gotoDocumentList,
+  ROUTE_ROOT,
+  gotoRaw,
+  gotoRouteReady,
+} from './helpers'
 
 // #192 — a shareable link to ONE file of a document, driven against the running app.
 //
@@ -46,7 +54,7 @@ test('copying a file link and following it opens the preview on that exact file 
 }) => {
   const id = await seedDoc(page.request, unique('deeplink'), ['alpha.txt', 'beta.txt'])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   // Copy the link of the SECOND file: a spec that copies the first would pass even if the
@@ -66,7 +74,8 @@ test('copying a file link and following it opens the preview on that exact file 
   // before the deep link is issued — a hash navigation that overtakes the first one is
   // clobbered when it finalizes (#215, see gotoDocumentList).
   await gotoDocumentList(page)
-  await page.goto(copied)
+  // raw: following the clipboard deep link IS the subject — its `?file=` param is consumed during mount.
+  await gotoRaw(page, copied)
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -89,7 +98,8 @@ test('a link to a file this document no longer has degrades with one warning (#1
   const id = await seedDoc(page.request, unique('deadlink'), ['alpha.txt'])
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content?file=no-such-file-id`)
+  // raw: an unknown `?file=` id is dropped during mount, so the landing URL is deliberately not this one.
+  await gotoRaw(page, `/#/document/view/${id}/content?file=no-such-file-id`)
 
   // The document itself still loads…
   await expect(page.locator('.file-preview-grid, .file-data-table').first()).toBeVisible()
@@ -113,7 +123,7 @@ test('the preview param is written by replace, never pushed onto history (#192)'
   // still resolving gets clobbered when it finalizes, leaving the app on the list with the
   // deep link's URL undone (#215, see gotoDocumentList).
   await gotoDocumentList(page)
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
 
   const row = page.locator('.file-data-table tbody tr', { hasText: 'alpha.txt' })

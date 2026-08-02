@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Guest (passwordless) login. The guest button + passwordless login path ARE real UI
 // (Login.vue -> auth.login('guest', '')), but a fresh DB defaults GUEST_LOGIN=false
@@ -46,7 +47,7 @@ test('guest login button works once an admin enables it', async ({ browser, requ
   cleanup.defer('the guest button is gone in a fresh clean context', async () => {
     const cleanupContext = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const cleanupPage = await cleanupContext.newPage()
-    await cleanupPage.goto('/#/login')
+    await gotoRouteReady(cleanupPage, '/#/login', ROUTE_ROOT.login)
     await expect(cleanupPage.getByRole('button', { name: 'Sign in' })).toBeVisible()
     await expect(cleanupPage.getByRole('button', { name: 'Login as guest' })).toHaveCount(0)
     await cleanupContext.close()
@@ -57,7 +58,7 @@ test('guest login button works once an admin enables it', async ({ browser, requ
   const before = await guestContext.request.get('/api/user')
   expect((await before.json()).anonymous).toBe(true)
 
-  await guestPage.goto('/#/login')
+  await gotoRouteReady(guestPage, '/#/login', ROUTE_ROOT.login)
   const guestButton = guestPage.getByRole('button', { name: 'Login as guest' })
   await expect(guestButton).toBeVisible()
   await guestButton.click()

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { login } from './helpers'
+import { login, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #82 regression: a per-user UI language chosen in Settings must be stored SERVER-SIDE and reseed a
 // FRESH device on the next login. Product behaviour proven end-to-end: pick Deutsch, log out, clear
@@ -29,7 +29,7 @@ test.describe('per-user UI language persistence (#82)', () => {
   test('language chosen in settings reseeds a fresh device after re-login', async ({ page, cleanup }) => {
     // 1. Log in and choose Deutsch in Settings → Account (writes localStorage AND POSTs to /user).
     await login(page, 'admin', 'admin')
-    await page.goto('/#/settings/account')
+    await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
     await expect(page.getByRole('heading', { name: EN_ACCOUNT_TITLE })).toBeVisible()
 
     // Restore the server-side preference to English so later specs see the English baseline.
@@ -60,7 +60,7 @@ test.describe('per-user UI language persistence (#82)', () => {
 
     // 4. Log back in — the server-side preference (de) must reseed the UI language.
     await login(page, 'admin', 'admin')
-    await page.goto('/#/settings/account')
+    await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
     await expect(page.getByRole('heading', { name: DE_ACCOUNT_TITLE })).toBeVisible()
   })
 })

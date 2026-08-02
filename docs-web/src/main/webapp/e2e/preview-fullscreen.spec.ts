@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, gotoRaw } from './helpers'
 
 // #205 — the in-app file preview can be taken FULLSCREEN.
 //
@@ -57,7 +57,8 @@ test('maximizing the preview dialog lifts BOTH the 960px width clamp and the 70v
   const fileId = await fileIdOf(page.request, id)
 
   // The file deep link opens the preview dialog directly on that file (#192).
-  await page.goto(`/#/document/view/${id}/content?file=${fileId}`)
+  // raw: the `?file=` deep link IS the subject — its param lifecycle is what this test measures.
+  await gotoRaw(page, `/#/document/view/${id}/content?file=${fileId}`)
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
 

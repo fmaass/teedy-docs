@@ -7,6 +7,10 @@ import {
   deleteDocApi,
   deleteTagByNameApi,
   deleteUserApi,
+  ROUTE_ROOT,
+  gotoRouteReady,
+  gotoRaw,
+  expectRouteReady,
 } from './helpers'
 
 // #88: the tag editor gained a Permissions section (AclEditor on the generic /acl
@@ -19,7 +23,7 @@ import {
 //      UI (the server enforces the other half; see TestAclResource#testTagLastWriteLockout).
 
 async function createTag(page: Page, name: string): Promise<void> {
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(name)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.locator('.tag-tree').getByText(name, { exact: true })).toBeVisible()
@@ -27,7 +31,7 @@ async function createTag(page: Page, name: string): Promise<void> {
 
 // Open a tag's edit page from the tree and wait for the Permissions section to render.
 async function openTagPermissions(page: Page, name: string): Promise<void> {
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.locator('.tag-tree').getByText(name, { exact: true }).click()
   await expect(page).toHaveURL(/#\/tag\//)
   await expect(page.getByRole('heading', { name: 'Permissions' })).toBeVisible()
@@ -36,9 +40,13 @@ async function openTagPermissions(page: Page, name: string): Promise<void> {
 // Force a fresh app load: hash-route navigation is a same-document change, so the SPA's
 // cached queries (tag list, staleTime 60s) would not refetch. A full reload re-inits the
 // query client, so the second user observes the true post-grant/post-revoke visibility.
-async function freshGoto(p: Page, url: string): Promise<void> {
-  await p.goto(url)
+async function freshGoto(p: Page, url: string, routeRoot: string): Promise<void> {
+  // The reload re-runs the SPA's WHOLE first-navigation sequence, so route readiness belongs
+  // after it — a barrier asserted on the goto is discarded with the document the reload
+  // replaces (#203). Hence the raw goto here rather than gotoRouteReady.
+  await gotoRaw(p, url)
   await p.reload()
+  await expectRouteReady(p, url, routeRoot)
 }
 
 test('grant READ on a tag to a second user reveals its documents; revoke hides them', async ({ page, browser, cleanup }) => {
@@ -53,7 +61,7 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
   const userPage = await userCtx.newPage()
 
   // --- Admin: create the second user ---
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const userDialog = page.getByRole('dialog', { name: 'Add user' })
   await userDialog.locator('#add-user-name').fill(username)
@@ -66,7 +74,7 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
   // --- Admin: create a tag and a document that carries it ---
   await createTag(page, tagName)
   cleanup.defer('delete the tag', () => deleteTagByNameApi(page.request, tagName))
-  await page.goto('/#/document/add')
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(docTitle)
   await page.locator('#edit-tags').click()
   await page.getByRole('option', { name: tagName }).click()
@@ -79,9 +87,9 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
 
   // --- Second user: logs in, sees NEITHER the tag nor the document ---
   await login(userPage, username, password)
-  await freshGoto(userPage, '/#/tag')
+  await freshGoto(userPage, '/#/tag', ROUTE_ROOT.tagList)
   await expect(userPage.locator('.tag-tree').getByText(tagName, { exact: true })).toHaveCount(0)
-  await freshGoto(userPage, '/#/document')
+  await freshGoto(userPage, '/#/document', ROUTE_ROOT.documentList)
   await expect(userPage.getByText(new RegExp(docTitle))).toHaveCount(0)
 
   // --- Admin: grant the second user READ on the tag; the doc-count disclosure fires ---
@@ -104,9 +112,9 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
   await expect(aclRow.getByText('Can view')).toBeVisible()
 
   // --- Second user: NOW sees the tag AND the document ---
-  await freshGoto(userPage, '/#/tag')
+  await freshGoto(userPage, '/#/tag', ROUTE_ROOT.tagList)
   await expect(userPage.locator('.tag-tree').getByText(tagName, { exact: true })).toBeVisible()
-  await freshGoto(userPage, '/#/document')
+  await freshGoto(userPage, '/#/document', ROUTE_ROOT.documentList)
   await expect(userPage.getByText(new RegExp(docTitle))).toBeVisible()
 
   // --- Admin: revoke the grant ---
@@ -116,9 +124,9 @@ test('grant READ on a tag to a second user reveals its documents; revoke hides t
   await expect(page.locator('.acl-row', { hasText: username })).toHaveCount(0)
 
   // --- Second user: tag AND document disappear again ---
-  await freshGoto(userPage, '/#/tag')
+  await freshGoto(userPage, '/#/tag', ROUTE_ROOT.tagList)
   await expect(userPage.locator('.tag-tree').getByText(tagName, { exact: true })).toHaveCount(0)
-  await freshGoto(userPage, '/#/document')
+  await freshGoto(userPage, '/#/document', ROUTE_ROOT.documentList)
   await expect(userPage.getByText(new RegExp(docTitle))).toHaveCount(0)
 })
 

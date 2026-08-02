@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, openFileList, deleteDocApi } from './helpers'
+import { unique, openFileList, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #175 — move a file to another document. The moved file leaves the source's file list and appears in
 // the target; a source cover that pointed at the moved file falls back, and a previously empty target
@@ -63,7 +63,7 @@ test('move a file to another document: it leaves the source, the source cover fa
   const ids = await fileIds(page.request, sourceId)
 
   // Pin the file we are about to move as the source's explicit cover, so the move must fall the cover back.
-  await page.goto(`/#/document/view/${sourceId}/content`)
+  await gotoRouteReady(page, `/#/document/view/${sourceId}/content`, ROUTE_ROOT.documentContent)
   await openFileList(page)
   await page.locator('.file-data-table tbody tr', { hasText: 'moved.png' })
     .getByRole('button', { name: 'Set as cover' }).click()

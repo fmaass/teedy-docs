@@ -292,34 +292,81 @@ export async function fillDescription(page: Page, text: string): Promise<void> {
 /**
  * Route roots used for readiness — each is the destination component's OWN root element,
  * verified destination-exclusive against src (a selector shared with another route would
- * make readiness pass on the wrong page):
+ * make readiness pass on the wrong page). There is one key per route the SUITE NAVIGATES TO;
+ * routes reached only by clicking inside the app (tag edit, document text) have none.
  *
- *   documentList  `.doc-list-page`  — DocumentList.vue:572, the only occurrence in src.
- *   documentEdit  `.doc-edit`       — DocumentEdit.vue:490 (add AND edit render it), the
- *                                     only occurrence; the `doc-edit-*` siblings are
- *                                     different class tokens and do not match.
- *   documentPermissions
- *                 `.permissions-view` — DocumentViewPermissions.vue:167, the only
- *                                     occurrence, and rendered under `v-if="doc"`, so it
- *                                     also proves the document itself loaded.
- *   documentActivity
- *                 `.doc-tab-content .p-datatable` — the Activity tab is the one
- *                                     document-view child that has no root class of its
- *                                     own (DocumentViewActivity.vue renders ActivityTable
- *                                     directly, whose root is a bare <div>), and giving it
- *                                     one is a product change this phase must not make. Its
- *                                     table inside the document-view tab outlet
- *                                     (DocumentView.vue `.doc-tab-content`, itself rendered
- *                                     only under `v-else-if="doc"`) is the destination-
- *                                     specific tab content: on the `/activity` hash — which
- *                                     expectRouteReady pins first — it can only be
- *                                     ActivityTable's DataTable.
+ * Most views already carried a route-specific root class. The ones that rendered a BARE root
+ * `<div>` were given one static class each (#224) — template-only, no behaviour, and the name
+ * matches nothing in any stylesheet, so nothing renders differently. The alternative was
+ * pinning readiness to the shared `.settings-content` wrapper, which is live on EVERY settings
+ * route and would therefore pass on a stale view — the precise failure this asserts against.
+ *
+ * Two entries are worth calling out:
+ *
+ *   documentActivity — `.doc-activity-view`. DocumentViewActivity renders ActivityTable directly,
+ *                      whose root is a bare <div>, so the class is applied at the ActivityTable
+ *                      usage and falls through to that root. The tab outlet's DataTable is NOT a
+ *                      usable root here: the Content tab renders FileListTable, also a PrimeVue
+ *                      DataTable (FileListTable.vue:308), so `.doc-tab-content .p-datatable`
+ *                      matches the FILE table and a content -> activity barrier would pass on the
+ *                      previous tab. ActivityTable's own inner markup cannot serve either — its
+ *                      toolbar/filters/rows are all conditional, and the document tab legitimately
+ *                      renders zero rows ("No activity recorded", activity.spec.ts).
+ *   login            — `.login-page`, added because `.teedy-login` is shared with
+ *                      PasswordReset.vue and so is not destination-exclusive.
+ *
+ * WHAT THESE SELECTORS DO AND DO NOT PIN. Every one is emitted by exactly ONE component (checked
+ * by a class-token scan over every template), so a barrier can never be satisfied by a DIFFERENT
+ * view — that is the property that makes it a readiness barrier at all, and it is the property
+ * `.doc-tab-content .p-datatable` lacked.
+ *
+ * They deliberately do NOT discriminate two hashes served by the SAME component — `/#/document`
+ * vs `/#/document?favorites=me`, `/#/document/add` vs `/#/document/edit/:id`, the same tab of two
+ * different documents. vue-router reuses the instance there, so the root can stay mounted across
+ * the change and the root assertion passes immediately; those navigations are pinned by the URL
+ * poll that runs FIRST, and by whatever content assertion the spec makes next. Giving a
+ * per-instance root would mean keying readiness on rendered DATA, which is a different (and
+ * spec-local) assertion.
+ *
+ * A route that REDIRECTS is keyed by its DESTINATION: `/#/document/view/:id` redirects to
+ * `…/content` (router/index.ts), and expectRouteReady pins the FINAL hash, so specs address
+ * the `/content` URL directly.
  */
 export const ROUTE_ROOT = {
+  // Documents. `.doc-edit` backs both add and edit (DocumentEdit.vue renders it for either);
+  // its `doc-edit-*` siblings are different class tokens and do not match.
   documentList: '.doc-list-page',
+  documentTrash: '.trash-page',
   documentEdit: '.doc-edit',
+  // The four document-view tabs below render under `v-if="doc"`, so each also proves the
+  // document itself loaded — not merely that the tab outlet exists.
+  documentContent: '.doc-content-view',
   documentPermissions: '.permissions-view',
-  documentActivity: '.doc-tab-content .p-datatable',
+  documentWorkflow: '.workflow-view',
+  documentComments: '.comments',
+  documentActivity: '.doc-activity-view',
+  // Everything else
+  history: '.history-view',
+  tagList: '.tag-list-page',
+  login: '.login-page',
+  shareView: '.share-page',
+  // Settings leaves. Each is its view's own root; `.settings-content` (SettingsLayout) is
+  // deliberately NOT used — it is the same element on every settings route.
+  settingsHub: '.settings-hub',
+  settingsAccount: '.account-settings',
+  settingsApiKeys: '.apikeys-settings',
+  settingsConfig: '.config-settings',
+  settingsGroups: '.groups-settings',
+  settingsInbox: '.inbox-settings',
+  settingsLdap: '.ldap-settings',
+  settingsMetadata: '.metadata-settings',
+  settingsOidc: '.oidc-settings',
+  settingsStats: '.stats-settings',
+  settingsTagRules: '.tag-rules-settings',
+  settingsUsers: '.users-settings',
+  settingsVocabulary: '.vocabulary-settings',
+  settingsWebhooks: '.webhooks-settings',
+  settingsWorkflow: '.workflow-settings',
 } as const
 
 /**
@@ -363,6 +410,29 @@ export async function gotoRouteReady(page: Page, url: string, routeRoot: string)
 /** The document list, route-ready (#215). A thin wrapper — the barrier is gotoRouteReady's. */
 export async function gotoDocumentList(page: Page): Promise<void> {
   await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+}
+
+/**
+ * Navigate with NO readiness barrier — the sanctioned escape from the #224 lint guard, which
+ * bans every direct `.goto()` in a spec.
+ *
+ * It is deliberately a named wrapper rather than an eslint-disable comment: a raw navigation
+ * is legitimate in a handful of shapes, and each of them should be greppable and carry a
+ * one-line reason at the call site. The shapes currently in the suite:
+ *
+ *   * a REAL non-SPA path (`/apidoc/`) — vue-router is not involved at all;
+ *   * a nav-guard BOUNCE — the landing route is deliberately not the requested one, so
+ *     pinning the requested hash would assert the opposite of what the test proves;
+ *   * a deep link whose query param is consumed during mount (`?file=<id>`), so the landing
+ *     URL is deliberately not the requested one;
+ *   * the goto half of a goto-then-reload pair — the reload re-runs the whole first-navigation
+ *     sequence, so readiness belongs AFTER it, asserted with expectRouteReady;
+ *   * a tolerant teardown, where a missing target must stay a no-op rather than a failure.
+ *
+ * Anything else wants gotoRouteReady.
+ */
+export async function gotoRaw(page: Page, url: string): Promise<void> {
+  await page.goto(url)
 }
 
 // The document-view file panel defaults to GRID (#58). Switch it to the enriched

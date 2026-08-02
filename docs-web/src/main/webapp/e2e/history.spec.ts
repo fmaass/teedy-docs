@@ -1,5 +1,14 @@
 import { test, expect, type Page } from './fixtures'
-import { unique, login, createDocument, deleteDocApi, deleteUser } from './helpers'
+import {
+  unique,
+  login,
+  createDocument,
+  deleteDocApi,
+  deleteUser,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
+} from './helpers'
 
 // Global activity history (#177) — the account-wide audit feed restored from the AngularJS app.
 //
@@ -17,13 +26,13 @@ import { unique, login, createDocument, deleteDocApi, deleteUser } from './helpe
 const historyRows = (page: Page) => page.locator('.p-datatable tbody tr')
 
 async function gotoHistory(page: Page) {
-  await page.goto('/#/history')
+  await gotoRouteReady(page, '/#/history', ROUTE_ROOT.history)
   await expect(page.getByRole('heading', { name: 'Activity history' })).toBeVisible()
   await expect(page.locator('.p-datatable')).toBeVisible()
 }
 
 test('the header button opens the global history view', async ({ page }) => {
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await page.getByRole('button', { name: 'Activity history', exact: true }).click()
   await expect(page).toHaveURL(/#\/history$/)
   await expect(page.getByRole('heading', { name: 'Activity history' })).toBeVisible()
@@ -35,7 +44,7 @@ test('an admin sees a cross-user feed that filters narrow and pages older', asyn
 
   // Create a second user and have THEM create a document, so the admin's feed must contain a row
   // authored by somebody else. That row is the cross-user proof.
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)
@@ -106,7 +115,7 @@ test('a non-admin sees only their own rows and never an Acl row', async ({ page,
   const username = unique('histown').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const password = 'HistoryPass123'
 
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await page.getByRole('button', { name: 'Add user' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.locator('#add-user-name').fill(username)

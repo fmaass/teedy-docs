@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // OIDC settings smoke (#44): the admin opens /settings/oidc, sees the enabled toggle reveal the
 // provider/claim fields, the client secret is masked (a Password input, never a plaintext value),
@@ -7,7 +8,7 @@ import { test, expect } from './fixtures'
 
 test.describe('OIDC settings', () => {
   test('the admin can open the OIDC settings and see the fields with a masked secret', async ({ page }) => {
-    await page.goto('/#/settings/oidc')
+    await gotoRouteReady(page, '/#/settings/oidc', ROUTE_ROOT.settingsOidc)
     await expect(page.getByRole('heading', { name: 'OIDC authentication' })).toBeVisible()
 
     // Toggle on — the provider/claim fields appear.
@@ -32,7 +33,7 @@ test.describe('OIDC settings', () => {
   })
 
   test('saving a disabled OIDC config succeeds without error', async ({ page }) => {
-    await page.goto('/#/settings/oidc')
+    await gotoRouteReady(page, '/#/settings/oidc', ROUTE_ROOT.settingsOidc)
     await expect(page.getByRole('heading', { name: 'OIDC authentication' })).toBeVisible()
 
     // Ensure disabled (default), then save — no required fields apply when disabled.

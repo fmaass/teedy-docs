@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures'
-import { unique, createDocument, confirmDanger } from './helpers'
+import { unique, createDocument, confirmDanger, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Share-by-URL: create a public link on a document, open it in a SEPARATE
 // unauthenticated browser context (no storageState), confirm the doc is viewable
@@ -10,7 +10,7 @@ test('create a public share link, view it anonymously, then revoke it', async ({
   const { id } = await createDocument(page, title, { description: 'Shared read-only content.' })
 
   // Open the Permissions tab and create a share link.
-  await page.goto(`/#/document/view/${id}/permissions`)
+  await gotoRouteReady(page, `/#/document/view/${id}/permissions`, ROUTE_ROOT.documentPermissions)
   await expect(page.getByRole('heading', { name: 'Share links' })).toBeVisible()
   await expect(page.getByText('No active share links.')).toBeVisible()
 
@@ -29,7 +29,7 @@ test('create a public share link, view it anonymously, then revoke it', async ({
   const meRes = await anonContext.request.get('/api/user')
   expect((await meRes.json()).anonymous).toBe(true)
 
-  await anonPage.goto(shareUrl.substring(shareUrl.indexOf('#')))
+  await gotoRouteReady(anonPage, shareUrl.substring(shareUrl.indexOf('#')), ROUTE_ROOT.shareView)
   await expect(anonPage.getByRole('heading', { name: title })).toBeVisible()
   await expect(anonPage.getByText('Shared via Teedy')).toBeVisible()
 

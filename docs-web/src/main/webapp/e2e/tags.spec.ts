@@ -7,6 +7,9 @@ import {
   expectTagNodeState,
   openNav,
   deleteTagByNameApi,
+  ROUTE_ROOT,
+  gotoDocumentList,
+  gotoRouteReady,
 } from './helpers'
 
 // Tag management (create/edit/delete on the /tag page) and the left-panel tag
@@ -18,7 +21,7 @@ test.describe('tag management', () => {
     const name = uniqueTag('e2e-tag')
     const renamed = `${name}-r`
 
-    await page.goto('/#/tag')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     await expect(page.getByRole('heading', { name: 'Tags' })).toBeVisible()
 
     // Create: the create card's InputText carries the tag-name placeholder.
@@ -61,7 +64,7 @@ test.describe('tag filter panel', () => {
   }
 
   async function createTag(page: import('@playwright/test').Page, name: string) {
-    await page.goto('/#/tag')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     await page.getByPlaceholder('Tag name').fill(name)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
     // The success signal is the new node in the tree — the transient "Tag created"
@@ -84,7 +87,7 @@ test.describe('tag filter panel', () => {
     cleanup.defer('delete the excluded tag', () => deleteTagByNameApi(page.request, excludeTag))
 
     const docTitle = unique('flt-doc')
-    await page.goto('/#/document/add')
+    await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
     await page.locator('#edit-title').fill(docTitle)
     await page.locator('#edit-tags').click()
     await page.getByRole('option', { name: includeTag }).click()
@@ -93,7 +96,7 @@ test.describe('tag filter panel', () => {
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/#\/document\/view\//)
 
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
 
     // Drive the tag tree via the viewport-aware helpers: on desktop the panel stays
     // open; on mobile each select CLOSES the Drawer, so toggleTagFilter re-opens it
@@ -123,9 +126,9 @@ test.describe('tag filter panel', () => {
     // --- Round-trip: navigate AWAY, then back to the combined URL (deep-link /
     // back-button). BOTH the include selection AND the exclusion must re-hydrate.
     // This fails if EITHER dimension is dropped — the exact regression guarded. ---
-    await page.goto('/#/settings/account')
+    await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
     await expect(page).toHaveURL(/#\/settings\/account/)
-    await page.goto(combinedUrl.substring(combinedUrl.indexOf('#')))
+    await gotoRouteReady(page, combinedUrl.substring(combinedUrl.indexOf('#')), ROUTE_ROOT.documentList)
     await expect(page).toHaveURL(/#\/document/)
 
     // Included tag: back to a selected (aria-pressed) chip in the panel.
@@ -148,7 +151,7 @@ test.describe('tag filter panel', () => {
     cleanup.defer('delete the tri-state tag', () => deleteTagByNameApi(page.request, tagName))
 
     const docTitle = unique('tri-doc')
-    await page.goto('/#/document/add')
+    await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
     await page.locator('#edit-title').fill(docTitle)
     await page.locator('#edit-tags').click()
     await page.getByRole('option', { name: tagName }).click()
@@ -156,7 +159,7 @@ test.describe('tag filter panel', () => {
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/#\/document\/view\//)
 
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
 
     // Tri-state via the viewport-aware helper (each click re-opens the Drawer on
     // mobile). The URL is the primary, viewport-agnostic assertion; the node's
@@ -181,7 +184,7 @@ test.describe('tag filter panel', () => {
   })
 
   test('toggles between Tree and Facets view modes', async ({ page }) => {
-    await page.goto('/#/document')
+    await gotoDocumentList(page)
     // The view-mode SelectButton lives in the tag panel — desktop side panel OR the
     // mobile Drawer (openNav opens it on mobile). The Tree/Facets toggle does NOT
     // close the Drawer (only a tag SELECT does), so both clicks run in one open pass.
@@ -213,7 +216,7 @@ test.describe('tag filter panel', () => {
 // reverting the #chip slot would drop .teedy-tag and fail.
 test.describe('tag pickers (behavior C)', () => {
   async function createTag(page: import('@playwright/test').Page, name: string) {
-    await page.goto('/#/tag')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     await page.getByPlaceholder('Tag name').fill(name)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
     // The success signal is the new node in the tree — the transient "Tag created"
@@ -232,7 +235,7 @@ test.describe('tag pickers (behavior C)', () => {
     await createTag(page, dropTag)
     cleanup.defer('delete the filtered-out tag', () => deleteTagByNameApi(page.request, dropTag))
 
-    await page.goto('/#/document/add')
+    await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
     await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
 
     // Open the MultiSelect overlay.
@@ -283,7 +286,7 @@ test.describe('tag pickers (behavior C)', () => {
     cleanup.defer('delete the child tag', () => deleteTagByNameApi(page.request, child))
 
     // Open the child's edit page and its parent Select.
-    await page.goto('/#/tag')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     await page.locator('.tag-tree').getByText(child, { exact: true }).click()
     await expect(page).toHaveURL(/#\/tag\//)
 

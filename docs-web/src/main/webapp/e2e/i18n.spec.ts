@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // UI language switch (vue-i18n) via the REAL Settings → Account language control.
 // Proves the whole loop: selecting Deutsch swaps rendered strings to German, the
@@ -30,7 +31,7 @@ test('switching the UI language to German and back updates and persists rendered
   const appearanceTitle = (page: import('@playwright/test').Page) =>
     page.locator('.section-title').first()
 
-  await page.goto('/#/settings/account')
+  await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
 
   // Guard against leaking a non-English locale into later specs if an assertion below
   // failed after the switch. Registered once the app document exists (localStorage is

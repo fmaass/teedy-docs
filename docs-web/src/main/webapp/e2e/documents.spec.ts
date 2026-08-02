@@ -1,5 +1,13 @@
 import { test, expect } from './fixtures'
-import { unique, uniqueTag, deleteDocApi, deleteTagApi, gotoRouteReady, ROUTE_ROOT } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  deleteDocApi,
+  deleteTagApi,
+  gotoRouteReady,
+  ROUTE_ROOT,
+  gotoDocumentList,
+} from './helpers'
 
 // Runs authenticated. Creates a document via the real Add-document form. On save,
 // Teedy routes to the full document view (DocumentEdit -> document-view). We then
@@ -7,7 +15,7 @@ import { unique, uniqueTag, deleteDocApi, deleteTagApi, gotoRouteReady, ROUTE_RO
 test('creates a document, sees it in the list, and opens it', async ({ page }) => {
   const title = `E2E doc ${Date.now()}`
 
-  await page.goto('/#/document/add')
+  await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await expect(page.getByRole('heading', { name: 'New document' })).toBeVisible()
 
   await page.locator('#edit-title').fill(title)
@@ -18,7 +26,7 @@ test('creates a document, sees it in the list, and opens it', async ({ page }) =
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   // Return to the list — the new document appears in the table.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const titleCell = page.getByText(title, { exact: true })
   await expect(titleCell).toBeVisible()
 
@@ -54,7 +62,7 @@ test('double-clicking a document row navigates to the full document view (D #11)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', { name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
   await expect(row).toBeVisible()
 
@@ -94,7 +102,7 @@ test('a document with more than 3 tags shows a focusable +N control whose popove
   const docId = (await docRes.json()).id as string
   cleanup.defer('purge the tagged document', () => deleteDocApi(page.request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const row = page.getByRole('row', { name: new RegExp(docTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
   await expect(row).toBeVisible()
 
@@ -156,7 +164,7 @@ test('middle-clicking a document title opens the full view in a new tab (#194)',
   const docId = (await res.json()).id as string
   cleanup.defer('purge the new-tab document', () => deleteDocApi(request, docId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const link = page.getByRole('link', { name: title, exact: true })
   await expect(link).toBeVisible()
   // The href is the document's own full-view route — not "#" or a JS placeholder.
@@ -180,7 +188,7 @@ test('middle-clicking a document title opens the full view in a new tab (#194)',
 test('admin/settings table pages render at the wider content width (D #25)', async ({ page }) => {
   // A wideSettings route (users) opts into the full-width layout; a narrow-measure
   // route (account) keeps the 800px cap. Assert the class the flag toggles.
-  await page.goto('/#/settings/users')
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
   await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible()
   await expect(page.locator('.settings-content.settings-content--wide')).toBeVisible()
   // And its computed max-width is unconstrained (not the 800px text cap).
@@ -190,7 +198,7 @@ test('admin/settings table pages render at the wider content width (D #25)', asy
   expect(wideMax).toBe('none')
 
   // The narrow account page does NOT get the wide modifier.
-  await page.goto('/#/settings/account')
+  await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   await expect(page.locator('.settings-content')).toBeVisible()
   await expect(page.locator('.settings-content.settings-content--wide')).toHaveCount(0)
 })

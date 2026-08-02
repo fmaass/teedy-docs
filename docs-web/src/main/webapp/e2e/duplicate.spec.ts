@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique } from './helpers'
+import { unique, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // #184 — duplicate a document from the document-view header. Duplicating a 2-file document produces a
 // new document (a different id) owned by the requester, titled "<title> (copy)", carrying fresh copies
@@ -29,7 +29,7 @@ test('duplicates a 2-file document from the header; the copy opens with both fil
   const title = unique('E2E dup')
   const sourceId = await seedTwoFileDoc(request, title)
 
-  await page.goto(`/#/document/view/${sourceId}`)
+  await gotoRouteReady(page, `/#/document/view/${sourceId}/content`, ROUTE_ROOT.documentContent)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   await page.getByRole('button', { name: 'Duplicate', exact: true }).click()

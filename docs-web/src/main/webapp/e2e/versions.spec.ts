@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { unique, createDocument, openFileList, deleteDocApi } from './helpers'
+import { unique, createDocument, openFileList, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const v1 = resolve(here, 'fixtures/sample.txt')
@@ -19,7 +19,7 @@ test('the version-history dialog opens and lists the current version', async ({ 
   // Cleanup the document (runs even if an assertion below fails).
   cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
 
-  await page.goto(`/#/document/view/${id}/content`)
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(v1)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
   // Version history lives in the list's per-file action menu.

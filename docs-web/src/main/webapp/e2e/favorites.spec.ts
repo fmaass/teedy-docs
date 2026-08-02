@@ -1,5 +1,5 @@
 import { test, expect, type Page, type APIRequestContext } from './fixtures'
-import { unique, deleteDocApi } from './helpers'
+import { unique, deleteDocApi, ROUTE_ROOT, gotoDocumentList, gotoRouteReady } from './helpers'
 
 // #41: per-user document favorites. A user STARS a document from the list row, the
 // star is visible (and persistent) on the document detail, the "Favorites" filter
@@ -34,7 +34,7 @@ test('star from list, see it on detail, filter by favorites, unstar (#41)', asyn
   const otherId = await apiCreateDocument(request, otherTitle)
   cleanup.defer('purge the other document', () => deleteDocApi(page.request, otherId))
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const favedRow = rowFor(page, favedTitle)
   const otherRow = rowFor(page, otherTitle)
   await expect(favedRow).toBeVisible()
@@ -65,7 +65,7 @@ test('star from list, see it on detail, filter by favorites, unstar (#41)', asyn
   )
 
   // Back to the list and activate the Favorites filter — the URL gains favorites=me.
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   // The filter toggle lives in the filter row; scope to it so the row-level star
   // buttons ("Add/Remove from favorites") never ambiguate the "Favorites" match.
   const filterToggle = page.locator('.wf-filter-row').getByRole('button', { name: 'Favorites' })
@@ -86,7 +86,7 @@ test('star from list, see it on detail, filter by favorites, unstar (#41)', asyn
   // Authoritative read-back: reload the favorites-filtered URL directly. The
   // document is gone from the favorites view because the star was removed
   // server-side (the favorited row does not resurface after a full reload).
-  await page.goto('/#/document?favorites=me')
+  await gotoRouteReady(page, '/#/document?favorites=me', ROUTE_ROOT.documentList)
   await expect(page.locator('.wf-filter-row').getByRole('button', { name: 'Favorites' })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -94,7 +94,7 @@ test('star from list, see it on detail, filter by favorites, unstar (#41)', asyn
   await expect(rowFor(page, favedTitle)).toBeHidden()
 
   // And clearing the filter, both documents are visible again (neither was deleted).
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   await expect(rowFor(page, favedTitle)).toBeVisible()
   await expect(rowFor(page, otherTitle)).toBeVisible()
   // The favorited star is OFF again (the unstar persisted).

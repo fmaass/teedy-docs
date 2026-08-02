@@ -1,5 +1,5 @@
 import { test, expect, request as pwRequest } from './fixtures'
-import { unique, totpCode } from './helpers'
+import { unique, totpCode, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // The login-form specs must start UNauthenticated — override the project-wide
 // admin storageState with a clean one.
@@ -7,7 +7,7 @@ test.describe('authentication', () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
   test('logs in with valid credentials', async ({ page }) => {
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill('admin')
     await page.locator('#login-pass').fill('admin')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -20,7 +20,7 @@ test.describe('authentication', () => {
   })
 
   test('shows an error for bad credentials', async ({ page }) => {
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill('admin')
     await page.locator('#login-pass').fill('wrong-password')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -34,7 +34,7 @@ test.describe('authentication', () => {
   })
 
   test('logs out', async ({ page }) => {
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill('admin')
     await page.locator('#login-pass').fill('admin')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -122,7 +122,7 @@ test.describe('TOTP login (behavior A)', () => {
     const { username, password, secret } = await seedTotpUser(baseURL!)
     cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill(username)
     await page.locator('#login-pass').fill(password)
     // The OTP field is NOT present before the challenge — a non-TOTP login never
@@ -150,7 +150,7 @@ test.describe('TOTP login (behavior A)', () => {
     const { username, password } = await seedTotpUser(baseURL!)
     cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill(username)
     await page.locator('#login-pass').fill(password)
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -175,7 +175,7 @@ test.describe('TOTP login (behavior A)', () => {
     const { username, password } = await seedTotpUser(baseURL!)
     cleanup.defer('delete the TOTP seed user', () => deleteUser(baseURL!, username))
 
-    await page.goto('/#/login')
+    await gotoRouteReady(page, '/#/login', ROUTE_ROOT.login)
     await page.getByLabel('Username').fill(username)
     await page.locator('#login-pass').fill(password)
     await page.getByRole('button', { name: 'Sign in' }).click()

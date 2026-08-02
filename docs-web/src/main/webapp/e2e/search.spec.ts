@@ -1,12 +1,19 @@
 import { test, expect } from './fixtures'
-import { uniqueTag, createDocument, confirmDanger, gotoRouteReady, ROUTE_ROOT } from './helpers'
+import {
+  uniqueTag,
+  createDocument,
+  confirmDanger,
+  gotoRouteReady,
+  ROUTE_ROOT,
+  gotoDocumentList,
+} from './helpers'
 
 // Full-text search: a created document is found by a title term and by a tag:
 // operator, and the search-help popover lists the supported operators.
 
 test('full-text and tag: operator search find a document; help popover lists operators', async ({ page }) => {
   const tagName = uniqueTag('srch-tag')
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.getByPlaceholder('Tag name').fill(tagName)
   await page.getByRole('button', { name: 'Create', exact: true }).click()
   await expect(page.getByText('Tag created')).toBeVisible()
@@ -24,7 +31,7 @@ test('full-text and tag: operator search find a document; help popover lists ope
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
 
-  await page.goto('/#/document')
+  await gotoDocumentList(page)
   const search = page.getByPlaceholder('Search')
 
   // Full-text: the unique token returns exactly our document.
@@ -57,7 +64,7 @@ test('full-text and tag: operator search find a document; help popover lists ope
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)
 
-  await page.goto('/#/tag')
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
   await page.locator('.tag-tree').getByText(tagName, { exact: true }).click()
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   await confirmDanger(page)

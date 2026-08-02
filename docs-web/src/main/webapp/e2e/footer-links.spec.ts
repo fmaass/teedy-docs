@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from './fixtures'
-import { openNav } from './helpers'
+import { openNav, ROUTE_ROOT, expectRouteReady, gotoRaw, gotoRouteReady } from './helpers'
 
 // Configurable footer/imprint links (issue #43). Two admin-configured links must
 // render BOTH in the authenticated app shell AND on the logged-out login screen —
@@ -39,8 +39,9 @@ test.describe('configurable footer links', () => {
 
     // --- App shell (authenticated; storageState = admin) ---
     // Reload so the app-info query refetches the just-set links (refresh barrier).
-    await page.goto('/#/document')
+    await gotoRaw(page, '/#/document')
     await page.reload()
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
 
     // The footer links live in the panel footer (desktop) OR the Drawer footer
     // (mobile) — openNav opens the Drawer on mobile so both are in view.
@@ -62,7 +63,7 @@ test.describe('configurable footer links', () => {
     })
     cleanup.defer('close the anonymous login-screen context', () => context.close())
     const anon = await context.newPage()
-    await anon.goto('/#/login?local=1')
+    await gotoRouteReady(anon, '/#/login?local=1', ROUTE_ROOT.login)
     const loginImprint = anon.getByRole('link', { name: IMPRINT.label })
     const loginPrivacy = anon.getByRole('link', { name: PRIVACY.label })
     await expect(loginImprint).toBeVisible()

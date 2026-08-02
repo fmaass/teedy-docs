@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures'
+import { ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // The admin LDAP settings screen (/settings/ldap): the enabled toggle reveals the
 // fields; client-side validation blocks save (filter must contain USERNAME;
@@ -7,7 +8,7 @@ import { test, expect } from './fixtures'
 
 test.describe('LDAP settings', () => {
   test('enabled toggle reveals the fields; disabled hides them', async ({ page }) => {
-    await page.goto('/#/settings/ldap')
+    await gotoRouteReady(page, '/#/settings/ldap', ROUTE_ROOT.settingsLdap)
     await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
 
     // Disabled by default (default admin config): the host field is not rendered.
@@ -25,7 +26,7 @@ test.describe('LDAP settings', () => {
   })
 
   test('saving a disabled config succeeds', async ({ page }) => {
-    await page.goto('/#/settings/ldap')
+    await gotoRouteReady(page, '/#/settings/ldap', ROUTE_ROOT.settingsLdap)
     await expect(page.getByRole('heading', { name: 'LDAP authentication' })).toBeVisible()
     // Ensure disabled state, then save — no required fields apply when disabled.
     await expect(page.locator('#ldap-host')).toHaveCount(0)
@@ -34,7 +35,7 @@ test.describe('LDAP settings', () => {
   })
 
   test('required-when-enabled fields and the USERNAME filter rule block save', async ({ page }) => {
-    await page.goto('/#/settings/ldap')
+    await gotoRouteReady(page, '/#/settings/ldap', ROUTE_ROOT.settingsLdap)
     await page.locator('#ldap-enabled').click()
     await expect(page.locator('#ldap-host')).toBeVisible()
 
