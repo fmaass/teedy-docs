@@ -6,7 +6,7 @@
 -- key is the identity DIGEST (not the raw account/folder columns), so it behaves identically on H2
 -- (SET IGNORECASE) and PostgreSQL. Retry-safe DDL (IF NOT EXISTS): on H2 a partially-applied migration
 -- leaves the auto-committed DDL behind, and a re-run must skip it rather than fail.
-create cached table if not exists T_INBOX_RECEIPT ( INR_ID_C varchar(36) not null, INR_IDENTITY_C varchar(64) not null, INR_UIDVALIDITY_N bigint not null, INR_UID_N bigint not null, INR_ACCOUNT_C varchar(500), INR_FOLDER_C varchar(500), INR_IDDOCUMENT_C varchar(36), INR_CREATEDATE_D datetime not null, primary key (INR_ID_C), constraint FK_INR_IDDOCUMENT_C foreign key (INR_IDDOCUMENT_C) references T_DOCUMENT (DOC_ID_C) on delete set null on update restrict );
+create cached table if not exists T_INBOX_RECEIPT ( INR_ID_C varchar(36) not null, INR_IDENTITY_C varchar(64) not null, INR_UIDVALIDITY_N bigint not null, INR_UID_N bigint not null, INR_ACCOUNT_C varchar(500), INR_FOLDER_C varchar(500), INR_IDDOCUMENT_C varchar(36), INR_CREATEDATE_D timestamp not null, primary key (INR_ID_C), constraint FK_INR_IDDOCUMENT_C foreign key (INR_IDDOCUMENT_C) references T_DOCUMENT (DOC_ID_C) on delete set null on update restrict );
 create unique index if not exists IDX_INR_IDENTITY on T_INBOX_RECEIPT (INR_IDENTITY_C, INR_UIDVALIDITY_N, INR_UID_N);
 -- #6 GLOBAL_QUOTA_LOCK sentinel: a single shared row Phase D locks (PESSIMISTIC_WRITE) to serialize the
 -- cross-user global-quota check. Created + seeded here so it exists on fresh installs AND upgraded

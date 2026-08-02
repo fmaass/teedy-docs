@@ -2,11 +2,12 @@
 -- derived data (OCR text, index entry, thumbnail, auto-tags) is produced asynchronously after the
 -- upload commits; a hard JVM stop in the commit->process window loses that work with no backfill. These
 -- columns give a durable "processing completed" signal a startup reconciliation service can act on.
--- `datetime` is rewritten to `timestamp` for PostgreSQL by the H2->PG dialect transform, and a plain
--- nullable varchar/int is unchanged, so no !H2!/!PGSQL! split is needed here. ADD COLUMN IF NOT EXISTS is
--- accepted by both engines, so a partially-applied re-run skips an already-created column.
-alter table T_FILE add column if not exists FIL_PROCESSED_D datetime;
-alter table T_FILE add column if not exists FIL_PROCESSINGAT_D datetime;
+-- `timestamp` is spelled the same on both engines and is left untouched by the H2->PG dialect
+-- transform, as is a plain nullable varchar/int, so no !H2!/!PGSQL! split is needed here. ADD
+-- COLUMN IF NOT EXISTS is accepted by both engines, so a partially-applied re-run skips an
+-- already-created column.
+alter table T_FILE add column if not exists FIL_PROCESSED_D timestamp;
+alter table T_FILE add column if not exists FIL_PROCESSINGAT_D timestamp;
 alter table T_FILE add column if not exists FIL_PROCESSINGTOKEN_C varchar(36);
 alter table T_FILE add column if not exists FIL_PROCATTEMPTS_N int;
 -- LEGACY LINE (bounded, one-time). Stamp every row that exists at upgrade time COMPLETE. There is no

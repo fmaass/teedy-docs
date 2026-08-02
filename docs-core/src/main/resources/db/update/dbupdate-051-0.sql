@@ -11,5 +11,5 @@
 --   CLR_USERNAME_C   acting admin username snapshot (readable protocol without a join)
 --   CLR_CREATEDATE_D run timestamp
 -- The whole DDL is on one physical line: DbOpenHelper executes one statement per line.
-create cached table T_CLEANUP_RUN ( CLR_ID_C varchar(36) not null, CLR_FILECOUNT_N bigint not null, CLR_BYTES_N bigint not null, CLR_IDUSER_C varchar(36), CLR_USERNAME_C varchar(50), CLR_CREATEDATE_D datetime not null, primary key (CLR_ID_C) );
+create cached table T_CLEANUP_RUN ( CLR_ID_C varchar(36) not null, CLR_FILECOUNT_N bigint not null, CLR_BYTES_N bigint not null, CLR_IDUSER_C varchar(36), CLR_USERNAME_C varchar(50), CLR_CREATEDATE_D timestamp not null, primary key (CLR_ID_C) );
 update T_CONFIG set CFG_VALUE_C = '51' where CFG_ID_C = 'DB_VERSION';
