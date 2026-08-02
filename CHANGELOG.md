@@ -16,6 +16,23 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.8.1] - 2026-08-02
+
+A hygiene and hardening release. There is no database migration; the schema level remains 64.
+
+### Fixed
+- Tag menus no longer close immediately when opened while scrolling is still in progress. The two quarantined tag-add tests have returned to the gating suite, alongside a new deterministic regression pair (#213).
+- Concurrent deletion of groups that are parents of each other no longer deadlocks. Deletion now acquires locks for the target and its children in a single acquisition, ordered by ascending ID (#217).
+- A failing architecture-test run can no longer silently rewrite the baseline of frozen violations (#214).
+- The lock-order test fixture now reproduces the inversion deterministically instead of relying on sampling for an event with an approximately 1-in-700 chance (#221).
+- Visual-mode end-to-end test runs no longer leave root-owned output directories that break the next host-side run (#219).
+
+### Added
+- A one-time repair tool for historically double-encoded file names (`scripts/repair-mojibake.mjs`). It is idempotent, runs as a dry-run by default, changes only rows explicitly approved in a per-row manifest, and applies those changes in a single transaction. The search-index reconciliation post-step is documented. Before release, the tool had already been applied to the maintainer's own production instance, where it repaired 21 stored file names damaged by pre-fix uploads.
+- An end-to-end encoding test gate that runs on every build and covers desktop and mobile views. It checks file names and document titles containing umlauts, `ß`, and CJK characters byte-for-byte across the API, document and file lists, the filename tooltip, and search (#143 follow-through).
+- CI now checks the end-to-end test tree with TypeScript (#212). Self-tests for the release mirror gates now run in CI through a glob runner (#220).
+- A release-time gate verifies that every issue closed in the release delta has a maintainer comment posted after the issue was closed.
+
 ## [3.8.0] - 2026-08-01
 
 A minor release. **Five additive migrations apply on first boot and raise `db.version` from 59 to
@@ -530,7 +547,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...HEAD
+[3.8.1]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...v3.8.0
 [3.7.2]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/fmaass/teedy-docs/compare/v3.7.0...v3.7.1

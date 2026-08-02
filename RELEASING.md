@@ -79,9 +79,11 @@ scripts/check-issue-close-comments.sh <prev-release-tag>
 
 ## Pre-tag regression (standing rule)
 
-Every rc/version closeout runs, in addition to CI: the Playwright suites AND the **full**
-browser-harness regression (`scripts/e2e-browser-harness.sh`) against a locally-running build.
-The CI `e2e-harness` job is a trimmed smoke and is non-gating — it does not satisfy this rule.
+Every rc/version closeout runs, in addition to CI: the Playwright suites AND the
+browser-harness regression (`scripts/e2e-browser-harness.sh`, via `scripts/e2e-harness-run.sh`)
+against a locally-running build. The script is one suite — the CI `e2e-harness` job runs the same
+checks but is non-gating and does not satisfy this rule; what this rule adds is a LOCAL, gating,
+evidence-recorded run.
 Record the harness scenario counts and the script's exit code in the release evidence before
 requesting the tag go.
 

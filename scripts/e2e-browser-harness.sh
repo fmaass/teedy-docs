@@ -8,11 +8,13 @@
 # (which Playwright spec overlaps/complements which check here) lives in
 # scripts/e2e-coverage-matrix.md.
 #
-# TRIMMED FOR CI (GitHub #76): checks duplicated by the Playwright
-# desktop/mobile/visual suite were removed; only checks genuinely unique to the
-# real-Chrome CDP harness (exact version gate, account-sessions & monitoring
-# content, the not-clipped +N overflow layout probe, and the authoritative
-# XSS-inert read-back) plus the login prerequisite remain. Full overlap analysis:
+# TRIMMED (GitHub #76): checks duplicated by the Playwright desktop/mobile/visual
+# suite were removed; only checks genuinely unique to the real-Chrome CDP harness
+# remain — the exact version gate, account-sessions & monitoring content, the
+# not-clipped +N overflow layout probe, the authoritative XSS-inert read-back,
+# the PDF page organizer (#73), plus the login prerequisite. What remains below
+# IS the full harness suite: local release runs and the CI e2e-harness job execute
+# the same checks (the CI job is merely non-gating). Full overlap analysis:
 # scripts/e2e-coverage-matrix.md.
 #
 # PRECONDITION — this script does NOT boot anything. It assumes a RUNNING Teedy
