@@ -15,8 +15,14 @@ import { getStoredTheme, loadPreset } from './theme/presets'
 
 import App from './App.vue'
 import router from './router'
+import { armBootNavigationLatch } from './router/bootNavigationLatch'
 import { i18n, setLocale } from './i18n'
 import { buildPrimeVueLocale, bindPrimeVueConfig } from './primevueLocale'
+
+// #216: a navigation the user issues while the app is still booting has to win over the
+// initial one. Armed here, before the first `await` below, so the whole boot — the theme
+// preset fetch, the router's first navigation, the async auth guard — is covered.
+const replayBootNavigation = armBootNavigationLatch()
 
 const savedLocale = localStorage.getItem('teedy-locale')
 if (savedLocale && savedLocale !== 'en') {
@@ -77,4 +83,26 @@ app.use(ToastService)
 app.use(ConfirmationService)
 app.directive('tooltip', Tooltip)
 
-app.mount('#app')
+// #216: mount only once the router's first navigation has FINALIZED, and only after any
+// navigation the user issued in the meantime has been replayed. Mounting before the
+// router is ready is what lets a fast follow-up navigation be reverted; mounting between
+// readiness and the replay is what would flash the route the user has already left. The
+// cost is that the shell paints a moment later on a slow link — accepted.
+//
+// This must NOT be a top-level await, however tempting: every lazily-imported route chunk
+// statically imports THIS entry chunk, so suspending the module body on `router.isReady()`
+// deadlocks the very chunk the first navigation is waiting for — the router never becomes
+// ready and nothing ever mounts. Letting the module finish and doing the wait in a task
+// keeps that dependency satisfiable.
+void (async () => {
+  try {
+    await router.isReady()
+  } catch {
+    // The initial navigation FAILED (a route chunk that will not load, a guard that threw).
+    // Mount anyway: an app shell with an empty view is what this has always shown for that
+    // case, and a boot that never mounts at all would be the worse regression.
+  }
+  await replayBootNavigation(router)
+
+  app.mount('#app')
+})()
