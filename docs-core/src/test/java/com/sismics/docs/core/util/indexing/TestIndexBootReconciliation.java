@@ -257,11 +257,11 @@ public class TestIndexBootReconciliation extends BaseTest {
             @Override
             public void post(Object event) {
                 // Fail — and count — ONLY the reconciliation's own event. Anything else reaching this bus
-                // belongs to a background service of the context booted above, and on PostgreSQL those
-                // services have real work: the docs-core suite shares ONE database across all test classes
-                // (H2 gives each class JVM a private jdbc:h2:mem:docs), so rows and config committed by
-                // earlier classes are still there. Counting every post made this assertion depend on
-                // JVM-wide quiescence that no test can enforce; foreign events pass through untouched.
+                // belongs to a background service of the context booted above, and those services have real
+                // work: this class commits its own fixtures, and on PostgreSQL they stay committed for the
+                // rest of the class (H2 keeps them too, in the per-class JVM's private jdbc:h2:mem:docs).
+                // Counting every post made this assertion depend on JVM-wide quiescence that no test can
+                // enforce; foreign events pass through untouched.
                 if (event instanceof RebuildIndexAsyncEvent) {
                     attempts.incrementAndGet();
                     throw new IllegalStateException("the event bus is unavailable");
