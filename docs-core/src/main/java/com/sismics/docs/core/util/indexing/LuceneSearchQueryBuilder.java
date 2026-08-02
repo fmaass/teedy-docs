@@ -26,9 +26,10 @@ import java.util.List;
  * <p>Two routes:
  * <ul>
  *   <li><b>Operator route</b> — if the free text contains ANY {@link SimpleQueryParser} operator
- *       character ({@code | + - " * ~ ( ) \}) it is handed to the stock parser UNCHANGED, so OR,
- *       NOT, precedence, explicit fuzzy, wildcard, phrase and escape all keep their exact prior
- *       behavior.</li>
+ *       character ({@code | + " * ~ ( ) \}, or a {@code -} in negation position) it is handed to
+ *       the stock parser UNCHANGED, so OR, NOT, precedence, explicit fuzzy, wildcard, phrase and
+ *       escape all keep their exact prior behavior. A {@code -} INSIDE a word is term content for
+ *       the stock parser too, so it does not route the query away from the forgiving path.</li>
  *   <li><b>Forgiving route</b> — for a pure bare-term query, each analyzed term becomes
  *       {@code exact^3 OR (last term only) prefix^1 OR (length-gated) fuzzy^0.5}, MUST-combined
  *       across terms. This makes a bare partial term find a longer compound token and tolerates
@@ -40,8 +41,15 @@ import java.util.List;
  * keeping earlier terms strict).
  */
 public final class LuceneSearchQueryBuilder {
-    /** Characters that make a free-text query "operator-bearing" and route it to the stock parser. */
-    private static final String OPERATOR_CHARS = "|+-\"*~()\\";
+    /**
+     * Characters that make a free-text query "operator-bearing" and route it to the stock parser
+     * wherever they appear. The exclusion operator '-' is NOT among them: it is position-dependent
+     * and handled by {@link #isNegationPosition}.
+     */
+    private static final String OPERATOR_CHARS = "|+\"*~()\\";
+
+    /** The exclusion operator, which only acts as one at the start of a clause. */
+    private static final char NEGATION_CHAR = '-';
 
     private static final float EXACT_BOOST = 3f;
     private static final float PREFIX_BOOST = 1f;
@@ -54,7 +62,8 @@ public final class LuceneSearchQueryBuilder {
     }
 
     /**
-     * True if the free text contains any SimpleQueryParser operator character.
+     * True if the free text carries a SimpleQueryParser operator: any of {@code | + " * ~ ( ) \}
+     * anywhere, or a {@code -} in negation position.
      *
      * @param search Free-text query
      * @return True if operator-bearing
@@ -64,11 +73,32 @@ public final class LuceneSearchQueryBuilder {
             return false;
         }
         for (int i = 0; i < search.length(); i++) {
-            if (OPERATOR_CHARS.indexOf(search.charAt(i)) >= 0) {
+            char c = search.charAt(i);
+            if (c == NEGATION_CHAR) {
+                if (isNegationPosition(search, i)) {
+                    return true;
+                }
+                continue;
+            }
+            if (OPERATOR_CHARS.indexOf(c) >= 0) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * True if the '-' at this index is the exclusion OPERATOR rather than term content.
+     *
+     * <p>{@link SimpleQueryParser} only reads '-' as exclusion at the start of a clause — the
+     * start of the query, or directly after whitespace. Everywhere else it is an ordinary term
+     * character: the parser renders {@code "alpha beta-gamma"} as {@code +alpha +(+beta +gamma)},
+     * two required terms and no NOT clause. Treating every '-' as an operator therefore pushed
+     * queries carrying a hyphenated identifier onto the stock route for no semantic gain, and cost
+     * them the forgiving path's prefix expansion on the trailing term.
+     */
+    private static boolean isNegationPosition(String search, int index) {
+        return index == 0 || Character.isWhitespace(search.charAt(index - 1));
     }
 
     /**

@@ -585,8 +585,9 @@ public class LuceneIndexingHandler implements IndexingHandler {
         // Search on documents and files.
         // Free-text fields go through the forgiving query builder (#53): a bare partial term finds
         // a longer compound token and small typos are tolerated, while any operator-bearing query
-        // (| + - " * ~ ( ) \) is routed unchanged through SimpleQueryParser to preserve OR/NOT/
-        // precedence/phrase/explicit-wildcard/fuzzy/escape. No index-time / analyzer change.
+        // (| + " * ~ ( ) \, or a '-' in negation position) is routed unchanged through
+        // SimpleQueryParser to preserve OR/NOT/precedence/phrase/explicit-wildcard/fuzzy/escape.
+        // No index-time / analyzer change.
         String contentQuery = Strings.isNullOrEmpty(fullSearchQuery) ? searchQuery : fullSearchQuery;
         BooleanQuery query = new BooleanQuery.Builder()
                 .add(LuceneSearchQueryBuilder.build(analyzer, "title", searchQuery), BooleanClause.Occur.SHOULD)

@@ -7,6 +7,8 @@ import { createDocument, deleteCurrentDocument } from './helpers'
 //    (no explicit wildcard, no reindex) — the core forgiving-search acceptance.
 // 2. The client-side "filter loaded results" box narrows the visible list instantly,
 //    without a server round-trip.
+// 3. #232: the same forgiving expansion applies when the trailing token carries an
+//    in-word hyphen (an identifier like `fscompoundbh-1712345678`).
 
 test('a bare partial term finds a longer compound; the quick-filter box narrows the list', async ({ page }) => {
   // A German-style compound title plus a run-unique token so the search is deterministic.
@@ -53,5 +55,30 @@ test('a bare partial term finds a longer compound; the quick-filter box narrows 
   await page.getByText(otherTitle, { exact: true }).click()
   await page.getByRole('button', { name: 'Open', exact: true }).click()
   await expect(page).toHaveURL(/#\/document\/view\//)
+  await deleteCurrentDocument(page)
+})
+
+test('a partial hyphenated identifier finds the document in a multi-token query', async ({ page }) => {
+  // #232. The trailing token of the query is a PARTIAL hyphenated identifier. A '-' is only
+  // Lucene's exclusion operator at the start of a clause, so an in-word hyphen must leave the
+  // query on the forgiving route and the trailing fragment must still be prefix-expanded.
+  const stamp = Date.now()
+  const marker = `invoice${stamp}`
+  const identifier = `fscompoundbh-${stamp}90210`
+  const title = `${marker} ${identifier}`
+
+  const doc = await createDocument(page, title)
+
+  await page.goto('/#/document')
+  const search = page.getByPlaceholder('Search')
+
+  // Drop the last three characters of the identifier: a whole-term match is impossible, only
+  // prefix expansion of the post-hyphen fragment can find it.
+  await search.fill(`${marker} ${identifier.slice(0, -3)}`)
+  await expect(page.getByText(title, { exact: true })).toBeVisible()
+
+  // Cleanup.
+  await search.fill('')
+  await page.goto(`/#/document/view/${doc.id}`)
   await deleteCurrentDocument(page)
 })

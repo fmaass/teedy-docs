@@ -76,11 +76,10 @@ let tokenCounter = 0
 /**
  * A run-unique discriminator, alphanumeric ONLY.
  *
- * The shared `unique()` helper is not used here because its `-` separators would change the
- * meaning of the search query this token also appears in: `-` is one of Lucene's
- * SimpleQueryParser operator characters (LuceneSearchQueryBuilder.OPERATOR_CHARS), so a
- * hyphenated token routes the whole query to the stock parser and turns the tail into a NOT
- * clause. Uniqueness is structural exactly as in `unique()` — timestamp, pid, counter.
+ * The shared `unique()` helper is not used here because its `-` separators split the token:
+ * the analyzer breaks a hyphenated token into its fragments on both the index and the query
+ * side, so the discriminator would stop being the single opaque term these assertions rely on.
+ * Uniqueness is structural exactly as in `unique()` — timestamp, pid, counter.
  */
 function runToken(): string {
   return `enc${Date.now().toString(36)}${process.pid.toString(36)}${tokenCounter++}`

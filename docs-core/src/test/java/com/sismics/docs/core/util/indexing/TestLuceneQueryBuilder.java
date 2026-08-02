@@ -418,4 +418,60 @@ public class TestLuceneQueryBuilder {
             Assertions.assertFalse(LuceneSearchQueryBuilder.hasOperator(plain), "plain: " + plain);
         }
     }
+
+    // ----------------------------------------------------------------------------------------
+    // IN-WORD HYPHENS — a '-' inside a token is term content, not an exclusion operator
+    // ----------------------------------------------------------------------------------------
+
+    @Test
+    public void hyphenIsAnOperatorOnlyInNegationPosition() {
+        // SimpleQueryParser reads '-' as exclusion only at the START of a clause: start of the
+        // query, or directly after whitespace. Anywhere else it is ordinary term content — the
+        // parser itself renders "alpha beta-gamma" as "+alpha +(+beta +gamma)", two required
+        // terms and no NOT clause. Routing therefore has to look at the POSITION of the hyphen.
+        for (String op : List.of("-alpha", "alpha -beta", "alpha - beta", "alpha -")) {
+            Assertions.assertTrue(LuceneSearchQueryBuilder.hasOperator(op), "negation position: " + op);
+        }
+        for (String plain : List.of("alpha-beta", "alpha-beta-gamma", "alpha- beta",
+                "fscompoundbh-1712345678", "invoice fscompoundbh-171234")) {
+            Assertions.assertFalse(LuceneSearchQueryBuilder.hasOperator(plain), "in-word hyphen: " + plain);
+        }
+    }
+
+    @Test
+    public void hyphenatedTrailingTokenGetsPrefixExpansion() throws Exception {
+        // A multi-token query whose trailing token is a hyphenated identifier must get the same
+        // prefix expansion as any other trailing token. The analyzer splits the identifier on the
+        // hyphen on BOTH sides (index and query), so the leading fragment is required exactly and
+        // the trailing fragment is the one that gets expanded.
+        index("invoice fscompoundbh-1712345678", "");
+        Assertions.assertEquals(0, hits(stockQuery("invoice fscompoundbh-171234")),
+                "baseline: the stock parser requires the trailing fragment verbatim");
+        Assertions.assertTrue(hits(forgivingQuery("invoice fscompoundbh-171234")) >= 1,
+                "a hyphenated trailing token must be prefix-expanded like any other trailing token");
+    }
+
+    @Test
+    public void hyphenatedTokenStillRequiresEveryFragment() throws Exception {
+        // Prefix expansion must not turn the identifier into a loose match: the complete
+        // identifier still matches, a different trailing fragment still does not.
+        index("invoice fscompoundbh-1712345678", "");
+        Assertions.assertTrue(hits(forgivingQuery("fscompoundbh-1712345678")) >= 1,
+                "the complete hyphenated identifier must still match");
+        Assertions.assertEquals(0, hits(forgivingQuery("fscompoundbh-1799999999")),
+                "a different trailing fragment must NOT match");
+    }
+
+    @Test
+    public void exclusionStillWorksAlongsideAnInWordHyphen() throws Exception {
+        // A genuine exclusion keeps the stock route even when the same query also carries an
+        // in-word hyphen: the whitespace-preceded '-' is still an operator.
+        index("fscompoundbh-1712345678 gamma", "");
+        index("fscompoundbh-1712345678 delta", "");
+        Assertions.assertEquals(hits(stockQuery("fscompoundbh-1712345678 -gamma")),
+                hits(forgivingQuery("fscompoundbh-1712345678 -gamma")),
+                "exclusion must behave identically to the stock parser");
+        Assertions.assertEquals(1, hits(forgivingQuery("fscompoundbh-1712345678 -gamma")),
+                "the excluded document must be dropped");
+    }
 }
