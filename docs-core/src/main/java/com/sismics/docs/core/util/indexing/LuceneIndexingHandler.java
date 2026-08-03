@@ -61,6 +61,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -445,9 +446,13 @@ public class LuceneIndexingHandler implements IndexingHandler {
             for (List<String> tagIdList : criteria.getTagIdList()) {
                 List<String> tagCriteriaList = Lists.newArrayList();
                 for (String tagId : tagIdList) {
-                    sb.append(String.format("left join T_DOCUMENT_TAG dt%d on dt%d.DOT_IDDOCUMENT_C = d.DOC_ID_C and dt%d.DOT_IDTAG_C = :tagId%d and dt%d.DOT_DELETEDATE_D is null ", index, index, index, index, index));
+                    // Locale.ROOT: the index becomes a SQL alias and a named parameter, and the bind
+                    // below spells that parameter with ASCII concatenation. A default-locale format
+                    // renders non-ASCII digits on ar/fa/… hosts, so the emitted :tagId<n> would never
+                    // match the bound "tagId" + index and the query would fail to bind.
+                    sb.append(String.format(Locale.ROOT, "left join T_DOCUMENT_TAG dt%d on dt%d.DOT_IDDOCUMENT_C = d.DOC_ID_C and dt%d.DOT_IDTAG_C = :tagId%d and dt%d.DOT_DELETEDATE_D is null ", index, index, index, index, index));
                     parameterMap.put("tagId" + index, tagId);
-                    tagCriteriaList.add(String.format("dt%d.DOT_ID_C is not null", index));
+                    tagCriteriaList.add(String.format(Locale.ROOT, "dt%d.DOT_ID_C is not null", index));
                     index++;
                 }
                 if (orMode) {
@@ -465,9 +470,10 @@ public class LuceneIndexingHandler implements IndexingHandler {
             for (List<String> tagIdList : criteria.getExcludedTagIdList()) {
                 List<String> tagCriteriaList = Lists.newArrayList();
                 for (String tagId : tagIdList) {
-                    sb.append(String.format("left join T_DOCUMENT_TAG dtex%d on dtex%d.DOT_IDDOCUMENT_C = d.DOC_ID_C and dtex%d.DOT_IDTAG_C = :tagIdEx%d and dtex%d.DOT_DELETEDATE_D is null ", index, index, index, index, index));
+                    // Locale.ROOT, for the same reason as the included-tag join above.
+                    sb.append(String.format(Locale.ROOT, "left join T_DOCUMENT_TAG dtex%d on dtex%d.DOT_IDDOCUMENT_C = d.DOC_ID_C and dtex%d.DOT_IDTAG_C = :tagIdEx%d and dtex%d.DOT_DELETEDATE_D is null ", index, index, index, index, index));
                     parameterMap.put("tagIdEx" + index, tagId);
-                    tagCriteriaList.add(String.format("dtex%d.DOT_ID_C is null", index));
+                    tagCriteriaList.add(String.format(Locale.ROOT, "dtex%d.DOT_ID_C is null", index));
                     index++;
                 }
                 criteriaList.add("(" + Joiner.on(" AND ").join(tagCriteriaList) + ")");

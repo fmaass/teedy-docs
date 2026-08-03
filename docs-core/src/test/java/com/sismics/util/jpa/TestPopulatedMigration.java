@@ -14,6 +14,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Data-loss guardrail for the destructive forward-only retirement migrations 037-039
@@ -1806,7 +1807,9 @@ public class TestPopulatedMigration {
 
     /** Read the single statement line of a shipped migration script that starts with the given prefix. */
     private static String migrationLineStartingWith(int version, String prefix) throws Exception {
-        String resource = String.format("/db/update/dbupdate-%03d-0.sql", version);
+        // Locale.ROOT: this is a classpath resource path, not human-facing output. A default-locale
+        // format renders non-ASCII digits on ar/fa/… hosts and the lookup finds nothing.
+        String resource = String.format(Locale.ROOT, "/db/update/dbupdate-%03d-0.sql", version);
         try (InputStream is = TestPopulatedMigration.class.getResourceAsStream(resource)) {
             Assertions.assertNotNull(is, "migration script must be on the classpath: " + resource);
             String script = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);

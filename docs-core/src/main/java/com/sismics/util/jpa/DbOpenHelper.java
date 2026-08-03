@@ -18,6 +18,7 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.ResourceBundle;
 
 /**
@@ -152,7 +153,11 @@ abstract class DbOpenHelper {
      */
     void executeAllScript(final int version) throws Exception {
         List<String> fileNameList = ResourceUtil.list(getClass(), "/db/update/", (dir, name) -> {
-            String versionString = String.format("%03d", version);
+            // Locale.ROOT: this string is a REGEX matched against ASCII resource names
+            // (dbupdate-059-0.sql), not human-facing output. On a host whose default locale uses a
+            // non-ASCII numbering system (ar, fa, …) the default-locale format renders non-ASCII
+            // digits, nothing matches, and the caller silently executes no migration at all.
+            String versionString = String.format(Locale.ROOT, "%03d", version);
             return name.matches("dbupdate-" + versionString + "-\\d+\\.sql");
         });
         Collections.sort(fileNameList);
