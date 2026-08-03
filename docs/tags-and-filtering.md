@@ -83,6 +83,32 @@ precise filtering. Prefix a term with an operator and a colon:
 Operators combine — `tag:invoice after:2026-01-01 !tag:paid` finds unpaid invoices
 created this year. Multiple `tag:`/`!tag:` terms are ANDed together.
 
+### Tag wildcards
+
+A tag term matches the tag of that exact name, and a tag whose name only *starts*
+with the term when no tag matches it exactly. To search by pattern deliberately,
+put an asterisk in the term — it stands for any run of characters, including none,
+at any position and as often as you like:
+
+| Term | Matches |
+|------|---------|
+| `tag:invoice` | the tag named `invoice` exactly (or, if there is none, every tag starting with `invoice`) |
+| `tag:invoice*` | every tag starting with `invoice`, even when a tag is named exactly that |
+| `tag:*2026` | every tag ending with `2026` |
+| `tag:*invoice*` | every tag containing `invoice` |
+| `tag:inv*2026` | every tag starting with `inv` and ending with `2026` |
+
+Matched tags still bring in their children, and `!tag:` takes the same patterns.
+Two details worth knowing: a tag whose own name contains an asterisk is matched
+literally and wins over the pattern reading, and a term of nothing but asterisks
+matches nothing rather than everything — unless a tag is named exactly that, which
+is the same literal-name rule. Excluding a tag that does not exist excludes
+nothing, so `!tag:typo` leaves the result list alone.
+
+An instance can be configured to match tag names exactly rather than by prefix
+(*Settings → Configuration → General*, admin only); an explicit asterisk overrides
+that setting for the term it appears in.
+
 ## Saved filters
 
 A filter in Teedy lives entirely in the URL — the active tags, exclusions, view
