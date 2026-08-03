@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -83,6 +84,21 @@ public class ThemeResource extends BaseResource {
      * actually chosen a colour — see {@link #buildStylesheet()}.
      */
     private static final String NAVBAR_COLOR_PROPERTY = "--teedy-navbar-bg";
+
+    /**
+     * The selector the navbar colour's DARK-MODE value is published under. `.dark-mode` is the class
+     * the SPA toggles on the document element (its DARK_MODE_SELECTOR constant, also what PrimeVue's
+     * dark scheme keys off), so this is the same element `:root` matches and the two rules differ
+     * only in whether dark mode is on. Qualified rather than written as a bare `.dark-mode` so it
+     * outranks the `:root` rule on specificity instead of on source order.
+     */
+    private static final String NAVBAR_DARK_SELECTOR = ":root.dark-mode";
+
+    /**
+     * How far the dark-mode navbar colour is shaded toward black, in percent. 75 is the 950 step of
+     * the palette PrimeVue derives from a brand colour — see {@link #shade}.
+     */
+    private static final int NAVBAR_DARK_SHADE = 75;
 
 	/**
      * Returns custom CSS stylesheet.
@@ -598,9 +614,17 @@ public class ThemeResource extends BaseResource {
      * instead of competing with it — the `.navbar` rule this replaces was inherited from the old
      * UI and matched no element at all.
      *
-     * An UNSET colour emits NOTHING. The property has to stay undeclared so the component's own
-     * fallback (the theme surface token, which follows light/dark) keeps deciding; declaring the
-     * former "#ffffff" default instead would pin every unconfigured install's header to white.
+     * The property is declared TWICE: the chosen colour on :root, and a darkened variant of it under
+     * the dark-mode selector. Branding offers one colour field and the value an admin picks is the
+     * LIGHT one, so the dark one is derived rather than asked for — otherwise the header keeps its
+     * light colour while every surface around it goes dark, and a light choice ends up behind dark
+     * mode's light text (#262). Both are the SAME property, so the component still makes one var()
+     * read and the mode switch costs it nothing.
+     *
+     * An UNSET colour emits NOTHING — neither declaration. The property has to stay undeclared so the
+     * component's own fallback (the theme surface token, which follows light/dark) keeps deciding;
+     * declaring the former "#ffffff" default instead would pin every unconfigured install's header to
+     * white.
      *
      * A stored colour that is not a well-formed #rrggbb is treated as unset for the same reason,
      * and this is a FORMAT check rather than a presence one on purpose. Strict hex validation of
@@ -620,9 +644,40 @@ public class ThemeResource extends BaseResource {
         String navbarColor = themeConfig.getString("color", null);
         if (ValidationUtil.isHexColor(navbarColor)) {
             sb.append(new Selector(":root").rule(NAVBAR_COLOR_PROPERTY, navbarColor));
+            sb.append(new Selector(NAVBAR_DARK_SELECTOR)
+                    .rule(NAVBAR_COLOR_PROPERTY, shade(navbarColor, NAVBAR_DARK_SHADE)));
         }
         sb.append(effectiveCss(themeConfig));
         return sb.toString();
+    }
+
+    /**
+     * Mixes a #rrggbb colour with black, by the given percentage of black, per channel.
+     *
+     * This is PrimeVue's own `shade()` — the darkening half of the `palette()` that the OTHER
+     * Branding colour, `main_color`, is already expanded through client-side (see the SPA's
+     * theme/primary.ts): `mix(black, colour, t)` reduces to scaling each channel by `1 - t/100`, and
+     * `palette()` lays its 600…950 steps out at t = 15, 30, 45, 60, 75. Deriving the dark navbar the
+     * same way keeps one notion of "a darker shade of the brand colour" in the product instead of
+     * two, and 75 — the darkest step — is the one that also holds for a colour chosen at the light
+     * end: the step above it turns #ffffff into a mid grey that dark mode's text cannot sit on.
+     *
+     * Evaluated here rather than left to the browser (color-mix) because the emitted stylesheet is
+     * the only place that knows whether a colour is configured at all: a component-side derivation
+     * would have to be applied to the FALLBACK too, which would stop an unconfigured instance from
+     * tracking its theme token.
+     *
+     * @param color Colour, already known to be a well-formed #rrggbb
+     * @param percent Percentage of black to mix in
+     * @return Shaded colour as #rrggbb
+     */
+    private static String shade(String color, int percent) {
+        int rgb = Integer.parseInt(color.substring(1), 16);
+        double keep = (100 - percent) / 100d;
+        return String.format(Locale.ROOT, "#%02x%02x%02x",
+                Math.round((rgb >> 16 & 0xff) * keep),
+                Math.round((rgb >> 8 & 0xff) * keep),
+                Math.round((rgb & 0xff) * keep));
     }
 
     /**

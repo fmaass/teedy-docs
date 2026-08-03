@@ -123,7 +123,12 @@ async function handleLogout() {
    setting used to emit `.navbar { background-color: … }`, a class nothing in this UI carries, and
    renaming that selector would not have fixed it either — this style is scoped, so a global
    background declaration can never outweigh it whatever the load order. Undeclared (no colour
-   configured, the normal case) falls back to the surface token, which follows light/dark. */
+   configured, the normal case) falls back to the surface token, which follows light/dark.
+
+   ONE var() read covers both modes: that stylesheet redeclares the same property under
+   `:root.dark-mode` with a darkened variant of the chosen colour, so a light/dark switch needs no
+   second declaration here — and an unconfigured instance still has neither, which is what keeps
+   the fallback in charge. */
 .action-bar {
   display: flex;
   align-items: center;

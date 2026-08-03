@@ -373,6 +373,67 @@ public class TestThemeResource extends BaseJerseyTest {
     }
 
     /**
+     * A configured navbar colour has to follow light/dark like every other surface, which #261 did
+     * not make it do: the header kept the chosen colour while everything around it went dark. The
+     * colour an admin picks is the LIGHT one — Branding offers a single field, and the dark one is
+     * DERIVED from it rather than asked for.
+     *
+     * The derived value is the 950 step of the palette PrimeVue builds from a brand colour, the same
+     * derivation the Branding brand colour (`main_color`) already goes through: `shade(colour, 75)`,
+     * i.e. each channel scaled to a quarter, rounded half up. It is published as a second
+     * declaration of the SAME custom property, scoped to `:root.dark-mode` — the class the SPA puts
+     * on `<html>` — so the header keeps its single `var()` read and an instance that configured no
+     * colour still gets nothing at all.
+     */
+    @Test
+    public void testThemeNavbarColorDarkVariant() throws Exception {
+        String adminToken = adminToken();
+        resetTheme(adminToken);
+        try {
+            // A DARK choice: the header stays recognisably that colour, only darker.
+            postTheme(adminToken, new Form().param("color", "#8b0000"));
+            String stylesheet = stylesheet();
+            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #8b0000;\n}\n"
+                            + ":root.dark-mode {\n  --teedy-navbar-bg: #230000;\n}\n",
+                    stylesheet);
+            Assertions.assertNotEquals(navbarColor(stylesheet, ":root"),
+                    navbarColor(stylesheet, ":root.dark-mode"),
+                    "the dark-mode header colour must differ from the light-mode one");
+
+            // A LIGHT choice is the one that actually costs legibility when it does not adapt: a
+            // white bar stays white behind dark mode's light text.
+            postTheme(adminToken, new Form().param("color", "#ffffff"));
+            stylesheet = stylesheet();
+            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #ffffff;\n}\n"
+                            + ":root.dark-mode {\n  --teedy-navbar-bg: #404040;\n}\n",
+                    stylesheet);
+            Assertions.assertNotEquals(navbarColor(stylesheet, ":root"),
+                    navbarColor(stylesheet, ":root.dark-mode"),
+                    "the dark-mode header colour must differ from the light-mode one");
+
+            // Rounding is per channel and half up, as in the derivation this mirrors: 245 -> 61,
+            // 220 -> 55.
+            postTheme(adminToken, new Form().param("color", "#f5f5dc"));
+            stylesheet = stylesheet();
+            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #f5f5dc;\n}\n"
+                            + ":root.dark-mode {\n  --teedy-navbar-bg: #3d3d37;\n}\n",
+                    stylesheet);
+
+            // The derivation is a function of the STORED colour only, so a legacy row that is not
+            // well formed produces no dark declaration either — the light one is already suppressed,
+            // and a dark-only declaration would colour the header in dark mode and nowhere else.
+            storeRawThemeColor("#gggggg");
+            Assertions.assertEquals("", stylesheet());
+
+            // Cleared: both declarations go, so the header returns to the theme token in BOTH modes.
+            postTheme(adminToken, new Form().param("color", ""));
+            Assertions.assertEquals("", stylesheet());
+        } finally {
+            resetTheme(adminToken);
+        }
+    }
+
+    /**
      * A legacy install can hold a `color` that is NOT a well-formed #rrggbb: strict hex validation
      * on the write path is recent, and before it the field was checked for LENGTH only — seven
      * characters of anything passed. Such a value used to feed the dead `.navbar` selector and was
@@ -402,10 +463,13 @@ public class TestThemeResource extends BaseJerseyTest {
             storeRawThemeColor("red; } body { display: none");
             Assertions.assertEquals("", stylesheet());
 
-            // Green guard: a well-formed value stored the SAME way still renders, so the test
-            // proves a format check and not merely a dead code path.
+            // Green guard: a well-formed value stored the SAME way still renders — both the chosen
+            // colour and the dark-mode variant derived from it — so the test proves a format check
+            // and not merely a dead code path.
             storeRawThemeColor("#336699");
-            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #336699;\n}\n", stylesheet());
+            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #336699;\n}\n"
+                            + ":root.dark-mode {\n  --teedy-navbar-bg: #0d1a26;\n}\n",
+                    stylesheet());
         } finally {
             resetTheme(adminToken);
         }
@@ -810,6 +874,16 @@ public class TestThemeResource extends BaseJerseyTest {
      */
     private String stylesheet() {
         return target().path("/theme/stylesheet").request().get(String.class);
+    }
+
+    /**
+     * The value `--teedy-navbar-bg` is given inside the block the named selector opens.
+     */
+    private static String navbarColor(String stylesheet, String selector) {
+        int block = stylesheet.indexOf(selector + " {");
+        Assertions.assertTrue(block >= 0, "no `" + selector + "` block in: " + stylesheet);
+        int start = stylesheet.indexOf("--teedy-navbar-bg: ", block) + "--teedy-navbar-bg: ".length();
+        return stylesheet.substring(start, stylesheet.indexOf(';', start));
     }
 
     /**
