@@ -1131,7 +1131,11 @@
         "cover_in_header": "La cabecera de un documento muestra ahora la miniatura de su portada, para ver de un vistazo qué se ha abierto.",
         "grid_sort_and_reorder": "La vista de cuadrícula ya se puede ordenar por nombre, fecha o tamaño, y los archivos se reordenan arrastrándolos.",
         "index_self_repair": "Un índice de búsqueda ausente se reconstruye automáticamente al iniciar, y ha desaparecido el fallo de hace años que borraba y reconstruía en cada reinicio un índice en perfecto estado.",
-        "filename_tooltips": "Al pasar el ratón por un nombre de archivo recortado se muestra completo, tanto en la lista como en la cuadrícula."
+        "filename_tooltips": "Al pasar el ratón por un nombre de archivo recortado se muestra completo, tanto en la lista como en la cuadrícula.",
+        "custom_branding": "Cada instancia puede tener ahora su propio nombre, logotipo, favicon y color de marca, además de CSS y JavaScript personalizados, desde la nueva página «Personalización» de los ajustes.",
+        "tag_wildcards": "La búsqueda por etiquetas admite ahora comodines: tag:invoice*, *2026, *invoice* e inv*2026 coinciden por patrón, salvo que una etiqueta se llame exactamente así, en cuyo caso prevalece esa.",
+        "webp_previews": "Las imágenes WebP tienen ya miniatura y vista previa, igual que el resto de formatos de imagen.",
+        "pdf_scroll_and_gallery_open": "La vista previa a pantalla completa se desplaza de forma continua por todo el PDF en lugar de mostrar una página cada vez, y al pulsar una miniatura de la galería se abre su documento."
       }
     },
     "sso_failed": "El inicio de sesión único falló. Puede intentarlo de nuevo o iniciar sesión con una cuenta local.",

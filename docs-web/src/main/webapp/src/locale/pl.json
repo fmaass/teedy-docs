@@ -1131,7 +1131,11 @@
         "cover_in_header": "Nagłówek dokumentu pokazuje teraz miniaturę okładki, więc od razu widać, co zostało otwarte.",
         "grid_sort_and_reorder": "Widok siatki można teraz sortować według nazwy, daty lub rozmiaru, a pliki da się przeciągać w wybraną kolejność.",
         "index_self_repair": "Brakujący indeks wyszukiwania odbudowuje się automatycznie przy starcie, a wieloletni błąd, który przy każdym restarcie usuwał i odbudowywał całkowicie sprawny indeks, zniknął.",
-        "filename_tooltips": "Najechanie na skróconą nazwę pliku pokazuje ją w całości — zarówno na liście, jak i w siatce."
+        "filename_tooltips": "Najechanie na skróconą nazwę pliku pokazuje ją w całości — zarówno na liście, jak i w siatce.",
+        "custom_branding": "Każda instancja może mieć teraz własną nazwę, logo, favikonę i kolor marki, a także własny CSS i JavaScript — wszystko na nowej stronie „Personalizacja” w ustawieniach.",
+        "tag_wildcards": "Wyszukiwanie etykiet obsługuje teraz symbole wieloznaczne: tag:invoice*, *2026, *invoice* i inv*2026 pasują do wzorca, chyba że etykieta ma dokładnie taką nazwę — wtedy wygrywa ona.",
+        "webp_previews": "Obrazy WebP mają teraz miniatury i podgląd, tak jak pozostałe formaty obrazów.",
+        "pdf_scroll_and_gallery_open": "Podgląd pełnoekranowy przewija cały plik PDF płynnie, zamiast pokazywać jedną stronę naraz, a kliknięcie miniatury w galerii otwiera powiązany dokument."
       }
     },
     "sso_failed": "Logowanie jednokrotne (SSO) nie powiodło się. Możesz spróbować ponownie lub zalogować się przy użyciu konta lokalnego.",

@@ -1131,7 +1131,11 @@
         "cover_in_header": "A document's header now shows its cover thumbnail, so you can see at a glance what you opened.",
         "grid_sort_and_reorder": "The grid view can now be sorted by name, date or size, and files can be dragged into the order you want.",
         "index_self_repair": "A missing search index now rebuilds itself at startup — and the years-old bug that deleted and rebuilt a perfectly healthy index on every restart is gone.",
-        "filename_tooltips": "Hovering a shortened file name reveals the full name, in both the list and the grid view."
+        "filename_tooltips": "Hovering a shortened file name reveals the full name, in both the list and the grid view.",
+        "custom_branding": "An instance can now carry its own name, logo, favicon and brand color, plus custom CSS and JavaScript, from the new Branding page in the settings.",
+        "tag_wildcards": "Tag search matches by pattern: tag:invoice*, *2026, *invoice* and inv*2026 all find the tags they describe — a tag named exactly like the term still wins.",
+        "webp_previews": "WebP images now get thumbnails and previews, like every other supported image format.",
+        "pdf_scroll_and_gallery_open": "The fullscreen preview scrolls continuously through a PDF instead of showing one page at a time, and clicking a thumbnail in the gallery opens its document."
       }
     },
     "sso_failed": "Single sign-on failed. You can try again or sign in with a local account.",

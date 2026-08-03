@@ -28,13 +28,13 @@ import AboutDialog from './AboutDialog.vue'
 
 // --- About dialog "What's new" must reflect the 3.8 release ---
 //
-// The bullets are hand-curated per release (imported mail keeping its original
-// .eml, the fullscreen file preview, the cover thumbnail in the document header,
-// grid-view sorting and drag reordering, the self-rebuilding search index, and
-// full file names on hover). The heading is pinned to that release and must stay in
-// step with the project's MAJOR.MINOR — the final test guards against the heading
-// drifting behind a minor bump, which is exactly how the 3.1.0 bullets survived
-// unchanged to 3.4.0.
+// The bullets are hand-curated for the minor LINE and grow with its patches (3.8.0
+// brought imported mail keeping its original .eml, the fullscreen file preview, the
+// cover thumbnail in the document header, grid-view sorting and drag reordering, the
+// self-rebuilding search index and full file names on hover; 3.8.1/3.8.2 added the
+// four below). The heading is pinned to that line and must stay in step with the
+// project's MAJOR.MINOR — the final test guards against the heading drifting behind
+// a minor bump, which is exactly how the 3.1.0 bullets survived unchanged to 3.4.0.
 
 describe('AboutDialog highlights', () => {
   it('pins the What\'s-new heading to the 3.8 highlights', () => {
@@ -57,6 +57,31 @@ describe('AboutDialog highlights', () => {
     expect(enText).not.toContain('dark-mode')
     expect(enText).not.toContain('activity log')
     expect(deText).not.toContain('aktivitätsprotokoll')
+  })
+
+  // The bullets describe the whole 3.8 LINE and accumulate across its patches: a
+  // 3.8.2 user opens the same "What's new in 3.8" list, so the features shipped by
+  // 3.8.1/3.8.2 have to be in it. Leaving them out is how the branding page, the
+  // tag wildcards, WebP previews and the scrolling fullscreen PDF would have been
+  // invisible to exactly the people who had just installed them.
+  it('carries the 3.8.1/3.8.2 additions as resolvable bullets', () => {
+    const added = [
+      'ui.about.highlights.custom_branding',
+      'ui.about.highlights.tag_wildcards',
+      'ui.about.highlights.webp_previews',
+      'ui.about.highlights.pdf_scroll_and_gallery_open',
+    ]
+    for (const key of added) {
+      expect(HIGHLIGHT_KEYS as readonly string[], `listed: ${key}`).toContain(key)
+      // An unresolved key renders as the raw dotted key in the dialog, so presence
+      // in the list is only half of it — en must carry the sentence.
+      expect(resolve(en, key), `en:${key}`).toBeTruthy()
+    }
+    const addedText = added.map((k) => resolve(en, k).toLowerCase()).join(' ')
+    expect(addedText).toContain('branding')
+    expect(addedText).toContain('tag:invoice*')
+    expect(addedText).toContain('webp')
+    expect(addedText).toContain('scroll')
   })
 
   it('every highlight key resolves in both locales (no missing bullet)', () => {

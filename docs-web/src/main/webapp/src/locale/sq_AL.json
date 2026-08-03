@@ -1131,7 +1131,11 @@
         "cover_in_header": "Kreu i një dokumenti tani shfaq miniaturën e kopertinës së tij, që të duket me një shikim çfarë keni hapur.",
         "grid_sort_and_reorder": "Pamja në rrjetë tani mund të renditet sipas emrit, datës ose madhësisë, dhe skedarët riorganizohen duke i zvarritur.",
         "index_self_repair": "Një indeks kërkimi që mungon rindërtohet automatikisht në nisje — dhe gabimi shumëvjeçar që fshinte e rindërtonte një indeks krejtësisht të shëndoshë në çdo rinisje është zhdukur.",
-        "filename_tooltips": "Kalimi i miut mbi një emër skedari të shkurtuar e shfaq atë të plotë, si në listë ashtu edhe në rrjetë."
+        "filename_tooltips": "Kalimi i miut mbi një emër skedari të shkurtuar e shfaq atë të plotë, si në listë ashtu edhe në rrjetë.",
+        "custom_branding": "Çdo instancë mund të ketë tani emrin, logon, favicon-in dhe ngjyrën e vet të markës, si dhe CSS e JavaScript të personalizuar, nga faqja e re «Markimi» te cilësimet.",
+        "tag_wildcards": "Kërkimi sipas etiketave pranon tani shenja të përgjithshme: tag:invoice*, *2026, *invoice* dhe inv*2026 përputhen sipas modelit — përveç nëse një etiketë ka saktësisht atë emër, e cila atëherë ka përparësi.",
+        "webp_previews": "Imazhet WebP marrin tani miniatura dhe pamje paraprake, si të gjitha formatet e tjera të imazheve.",
+        "pdf_scroll_and_gallery_open": "Pamja paraprake në ekran të plotë e rrëshqet PDF-në pa ndërprerje, në vend që të shfaqë një faqe në një kohë, dhe një klikim mbi një miniaturë në galeri hap dokumentin përkatës."
       }
     },
     "sso_failed": "Identifikimi me një hyrje (SSO) dështoi. Mund të provoni përsëri ose të hyni me një llogari lokale.",

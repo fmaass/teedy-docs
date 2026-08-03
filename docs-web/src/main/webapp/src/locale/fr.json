@@ -1131,7 +1131,11 @@
         "cover_in_header": "L'en-tête d'un document affiche désormais la miniature de sa couverture, pour voir d'un coup d'œil ce que vous avez ouvert.",
         "grid_sort_and_reorder": "La vue en grille peut désormais être triée par nom, date ou taille, et les fichiers se réorganisent par glisser-déposer.",
         "index_self_repair": "Un index de recherche manquant se reconstruit automatiquement au démarrage — et le bogue vieux de plusieurs années qui supprimait et reconstruisait un index parfaitement sain à chaque redémarrage a disparu.",
-        "filename_tooltips": "Survoler un nom de fichier tronqué en révèle le nom complet, aussi bien dans la liste que dans la grille."
+        "filename_tooltips": "Survoler un nom de fichier tronqué en révèle le nom complet, aussi bien dans la liste que dans la grille.",
+        "custom_branding": "Chaque instance peut désormais avoir son propre nom, son logo, son favicon et sa couleur de marque, ainsi que du CSS et du JavaScript personnalisés, depuis la nouvelle page « Personnalisation » des paramètres.",
+        "tag_wildcards": "La recherche par tag accepte désormais les jokers : tag:invoice*, *2026, *invoice* et inv*2026 correspondent au motif — sauf si un tag porte exactement ce nom, auquel cas c'est lui qui l'emporte.",
+        "webp_previews": "Les images WebP disposent désormais d'une miniature et d'un aperçu, comme les autres formats d'image.",
+        "pdf_scroll_and_gallery_open": "L'aperçu en plein écran fait défiler le PDF en continu au lieu d'afficher une page à la fois, et un clic sur une miniature de la galerie ouvre le document correspondant."
       }
     },
     "sso_failed": "L'authentification unique a échoué. Vous pouvez réessayer ou vous connecter avec un compte local.",

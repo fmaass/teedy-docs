@@ -1131,7 +1131,11 @@
         "cover_in_header": "O cabeçalho de um documento mostra agora a miniatura da sua capa, para ver de relance o que foi aberto.",
         "grid_sort_and_reorder": "A vista em grelha já pode ser ordenada por nome, data ou tamanho, e os ficheiros reordenam-se arrastando-os.",
         "index_self_repair": "Um índice de pesquisa em falta é reconstruído automaticamente no arranque — e desapareceu o erro com anos que apagava e reconstruía um índice perfeitamente saudável em cada reinício.",
-        "filename_tooltips": "Ao passar o rato sobre um nome de ficheiro cortado, o nome completo é revelado, tanto na lista como na grelha."
+        "filename_tooltips": "Ao passar o rato sobre um nome de ficheiro cortado, o nome completo é revelado, tanto na lista como na grelha.",
+        "custom_branding": "Cada instância pode agora ter o seu próprio nome, logótipo, favicon e cor da marca, além de CSS e JavaScript personalizados, a partir da nova página «Personalização» nas definições.",
+        "tag_wildcards": "A pesquisa por etiquetas aceita agora caracteres universais: tag:invoice*, *2026, *invoice* e inv*2026 correspondem ao padrão, salvo se uma etiqueta tiver exatamente esse nome, caso em que prevalece essa.",
+        "webp_previews": "As imagens WebP passam a ter miniatura e pré-visualização, tal como os restantes formatos de imagem.",
+        "pdf_scroll_and_gallery_open": "A pré-visualização em ecrã inteiro percorre o PDF de forma contínua em vez de mostrar uma página de cada vez, e um clique numa miniatura da galeria abre o respetivo documento."
       }
     },
     "sso_failed": "O início de sessão único falhou. Pode tentar novamente ou iniciar sessão com uma conta local.",

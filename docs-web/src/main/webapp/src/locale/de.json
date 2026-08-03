@@ -1131,7 +1131,11 @@
         "cover_in_header": "Der Dokumentkopf zeigt jetzt das Titelbild als Vorschau, sodass du auf einen Blick siehst, was du geöffnet hast.",
         "grid_sort_and_reorder": "Die Rasteransicht lässt sich jetzt nach Name, Datum oder Größe sortieren, und Dateien lassen sich per Ziehen in die gewünschte Reihenfolge bringen.",
         "index_self_repair": "Ein fehlender Suchindex wird beim Start automatisch neu aufgebaut – und der jahrealte Fehler, der bei jedem Neustart auch einen intakten Index gelöscht und neu aufgebaut hat, ist behoben.",
-        "filename_tooltips": "Abgeschnittene Dateinamen zeigen beim Überfahren mit der Maus den vollständigen Namen – in der Listen- wie in der Rasteransicht."
+        "filename_tooltips": "Abgeschnittene Dateinamen zeigen beim Überfahren mit der Maus den vollständigen Namen – in der Listen- wie in der Rasteransicht.",
+        "custom_branding": "Du kannst deiner Instanz jetzt einen eigenen Namen, ein Logo, ein Favicon und eine Markenfarbe geben, dazu eigenes CSS und JavaScript – alles auf der neuen Seite „Branding“ in den Einstellungen.",
+        "tag_wildcards": "Die Tag-Suche versteht jetzt Platzhalter: tag:invoice*, *2026, *invoice* und inv*2026 passen auf das Muster – heißt ein Tag genau so, gewinnt weiterhin der exakte Name.",
+        "webp_previews": "WebP-Bilder bekommen jetzt Miniaturansichten und eine Vorschau wie alle anderen Bildformate.",
+        "pdf_scroll_and_gallery_open": "Die Vollbildvorschau scrollt jetzt durchgehend durch ein PDF, statt eine Seite nach der anderen zu zeigen, und mit einem Klick auf ein Vorschaubild in der Galerie öffnest du das zugehörige Dokument."
       }
     },
     "sso_failed": "Die Anmeldung per Single Sign-On ist fehlgeschlagen. Versuche es erneut oder melde dich mit einem lokalen Konto an.",
