@@ -42,6 +42,15 @@ public class TestTagResource extends BaseJerseyTest {
                         .param("color", "#ff0000")));
         Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
 
+        // Create a tag with a 7-character color that is not hexadecimal. The colour is rendered
+        // straight into the tag chip's style, so "looks like a colour" is not good enough.
+        response = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tag1Token)
+                .put(Entity.form(new Form()
+                        .param("name", "TagBadColor")
+                        .param("color", "#gggggg")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+
         // Create a tag
         JsonObject json = target().path("/tag").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, tag1Token)

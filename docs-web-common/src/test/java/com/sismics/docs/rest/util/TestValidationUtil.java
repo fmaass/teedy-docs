@@ -99,4 +99,42 @@ public class TestValidationUtil {
     public void validateTagNameAcceptsAnAbsentName() {
         Assertions.assertDoesNotThrow(() -> ValidationUtil.validateTagName(null));
     }
+
+    /**
+     * A colour is stored verbatim and rendered as a CSS colour (the tag chip background, the theme
+     * navbar rule) or derived into the UI palette, so "seven characters long" is not the contract.
+     * A length-only check accepted "#gggggg" and persisted it.
+     */
+    @Test
+    public void validateHexColorRejectsNonHexadecimalValues() {
+        String[] bad = {
+                "#gggggg",
+                "#12345z",
+                "#ff00 0",
+                "1234567",
+                "##12345",
+                " #ff0000 ", // seven characters once trimmed, but the caller stores the padding
+        };
+        for (String value : bad) {
+            Assertions.assertThrows(ClientException.class,
+                    () -> ValidationUtil.validateHexColor(value, "color", true),
+                    "must reject a non-hexadecimal colour: " + value);
+        }
+    }
+
+    /**
+     * The tightening must not narrow what the app already produces: real colours in either case,
+     * and the nullable/empty forms every caller passes for "leave it unset".
+     */
+    @Test
+    public void validateHexColorAcceptsRealColorsAndTheEmptyForms() throws Exception {
+        for (String value : new String[] { "#000000", "#ffffff", "#AABBCC", "#0f0F0f" }) {
+            ValidationUtil.validateHexColor(value, "color", true);
+        }
+        ValidationUtil.validateHexColor(null, "color", true);
+        ValidationUtil.validateHexColor("", "color", true);
+        Assertions.assertThrows(ClientException.class,
+                () -> ValidationUtil.validateHexColor(null, "color", false),
+                "a non-nullable colour must still be required");
+    }
 }

@@ -22,6 +22,8 @@ public class ValidationUtil {
     private static Pattern ALPHANUMERIC_PATTERN = Pattern.compile("[a-zA-Z0-9_]+");
     
     private static Pattern USERNAME_PATTERN = Pattern.compile("[a-zA-Z0-9_@.-]+");
+
+    private static Pattern HEX_COLOR_PATTERN = Pattern.compile("#[0-9a-fA-F]{6}");
     
     /**
      * Checks that the argument is not null.
@@ -104,14 +106,29 @@ public class ValidationUtil {
     }
     
     /**
-     * Checks if the string is a hexadecimal color.
-     * 
+     * Checks if the string is a hexadecimal color (#rrggbb).
+     *
+     * The length check alone is not the contract: every caller stores this value verbatim and it is
+     * then rendered as a CSS colour (the tag chip's background, the theme's navbar rule) or derived
+     * into a palette. "#gggggg" is seven characters, so a length-only check accepted and persisted
+     * it, leaving a configuration that claims a colour the UI cannot render.
+     *
+     * The pattern is matched against the RAW argument rather than the stripped one: callers keep
+     * the value they passed in, so accepting " #ff0000 " here would persist the padding.
+     *
      * @param s String to validate
      * @param name Name of the parameter
      * @param nullable True if the string can be empty or null
      */
     public static void validateHexColor(String s, String name, boolean nullable) throws ClientException {
-        ValidationUtil.validateLength(s, name, 7, 7, nullable);
+        String value = ValidationUtil.validateLength(s, name, 7, 7, nullable);
+        if (Strings.isNullOrEmpty(value)) {
+            return;
+        }
+        if (!HEX_COLOR_PATTERN.matcher(s).matches()) {
+            throw new ClientException("ValidationError",
+                    MessageFormat.format("{0} must be a hexadecimal color, for example #336699", name));
+        }
     }
 
     /**

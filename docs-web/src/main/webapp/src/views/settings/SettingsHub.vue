@@ -62,6 +62,7 @@ const adminSections: HubSection[] = [
     headingKey: 'ui.nav.group_system',
     entries: [
       { icon: 'pi pi-cog', titleKey: 'ui.config.title', descKey: 'ui.settings.hub.desc.config', name: 'settings-config' },
+      { icon: 'pi pi-palette', titleKey: 'ui.branding.title', descKey: 'ui.settings.hub.desc.branding', name: 'settings-branding' },
       { icon: 'pi pi-inbox', titleKey: 'ui.inbox.title', descKey: 'ui.settings.hub.desc.inbox', name: 'settings-inbox' },
       { icon: 'pi pi-link', titleKey: 'ui.webhooks.title', descKey: 'ui.settings.hub.desc.webhooks', name: 'settings-webhooks' },
       { icon: 'pi pi-chart-bar', titleKey: 'ui.stats.title', descKey: 'ui.settings.hub.desc.stats', name: 'settings-stats' },

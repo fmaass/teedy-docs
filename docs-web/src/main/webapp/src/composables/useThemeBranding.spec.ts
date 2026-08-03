@@ -8,14 +8,23 @@ import { ref, effectScope, nextTick } from 'vue'
 // directly against jsdom.
 
 const useQueryMock = vi.fn()
+const invalidateQueriesMock = vi.hoisted(() => vi.fn())
 vi.mock('@tanstack/vue-query', () => ({
   useQuery: (opts: unknown) => useQueryMock(opts),
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
 }))
 vi.mock('../api/theme', () => ({ getTheme: vi.fn() }))
+// The palette applier drives PrimeVue's runtime theme service; its own contract is covered in
+// theme/primary.spec.ts. Here we only assert that the composable hands it the configured colour.
+const applyBrandPrimaryMock = vi.hoisted(() => vi.fn())
+vi.mock('../theme/primary', () => ({ applyBrandPrimary: applyBrandPrimaryMock }))
 
 import {
   applyDocumentTitle,
   applyFavicon,
+  applyThemeStylesheet,
+  applyThemeScript,
+  useInvalidateTheme,
   useThemeBranding,
 } from './useThemeBranding'
 import { queryKeys } from '../api/queryKeys'
@@ -31,8 +40,12 @@ function inScope<T>(fn: () => T): { result: T; scope: ReturnType<typeof effectSc
 
 beforeEach(() => {
   useQueryMock.mockReset()
+  applyBrandPrimaryMock.mockReset()
+  invalidateQueriesMock.mockReset()
   document.title = ''
   document.head.querySelectorAll('link[rel~="icon"]').forEach((n) => n.remove())
+  document.getElementById('teedy-theme-stylesheet')?.remove()
+  document.getElementById('teedy-theme-script')?.remove()
 })
 
 describe('applyDocumentTitle', () => {
@@ -69,6 +82,64 @@ describe('applyFavicon', () => {
     expect(document.querySelectorAll('link[rel~="icon"]').length).toBe(1)
     expect(document.querySelector<HTMLLinkElement>('link[rel~="icon"]')!.getAttribute('href'))
       .toBe('/api/theme/image/favicon?v=two')
+  })
+})
+
+describe('applyThemeStylesheet', () => {
+  it('links the compiled theme stylesheet, cache-busted by the stylesheet version', () => {
+    const { created, link } = applyThemeStylesheet('abc123')
+    expect(created).toBe(true)
+    expect(link.rel).toBe('stylesheet')
+    expect(link.getAttribute('href')).toBe('/api/theme/stylesheet?v=abc123')
+    expect(document.querySelectorAll('#teedy-theme-stylesheet').length).toBe(1)
+  })
+
+  it('reuses the one link it owns and re-points it when the version changes', () => {
+    applyThemeStylesheet('v1')
+    const { created } = applyThemeStylesheet('v2')
+    expect(created).toBe(false)
+    expect(document.querySelectorAll('#teedy-theme-stylesheet').length).toBe(1)
+    expect(document.getElementById('teedy-theme-stylesheet')!.getAttribute('href'))
+      .toBe('/api/theme/stylesheet?v=v2')
+  })
+})
+
+describe('applyThemeScript', () => {
+  it('injects NOTHING when no custom script is configured (empty version)', () => {
+    expect(applyThemeScript('')).toBeNull()
+    expect(applyThemeScript(undefined)).toBeNull()
+    expect(document.querySelectorAll('#teedy-theme-script').length).toBe(0)
+  })
+
+  it('loads the script as an EXTERNAL same-origin src (never inline)', () => {
+    const script = applyThemeScript('s1')!
+    expect(script).not.toBeNull()
+    expect(script.getAttribute('src')).toBe('/api/theme/script?v=s1')
+    // Nothing is ever executed from a string: no inline body, no eval.
+    expect(script.textContent).toBe('')
+    expect(document.querySelectorAll('#teedy-theme-script').length).toBe(1)
+  })
+
+  it('keeps a single tag across an unchanged version and replaces it on a change', () => {
+    const first = applyThemeScript('s1')
+    expect(applyThemeScript('s1')).toBe(first)
+    applyThemeScript('s2')
+    expect(document.querySelectorAll('#teedy-theme-script').length).toBe(1)
+    expect(document.getElementById('teedy-theme-script')!.getAttribute('src'))
+      .toBe('/api/theme/script?v=s2')
+  })
+
+  it('removes the tag when the admin deletes the script', () => {
+    applyThemeScript('s1')
+    expect(applyThemeScript('')).toBeNull()
+    expect(document.querySelectorAll('#teedy-theme-script').length).toBe(0)
+  })
+})
+
+describe('useInvalidateTheme', () => {
+  it('invalidates the shared theme key so branding follows a mutation without a reload', () => {
+    useInvalidateTheme()()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: queryKeys.theme() })
   })
 })
 
@@ -131,6 +202,67 @@ describe('useThemeBranding', () => {
     await nextTick()
     expect(document.querySelector<HTMLLinkElement>('link[rel~="icon"]')!.getAttribute('href'))
       .toBe('/api/theme/image/favicon?v=200')
+  })
+
+  it('applies the brand palette, stylesheet and script once the theme resolves', async () => {
+    const theme = ref<Record<string, unknown> | undefined>({
+      name: 'Branded',
+      favicon_version: 7,
+      main_color: '#ff5722',
+      stylesheet_version: 'css1',
+      script_version: 'js1',
+    })
+    const isSuccess = ref(true)
+    useQueryMock.mockReturnValue({ data: theme, isSuccess })
+    inScope(() => useThemeBranding())
+    await nextTick()
+
+    expect(applyBrandPrimaryMock).toHaveBeenCalledWith('#ff5722')
+    expect(document.getElementById('teedy-theme-stylesheet')!.getAttribute('href'))
+      .toBe('/api/theme/stylesheet?v=css1')
+    expect(document.getElementById('teedy-theme-script')!.getAttribute('src'))
+      .toBe('/api/theme/script?v=js1')
+
+    // A mutation-driven refetch re-applies without a reload.
+    theme.value = {
+      name: 'Branded',
+      favicon_version: 7,
+      main_color: '#336699',
+      stylesheet_version: 'css2',
+      script_version: '',
+    }
+    await nextTick()
+    expect(applyBrandPrimaryMock).toHaveBeenLastCalledWith('#336699')
+    expect(document.getElementById('teedy-theme-stylesheet')!.getAttribute('href'))
+      .toBe('/api/theme/stylesheet?v=css2')
+    expect(document.getElementById('teedy-theme-script')).toBeNull()
+  })
+
+  it('injects NOTHING before the theme resolves — mount must not wait on the theme request', () => {
+    useQueryMock.mockReturnValue({ data: ref(undefined), isSuccess: ref(false) })
+    inScope(() => useThemeBranding())
+    expect(document.getElementById('teedy-theme-stylesheet')).toBeNull()
+    expect(document.getElementById('teedy-theme-script')).toBeNull()
+    expect(applyBrandPrimaryMock).not.toHaveBeenCalled()
+  })
+
+  it('removes the stylesheet link and script tag it injected on unmount', async () => {
+    const theme = ref<Record<string, unknown> | undefined>({
+      name: 'Branded',
+      favicon_version: 1,
+      stylesheet_version: 'css1',
+      script_version: 'js1',
+    })
+    useQueryMock.mockReturnValue({ data: theme, isSuccess: ref(true) })
+    const scope = effectScope()
+    scope.run(() => useThemeBranding())
+    await nextTick()
+    expect(document.getElementById('teedy-theme-stylesheet')).not.toBeNull()
+    expect(document.getElementById('teedy-theme-script')).not.toBeNull()
+
+    scope.stop()
+    expect(document.getElementById('teedy-theme-stylesheet')).toBeNull()
+    expect(document.getElementById('teedy-theme-script')).toBeNull()
   })
 
   it('restores the original title and removes the created icon link on unmount', async () => {

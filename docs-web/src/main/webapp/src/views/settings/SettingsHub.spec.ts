@@ -72,6 +72,7 @@ const ADMIN_GROUPS = [
     heading: en.ui.nav.group_system,
     entries: [
       { name: 'settings-config', desc: en.ui.settings.hub.desc.config },
+      { name: 'settings-branding', desc: en.ui.settings.hub.desc.branding },
       { name: 'settings-inbox', desc: en.ui.settings.hub.desc.inbox },
       { name: 'settings-webhooks', desc: en.ui.settings.hub.desc.webhooks },
       { name: 'settings-stats', desc: en.ui.settings.hub.desc.stats },

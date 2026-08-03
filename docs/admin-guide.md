@@ -1,11 +1,11 @@
 # Admin guide
 
 This page covers the administrator-only capabilities: user and quota management,
-webhooks, auto-tagging rules, the audit log, custom theming, and the SMTP/OCR
+webhooks, auto-tagging rules, the audit log, branding, and the SMTP/OCR
 settings that live in the server configuration.
 
 Most admin features live under **Settings** when you are logged in as an
-administrator. A few (theme, SMTP, OCR) are API- or environment-only and are noted
+administrator. A few (SMTP, OCR) are API- or environment-only and are noted
 as such.
 
 ## Users and quotas
@@ -111,21 +111,43 @@ All day buckets are UTC `[start, end)` calendar days and are zero-filled across 
 > activity series undercounts route activity after a cleanup run. This is a known
 > pre-existing limitation, tracked separately.
 
-## Theming (API-only)
+## Branding
 
-Teedy's appearance is customized through a custom-CSS injection endpoint — there is
-**no dedicated theme settings page** in the UI; it is an admin API capability.
+**Settings › Branding** (admin-only) is the UI for everything below: the application name,
+the navbar colour, the brand colour the whole interface palette is derived from, the logo /
+login background / favicon, and custom CSS and JavaScript. The same surface is available over
+the API for scripted setups.
 
 | Action | Request |
 |--------|---------|
 | Get the theme config | `GET /api/theme` |
-| Update the theme | `POST /api/theme` with form params `name`, `color`, `css` (admin) |
+| Update the theme | `POST /api/theme` with form params `name`, `color`, `main_color`, `css` (admin) |
 | Get the compiled stylesheet | `GET /api/theme/stylesheet` |
-| Upload a logo/background image | `PUT /api/theme/image/{type}` (`type` = `logo` or `background`, admin) |
+| Replace / remove the custom CSS | `PUT` / `DELETE /api/theme/stylesheet` (admin, `text/plain` body) |
+| Get the custom script | `GET /api/theme/script` |
+| Replace / remove the custom script | `PUT` / `DELETE /api/theme/script` (admin, `text/plain` body) |
+| Upload a theme image | `PUT /api/theme/image/{type}` (`type` = `logo`, `background` or `favicon`, admin) |
+| Reset a theme image | `DELETE /api/theme/image/{type}` (admin) |
 
-- `name` — the application name shown in the UI (3–30 chars).
+- `name` — the application name shown in the browser tab and across the UI (3–30 chars).
 - `color` — a hex accent color applied to the navbar (default `#ffffff`).
-- `css` — arbitrary custom CSS appended to the generated stylesheet.
+- `main_color` — a hex brand color; the PrimeVue primary palette (50–950) is derived from it for
+  both light and dark mode. Unset (the default) keeps the stock palette.
+- `css` — custom CSS. Kept for compatibility with older clients: a supplied value is stored as
+  `theme/custom.css` in the data directory and returned by `GET /api/theme`. Prefer
+  `PUT /api/theme/stylesheet`.
+
+On `POST /api/theme` an **absent** parameter preserves the stored value and an **empty** one
+clears it, so a partial update cannot wipe fields it does not mention.
+
+Custom CSS and JavaScript are stored as files in the data directory (`theme/custom.css`,
+`theme/custom.js`). Each is capped at 256 KiB of UTF-8 — measured on what gets stored, not on what
+was sent — so a larger body is rejected with `413`, and a body that is not valid UTF-8 with `400`.
+
+> **Custom JavaScript runs as your users.** The script is served to every visitor and executes in
+> each signed-in user's browser inside their session: it can act as them and read or transmit any
+> document data they can see. This is a deliberate operator capability — only an admin can set it —
+> but treat anything you paste there as code running with your users' privileges.
 
 ## Footer links
 

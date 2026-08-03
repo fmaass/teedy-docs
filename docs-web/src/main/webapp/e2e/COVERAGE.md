@@ -165,6 +165,7 @@ run is split by a `@visual` grep tag (on the pixel-comparison `describe` in
 | `comments.spec.ts` | Add + delete a document comment. |
 | `share.spec.ts` | Public share-link create -> anonymous read-only view -> revoke (server-side write denial asserted). |
 | `trash.spec.ts` | Soft-delete to trash, restore, purge. |
+| `settings-branding.spec.ts` | **Settings › Branding (#57 + #241)**: the section is reachable from the hub and the settings sidebar; an admin sets the app name (tab title follows) and replaces/resets the favicon from the UI alone; a brand colour derives the interface palette and SURVIVES a preset-family switch and a dark-mode toggle; custom CSS actually styles the page and custom JavaScript is loaded as an external script and actually executes. Resets the instance-wide theme over the API in a deferred cleanup. |
 | `settings-crud.spec.ts` | Admin settings CRUD: groups, custom-metadata fields, webhooks, API keys, tag rules. |
 | `ldap.spec.ts` | LDAP settings UI + client-side validation (no live LDAP needed). |
 | `workflow.spec.ts` | **Route models + document routing**: admin builds a VALIDATE→APPROVE model (SettingsWorkflow), runs it to DONE (validate then approve), and a second run halts on REJECT (route ends REJECTED, no advance); history shows status badges + acted/rejected rows. |

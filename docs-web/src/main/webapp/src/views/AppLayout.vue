@@ -93,6 +93,7 @@ const settingsAdminGroups = computed(() => [
     label: t('ui.nav.group_system'),
     items: [
       { label: t('ui.config.title'), icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
+      { label: t('ui.branding.title'), icon: 'pi pi-palette', to: '/settings/branding', name: 'settings-branding' },
       { label: t('ui.inbox.title'), icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
       { label: t('ui.webhooks.title'), icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
       { label: t('ui.stats.title'), icon: 'pi pi-chart-bar', to: '/settings/stats', name: 'settings-stats' },

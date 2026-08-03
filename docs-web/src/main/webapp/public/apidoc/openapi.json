@@ -3514,8 +3514,120 @@
           "theme"
         ],
         "summary": "Get the CSS stylesheet",
+        "description": "The compiled stylesheet: the generated navbar colour rule, then the legacy `css` config field, then the stored `custom.css`.",
         "operationId": "get_theme_stylesheet",
         "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/css": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Replace the custom stylesheet",
+        "description": "The request body is the raw CSS. Replaces the effective custom CSS: it is stored as `custom.css` and the legacy `css` config field is cleared.",
+        "operationId": "put_theme_stylesheet",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The body is not valid UTF-8"
+          },
+          "413": {
+            "description": "The stylesheet exceeds the 256 KiB limit"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Delete the custom stylesheet",
+        "description": "Removes `custom.css` AND clears the legacy `css` config field, so a reset cannot leave older CSS active.",
+        "operationId": "delete_theme_stylesheet",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/theme/script": {
+      "get": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Get the custom script",
+        "description": "The stored custom JavaScript, or an empty body when none is configured. Served as an external same-origin script with a JavaScript media type and `X-Content-Type-Options: nosniff`.",
+        "operationId": "get_theme_script",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "text/javascript": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Replace the custom script",
+        "description": "The request body is the raw JavaScript. Admin-injected script runs for every user of the instance.",
+        "operationId": "put_theme_script",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The body is not valid UTF-8"
+          },
+          "413": {
+            "description": "The script exceeds the 256 KiB limit"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Delete the custom script",
+        "operationId": "delete_theme_script",
         "responses": {
           "200": {
             "description": "Success"
@@ -3533,7 +3645,56 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Application name (defaults to Teedy)"
+                    },
+                    "color": {
+                      "type": "string",
+                      "description": "Navbar colour"
+                    },
+                    "main_color": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Brand colour the UI palette is derived from; null when the feature is off"
+                    },
+                    "css": {
+                      "type": "string",
+                      "description": "Effective custom CSS (legacy config field plus the stored custom.css)"
+                    },
+                    "favicon_version": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Cache-bust token for the favicon (0 when the bundled default is served)"
+                    },
+                    "logo_version": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Cache-bust token for the logo (0 when the bundled default is served)"
+                    },
+                    "background_version": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Cache-bust token for the background (0 when the bundled default is served)"
+                    },
+                    "stylesheet_version": {
+                      "type": "string",
+                      "description": "Cache-bust token for /theme/stylesheet, derived from the compiled body"
+                    },
+                    "script_version": {
+                      "type": "string",
+                      "description": "Cache-bust token for /theme/script, derived from the served body"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3542,6 +3703,7 @@
           "theme"
         ],
         "summary": "Update the theme configuration",
+        "description": "Every field is optional: an ABSENT parameter preserves the stored value, an EMPTY one clears it. A supplied `css` replaces the effective custom CSS (stored as `custom.css`, legacy field cleared).",
         "operationId": "post_theme",
         "requestBody": {
           "content": {
@@ -3555,6 +3717,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "main_color": {
+                    "type": "string"
+                  },
                   "css": {
                     "type": "string"
                   }
@@ -3566,6 +3731,9 @@
         "responses": {
           "200": {
             "description": "Success"
+          },
+          "413": {
+            "description": "The stylesheet exceeds the 256 KiB limit"
           }
         }
       }
@@ -3614,6 +3782,28 @@
         "summary": "Get a theme image",
         "operationId": "get_theme_image_type",
         "security": [],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "theme"
+        ],
+        "summary": "Reset a theme image to the bundled default",
+        "operationId": "delete_theme_image_type",
         "parameters": [
           {
             "name": "type",

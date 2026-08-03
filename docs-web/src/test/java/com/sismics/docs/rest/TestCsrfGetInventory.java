@@ -71,6 +71,7 @@ public class TestCsrfGetInventory {
             "/tagmatchrule",
             "/theme",
             "/theme/stylesheet",
+            "/theme/script",
             "/theme/image/{}",
             "/user/{}",
             "/user/list",

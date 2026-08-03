@@ -3,13 +3,12 @@ import { createPinia } from 'pinia'
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import PrimeVue from 'primevue/config'
 import Tooltip from 'primevue/tooltip'
-import { definePreset } from '@primeuix/themes'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import 'primeicons/primeicons.css'
 import './assets/teedy-tokens.css'
 import './assets/teedy-theme.css'
-import { teedyPrimary } from './theme/primary'
+import { buildPreset } from './theme/primary'
 import { DARK_MODE_SELECTOR } from './constants/theme'
 import { getStoredTheme, loadPreset } from './theme/presets'
 
@@ -36,11 +35,11 @@ if (localStorage.getItem('teedy-dark-mode') === 'true') {
 // keeping the other three presets out of the initial bundle.
 const basePreset = await loadPreset(getStoredTheme())
 
-const TeedyPreset = definePreset(basePreset, {
-  semantic: {
-    primary: teedyPrimary,
-  },
-})
+// Built through the shared preset builder, which is the ONE place that knows the brand primary.
+// A custom brand colour (#241) is not known yet at this point — GET /api/theme is deliberately
+// not awaited before mount — so this boots on the stock scale and useThemeBranding swaps in the
+// derived palette once the theme resolves.
+const TeedyPreset = buildPreset(basePreset)
 
 const app = createApp(App)
 

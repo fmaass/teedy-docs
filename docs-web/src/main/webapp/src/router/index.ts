@@ -179,6 +179,14 @@ const router = createRouter({
               meta: { requiresAdmin: true },
             },
             {
+              path: 'branding',
+              name: 'settings-branding',
+              component: () => import('../views/settings/SettingsBranding.vue'),
+              // Admin-only: every theme mutation the screen drives is admin-gated server-side,
+              // and the screen is useless (and misleading) without them.
+              meta: { requiresAdmin: true },
+            },
+            {
               path: 'users',
               name: 'settings-users',
               component: () => import('../views/settings/SettingsUsers.vue'),

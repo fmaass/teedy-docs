@@ -355,6 +355,7 @@ export const ROUTE_ROOT = {
   settingsHub: '.settings-hub',
   settingsAccount: '.account-settings',
   settingsApiKeys: '.apikeys-settings',
+  settingsBranding: '.branding-settings',
   settingsConfig: '.config-settings',
   settingsGroups: '.groups-settings',
   settingsInbox: '.inbox-settings',

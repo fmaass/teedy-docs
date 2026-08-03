@@ -28,8 +28,14 @@ export const queryKeys = {
   trash: () => ['trash'] as const,
   /** Application info. */
   app: () => ['app-info'] as const,
-  /** Theme configuration (custom app name / color / css). */
+  /** Theme configuration (custom app name / colors / css / asset versions). */
   theme: () => ['theme'] as const,
+  /**
+   * The custom theme script SOURCE. Deliberately its own key: the theme payload carries only the
+   * script's version token (what the app root needs to inject it), while the Branding editor needs
+   * the text — so invalidating one must not force a fetch of the other.
+   */
+  themeScript: () => ['theme-script'] as const,
 } as const
 
 /**

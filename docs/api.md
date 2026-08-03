@@ -60,7 +60,7 @@ JSON. File uploads use `multipart/form-data` on `PUT /api/file`.
 | `/api/tagmatchrule` | Auto-tagging rules |
 | `/api/webhook` | Webhooks |
 | `/api/auditlog` | Audit log |
-| `/api/theme` | Custom theme CSS (admin) |
+| `/api/theme` | Branding: name, colors, images, custom CSS and JavaScript (admin) |
 | `/api/oidc` | OIDC login/callback |
 | `/api/app` | Application info (version, status) |
 

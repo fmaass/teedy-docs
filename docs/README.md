@@ -17,7 +17,7 @@ Self-hoster documentation for this fork of Teedy. Start with
 | [Vocabulary](vocabulary.md) | Admin-managed controlled value lists that back dropdown metadata fields |
 | [Workflows](workflows.md) | Multi-step approval routes: concepts, lifecycle, webhooks, and two worked sample workflows |
 | [Sharing & permissions](sharing-and-permissions.md) | ACLs, hierarchical groups, guest access, public share links, and comments |
-| [Admin guide](admin-guide.md) | Users and quotas, webhooks, tag rules, audit log, theming, and SMTP/OCR settings |
+| [Admin guide](admin-guide.md) | Users and quotas, webhooks, tag rules, audit log, branding, and SMTP/OCR settings |
 | [REST API](api.md) | Authentication methods (session vs API key), request format, key resources, and curl examples |
 | [FAQ & troubleshooting](faq-troubleshooting.md) | Common failures and their fixes, with pointers to the deeper pages |
 

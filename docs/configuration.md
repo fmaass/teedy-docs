@@ -102,6 +102,25 @@ A few settings are read only as JVM system properties, passed via
 The full set of `docs.oidc_*` properties is documented on the
 [authentication page](authentication.md#configuration).
 
+## Branding assets
+
+Branding is configured from **Settings › Branding** (admin-only) — see the
+[admin guide](admin-guide.md#branding) for the full field reference and the API equivalents.
+The assets live in the data directory, so they are covered by the backup below:
+
+| Path (under `docs.home`) | Contents |
+|---|---|
+| `theme/logo`, `theme/background`, `theme/favicon` | Uploaded images; absent means the bundled default is served |
+| `theme/custom.css` | Custom stylesheet, appended after the generated colour rule |
+| `theme/custom.js` | Custom script, served from `GET /api/theme/script` |
+
+Each text asset is capped at 256 KiB.
+
+> **Custom JavaScript runs as your users.** The script is public and executes in every signed-in
+> user's browser within their session: it can act as them and read or transmit any document data
+> they can see. Only an admin can set it, and that is the security boundary — the code itself gets
+> no sandbox. Deploy only code you wrote or have fully reviewed.
+
 ## Data directory and backup
 
 Stored files are AES-encrypted on disk and are useless without the database
@@ -118,4 +137,4 @@ metadata; the database cannot restore usable documents without the matching file
 
 - [Getting started](getting-started.md) — the minimal compose setup
 - [Authentication](authentication.md) — OIDC / LDAP / header-auth configuration
-- [Admin guide](admin-guide.md) — webhooks, quotas, SMTP, OCR, theme
+- [Admin guide](admin-guide.md) — webhooks, quotas, SMTP, OCR, branding

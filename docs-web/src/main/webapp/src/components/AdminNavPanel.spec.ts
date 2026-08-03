@@ -38,6 +38,7 @@ const settingsAdminGroups = [
     label: en.ui.nav.group_system,
     items: [
       { label: 'Config', icon: 'pi pi-cog', to: '/settings/config', name: 'settings-config' },
+      { label: 'Branding', icon: 'pi pi-palette', to: '/settings/branding', name: 'settings-branding' },
       { label: 'Inbox', icon: 'pi pi-inbox', to: '/settings/inbox', name: 'settings-inbox' },
       { label: 'Webhooks', icon: 'pi pi-link', to: '/settings/webhooks', name: 'settings-webhooks' },
       { label: 'Stats', icon: 'pi pi-chart-bar', to: '/settings/stats', name: 'settings-stats' },
@@ -104,7 +105,7 @@ describe('AdminNavPanel — settings nav regroup (#61)', () => {
     }
     expect(grouped['Access & Users']).toEqual(['Users', 'Groups', 'LDAP', 'OIDC'])
     expect(grouped['Content Model']).toEqual(['Metadata', 'Vocabulary', 'Tag rules', 'Workflow'])
-    expect(grouped['System']).toEqual(['Config', 'Inbox', 'Webhooks', 'Stats', 'Monitoring'])
+    expect(grouped['System']).toEqual(['Config', 'Branding', 'Inbox', 'Webhooks', 'Stats', 'Monitoring'])
   })
 
   it('renders no admin group sections for a non-admin', () => {
