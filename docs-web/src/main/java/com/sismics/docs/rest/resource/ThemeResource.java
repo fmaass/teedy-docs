@@ -288,7 +288,7 @@ public class ThemeResource extends BaseResource {
      * @return Image version token
      */
     private long imageVersion(String type) {
-        java.nio.file.Path imagePath = DirectoryUtil.getThemeDirectory().resolve(type);
+        java.nio.file.Path imagePath = themeImagePath(type);
         if (!Files.exists(imagePath)) {
             return 0L;
         }
@@ -400,8 +400,8 @@ public class ThemeResource extends BaseResource {
             throw new ClientException("NoImageProvided", "An image is required");
         }
 
-        // Only a background or a logo is handled
-        java.nio.file.Path filePath = DirectoryUtil.getThemeDirectory().resolve(type);
+        // Only the three allowlisted types name a file
+        java.nio.file.Path filePath = themeImagePath(type);
 
         // Copy the image to the theme directory
         try (InputStream inputStream = imageBodyPart.getValueAs(InputStream.class)) {
@@ -436,7 +436,7 @@ public class ThemeResource extends BaseResource {
 
         // Dropping the override is the reset: getImage falls back to the bundled default whenever
         // the file is absent. Resetting an image that was never uploaded is a no-op.
-        java.nio.file.Path filePath = DirectoryUtil.getThemeDirectory().resolve(type);
+        java.nio.file.Path filePath = themeImagePath(type);
         try {
             Files.deleteIfExists(filePath);
         } catch (IOException e) {
@@ -464,7 +464,7 @@ public class ThemeResource extends BaseResource {
     @Produces("image/*")
     @Path("image/{type: logo|background|favicon}")
     public Response getImage(@PathParam("type") final String type) {
-        final java.nio.file.Path filePath = DirectoryUtil.getThemeDirectory().resolve(type);
+        final java.nio.file.Path filePath = themeImagePath(type);
 
         // Copy the image to the response output
         return Response.ok(new StreamingOutput() {
@@ -494,6 +494,32 @@ public class ThemeResource extends BaseResource {
         .header(HttpHeaders.CACHE_CONTROL, "public")
         .header(HttpHeaders.EXPIRES, HttpUtil.buildExpiresHeader(3_600_000L * 24L * 15L))
         .build();
+    }
+
+    /**
+     * Resolves a theme image type to its file in the theme directory through an explicit in-code
+     * allowlist: each accepted type maps to a CONSTANT name, so no request-derived string is ever
+     * used to build a path. The path template on the three endpoints restricts the routed values to
+     * the same literals and is the outer guard; this is the inner one, and it is the guard that
+     * still holds for a caller arriving from somewhere other than a routed request, or if the
+     * template is ever relaxed.
+     *
+     * @param type Image type (logo|background|favicon)
+     * @return Path of that image inside the theme directory
+     */
+    private static java.nio.file.Path themeImagePath(String type) {
+        java.nio.file.Path themeDirectory = DirectoryUtil.getThemeDirectory();
+        switch (type) {
+            case "logo":
+                return themeDirectory.resolve("logo");
+            case "background":
+                return themeDirectory.resolve("background");
+            case "favicon":
+                return themeDirectory.resolve("favicon");
+            default:
+                throw new ClientException("InvalidImageType",
+                        "The image type must be logo, background or favicon");
+        }
     }
 
     /**

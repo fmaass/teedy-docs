@@ -2,6 +2,8 @@ package com.sismics.docs.rest;
 
 import com.google.common.io.Resources;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.rest.resource.ThemeResource;
+import com.sismics.rest.exception.ClientException;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
 import org.glassfish.jersey.media.multipart.FormDataMultiPart;
 import org.glassfish.jersey.media.multipart.MultiPartFeature;
@@ -16,6 +18,8 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.Locale;
 
@@ -448,6 +452,101 @@ public class TestThemeResource extends BaseJerseyTest {
     }
 
     /**
+     * The image type is a PATH SEGMENT that used to be resolved against the theme directory as it
+     * arrived, so the contract has two halves. The three accepted types keep their full PUT/GET/
+     * DELETE round trip and each one still names its own file; every other type is refused on
+     * every method and never reaches the theme directory — in particular it cannot name one of the
+     * files that genuinely live there (custom.css, custom.js) and overwrite it.
+     */
+    @Test
+    public void testThemeImageTypeAllowlist() throws Exception {
+        String adminToken = adminToken();
+        resetTheme(adminToken);
+        try {
+            byte[] uploaded = Resources.toByteArray(Resources.getResource("file/PIA00452.jpg"));
+
+            for (String type : new String[] { "logo", "background", "favicon" }) {
+                putImage(adminToken, type);
+
+                // The upload landed under its own name, byte for byte.
+                java.nio.file.Path imagePath = DirectoryUtil.getThemeDirectory().resolve(type);
+                Assertions.assertTrue(Files.exists(imagePath),
+                        type + " was not written to the theme directory");
+                Assertions.assertArrayEquals(uploaded, Files.readAllBytes(imagePath),
+                        type + " was not stored verbatim");
+
+                // …and it is what the endpoint serves.
+                Response response = target().path("/theme/image/" + type).request().get();
+                Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+                Assertions.assertArrayEquals(uploaded, response.readEntity(byte[].class),
+                        type + " did not serve the uploaded image");
+
+                // The reset drops that file and the bundled default comes back.
+                response = target().path("/theme/image/" + type).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                        .delete();
+                Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+                Assertions.assertFalse(Files.exists(imagePath), type + " survived the reset");
+                response = target().path("/theme/image/" + type).request().get();
+                Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+                Assertions.assertFalse(java.util.Arrays.equals(uploaded, response.readEntity(byte[].class)),
+                        type + " still served the uploaded image after the reset");
+            }
+
+            // No other type is accepted, and none of them creates a file.
+            for (String type : new String[] { "Logo", "logo.png", "sidebar", "theme" }) {
+                assertImageTypeRefused(adminToken, type);
+                Assertions.assertFalse(Files.exists(DirectoryUtil.getThemeDirectory().resolve(type)),
+                        "the image type " + type + " reached the theme directory");
+            }
+
+            // The two files that DO live in the theme directory are not reachable through the image
+            // endpoints either: a refused write leaves the stored asset exactly as it was.
+            String seededCss = ".allowlist { color: red; }";
+            String seededJs = "window.__allowlist = 1;";
+            putText(adminToken, "/theme/stylesheet", seededCss);
+            putText(adminToken, "/theme/script", seededJs);
+            for (String type : new String[] { "custom.css", "custom.js" }) {
+                assertImageTypeRefused(adminToken, type);
+            }
+            Assertions.assertEquals(seededCss, getTheme().getString("css"));
+            Assertions.assertEquals(seededJs, target().path("/theme/script").request().get(String.class));
+        } finally {
+            resetTheme(adminToken);
+        }
+    }
+
+    /**
+     * JAX-RS routes only the three literals, so no request can reach the in-code allowlist with
+     * anything else and the test above can only prove the OUTER guard. The allowlist is the inner
+     * one — the guard that still holds for a caller that never went through routing, and the
+     * reason no request-derived string reaches a path at all — so it is asserted directly here.
+     * Without this, a revert to resolving the raw type would keep every HTTP test green.
+     */
+    @Test
+    public void testThemeImagePathAllowlist() throws Exception {
+        Method themeImagePath = ThemeResource.class.getDeclaredMethod("themeImagePath", String.class);
+        themeImagePath.setAccessible(true);
+
+        // Each accepted type keeps naming exactly the file it always named — the mapping is a
+        // constant lookup, not a rename, so no uploaded image moves.
+        for (String type : new String[] { "logo", "background", "favicon" }) {
+            Assertions.assertEquals(DirectoryUtil.getThemeDirectory().resolve(type),
+                    themeImagePath.invoke(null, type), type + " no longer resolves to its own file");
+        }
+
+        // Everything else is a client error rather than a path.
+        for (String type : new String[] { "..", "../custom.css", "custom.css", "logo/../custom.js",
+                "Logo", "logo ", "", "/etc/passwd" }) {
+            InvocationTargetException thrown = Assertions.assertThrows(InvocationTargetException.class,
+                    () -> themeImagePath.invoke(null, type),
+                    "the allowlist resolved a path for the image type " + type);
+            Assertions.assertInstanceOf(ClientException.class, thrown.getCause(),
+                    "the allowlist rejected " + type + " with " + thrown.getCause());
+        }
+    }
+
+    /**
      * The 256 KiB cap has to hold on the bytes that actually reach the disk, not on the bytes the
      * client sent. Lone UTF-8 continuation bytes are the gap: each one decodes to U+FFFD, which
      * re-encodes to THREE bytes, so a request sitting exactly on the limit would triple on write.
@@ -535,6 +634,55 @@ public class TestThemeResource extends BaseJerseyTest {
         } finally {
             resetTheme(adminToken);
         }
+    }
+
+    /**
+     * Uploads the same reference image as the given theme image type and asserts it was accepted.
+     */
+    private void putImage(String adminToken, String type) throws Exception {
+        try (InputStream is = Resources.getResource("file/PIA00452.jpg").openStream()) {
+            StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("image", is, "PIA00452.jpg");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                Response response = target()
+                        .register(MultiPartFeature.class)
+                        .path("/theme/image/" + type).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                        .put(Entity.entity(multiPart.bodyPart(streamDataBodyPart),
+                                MediaType.MULTIPART_FORM_DATA_TYPE));
+                Assertions.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus(),
+                        "PUT /theme/image/" + type + " rejected: " + response.readEntity(String.class));
+            }
+        }
+    }
+
+    /**
+     * Asserts that an image type is refused on all three methods, as an admin — the rejection has
+     * to be the type itself, not a missing permission.
+     */
+    private void assertImageTypeRefused(String adminToken, String type) throws Exception {
+        Response response = target().path("/theme/image/" + type).request().get();
+        Assertions.assertTrue(response.getStatus() >= 400,
+                "GET accepted the image type " + type + " with status " + response.getStatus());
+
+        response = target().path("/theme/image/" + type).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        Assertions.assertTrue(response.getStatus() >= 400,
+                "DELETE accepted the image type " + type + " with status " + response.getStatus());
+
+        try (InputStream is = Resources.getResource("file/PIA00452.jpg").openStream()) {
+            StreamDataBodyPart streamDataBodyPart = new StreamDataBodyPart("image", is, "PIA00452.jpg");
+            try (FormDataMultiPart multiPart = new FormDataMultiPart()) {
+                response = target()
+                        .register(MultiPartFeature.class)
+                        .path("/theme/image/" + type).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                        .put(Entity.entity(multiPart.bodyPart(streamDataBodyPart),
+                                MediaType.MULTIPART_FORM_DATA_TYPE));
+            }
+        }
+        Assertions.assertTrue(response.getStatus() >= 400,
+                "PUT accepted the image type " + type + " with status " + response.getStatus());
     }
 
     /**

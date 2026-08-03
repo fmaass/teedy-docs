@@ -225,17 +225,6 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-web/src/main/java/com/sismics/docs/rest/resource/ThemeResource.java:408:37",
-      "sink_line": "            Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);",
-      "finding": "CodeQL path-injection: theme image write flagged as path injection",
-      "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",
-      "owner": "fmaass",
-      "introduced": "2026-07-15",
-      "expires": "2026-10-15",
-      "compensating_control": "The type path segment is constrained by the JAX-RS route regex to exactly logo|background|favicon and the endpoint requires the ADMIN base function; no traversal value can bind.",
-      "removal_issue": "#104"
-    },
-    {
       "id": "java/polynomial-redos@docs-web-common/src/main/java/com/sismics/rest/util/ValidationUtil.java:103:36",
       "sink_line": "        if (!EMAIL_PATTERN.matcher(s).matches()) {",
       "finding": "CodeQL polynomial-redos: email format regex flagged as polynomial ReDoS",
