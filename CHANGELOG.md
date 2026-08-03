@@ -21,7 +21,7 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 There is no database migration; the schema level remains 64.
 
 ### Added
-- A new Branding page in the settings lets an administrator set the application name, logo, favicon and main colour, and add custom CSS or JavaScript. The main colour determines the rest of the interface palette. The configured name replaces the product name in the sidebar, mobile drawer, About dialog and settings intro, with the uploaded logo shown beside it (#57, #241).
+- A new Branding page in the settings lets an administrator set the application name, logo, favicon, navigation bar colour and main colour, and add custom CSS or JavaScript. The main colour determines the rest of the interface palette. The configured name replaces the product name in the sidebar, mobile drawer, About dialog and settings intro, with the uploaded logo shown beside it (#57, #241, #261).
 - Tag searches support `*` as a wildcard anywhere in a tag term: `tag:invoice*` matches names beginning with `invoice`, `tag:*2026` names ending in `2026`, `tag:*invoice*` `invoice` anywhere in the name, and `tag:inv*2026` names beginning with `inv` and ending in `2026`. An exact tag name takes precedence over a wildcard pattern, and a term made only of asterisks matches nothing. The tags and filtering documentation covers the new syntax (#236, #252).
 - WebP images now produce thumbnails, appear in previews and can be included in PDF exports (#233).
 - Clicking a thumbnail in gallery view opens its document (#235).
