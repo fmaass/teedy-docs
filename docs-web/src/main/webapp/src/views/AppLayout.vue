@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import { useTagFilterStore } from '../stores/tagFilter'
 import { useResizablePanel } from '../composables/useResizablePanel'
 import { useAppInfo } from '../composables/useAppInfo'
+import { useBrand } from '../composables/useThemeBranding'
 import AppHeader from '../components/AppHeader.vue'
 import DefaultPasswordBanner from '../components/DefaultPasswordBanner.vue'
 import AdminNavPanel from '../components/AdminNavPanel.vue'
@@ -31,6 +32,18 @@ const footerLinks = computed(() => appInfo.value?.footer_links ?? [])
 // #62: running app version, shown as a muted label directly above the two
 // footer nav links (Manage Tags / Settings) in the settings/tag sidebar.
 const appVersion = computed(() => appInfo.value?.current_version ?? null)
+
+// The instance brand, shown at the top of the desktop panel and of the mobile drawer. Served from
+// the SHARED theme query, so this costs no extra request and nothing is awaited before mount — the
+// brand shows the product fallback for a frame and then swaps in the configured name.
+const { brandName, brandLogoUrl } = useBrand()
+// A logo that fails to decode (a corrupt upload, a file removed underneath us) must degrade to the
+// text brand rather than leave a broken-image glyph in the most visible spot on screen. Reset
+// whenever the URL changes, so a REPLACEMENT upload gets a fresh chance to load.
+const logoBroken = ref(false)
+watch(brandLogoUrl, () => {
+  logoBroken.value = false
+})
 
 const isMobile = ref(false)
 const drawerOpen = ref(false)
@@ -130,7 +143,16 @@ function handleMobileTagSelect(tagId: string) {
       >
         <!-- Brand + add document -->
         <div class="panel-brand-row">
-          <router-link to="/document" class="panel-brand">teedy</router-link>
+          <router-link to="/document" class="panel-brand">
+            <img
+              v-if="brandLogoUrl && !logoBroken"
+              :src="brandLogoUrl"
+              class="panel-brand-logo"
+              alt=""
+              @error="logoBroken = true"
+            />
+            <span class="panel-brand-name">{{ brandName }}</span>
+          </router-link>
           <Button
             icon="pi pi-plus"
             size="small"
@@ -230,7 +252,16 @@ function handleMobileTagSelect(tagId: string) {
         class="mobile-panel-drawer"
       >
         <template #header>
-          <router-link to="/document" class="panel-brand" @click="drawerOpen = false">teedy</router-link>
+          <router-link to="/document" class="panel-brand" @click="drawerOpen = false">
+            <img
+              v-if="brandLogoUrl && !logoBroken"
+              :src="brandLogoUrl"
+              class="panel-brand-logo"
+              alt=""
+              @error="logoBroken = true"
+            />
+            <span class="panel-brand-name">{{ brandName }}</span>
+          </router-link>
         </template>
         <div class="mobile-panel-body">
           <TagTreePanel
@@ -358,10 +389,22 @@ function handleMobileTagSelect(tagId: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+/* The add-document button keeps its size; the brand is what yields when the name is long. */
+.panel-brand-row > :not(.panel-brand) {
   flex-shrink: 0;
 }
 
 .panel-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* min-width:0 is what lets the name ellipsize instead of forcing the row wider: a flex item's
+     default min-width:auto refuses to shrink below its content. The name field allows 30
+     characters, well past what the panel is wide enough to show. */
+  min-width: 0;
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--p-primary-color);
@@ -371,6 +414,21 @@ function handleMobileTagSelect(tagId: string) {
 .panel-brand:hover {
   text-decoration: none;
   opacity: 0.85;
+}
+/* The uploaded logo is arbitrary operator content of unknown aspect ratio, so it is bounded on
+   BOTH axes and never dictates the row's height. */
+.panel-brand-logo {
+  flex: 0 0 auto;
+  height: 1.5rem;
+  max-width: 2.5rem;
+  width: auto;
+  object-fit: contain;
+}
+.panel-brand-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-middle {

@@ -4,11 +4,17 @@ import { useI18n } from 'vue-i18n'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useAppInfo } from '../composables/useAppInfo'
+import { useBrand } from '../composables/useThemeBranding'
 import { HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
 const { t } = useI18n()
+
+// The brand line used to be a hardcoded "teedy" — the third such literal in the app, so an
+// instance renamed in Branding still introduced itself by the product name here. Same shared
+// query and same fallback as the panel brand.
+const { brandName } = useBrand()
 
 // Live running version from the shared app-info query (v{version} brand badge).
 const { data: appInfo } = useAppInfo()
@@ -38,7 +44,7 @@ const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
   >
     <div class="about-body">
       <div class="about-brand">
-        <span class="about-name">teedy</span>
+        <span class="about-name">{{ brandName }}</span>
         <span v-if="version" class="about-version">{{ `v${version}` }}</span>
       </div>
 

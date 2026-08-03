@@ -16,6 +16,7 @@ import {
 } from '../../api/theme'
 import { queryKeys } from '../../api/queryKeys'
 import { useInvalidateTheme } from '../../composables/useThemeBranding'
+import { teedyPrimary } from '../../theme/primary'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
@@ -42,10 +43,17 @@ const invalidateTheme = useInvalidateTheme()
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 const IMAGE_TYPES: ThemeImageType[] = ['logo', 'background', 'favicon']
-// Sample values, not defaults: the placeholders show the expected hex shape while the field is
-// empty (an empty field means "reset this to the stock value").
+// Shown while the field is empty, which means "use the stock value" rather than "unconfigured".
 const NAVBAR_COLOR_SAMPLE = '#ffffff'
-const BRAND_COLOR_SAMPLE = '#2aabd2'
+// The brand colour the app ACTUALLY falls back to, read from the palette module rather than
+// re-typed so the placeholder and the swatch beside it can never drift from it.
+//
+// It is also handed to the ColorPicker as its `defaultColor`, because PrimeVue substitutes its own
+// — 'ff0000' — whenever the bound value is empty, and paints it onto the preview as an inline
+// background-color that no stylesheet can override. That made a fresh install look like it had
+// deliberately picked RED as its brand while the text field correctly showed the stock colour.
+// Display only: the v-model stays empty, so "empty means reset" is unchanged.
+const BRAND_COLOR_SAMPLE = teedyPrimary['500']
 
 const { data: theme } = useQuery({
   queryKey: queryKeys.theme(),
@@ -268,7 +276,12 @@ async function resetImage(type: ThemeImageType) {
       <div class="form-field">
         <label for="branding-main-color">{{ t('ui.branding.brand_color') }}</label>
         <div class="color-row">
-          <ColorPicker v-model="mainSwatch" format="hex" :aria-label="t('ui.branding.brand_color')" />
+          <ColorPicker
+            v-model="mainSwatch"
+            format="hex"
+            :default-color="BRAND_COLOR_SAMPLE"
+            :aria-label="t('ui.branding.brand_color')"
+          />
           <InputText id="branding-main-color" v-model="mainColor" class="color-hex" :placeholder="BRAND_COLOR_SAMPLE" />
           <Button
             :label="t('ui.branding.clear')"

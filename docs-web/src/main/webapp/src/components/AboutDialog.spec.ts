@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { readFileSync } from 'node:fs'
@@ -14,6 +14,14 @@ import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS, headingVersion } from './aboutHighl
 const appInfoValue = vi.hoisted(() => ({ value: undefined as { current_version: string } | undefined }))
 vi.mock('../composables/useAppInfo', () => ({
   useAppInfo: () => ({ data: ref(appInfoValue.value) }),
+}))
+
+// The dialog's brand line renders the CONFIGURED instance name (it used to be a hardcoded
+// "teedy"). useBrand owns that derivation and is tested in useThemeBranding.spec.ts; here it is a
+// dependency, so it is mocked and the test asserts what the component renders from it.
+const brandNameValue = vi.hoisted(() => ({ value: 'Teedy' }))
+vi.mock('../composables/useThemeBranding', () => ({
+  useBrand: () => ({ brandName: computed(() => brandNameValue.value), brandLogoUrl: ref(null) }),
 }))
 
 import AboutDialog from './AboutDialog.vue'
@@ -90,10 +98,34 @@ describe('AboutDialog highlights', () => {
   })
 })
 
-// Mount AboutDialog (visible) and return its rendered "What's new" heading text.
-function renderedHeading(): string {
+// The About dialog was the THIRD place that hardcoded the product name (it read "teedy v3.8.1"
+// on every instance, lowercase, regardless of what the operator had called their deployment).
+// It now renders the configured brand, with the same fallback as the rest of the chrome.
+describe('AboutDialog brand name', () => {
+  it('renders the CONFIGURED application name, not a hardcoded product name', () => {
+    brandNameValue.value = 'Contoso Archive'
+    expect(mountDialog().get('.about-name').text()).toBe('Contoso Archive')
+  })
+
+  it('renders the fallback brand on an instance that has not been renamed', () => {
+    brandNameValue.value = 'Teedy'
+    const name = mountDialog().get('.about-name').text()
+    expect(name).toBe('Teedy')
+    // The old literal was lowercase; the brand is the product name proper.
+    expect(name).not.toBe('teedy')
+  })
+
+  it('keeps the running version beside the brand', () => {
+    brandNameValue.value = 'Contoso Archive'
+    appInfoValue.value = { current_version: '3.8.2' }
+    expect(mountDialog().get('.about-version').text()).toBe('v3.8.2')
+  })
+})
+
+// Mount AboutDialog (visible) with the overlay machinery stubbed out, so its body is in the DOM.
+function mountDialog() {
   const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
-  const wrapper = mount(AboutDialog, {
+  return mount(AboutDialog, {
     props: { visible: true },
     global: {
       plugins: [i18n],
@@ -105,7 +137,11 @@ function renderedHeading(): string {
       },
     },
   })
-  return wrapper.get('.about-heading').text()
+}
+
+// Mount AboutDialog (visible) and return its rendered "What's new" heading text.
+function renderedHeading(): string {
+  return mountDialog().get('.about-heading').text()
 }
 
 // The MAJOR.MINOR prefix of a semantic version (e.g. "3.5.0" -> "3.5").

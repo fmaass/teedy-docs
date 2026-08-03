@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PrimeVue from 'primevue/config'
@@ -15,6 +15,20 @@ import type { AppInfo, FooterLink } from '../api/app'
 const appInfo = vi.hoisted(() => ({ value: undefined as AppInfo | undefined }))
 vi.mock('../composables/useAppInfo', () => ({
   useAppInfo: () => ({ data: ref(appInfo.value) }),
+}))
+
+// The brand row reads the shared theme query. Mocked here for the same reason useAppInfo is: the
+// component is the unit under test, the query is a dependency — and mounting it unmocked would
+// need a real VueQueryPlugin client.
+const brand = vi.hoisted(() => ({
+  name: 'Teedy',
+  logoUrl: null as string | null,
+}))
+vi.mock('../composables/useThemeBranding', () => ({
+  useBrand: () => ({
+    brandName: computed(() => brand.name),
+    brandLogoUrl: computed(() => brand.logoUrl),
+  }),
 }))
 
 // Authenticated, admin — AppLayout only renders its shell when !auth.isAnonymous.
@@ -78,8 +92,9 @@ function mountLayout() {
         DefaultPasswordBanner: true,
         AdminNavPanel: true,
         TagTreePanel: true,
-        // Render the Drawer's default slot so the mobile footer is present in the DOM.
-        Drawer: { template: '<div class="drawer-stub"><slot /></div>' },
+        // Render the Drawer's header AND default slots so both the mobile brand (header) and the
+        // mobile footer (body) are present in the DOM.
+        Drawer: { template: '<div class="drawer-stub"><slot name="header" /><slot /></div>' },
         Button: true,
         'router-view': true,
       },
@@ -137,5 +152,79 @@ describe('AppLayout — configurable footer links', () => {
     await flushPromises()
     expect(wrapper.findAll('a.footer-external-link').length).toBe(0)
     expect(wrapper.find('.footer-external-links').exists()).toBe(false)
+  })
+})
+
+// --- The brand row (#57 display half) ----------------------------------------
+// The panel/drawer brand was a hardcoded "teedy" literal and the uploaded logo had no consumer,
+// so a renamed instance still showed stock Teedy in the most visible place on screen. These pin
+// the fallback rules at the component level; useBrand's own derivation is tested in
+// useThemeBranding.spec.ts.
+describe('AppLayout — the instance brand', () => {
+  it('renders the configured name in the desktop panel', async () => {
+    mobile.matches = false
+    brand.name = 'Contoso Archive'
+    brand.logoUrl = null
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+    expect(wrapper.find('.panel-brand-name').text()).toBe('Contoso Archive')
+    // The name is the brand link's own text, so it is that link's accessible name. (That it
+    // resolves to a real anchor pointing at /document is asserted end-to-end, where the router is
+    // real — here `router-link` is a stub.)
+    expect(wrapper.find('.panel-brand').text()).toContain('Contoso Archive')
+  })
+
+  it('renders the configured name in the mobile drawer', async () => {
+    mobile.matches = true
+    brand.name = 'Contoso Archive'
+    brand.logoUrl = null
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+    expect(wrapper.find('.panel-brand-name').text()).toBe('Contoso Archive')
+  })
+
+  it('renders NO image for an instance that never uploaded a logo', async () => {
+    mobile.matches = false
+    brand.name = 'Teedy'
+    brand.logoUrl = null
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+    // The bundled default is a Teedy asset; an unbranded instance must not grow a logo it never
+    // chose, so the brand stays text-only.
+    expect(wrapper.find('.panel-brand-logo').exists()).toBe(false)
+    expect(wrapper.find('.panel-brand-name').text()).toBe('Teedy')
+  })
+
+  it('renders the uploaded logo beside the name, at its cache-busted URL', async () => {
+    mobile.matches = false
+    brand.name = 'Contoso Archive'
+    brand.logoUrl = '/api/theme/image/logo?v=42'
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+    const logo = wrapper.find('img.panel-brand-logo')
+    expect(logo.exists()).toBe(true)
+    expect(logo.attributes('src')).toBe('/api/theme/image/logo?v=42')
+    // Decorative: the name beside it is what names the link, so a screen reader hears the
+    // instance name once rather than twice.
+    expect(logo.attributes('alt')).toBe('')
+    expect(wrapper.find('.panel-brand-name').text()).toBe('Contoso Archive')
+  })
+
+  it('falls back to the text brand when the uploaded logo fails to load', async () => {
+    mobile.matches = false
+    brand.name = 'Contoso Archive'
+    brand.logoUrl = '/api/theme/image/logo?v=42'
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+
+    await wrapper.find('img.panel-brand-logo').trigger('error')
+    // A broken-image glyph in the top-left corner is worse than no logo at all.
+    expect(wrapper.find('.panel-brand-logo').exists()).toBe(false)
+    expect(wrapper.find('.panel-brand-name').text()).toBe('Contoso Archive')
   })
 })

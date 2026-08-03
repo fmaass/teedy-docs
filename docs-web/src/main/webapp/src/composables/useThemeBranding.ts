@@ -1,4 +1,4 @@
-import { watch, onScopeDispose } from 'vue'
+import { computed, watch, onScopeDispose } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { getTheme, type ThemeConfig } from '../api/theme'
 import { queryKeys } from '../api/queryKeys'
@@ -6,6 +6,7 @@ import { applyBrandPrimary } from '../theme/primary'
 
 const DEFAULT_APP_NAME = 'Teedy'
 const FAVICON_ENDPOINT = '/api/theme/image/favicon'
+const LOGO_ENDPOINT = '/api/theme/image/logo'
 const STYLESHEET_ENDPOINT = '/api/theme/stylesheet'
 const SCRIPT_ENDPOINT = '/api/theme/script'
 const STYLESHEET_LINK_ID = 'teedy-theme-stylesheet'
@@ -130,6 +131,43 @@ export function applyThemeScript(
 function faviconBust(theme: ThemeConfig | undefined): string | number {
   if (theme?.favicon_version !== undefined) return theme.favicon_version
   return (theme?.name ?? '').trim() || DEFAULT_APP_NAME
+}
+
+/**
+ * The brand the app CHROME renders: the configured instance name, plus the uploaded logo when the
+ * operator has actually chosen one.
+ *
+ * Reads the SAME query key as {@link useThemeBranding}, so every consumer — the desktop panel
+ * brand, the mobile drawer brand, the About dialog — is served from ONE cache entry and ONE
+ * request; adding a consumer costs no extra network call. Nothing here is awaited before mount
+ * (#216/#245): until the payload lands the brand renders the product fallback and then swaps in,
+ * exactly as the tab title does.
+ *
+ * This exists because the in-app brand used to be a hardcoded `teedy` literal repeated at three
+ * sites while the uploaded logo had no consumer at all — so an operator could rename their
+ * instance and still see stock Teedy everywhere but the browser tab.
+ */
+export function useBrand() {
+  const { data: theme } = useQuery({
+    queryKey: queryKeys.theme(),
+    queryFn: () => getTheme(),
+    staleTime: Infinity,
+  })
+
+  // Blank as well as absent falls back: the server only defaults the name when the key is MISSING,
+  // so an admin who clears the field stores "" and gets "" back. The brand is never empty.
+  const brandName = computed(() => (theme.value?.name ?? '').trim() || DEFAULT_APP_NAME)
+
+  // logo_version is 0 exactly when no custom logo file exists (ThemeResource.imageVersion), and the
+  // image endpoint would then serve the BUNDLED Teedy asset — which an instance that never chose a
+  // logo must not silently grow. When there is a real one, that same version is the cache-bust
+  // token that gets the browser past the 15-day image cache after a replacement.
+  const brandLogoUrl = computed(() => {
+    const version = theme.value?.logo_version ?? 0
+    return version > 0 ? `${LOGO_ENDPOINT}?v=${version}` : null
+  })
+
+  return { brandName, brandLogoUrl }
 }
 
 /**

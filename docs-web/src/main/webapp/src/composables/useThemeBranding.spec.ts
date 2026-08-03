@@ -24,6 +24,7 @@ import {
   applyFavicon,
   applyThemeStylesheet,
   applyThemeScript,
+  useBrand,
   useInvalidateTheme,
   useThemeBranding,
 } from './useThemeBranding'
@@ -312,5 +313,90 @@ describe('useThemeBranding', () => {
     expect(document.querySelectorAll('link[rel~="icon"]').length).toBe(1)
     expect(pre.getAttribute('href')).toBe('/favicon.ico')
     expect(document.title).toBe('Orig')
+  })
+})
+
+// --- useBrand: the brand the APP CHROME renders -------------------------------
+// The tab title had a display half from day one; the brand INSIDE the app did not — the
+// panel/drawer and the About dialog each carried their own hardcoded "teedy" literal, and the
+// uploaded logo had no consumer at all. useBrand is the single derivation all three now read,
+// so the fallback rules live in one tested place.
+describe('useBrand', () => {
+  it('reads the SHARED theme query key (no second fetch of /api/theme)', () => {
+    useQueryMock.mockReturnValue({ data: ref(undefined) })
+    useBrand()
+    expect(useQueryMock).toHaveBeenCalledTimes(1)
+    const opts = useQueryMock.mock.calls[0][0]
+    // Same key + same staleTime as useThemeBranding, so vue-query serves both consumers from
+    // ONE cache entry and one request.
+    expect(opts.queryKey).toEqual(queryKeys.theme())
+    expect(opts.staleTime).toBe(Infinity)
+  })
+
+  it('renders the configured application name', () => {
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Contoso Archive', logo_version: 0 }) })
+    expect(useBrand().brandName.value).toBe('Contoso Archive')
+  })
+
+  it('falls back to Teedy for an absent, empty or blank name — never an empty brand', () => {
+    // Before the query resolves there is no payload at all: the brand shows the fallback for a
+    // frame rather than blanking the panel (nothing is awaited before mount, #216/#245).
+    useQueryMock.mockReturnValue({ data: ref(undefined) })
+    expect(useBrand().brandName.value).toBe('Teedy')
+
+    // An admin who CLEARS the name stores "", which the server returns verbatim.
+    useQueryMock.mockReturnValue({ data: ref({ name: '' }) })
+    expect(useBrand().brandName.value).toBe('Teedy')
+
+    useQueryMock.mockReturnValue({ data: ref({ name: '   ' }) })
+    expect(useBrand().brandName.value).toBe('Teedy')
+  })
+
+  it('trims a padded name rather than rendering the padding', () => {
+    useQueryMock.mockReturnValue({ data: ref({ name: '  Acme Docs  ' }) })
+    expect(useBrand().brandName.value).toBe('Acme Docs')
+  })
+
+  it('renders NO logo until one has actually been uploaded', () => {
+    // logo_version is 0 exactly when no custom logo file exists (ThemeResource.imageVersion).
+    // The bundled default is a Teedy asset — rendering it would give every unbranded instance a
+    // logo it never chose.
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme', logo_version: 0 }) })
+    expect(useBrand().brandLogoUrl.value).toBeNull()
+
+    // A server older than the logo_version field: still no logo rather than a guess.
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme' }) })
+    expect(useBrand().brandLogoUrl.value).toBeNull()
+
+    // Unresolved query.
+    useQueryMock.mockReturnValue({ data: ref(undefined) })
+    expect(useBrand().brandLogoUrl.value).toBeNull()
+  })
+
+  it('points at the logo endpoint with the image version as the cache-bust token', () => {
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme', logo_version: 1754212345678 }) })
+    expect(useBrand().brandLogoUrl.value).toBe('/api/theme/image/logo?v=1754212345678')
+  })
+
+  it('follows a live rename and a replaced logo without a reload', async () => {
+    const theme = ref<{ name: string; logo_version?: number } | undefined>({
+      name: 'Before',
+      logo_version: 0,
+    })
+    useQueryMock.mockReturnValue({ data: theme })
+    const { brandName, brandLogoUrl } = useBrand()
+    expect(brandName.value).toBe('Before')
+    expect(brandLogoUrl.value).toBeNull()
+
+    // The Branding screen invalidates the shared key after every mutation; the refetch lands here.
+    theme.value = { name: 'After', logo_version: 42 }
+    await nextTick()
+    expect(brandName.value).toBe('After')
+    expect(brandLogoUrl.value).toBe('/api/theme/image/logo?v=42')
+
+    // Replacing the image again bumps the token, so the browser refetches past the 15-day cache.
+    theme.value = { name: 'After', logo_version: 99 }
+    await nextTick()
+    expect(brandLogoUrl.value).toBe('/api/theme/image/logo?v=99')
   })
 })

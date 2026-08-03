@@ -1,4 +1,5 @@
-import { test, expect, type Page, type APIRequestContext } from './fixtures'
+import { test, expect, type Locator, type Page, type APIRequestContext } from './fixtures'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
@@ -219,5 +220,188 @@ test.describe('Settings › Branding', () => {
     await page.locator('#branding-js').fill('')
     await page.getByRole('button', { name: 'Save' }).nth(2).click()
     await expect(page.locator('#teedy-theme-script')).toHaveCount(0)
+  })
+})
+
+// --- The in-app brand: the display half of #57 -------------------------------
+//
+// The settings section above SETS the name and the logo; these specs assert they actually reach
+// the app chrome. Before this phase the brand shown in the most visible place on screen — the
+// panel/drawer top-left — was the hardcoded literal "teedy", the About dialog carried a second
+// hardcoded copy, and the uploaded logo had NO consumer anywhere in the SPA. So an operator could
+// rename their instance and upload a logo and still see stock Teedy everywhere but the tab title,
+// which defeats the point of #57 (telling two instances apart at a glance).
+//
+// The nav brand is asserted through openNav(), which resolves to the desktop left panel at the
+// desktop viewport and to the mobile Drawer at the mobile one — so the `desktop` and `mobile`
+// Playwright projects cover BOTH brand sites with one spec each.
+
+const APP_NAME = 'Contoso Archive'
+// Exercises the 30-character cap the name field allows: the brand must ellipsize rather than push
+// the add-document button out of the panel.
+const LONG_APP_NAME = 'Northwind Traders Document Hub'
+
+/** The brand link inside whichever navigation container this viewport renders. */
+async function navBrand(page: Page): Promise<Locator> {
+  return (await openNav(page)).locator('.panel-brand')
+}
+
+/**
+ * Re-enter the document list with a FRESH app instance.
+ *
+ * These specs change the theme over the API rather than through the settings screen, so nothing
+ * invalidates the client cache — and the theme query is deliberately `staleTime: Infinity`. A
+ * `goto` back to the same hash URL is a SAME-DOCUMENT navigation, which leaves the running SPA and
+ * its cache untouched, so the change would be invisible. Only a real document reload picks it up.
+ *
+ * This is not a product gap: the Branding screen calls invalidateTheme() after every mutation, so
+ * an admin editing through the UI sees the brand change without reloading.
+ */
+async function reloadDocumentList(page: Page): Promise<void> {
+  await page.reload()
+  await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+}
+
+/** The rendered background colour of a colour field's swatch (the PrimeVue preview button). */
+async function swatchColor(page: Page, inputId: string): Promise<string> {
+  return page
+    .locator('.color-row')
+    .filter({ has: page.locator(`#${inputId}`) })
+    .locator('.p-colorpicker-preview')
+    .evaluate((el) => getComputedStyle(el).backgroundColor)
+}
+
+test.describe('Settings › Branding › the brand shown inside the app', () => {
+  test.beforeEach(async ({ request, cleanup }) => {
+    await resetBranding(request)
+    cleanup.defer('reset branding to the bundled defaults', () => resetBranding(request))
+  })
+
+  test('#57: the configured application name is the brand in the navigation and in About', async ({
+    page,
+    request,
+  }) => {
+    // An unbranded instance keeps the product name — never an empty brand.
+    await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    await expect(await navBrand(page)).toHaveText('Teedy')
+    await closeNav(page)
+
+    await expectResponseOk(
+      await request.post('/api/theme', { form: { name: APP_NAME } }),
+      'set the application name',
+    )
+    await reloadDocumentList(page)
+
+    // The nav brand — the desktop left panel, or the mobile drawer.
+    await expect(await navBrand(page)).toHaveText(APP_NAME)
+    // It stays a link to the document list, and the name is its accessible name.
+    const brand = (await openNav(page)).getByRole('link', { name: APP_NAME })
+    await expect(brand).toBeVisible()
+    await expect(brand).toHaveAttribute('href', /#\/document$/)
+    await closeNav(page)
+
+    // The About dialog carried a THIRD hardcoded copy of the brand.
+    await page.getByRole('button', { name: 'About', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.about-name')).toHaveText(APP_NAME)
+  })
+
+  test('#57: a 30-character name ellipsizes instead of overflowing the brand row', async ({
+    page,
+    request,
+  }) => {
+    expect(LONG_APP_NAME.length).toBe(30)
+    await expectResponseOk(
+      await request.post('/api/theme', { form: { name: LONG_APP_NAME } }),
+      'set a maximum-length application name',
+    )
+    await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+
+    const nav = await openNav(page)
+    const brand = nav.locator('.panel-brand')
+    await expect(brand).toHaveText(LONG_APP_NAME)
+
+    // The brand must stay inside its container rather than pushing the row wider — the same
+    // geometry contract the German-overflow gate applies to the nav links.
+    const brandBox = await brand.boundingBox()
+    const navBox = await nav.boundingBox()
+    expect(brandBox, 'brand has a box').not.toBeNull()
+    expect(navBox, 'nav has a box').not.toBeNull()
+    expect(
+      brandBox!.x + brandBox!.width,
+      'long brand right edge stays within the nav container',
+    ).toBeLessThanOrEqual(navBox!.x + navBox!.width + 1)
+    // Ellipsized, not wrapped to a second line: the row keeps its single-line height.
+    const name = brand.locator('.panel-brand-name')
+    await expect(name).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(name).toHaveCSS('white-space', 'nowrap')
+    await closeNav(page)
+  })
+
+  test('#57: an uploaded logo shows in the brand row, and an instance without one shows none', async ({
+    page,
+    request,
+  }) => {
+    await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+
+    // No custom logo: the brand stays text-only. The BUNDLED default logo is a Teedy asset, so
+    // rendering it here would give every unbranded instance a logo it never chose.
+    await expect((await openNav(page)).locator('.panel-brand-logo')).toHaveCount(0)
+    await closeNav(page)
+
+    await expectResponseOk(
+      await request.put('/api/theme/image/logo', {
+        multipart: {
+          image: {
+            name: 'pixel.png',
+            mimeType: 'image/png',
+            buffer: readFileSync(join(FIXTURES, 'pixel.png')),
+          },
+        },
+      }),
+      'upload a custom logo',
+    )
+    await reloadDocumentList(page)
+
+    const logo = (await openNav(page)).locator('.panel-brand-logo')
+    await expect(logo).toBeVisible()
+    // Carries the image's own cache-bust token, so a replaced logo is not served stale for the
+    // 15 days the image response is cached for. v=0 means "no custom logo" and must not appear.
+    await expect(logo).toHaveAttribute('src', /^\/api\/theme\/image\/logo\?v=[1-9]\d*$/)
+    // It really decoded — a broken <img> would report zero natural width.
+    await expect
+      .poll(() => logo.evaluate((el) => (el as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0)
+    // The name stays beside it, so the brand keeps an accessible text name.
+    await expect((await openNav(page)).locator('.panel-brand-name')).toHaveText('Teedy')
+    await closeNav(page)
+
+    // Resetting the logo returns the instance to the text-only brand.
+    await expectResponseOk(await request.delete('/api/theme/image/logo'), 'reset the logo')
+    await reloadDocumentList(page)
+    await expect((await openNav(page)).locator('.panel-brand-logo')).toHaveCount(0)
+    await closeNav(page)
+  })
+
+  test('#57: an unset brand colour does not render a red swatch', async ({ page }) => {
+    await gotoBranding(page)
+
+    // PrimeVue's ColorPicker falls back to its own `defaultColor` ('ff0000') whenever the bound
+    // value is empty, so an instance that never chose a brand colour looked like it had picked
+    // red — while the text field beside it correctly showed the placeholder.
+    await expect(page.locator('#branding-main-color')).toHaveValue('')
+    const unsetSwatch = await swatchColor(page, 'branding-main-color')
+    expect(unsetSwatch).not.toBe('rgb(255, 0, 0)')
+
+    // The swatch still TRACKS a real value — the fix must not have frozen it.
+    await page.locator('#branding-main-color').fill('#123456')
+    await expect.poll(() => swatchColor(page, 'branding-main-color')).not.toBe(unsetSwatch)
+
+    // …and clearing a previously-set brand colour returns to the unset state, not to red.
+    await page.getByRole('button', { name: 'Clear' }).nth(1).click()
+    await expect(page.locator('#branding-main-color')).toHaveValue('')
+    await expect.poll(() => swatchColor(page, 'branding-main-color')).toBe(unsetSwatch)
+    expect(unsetSwatch).not.toBe('rgb(255, 0, 0)')
   })
 })
