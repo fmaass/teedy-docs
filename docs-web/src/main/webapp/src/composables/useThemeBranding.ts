@@ -7,6 +7,7 @@ import { applyBrandPrimary } from '../theme/primary'
 const DEFAULT_APP_NAME = 'Teedy'
 const FAVICON_ENDPOINT = '/api/theme/image/favicon'
 const LOGO_ENDPOINT = '/api/theme/image/logo'
+const BACKGROUND_ENDPOINT = '/api/theme/image/background'
 const STYLESHEET_ENDPOINT = '/api/theme/stylesheet'
 const SCRIPT_ENDPOINT = '/api/theme/script'
 const STYLESHEET_LINK_ID = 'teedy-theme-stylesheet'
@@ -134,8 +135,8 @@ function faviconBust(theme: ThemeConfig | undefined): string | number {
 }
 
 /**
- * The brand the app CHROME renders: the configured instance name, plus the uploaded logo when the
- * operator has actually chosen one.
+ * The brand the app CHROME renders: the configured instance name, the uploaded logo, and the
+ * uploaded login background — each only when the operator has actually chosen one.
  *
  * Reads the SAME query key as {@link useThemeBranding}, so every consumer — the desktop panel
  * brand, the mobile drawer brand, the About dialog — is served from ONE cache entry and ONE
@@ -167,7 +168,18 @@ export function useBrand() {
     return version > 0 ? `${LOGO_ENDPOINT}?v=${version}` : null
   })
 
-  return { brandName, brandLogoUrl }
+  // The admin-uploaded login background (#258). Same 0-means-none rule as the logo, and here it is
+  // the RELEASE-SAFETY property: GET /theme/image/background always answers, falling back to a
+  // bundled default, so an install that never chose a background would silently grow one on
+  // upgrade if the endpoint's answer were treated as the signal. background_version is the signal.
+  const brandBackgroundUrl = computed(() => {
+    // Coerced and range-checked because this value is interpolated into a CSS url(): only a
+    // finite positive number ever reaches the stylesheet.
+    const version = Number(theme.value?.background_version ?? 0)
+    return Number.isFinite(version) && version > 0 ? `${BACKGROUND_ENDPOINT}?v=${version}` : null
+  })
+
+  return { brandName, brandLogoUrl, brandBackgroundUrl }
 }
 
 /**

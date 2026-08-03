@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../stores/auth'
+import { useBrand } from '../composables/useThemeBranding'
 import { requestPasswordReset } from '../api/user'
 import { getAppInfo, type FooterLink } from '../api/app'
 import { queryKeys } from '../api/queryKeys'
@@ -41,6 +42,21 @@ const oidcError = ref(false)
 // Configurable footer/imprint links, rendered beneath the login card so EU imprint
 // links are reachable BEFORE login (GET /app is anonymous). Empty by default.
 const footerLinks = ref<FooterLink[]>([])
+
+// #258: the admin-uploaded branding background. It is served by a PUBLIC endpoint and read from
+// the shared theme query App.vue already mounts — so this page, which is itself public, adds no
+// request and no authenticated call. Null until an admin actually uploads one.
+const { brandBackgroundUrl } = useBrand()
+
+// Only the URL is bound; the scrim that keeps the form legible over an arbitrary photo is
+// composed in CSS, where it can differ per theme. Binding `undefined` (not an empty object) when
+// there is no background means no style attribute is emitted at all, so the default login page
+// stays byte-identical to what it rendered before this feature.
+const backgroundStyle = computed(() =>
+  brandBackgroundUrl.value
+    ? { '--login-background-image': `url("${brandBackgroundUrl.value}")` }
+    : undefined,
+)
 
 interface ApiError {
   response?: {
@@ -203,7 +219,11 @@ async function handleForgot() {
 </script>
 
 <template>
-  <div class="teedy-login login-page">
+  <div
+    class="teedy-login login-page"
+    :class="{ 'has-login-background': !!brandBackgroundUrl }"
+    :style="backgroundStyle"
+  >
     <div class="teedy-login-card">
       <div class="teedy-login-brand">
         <h1>teedy</h1>
@@ -343,6 +363,62 @@ async function handleForgot() {
 </template>
 
 <style scoped>
+/* ── #258: the admin-uploaded branding background ──
+   Every rule here is gated on .has-login-background, which the view sets ONLY when the theme
+   reports background_version > 0 — i.e. only when an admin actually uploaded a file. The image
+   endpoint also serves a bundled default, so an install that never chose a background matches
+   none of these selectors and renders exactly as it did before. */
+.login-page.has-login-background {
+  /* The scrim is a second background LAYER rather than an overlay element: layers paint
+     front-to-back, so the gradient sits on top of the photo without introducing a stacking
+     context, a pseudo-element or any layout change. The base colour from .teedy-login still
+     shows through until the image has loaded, so there is no flash. */
+  background-image:
+    linear-gradient(var(--login-scrim), var(--login-scrim)),
+    var(--login-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  /* Dark in BOTH themes on purpose. A theme-following scrim would be light-on-light for a bright
+     image in light mode; a consistently dark one puts every image — bright, busy or dark — behind
+     the same predictable field, which is what lets the text colours below be fixed. */
+  --login-scrim: rgba(0, 0, 0, 0.5);
+}
+.dark-mode .login-page.has-login-background {
+  --login-scrim: rgba(0, 0, 0, 0.68);
+}
+
+/* The card is what actually keeps the form legible: it is an opaque surface
+   (--p-content-background), so the username/password fields, labels, button and error message
+   never have the photo behind them. This only separates its edge from a busy image. */
+.login-page.has-login-background .teedy-login-card {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* The footer/imprint links are the only text that sits directly on the page background instead of
+   inside the card, so they get their own surface rather than borrowing the card's.
+
+   Measured on a real instance (white 12px links, page scrim only): 5.70:1 worst-pixel over a
+   bright photograph and 10.03:1 over a dark one, but 4.35:1 over a near-white image — under the
+   4.5:1 AA bar, with an analytic floor of 3.95:1 for a pure-white pixel. A bright sky or a
+   white-backed product shot reaches that, so the fix is a plate the links carry with them
+   instead of a heavier page scrim, which would darken the whole photo for everyone.
+   Over the 0.5 page scrim this holds the worst case near 9:1 whatever the image does.
+
+   `width: auto` overrides the full-width footer box so the plate hugs the links and centres
+   with them, rather than drawing a card-width bar under the form. */
+.login-page.has-login-background .teedy-login-footer {
+  width: auto;
+  padding: 0.3rem 0.9rem;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 999px;
+}
+
+.login-page.has-login-background .teedy-login-footer a {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
 .teedy-login-row {
   display: flex;
   align-items: center;

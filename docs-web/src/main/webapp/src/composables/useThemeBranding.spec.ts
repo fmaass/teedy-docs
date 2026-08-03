@@ -378,6 +378,57 @@ describe('useBrand', () => {
     expect(useBrand().brandLogoUrl.value).toBe('/api/theme/image/logo?v=1754212345678')
   })
 
+  // #258: the uploaded background had no consumer at all — the Branding screen previewed it and
+  // nothing rendered it. It is now the login page background, which makes the uploaded-vs-bundled
+  // distinction load-bearing: GET /theme/image/background ALWAYS returns bytes (it falls back to a
+  // bundled default), so "the endpoint answers" is NOT the test. background_version is 0 exactly
+  // when no uploaded file exists (ThemeResource.imageVersion), and that is the test.
+  it('renders NO background until an admin has actually uploaded one', () => {
+    // The bundled default is being served here. Rendering it would give every existing install a
+    // login background it never chose — a visible regression on upgrade.
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme', background_version: 0 }) })
+    expect(useBrand().brandBackgroundUrl.value).toBeNull()
+
+    // A server older than the background_version field: still nothing rather than a guess.
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme' }) })
+    expect(useBrand().brandBackgroundUrl.value).toBeNull()
+
+    // Unresolved query.
+    useQueryMock.mockReturnValue({ data: ref(undefined) })
+    expect(useBrand().brandBackgroundUrl.value).toBeNull()
+  })
+
+  it('points at the background endpoint with the image version as the cache-bust token', () => {
+    useQueryMock.mockReturnValue({ data: ref({ name: 'Acme', background_version: 1754212345678 }) })
+    expect(useBrand().brandBackgroundUrl.value).toBe('/api/theme/image/background?v=1754212345678')
+  })
+
+  it('follows an uploaded, replaced and RESET background without a reload', async () => {
+    const theme = ref<{ name: string; background_version?: number } | undefined>({
+      name: 'Acme',
+      background_version: 0,
+    })
+    useQueryMock.mockReturnValue({ data: theme })
+    const { brandBackgroundUrl } = useBrand()
+    expect(brandBackgroundUrl.value).toBeNull()
+
+    // Upload: the Branding screen invalidates the shared key and the refetch lands here.
+    theme.value = { name: 'Acme', background_version: 1754212345678 }
+    await nextTick()
+    expect(brandBackgroundUrl.value).toBe('/api/theme/image/background?v=1754212345678')
+
+    // Replacing the image bumps the token past the 15-day image cache.
+    theme.value = { name: 'Acme', background_version: 1754299999999 }
+    await nextTick()
+    expect(brandBackgroundUrl.value).toBe('/api/theme/image/background?v=1754299999999')
+
+    // Reset deletes the file, so the server reports 0 again and the login page goes back to its
+    // plain surface — the bundled default must NOT leak in through the reset path.
+    theme.value = { name: 'Acme', background_version: 0 }
+    await nextTick()
+    expect(brandBackgroundUrl.value).toBeNull()
+  })
+
   it('follows a live rename and a replaced logo without a reload', async () => {
     const theme = ref<{ name: string; logo_version?: number } | undefined>({
       name: 'Before',
