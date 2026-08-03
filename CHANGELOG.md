@@ -16,12 +16,13 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
-## [3.8.2] - 2026-08-03
+## [3.8.2] - 2026-08-04
 
 There is no database migration; the schema level remains 64.
 
 ### Added
-- A new Branding page in the settings lets an administrator set the application name, logo, favicon, navigation bar colour and main colour, and add custom CSS or JavaScript. The main colour determines the rest of the interface palette. The configured name replaces the product name in the sidebar, mobile drawer, About dialog and settings intro, with the uploaded logo shown beside it (#57, #241, #261).
+- A new Branding page in the settings lets an administrator set the application name, logo, favicon, login background and navigation bar colour, pick a main colour that the rest of the interface palette is derived from, and add custom CSS or JavaScript. The navigation bar colour is darkened automatically for dark mode (#57, #241, #261, #262).
+- The configured name and logo now replace the product name throughout the interface — the sidebar, mobile drawer, About dialog, settings intro, and the footer that external recipients see on a shared link — and an uploaded background appears on the login page (#256, #258).
 - Tag searches support `*` as a wildcard anywhere in a tag term: `tag:invoice*` matches names beginning with `invoice`, `tag:*2026` names ending in `2026`, `tag:*invoice*` `invoice` anywhere in the name, and `tag:inv*2026` names beginning with `inv` and ending in `2026`. An exact tag name takes precedence over a wildcard pattern, and a term made only of asterisks matches nothing. The tags and filtering documentation covers the new syntax (#236, #252).
 - WebP images now produce thumbnails, appear in previews and can be included in PDF exports (#233).
 - Clicking a thumbnail in gallery view opens its document (#235).
@@ -31,6 +32,9 @@ There is no database migration; the schema level remains 64.
 - Jetty is updated to 12.1.11 in the published image, alongside patch and minor updates to Jackson, ArchUnit, java-jwt, Bouncy Castle, Caffeine, Swagger and @tanstack/vue-query.
 
 ### Fixed
+- Database migrations are applied again on hosts whose locale uses non-ASCII digits, such as any Arabic or Persian default. The version number was formatted in the host's digits and then matched against the migration filenames, so nothing matched, no migration ran, and the upgrade reported success anyway. Tag-filtered search failed outright on those hosts for the same reason (#264).
+- The document count above the list is pluralised, in every language rather than only in English (#260).
+- Dates written into an exported PDF no longer follow the host's calendar. A server set to Thai recorded a document created in 2026 as 2569, and with Thai digits the date was omitted from the file entirely (#257).
 - Concurrent file, thumbnail and preview requests no longer cause intermittent server errors. Those responses now carry a valid GMT date in the `Expires` header, so caches no longer reject it (#253).
 - File processing no longer fails intermittently on many-core hosts, where a fixed pool of ten database connections could be exhausted. The pool now scales with the application's processing capacity (#230).
 - A temporary server error during startup no longer redirects the user to the login page. The application retries once, and reports an error if the server is still unavailable (#245).
