@@ -16,6 +16,32 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Security
 
+## [3.8.2] - 2026-08-03
+
+There is no database migration; the schema level remains 64.
+
+### Added
+- A new Branding page in the settings lets an administrator set the application name, logo, favicon and main colour, and add custom CSS or JavaScript. The main colour determines the rest of the interface palette. The configured name replaces the product name in the sidebar, mobile drawer, About dialog and settings intro, with the uploaded logo shown beside it (#57, #241).
+- Tag searches support `*` as a wildcard anywhere in a tag term: `tag:invoice*` matches names beginning with `invoice`, `tag:*2026` names ending in `2026`, `tag:*invoice*` `invoice` anywhere in the name, and `tag:inv*2026` names beginning with `inv` and ending in `2026`. An exact tag name takes precedence over a wildcard pattern, and a term made only of asterisks matches nothing. The tags and filtering documentation covers the new syntax (#236, #252).
+- WebP images now produce thumbnails, appear in previews and can be included in PDF exports (#233).
+- Clicking a thumbnail in gallery view opens its document (#235).
+
+### Changed
+- The fullscreen preview scrolls continuously through a PDF instead of showing one page at a time (#237).
+- Jetty is updated to 12.1.11 in the published image, alongside patch and minor updates to Jackson, ArchUnit, java-jwt, Bouncy Castle, Caffeine, Swagger and @tanstack/vue-query.
+
+### Fixed
+- Concurrent file, thumbnail and preview requests no longer cause intermittent server errors. Those responses now carry a valid GMT date in the `Expires` header, so caches no longer reject it (#253).
+- File processing no longer fails intermittently on many-core hosts, where a fixed pool of ten database connections could be exhausted. The pool now scales with the application's processing capacity (#230).
+- A temporary server error during startup no longer redirects the user to the login page. The application retries once, and reports an error if the server is still unavailable (#245).
+- Clicking a link, opening a bookmark or using the browser's Back button while the application is still starting now takes the user to the requested page instead of discarding it (#216).
+- Searching for a hyphenated term works again. Any hyphen previously disabled prefix matching, so an identifier containing one was found only by its exact full text (#232).
+- Excluding a tag that does not exist no longer returns an empty result list (#248).
+- Case-insensitive tag matching now works correctly on hosts configured for the Turkish locale (#236).
+- Changing only a tag's colour or parent no longer causes a server error (#236).
+- Right-clicking a second time no longer leaves two menus on screen. The document menu closes when a right-click lands outside it, and shift+right-click still reaches the browser's own menu (#234).
+- The workflow documentation screenshots show the step panel the text describes (#228).
+
 ## [3.8.1] - 2026-08-02
 
 A hygiene and hardening release. There is no database migration; the schema level remains 64.
@@ -548,6 +574,7 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
 [Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...HEAD
+[3.8.2]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...v3.8.2
 [3.8.1]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...v3.8.0
 [3.7.2]: https://github.com/fmaass/teedy-docs/compare/v3.7.1...v3.7.2
