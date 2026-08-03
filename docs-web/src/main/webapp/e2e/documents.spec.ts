@@ -1,10 +1,18 @@
-import { test, expect, type BrowserContext, type Locator, type Page } from './fixtures'
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from './fixtures'
 import {
   unique,
   uniqueTag,
   deleteDocApi,
   deleteTagApi,
   gotoRouteReady,
+  isMobileViewport,
   ROUTE_ROOT,
   gotoDocumentList,
 } from './helpers'
@@ -251,4 +259,227 @@ test('admin/settings table pages render at the wider content width (D #25)', asy
   await gotoRouteReady(page, '/#/settings/account', ROUTE_ROOT.settingsAccount)
   await expect(page.locator('.settings-content')).toBeVisible()
   await expect(page.locator('.settings-content.settings-content--wide')).toHaveCount(0)
+})
+
+// --- #234: the quick-tag menu must go away on a right-click OUTSIDE it -------------
+//
+// The menu is a PrimeVue Popover, and PrimeVue dismisses a Popover on an outside `click`.
+// A right-click fires no click, so a second right-click that landed anywhere but a document
+// row left the menu standing while the browser drew its own menu next to it — the two menus
+// at once the reporter saw. Only the stale popover is the defect: off a document row the
+// native menu belongs to the user and must keep coming up.
+//
+// HOW THE NATIVE MENU IS ASSERTED: it is browser chrome, drawn outside the page, so no test
+// can see it. What a test CAN see is whether the page cancelled the gesture — a window-level
+// `contextmenu` listener reads `defaultPrevented` once every handler on the path has had its
+// say. `false` means the browser went on to draw its own menu; `true` means the app claimed
+// the gesture. That is the same contract the #194 shift escape hatch rests on.
+//
+// DESKTOP-ONLY: a right-click has no touch equivalent, and the menu has no long-press
+// handler, so on the mobile project there is no gesture to leak (same skip as every other
+// quick-menu spec).
+
+// The two surfaces that raise the quick-tag menu: a table row and a gallery card.
+const RIGHT_CLICK_VIEWS = ['list', 'gallery'] as const
+type RightClickView = (typeof RIGHT_CLICK_VIEWS)[number]
+
+async function seedListDocument(request: APIRequestContext, title: string): Promise<string> {
+  const res = await request.put('/api/document', { form: { title, language: 'eng' } })
+  expect(res.ok(), `create document ${title}`).toBeTruthy()
+  return (await res.json()).id as string
+}
+
+async function gotoDocumentView(page: Page, view: RightClickView): Promise<void> {
+  await gotoDocumentList(page)
+  if (view !== 'gallery') return
+  await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
+  await expect(page.locator('article.doc-card').first()).toBeVisible()
+}
+
+function documentSurface(page: Page, view: RightClickView, title: string): Locator {
+  if (view === 'gallery') {
+    return page
+      .locator('article.doc-card')
+      .filter({ has: page.getByRole('link', { name: title, exact: true }) })
+  }
+  return page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+}
+
+// The quick-tag menu specifically — the app mounts other popovers (saved filters, the tag
+// overflow chip), so the match is pinned to the menu's own body.
+function quickTagMenu(page: Page): Locator {
+  return page.locator('.p-popover').filter({ has: page.locator('.tqm-body') })
+}
+
+async function recordContextMenus(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const recorded: boolean[] = []
+    ;(window as unknown as { __ctxPrevented: boolean[] }).__ctxPrevented = recorded
+    // Window, bubble phase: the last stop on the path, so it reads the verdict every handler
+    // below it has already reached.
+    window.addEventListener('contextmenu', (event) => recorded.push(event.defaultPrevented))
+  })
+}
+
+async function lastContextMenuPrevented(page: Page): Promise<boolean | undefined> {
+  return page.evaluate(() =>
+    (window as unknown as { __ctxPrevented: boolean[] }).__ctxPrevented.at(-1),
+  )
+}
+
+for (const view of RIGHT_CLICK_VIEWS) {
+  test(`a right-click outside the quick-tag menu dismisses it and leaves the native menu alone (#234, ${view})`, async ({
+    page,
+    request,
+    cleanup,
+  }) => {
+    test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+    const title = unique(`ctx-outside-${view}`)
+    const docId = await seedListDocument(request, title)
+    cleanup.defer('purge the outside-right-click document', () => deleteDocApi(request, docId))
+
+    await gotoDocumentView(page, view)
+    const surface = documentSurface(page, view, title)
+    await expect(surface).toBeVisible()
+    await recordContextMenus(page)
+
+    // CONTROL: on a document the app owns the gesture — the menu comes up AND the native
+    // menu is suppressed. Without this the test would pass on a build that never handles
+    // contextmenu at all.
+    await surface.click({ button: 'right' })
+    const menu = quickTagMenu(page)
+    await expect(menu).toBeVisible()
+    expect(
+      await lastContextMenuPrevented(page),
+      'a right-click ON a document is claimed by the app',
+    ).toBe(true)
+
+    // A point on the page background, taken from the open menu's own box so it is provably
+    // to the left of it — this cannot degrade into a click on the menu itself.
+    const menuBox = (await menu.boundingBox())!
+    const backgroundX = 12
+    expect(backgroundX, 'the background point sits outside the open menu').toBeLessThan(menuBox.x)
+    await page.mouse.click(backgroundX, Math.round(menuBox.y), { button: 'right' })
+
+    // THE DEFECT: the menu stayed up here, beside the browser's own menu.
+    await expect(menu, 'a right-click outside the quick-tag menu dismisses it').toHaveCount(0)
+    // ...and that right-click still belongs to the browser: suppressing the popover must not
+    // suppress the native menu the user asked for.
+    expect(
+      await lastContextMenuPrevented(page),
+      'a right-click off a document stays with the browser',
+    ).toBe(false)
+  })
+
+  test(`a right-click on another document moves the quick-tag menu instead of closing it (#234, ${view})`, async ({
+    page,
+    request,
+    cleanup,
+  }) => {
+    test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+    const firstTitle = unique(`ctx-move-a-${view}`)
+    const secondTitle = unique(`ctx-move-b-${view}`)
+    const firstId = await seedListDocument(request, firstTitle)
+    cleanup.defer('purge the first move document', () => deleteDocApi(request, firstId))
+    const secondId = await seedListDocument(request, secondTitle)
+    cleanup.defer('purge the second move document', () => deleteDocApi(request, secondId))
+
+    await gotoDocumentView(page, view)
+    const first = documentSurface(page, view, firstTitle)
+    const second = documentSurface(page, view, secondTitle)
+    await expect(first).toBeVisible()
+    await expect(second).toBeVisible()
+
+    // Which document the menu is bound to, read off the menu itself: its "open in new tab"
+    // link is that document's own route (#194).
+    const openLink = quickTagMenu(page).locator('.tqm-open-link')
+    await first.click({ button: 'right' })
+    await expect(openLink).toHaveAttribute('href', new RegExp(`#/document/view/${firstId}$`))
+
+    // ONE gesture on a different document has to move the menu there. Dismissing an outside
+    // right-click must not cost the user a right-click to close and another to reopen.
+    await second.click({ button: 'right' })
+    await expect(
+      openLink,
+      'the menu followed the cursor to the document under it',
+    ).toHaveAttribute('href', new RegExp(`#/document/view/${secondId}$`))
+    await expect(quickTagMenu(page)).toBeVisible()
+  })
+
+  test(`shift+right-click keeps the native menu and takes the quick-tag menu away (#194/#234, ${view})`, async ({
+    page,
+    request,
+    cleanup,
+  }) => {
+    test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+    const title = unique(`ctx-shift-${view}`)
+    const docId = await seedListDocument(request, title)
+    cleanup.defer('purge the shift-right-click document', () => deleteDocApi(request, docId))
+
+    await gotoDocumentView(page, view)
+    const surface = documentSurface(page, view, title)
+    await expect(surface).toBeVisible()
+    await recordContextMenus(page)
+
+    await surface.click({ button: 'right' })
+    const menu = quickTagMenu(page)
+    await expect(menu).toBeVisible()
+    expect(await lastContextMenuPrevented(page), 'the plain right-click is claimed').toBe(true)
+
+    // THE ESCAPE HATCH (#194): shift+right-click is left completely alone, so the browser's
+    // own menu comes up — and the popover in front of it must not stay behind (#234).
+    await surface.click({ button: 'right', modifiers: ['Shift'] })
+    expect(
+      await lastContextMenuPrevented(page),
+      'shift+right-click is never claimed by the app',
+    ).toBe(false)
+    await expect(menu, 'the popover does not stay standing in front of the native menu').toHaveCount(0)
+  })
+}
+
+// The other side of "outside": the menu opens its tag Select itself (#171), and PrimeVue
+// teleports that Select's overlay to <body> — so the filter the user types in is NOT a DOM
+// descendant of the menu. Treating it as outside would make right-clicking the filter (the
+// gesture that reaches "paste") take the whole menu away, which is why the dismissal counts
+// that overlay as part of the menu. One view is enough: it is the same Select either way.
+test('a right-click in the menu\'s own tag filter leaves the menu open (#234)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+  // At least one assignable tag, or no Select is rendered and there is no overlay to click.
+  const tagName = uniqueTag('ctx-inside').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const tagRes = await request.put('/api/tag', { form: { name: tagName, color: '#3399cc' } })
+  expect(tagRes.ok(), 'create the tag-filter tag').toBeTruthy()
+  const tagId = (await tagRes.json()).id as string
+  cleanup.defer('delete the tag-filter tag', () => deleteTagApi(request, tagId))
+  const title = unique('ctx-inside')
+  const docId = await seedListDocument(request, title)
+  cleanup.defer('purge the tag-filter document', () => deleteDocApi(request, docId))
+
+  await gotoDocumentView(page, 'list')
+  const surface = documentSurface(page, 'list', title)
+  await expect(surface).toBeVisible()
+
+  await surface.click({ button: 'right' })
+  const menu = quickTagMenu(page)
+  await expect(menu).toBeVisible()
+  const filter = page.locator('.p-select-overlay input.p-select-filter')
+  await expect(filter, 'the menu opened its tag Select itself (#171)').toBeVisible()
+  // REALNESS: the filter really is outside the menu in the DOM, so this is the carve-out
+  // being exercised and not a containment check that would have passed anyway.
+  const teleported = await page.evaluate(() => {
+    const popover = document.querySelector('.p-popover')
+    const input = document.querySelector('.p-select-overlay input.p-select-filter')
+    return !!popover && !!input && !popover.contains(input)
+  })
+  expect(teleported, 'the tag filter is teleported out of the menu').toBe(true)
+
+  await filter.click({ button: 'right' })
+
+  await expect(menu, 'the menu survives a right-click in its own tag filter').toBeVisible()
+  await expect(filter, 'and so does the filter the user was about to paste into').toBeVisible()
 })

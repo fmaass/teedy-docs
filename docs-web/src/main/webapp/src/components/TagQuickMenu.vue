@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
@@ -130,6 +130,44 @@ function hide() {
   popover.value?.hide()
 }
 
+// Dismissal on an outside RIGHT-click (#234). PrimeVue dismisses a Popover on an outside
+// `click`, and a right-click fires no click — so this menu stayed up while the browser drew
+// its own menu next to it: two context menus on screen at once, the reported symptom. The
+// second right-click only reaches the parent's handler when it lands on a document, which is
+// why every other landing spot leaked.
+//
+// The event is otherwise left completely alone — no preventDefault, no stopPropagation — so
+// off a document the native menu is still the user's, and the shift+right-click escape hatch
+// (#194) keeps reaching it untouched.
+//
+// CAPTURE phase, deliberately: the dismissal has to land BEFORE the document row/card handler
+// that reopens this menu for whatever is under the cursor. Bubbling would undo that reopen, so
+// right-clicking another document would close the menu instead of moving it there.
+function onOutsideContextMenu(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  // The tag Select's overlay is teleported to <body>, so it belongs to this menu without
+  // being a DOM descendant of it. Counting it as outside would let a right-click in the tag
+  // filter — the gesture that reaches "paste" — take the whole menu away.
+  const ownRoots: unknown[] = [popover.value?.container, tagSelect.value?.overlay]
+  if (ownRoots.some((root) => root instanceof Node && root.contains(target))) return
+  hide()
+}
+
+// Bound only while the menu is up: PrimeVue emits `show` as the popover enters and `hide` as
+// it leaves. Re-registering the same listener is a no-op, so a `show` without an intervening
+// `hide` cannot stack a second one.
+function bindOutsideContextMenu() {
+  document.addEventListener('contextmenu', onOutsideContextMenu, true)
+}
+
+function unbindOutsideContextMenu() {
+  document.removeEventListener('contextmenu', onOutsideContextMenu, true)
+}
+
+// A menu unmounted while open plays no leave transition, so `hide` never arrives.
+onBeforeUnmount(unbindOutsideContextMenu)
+
 // Opening the Select on the popover's `show` gives keyboard tag entry with no click
 // (#171) — the filter only takes focus once that overlay is up. No-op when every tag is
 // already assigned (no Select rendered).
@@ -144,6 +182,9 @@ function hide() {
 // mid-open simply skips the focus instead of throwing. The popover closing is the
 // expected outcome of that scroll either way.
 async function onPopoverShow() {
+  // Before any await: the menu is on screen from this moment, so the outside-right-click
+  // dismissal has to be armed from this moment too (#234).
+  bindOutsideContextMenu()
   await nextTick()
   tagSelect.value?.show()
   // The overlay — and with it the filter input — mounts a tick later; either can already
@@ -172,7 +213,12 @@ defineExpose({ show, hide })
 </script>
 
 <template>
-  <Popover ref="popover" class="tag-quick-menu" @show="onPopoverShow">
+  <Popover
+    ref="popover"
+    class="tag-quick-menu"
+    @show="onPopoverShow"
+    @hide="unbindOutsideContextMenu"
+  >
     <div class="tqm-body">
       <!-- OPEN IN NEW TAB (#194). Right-click is claimed by this popover, so the
            browser's own "Open link in new tab" is out of reach on the surfaces that

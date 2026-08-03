@@ -46,16 +46,30 @@ function makeRouter() {
 // (the anchor it must position against and hit-test clicks with).
 const popoverShow = vi.fn()
 
+// The imperative close, recorded so the outside-right-click dismissal (#234) can be asserted
+// on the popover rather than on a private flag.
+const popoverHide = vi.fn()
+
 // Stub Popover so its content renders inline (no teleport/overlay in jsdom), and expose
 // show/hide so the component's defineExpose contract still works. Declared out here so a
 // test can grab the instance and emit the popover's own `show`/`hide` events.
 const PopoverStub = {
   template: '<div class="popover-stub"><slot /></div>',
+  data() {
+    return { container: null as HTMLElement | null }
+  },
+  mounted(this: { $el: HTMLElement; container: HTMLElement | null }) {
+    // The real Popover publishes its rendered root as `container` (its `containerRef`); the
+    // outside-right-click dismissal hit-tests the event against it (#234).
+    this.container = this.$el
+  },
   methods: {
     show(event: Event, target?: HTMLElement) {
       popoverShow(event, target)
     },
-    hide() {},
+    hide() {
+      popoverHide()
+    },
     toggle() {},
   },
 }
@@ -92,7 +106,10 @@ const SelectStub = {
     '<div class="select-stub" :data-count="options.length"><FilterInputStub v-if="opened" ref="filterInput" /><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
 }
 
-function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {}) {
+function mountMenu(
+  props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {},
+  attachTo?: HTMLElement,
+) {
   return mount(TagQuickMenu, {
     props: {
       document: makeDoc(['t1']),
@@ -100,6 +117,7 @@ function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> =
       tagCounts: { t2: 30, t3: 10, t4: 5, t5: 2, t6: 1 },
       ...props,
     },
+    attachTo,
     global: {
       plugins: [PrimeVue, makeRouter()],
       stubs: { Popover: PopoverStub, Select: SelectStub },
@@ -110,6 +128,7 @@ function mountMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> =
 beforeEach(() => {
   selectShow.mockClear()
   popoverShow.mockClear()
+  popoverHide.mockClear()
   selectMountsFilterInput = true
 })
 
@@ -132,9 +151,29 @@ function attachedRow(): HTMLElement {
   return row
 }
 
+// Menus mounted INTO the document — the outside-right-click dismissal listens on `document`,
+// so the menu has to really be in it for an event to reach both. Unmounted after every case so
+// no document-level listener outlives the test that armed it.
+const attachedMenus: ReturnType<typeof mountMenu>[] = []
+
+function mountAttachedMenu() {
+  const wrapper = mountMenu({}, document.body)
+  attachedMenus.push(wrapper)
+  return wrapper
+}
+
 afterEach(() => {
+  attachedMenus.splice(0).forEach((wrapper) => wrapper.unmount())
   attachedRows.splice(0).forEach((row) => row.remove())
 })
+
+// A right-click as the browser delivers it: cancelable, so a test can read back whether
+// anything claimed it.
+function dispatchContextMenu(target: EventTarget): MouseEvent {
+  const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  target.dispatchEvent(event)
+  return event
+}
 
 function rightClickOn(anchor: HTMLElement): Event {
   return { currentTarget: anchor, target: anchor } as unknown as Event
@@ -356,5 +395,56 @@ describe('TagQuickMenu', () => {
     expect(wrapper.find('.select-stub').exists()).toBe(false)
     expect(wrapper.findAll('.tqm-chip')).toHaveLength(0)
     expect(wrapper.text()).toContain('ui.tag_menu.all_assigned')
+  })
+})
+
+// --- #234: PrimeVue dismisses a Popover on an outside CLICK, and a right-click fires no
+//     click. The menu therefore stayed up while the browser drew its own menu next to it —
+//     two context menus at once. The dismissal has to answer `contextmenu` as well, without
+//     taking the native menu away from the user. ---
+describe('TagQuickMenu — outside right-click dismissal (#234)', () => {
+  it('hides the menu when a right-click lands outside it, and lets the gesture through', () => {
+    const wrapper = mountAttachedMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+
+    const event = dispatchContextMenu(document.body)
+
+    expect(popoverHide, 'the open menu is dismissed by a right-click outside it').toHaveBeenCalledTimes(1)
+    // The native menu stays the user's: the dismissal claims nothing, so the browser goes on
+    // to draw its own menu (the same contract the #194 shift escape hatch rests on).
+    expect(event.defaultPrevented, 'the right-click is left for the browser').toBe(false)
+  })
+
+  it('leaves the menu alone when the right-click lands inside it', () => {
+    // Parity with the outside-CLICK dismissal it mirrors: a press inside the menu is not a
+    // dismissal. It is also how the menu's own "open in new tab" link (#194) stays reachable
+    // by the browser's "copy link address".
+    const wrapper = mountAttachedMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+
+    dispatchContextMenu(wrapper.find('.tqm-body').element)
+
+    expect(popoverHide).not.toHaveBeenCalled()
+  })
+
+  it('stops answering right-clicks once the menu has gone', () => {
+    const wrapper = mountAttachedMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+    wrapper.findComponent(PopoverStub).vm.$emit('hide')
+
+    dispatchContextMenu(document.body)
+
+    expect(popoverHide, 'a closed menu leaves no listener behind').not.toHaveBeenCalled()
+  })
+
+  it('leaves no listener behind when the menu is unmounted while open', () => {
+    // Unmounting plays no leave transition, so the popover's own `hide` never arrives.
+    const wrapper = mountMenu({}, document.body)
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+    wrapper.unmount()
+
+    dispatchContextMenu(document.body)
+
+    expect(popoverHide).not.toHaveBeenCalled()
   })
 })
