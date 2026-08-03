@@ -697,6 +697,7 @@ async function bulkDownload() {
           :loading="isLoading"
           @card-click="openDocument"
           @card-dblclick="openDocumentFull"
+          @card-open-full="openDocumentFull"
           @card-context-menu="onDocContextMenu"
         />
 

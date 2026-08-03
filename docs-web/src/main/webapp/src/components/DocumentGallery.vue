@@ -23,6 +23,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   cardClick: [doc: DocumentListItem]
   cardDblclick: [doc: DocumentListItem]
+  // A single click on the THUMBNAIL region (#235). Separate from cardDblclick because
+  // the gesture is a different one, even though the parent routes both to the same
+  // full-open path.
+  cardOpenFull: [doc: DocumentListItem]
   cardContextMenu: [event: Event, doc: DocumentListItem]
 }>()
 
@@ -120,6 +124,27 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
   event.preventDefault()
   emit('cardDblclick', doc)
 }
+
+// #235 — the thumbnail is a shortcut STRAIGHT to the document. The thumbnail is the part
+// of the card that depicts the document itself, so a single click there opens it rather
+// than the slide-over the rest of the card opens.
+//
+// The thumbnail sits INSIDE the open link, so this has to stop the click twice over:
+// stopPropagation keeps it from reaching the link's own handler (which would schedule the
+// slide-over), and preventDefault keeps the browser from following the href (whose plain
+// navigation carries none of the list's returnTo/filterLabel history state — Back would
+// return to an unfiltered list). The parent routes this to the SAME full-open path the
+// double-click uses, so the two gestures land identically.
+//
+// Modifier / non-left clicks are left entirely alone: they keep the native
+// open-in-new-tab behaviour of the surrounding link. Keyboard activation targets the link
+// itself, not the thumbnail, so it is unaffected.
+function onThumbClick(event: MouseEvent, doc: DocumentListItem) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('cardOpenFull', doc)
+}
 </script>
 
 <template>
@@ -145,7 +170,7 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
           @click="(e: MouseEvent) => onOpenClick(e, doc)"
           @dblclick="(e: MouseEvent) => onOpenDblclick(e, doc)"
         >
-          <span class="card-thumb">
+          <span class="card-thumb" @click="(e: MouseEvent) => onThumbClick(e, doc)">
             <img
               v-if="doc.file_id && !failedThumbs.has(doc.file_id)"
               :src="thumbSrc(doc.file_id, doc.file_rotation)"
@@ -229,6 +254,11 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
   box-shadow: inset 0 0 0 2px var(--p-primary-color);
 }
 
+/* The thumbnail is its own action (#235: a single click opens the document), so it gets a
+   cue of its own — the zoom cursor plus a slight lift of the image under the pointer.
+   Both are HOVER-only: at rest the card renders pixel-identically to before, which the
+   standing visual baselines depend on. `overflow: hidden` keeps the lifted image inside
+   the thumbnail box instead of bleeding over the title. */
 .card-thumb {
   position: relative;
   aspect-ratio: 4 / 3;
@@ -238,11 +268,17 @@ function onOpenDblclick(event: MouseEvent, doc: DocumentListItem) {
   background: var(--p-content-hover-background);
   color: var(--p-text-muted-color);
   font-size: 2.5rem;
+  overflow: hidden;
+  cursor: zoom-in;
 }
 .card-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.15s ease;
+}
+.card-thumb:hover img {
+  transform: scale(1.04);
 }
 
 .card-star {

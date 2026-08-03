@@ -2,7 +2,15 @@ import { test, expect, type Page, type APIRequestContext } from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
-import { unique, uniqueTag, deleteDocApi, deleteTagApi, gotoDocumentList } from './helpers'
+import {
+  unique,
+  uniqueTag,
+  deleteDocApi,
+  deleteTagApi,
+  gotoDocumentList,
+  expectRouteReady,
+  ROUTE_ROOT,
+} from './helpers'
 
 // #39: the gallery VIEW MODE. A pure render mode over the SAME paginated list — the
 // list⇄gallery toggle persists to localStorage, cards render the document thumbnail
@@ -41,6 +49,17 @@ function cardContainer(page: Page, title: string) {
   // The whole card <article> — used to reach the star/tag controls that are
   // SIBLINGS of (not inside) the open link.
   return page.locator('article.doc-card').filter({ has: card(page, title) })
+}
+
+function cardThumb(page: Page, title: string) {
+  // The thumbnail REGION of the card (#235). It lives inside the open link, so its
+  // own click handler has to stop the click from reaching the link's slide-over path.
+  return card(page, title).locator('.card-thumb')
+}
+
+async function switchToGallery(page: Page) {
+  await page.locator('.view-mode-toggle').getByText('Gallery', { exact: true }).click()
+  await expect(page.locator('.doc-gallery')).toBeVisible()
 }
 
 async function apiCreateDocument(request: APIRequestContext, title: string): Promise<string> {
@@ -263,4 +282,101 @@ test('a list multi-selection does NOT leave the bulk toolbar reachable in galler
   // Switching back to list confirms the selection stayed empty (nothing to act on).
   await page.locator('.view-mode-toggle').getByText('List', { exact: true }).click()
   await expect(page.getByRole('toolbar', { name: 'Bulk actions' })).toHaveCount(0)
+})
+
+// --- #235: the thumbnail is a shortcut to the document itself -----------------
+//
+// The card's open link is otherwise one flat interaction surface: a plain click anywhere on
+// it opens the slide-over, a double-click opens the full view. The reporter asked for the
+// part of the card that LOOKS like the document — the thumbnail — to take him straight
+// there, and only that part changes.
+//
+// The navigation must go through the list's own full-open path, not the bare router-link
+// href: that path attaches the returnTo/filterLabel history state the document view's Back
+// bar reads. A bare link navigation would land on the same URL with NO state, so Back would
+// return to an UNFILTERED list and the filter context would vanish from the back bar. That
+// difference is what the `.back-filter` and post-Back assertions below pin down — a
+// "navigate()"-style implementation reaches the right URL and still fails them.
+
+test('a single click on a gallery card thumbnail opens the document and keeps the filtered-list return context (#235)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  const tagName = uniqueTag('thumbtag')
+  const title = unique('gal-thumb')
+
+  const tagId = await apiCreateTag(request, tagName)
+  cleanup.defer('delete the filter tag', () => deleteTagApi(request, tagId))
+  const docId = await apiCreateDocumentWithTag(request, title, tagId)
+  cleanup.defer('purge the thumbnail document', () => deleteDocApi(request, docId))
+  // A real attached image, so the click lands on an actual rendered thumbnail rather
+  // than the file-icon fallback.
+  await apiAttachFile(request, docId, widePng, 'wide.png', 'image/png')
+
+  await gotoDocumentList(page)
+  await switchToGallery(page)
+
+  // Filter the list by the document's tag from its own card chip, so the gallery the
+  // click starts from is a FILTERED one (the state the bare-href path would lose).
+  await cardContainer(page, title).getByRole('button', { name: new RegExp(tagName) }).click()
+  await expect(page).toHaveURL(new RegExp(`tags=${tagId}`))
+  await expect(card(page, title)).toBeVisible()
+
+  // THE ASK: one plain click on the thumbnail region — no double-click, no slide-over
+  // "Open" hop — lands on the document's content view.
+  await cardThumb(page, title).click()
+  await expectRouteReady(page, `/#/document/view/${docId}/content`, ROUTE_ROOT.documentContent)
+  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  // No slide-over was left behind by the click that navigated.
+  await expect(page.locator('.slide-over-title')).toHaveCount(0)
+
+  // The full-open path's history state arrived with it: the back bar names the filter…
+  await expect(page.locator('.back-filter')).toContainText(tagName)
+  // …and Back returns to the list WITH that filter still applied (the returnTo query).
+  await page.locator('.back-link').click()
+  await expect(page).toHaveURL(new RegExp(`#/document\\?.*tags=${tagId}`))
+  await expect(page.locator(ROUTE_ROOT.documentList)).toBeVisible()
+})
+
+test('the rest of the gallery card keeps its contract: title click opens the slide-over, a modified thumbnail click is not intercepted (#235)', async ({
+  page,
+  context,
+  request,
+  cleanup,
+}) => {
+  const title = unique('gal-contract')
+  const docId = await apiCreateDocument(request, title)
+  cleanup.defer('purge the contract document', () => deleteDocApi(request, docId))
+  await apiAttachFile(request, docId, widePng, 'wide.png', 'image/png')
+
+  await gotoDocumentList(page)
+  await switchToGallery(page)
+
+  // GUARD 1 — the NON-thumbnail part of the card is untouched: a plain click on the
+  // title still opens the slide-over (debounced 250 ms) and does not navigate.
+  await card(page, title).locator('.card-title').click()
+  await expect(page.locator('.slide-over-title')).toHaveText(title)
+  await expect(page).toHaveURL(/#\/document(\?|$)/)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.slide-over-title')).toHaveCount(0)
+
+  // GUARD 2 — a MODIFIED click on the thumbnail is left to the browser (the link's
+  // href opens in a new tab): the thumbnail handler must ignore it rather than
+  // preventDefault it. Whatever the browser does with the new tab, THIS page must
+  // neither navigate nor open the slide-over.
+  await cardThumb(page, title).click({ modifiers: ['ControlOrMeta'] })
+  // The settle barrier is a POSITIVE one, not a timeout: a plain title click must still
+  // reach the slide-over, which can only happen from the list — and it costs the 250 ms
+  // debounce to arrive, which is time a wrongly-intercepted navigation would have used to
+  // show up. Asserting the URL straight after the click would have passed on the
+  // still-unchanged URL of a navigation already under way.
+  await card(page, title).locator('.card-title').click()
+  await expect(page.locator('.slide-over-title')).toHaveText(title)
+  await expect(page).toHaveURL(/#\/document(\?|$)/)
+  await expect(page.locator('.doc-gallery')).toBeVisible()
+  // Close anything the modified click opened so it cannot leak into the next test.
+  for (const openTab of context.pages()) {
+    if (openTab !== page) await openTab.close()
+  }
 })

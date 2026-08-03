@@ -163,12 +163,17 @@ onUnmounted(() => {
 
       <!-- downloadable=false: the viewer must NOT expose its own original-URL control; this
            dialog's footer Download is the single Download affordance, and a viewer error is
-           degraded to the unavailable state below. -->
+           degraded to the unavailable state below.
+           continuous=maximized (#237): windowed, the dialog is a 960px box and one page at a
+           time is the right shape; maximized, the dialog IS the screen, so the viewer becomes
+           a scrollable column of pages and the page controls jump within it. Only this call
+           site opts in — the file grid's viewer stays single-page. -->
       <PdfViewer
         v-else-if="previewMode === 'pdf'"
         :src="pdfUrl"
         :persistable="false"
         :downloadable="false"
+        :continuous="maximized"
         @error="pdfFailed = true"
       />
 
@@ -256,6 +261,13 @@ onUnmounted(() => {
 }
 .file-preview-dialog--maximized .file-preview-image {
   max-height: 100%;
+}
+/* The PDF viewer is a child component, so this reaches its root: maximized it has to take
+   the dialog's remaining height (and be allowed to shrink to it) or its own page column
+   would have no viewport to scroll inside — the dialog would grow and scroll instead (#237). */
+.file-preview-dialog--maximized .file-preview-body :deep(.pdf-viewer) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .file-preview-status {
