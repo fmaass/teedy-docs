@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/auth'
 import { requestPasswordReset } from '../api/user'
 import { getAppInfo, type FooterLink } from '../api/app'
 import { queryKeys } from '../api/queryKeys'
+import ErrorState from '../components/ErrorState.vue'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
@@ -96,10 +97,32 @@ onMounted(async () => {
     return
   }
 
-  if (oidcEnabled.value && !route.query.local) {
+  // #245: never hand the browser to the IdP while the backend is unreachable. The redirect would
+  // replace the outage surface with an SSO round-trip that comes back to a still-broken /api/user —
+  // i.e. the outage would be invisible, and a provider that keeps its own session would bounce
+  // straight back here and start the loop again.
+  if (oidcEnabled.value && !route.query.local && !auth.serverUnavailable) {
     handleOidcLogin()
   }
 })
+
+// #245 Retry: re-ask the server who the current user is. A recovered server with a live session
+// lands on the documents list (the navigation the outage interrupted); a recovered server with no
+// session clears the outage flag, and the ordinary credential form renders in place of this surface.
+const availabilityRetrying = ref(false)
+
+async function handleAvailabilityRetry() {
+  if (availabilityRetrying.value) return
+  availabilityRetrying.value = true
+  try {
+    await auth.fetchCurrentUser()
+    if (!auth.serverUnavailable && !auth.isAnonymous) {
+      router.push({ name: 'documents' })
+    }
+  } finally {
+    availabilityRetrying.value = false
+  }
+}
 
 async function handleLogin() {
   error.value = ''
@@ -187,96 +210,106 @@ async function handleForgot() {
         <p>{{ t('ui.document_management') }}</p>
       </div>
 
-      <Message v-if="oidcError" severity="warn" :closable="false" class="mb-4">{{ t('ui.sso_failed') }}</Message>
-      <Message v-if="error" severity="error" :closable="false" class="mb-4">{{ error }}</Message>
+      <!--
+        #245: the backend could not say who the current user is. Showing the credential form here
+        would be a lie — it invites a sign-in that cannot succeed, and it is indistinguishable from
+        having been logged out. The shared ErrorState (icon + message + Retry) says the honest thing
+        instead, and the form comes back the moment the server answers again.
+      -->
+      <ErrorState v-if="auth.serverUnavailable" class="login-unavailable" @retry="handleAvailabilityRetry" />
 
-      <form @submit.prevent="handleLogin">
-        <div class="teedy-login-field">
-          <label for="login-user">{{ t('login.username') }}</label>
-          <InputText
-            id="login-user"
-            v-model="username"
-            autocomplete="username"
+      <template v-else>
+        <Message v-if="oidcError" severity="warn" :closable="false" class="mb-4">{{ t('ui.sso_failed') }}</Message>
+        <Message v-if="error" severity="error" :closable="false" class="mb-4">{{ error }}</Message>
+
+        <form @submit.prevent="handleLogin">
+          <div class="teedy-login-field">
+            <label for="login-user">{{ t('login.username') }}</label>
+            <InputText
+              id="login-user"
+              v-model="username"
+              autocomplete="username"
+              class="w-full"
+              autofocus
+            />
+          </div>
+
+          <div class="teedy-login-field">
+            <label for="login-pass">{{ t('login.password') }}</label>
+            <Password
+              inputId="login-pass"
+              v-model="password"
+              :feedback="false"
+              toggleMask
+              :inputProps="{ autocomplete: 'current-password', name: 'password' }"
+              inputClass="w-full"
+              class="w-full"
+            />
+          </div>
+
+          <div v-if="totpRequired" class="teedy-login-field">
+            <label for="login-code">{{ t('login.validation_code') }}</label>
+            <p class="text-sm text-muted mb-2">{{ t('login.validation_code_title') }}</p>
+            <InputText
+              id="login-code"
+              v-model="validationCode"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              class="w-full"
+              autofocus
+            />
+          </div>
+
+          <div class="teedy-login-row">
+            <label class="flex items-center gap-2 text-sm">
+              <Checkbox v-model="remember" :binary="true" />
+              {{ t('login.remember_me') }}
+            </label>
+            <button type="button" class="forgot-link" @click="showForgot = true">
+              {{ t('login.password_lost_btn') }}
+            </button>
+          </div>
+
+          <Button
+            type="submit"
+            :label="t('login.submit')"
+            icon="pi pi-sign-in"
+            :loading="loading"
             class="w-full"
-            autofocus
+          />
+        </form>
+
+        <div v-if="guestLogin || oidcEnabled" class="login-alt-actions">
+          <Button
+            v-if="guestLogin"
+            :label="t('login.login_as_guest')"
+            icon="pi pi-user"
+            severity="secondary"
+            outlined
+            class="w-full"
+            :loading="guestLoading"
+            @click="handleGuestLogin"
+          />
+          <Button
+            v-if="oidcEnabled"
+            :label="t('login.login_with_sso')"
+            icon="pi pi-sign-in"
+            severity="secondary"
+            outlined
+            class="w-full"
+            @click="handleOidcLogin"
           />
         </div>
 
-        <div class="teedy-login-field">
-          <label for="login-pass">{{ t('login.password') }}</label>
-          <Password
-            inputId="login-pass"
-            v-model="password"
-            :feedback="false"
-            toggleMask
-            :inputProps="{ autocomplete: 'current-password', name: 'password' }"
-            inputClass="w-full"
-            class="w-full"
-          />
-        </div>
-
-        <div v-if="totpRequired" class="teedy-login-field">
-          <label for="login-code">{{ t('login.validation_code') }}</label>
-          <p class="text-sm text-muted mb-2">{{ t('login.validation_code_title') }}</p>
-          <InputText
-            id="login-code"
-            v-model="validationCode"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            class="w-full"
-            autofocus
-          />
-        </div>
-
-        <div class="teedy-login-row">
-          <label class="flex items-center gap-2 text-sm">
-            <Checkbox v-model="remember" :binary="true" />
-            {{ t('login.remember_me') }}
-          </label>
-          <button type="button" class="forgot-link" @click="showForgot = true">
-            {{ t('login.password_lost_btn') }}
-          </button>
-        </div>
-
-        <Button
-          type="submit"
-          :label="t('login.submit')"
-          icon="pi pi-sign-in"
-          :loading="loading"
-          class="w-full"
-        />
-      </form>
-
-      <div v-if="guestLogin || oidcEnabled" class="login-alt-actions">
-        <Button
-          v-if="guestLogin"
-          :label="t('login.login_as_guest')"
-          icon="pi pi-user"
-          severity="secondary"
-          outlined
-          class="w-full"
-          :loading="guestLoading"
-          @click="handleGuestLogin"
-        />
-        <Button
+        <button
           v-if="oidcEnabled"
-          :label="t('login.login_with_sso')"
-          icon="pi pi-sign-in"
-          severity="secondary"
-          outlined
-          class="w-full"
-          @click="handleOidcLogin"
-        />
-      </div>
-
-      <button
-        v-if="oidcEnabled"
-        type="button"
-        class="local-account-link"
-        @click="useLocalAccount"
-      >
-        {{ t('login.use_local_account') }}
-      </button>
+          type="button"
+          class="local-account-link"
+          @click="useLocalAccount"
+        >
+          {{ t('login.use_local_account') }}
+        </button>
+      </template>
     </div>
 
     <div v-if="footerLinks.length" class="teedy-login-footer">

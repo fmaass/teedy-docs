@@ -3,11 +3,46 @@ import { ref, computed } from 'vue'
 import { getCurrentUser, login as apiLogin, logout as apiLogout, type UserInfo } from '../api/user'
 import { setLocale } from '../i18n'
 
+// #245: how long to wait before the single retry of a failed /api/user. Long enough to clear a
+// server that is still finishing its boot (the observed trigger — a request that arrives while the
+// backend is still warming up), short enough that the router guard the app mounts behind does not
+// visibly stall. ONE retry, never a loop: the guard is awaited before mount (#216), so an unbounded
+// retry here would be an unbounded boot.
+const AVAILABILITY_RETRY_DELAY_MS = 500
+
+interface HttpError {
+  response?: { status?: number }
+}
+
+/**
+ * Is this failure the server being unreachable rather than an answer about the session?
+ *
+ * A 401/403 is a real answer: there is no session, the user IS anonymous. A 5xx, or a rejection
+ * with no response at all (network failure, connection refused, request aborted), answers nothing —
+ * treating it as "anonymous" is precisely the #245 defect, because the router guard then bounces a
+ * signed-in user to the login page over a transient blip.
+ */
+function isAvailabilityFailure(error: unknown): boolean {
+  const status = (error as HttpError)?.response?.status
+  return status === undefined || status >= 500
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null)
   const initialized = ref(false)
+  // #245: the server could not answer who the current user is, even after the retry. Distinct from
+  // "anonymous" — the session is UNKNOWN, not absent — and the router turns it into an outage
+  // surface instead of a login form.
+  const serverUnavailable = ref(false)
 
-  const isAnonymous = computed(() => !user.value || user.value.anonymous)
+  // An unreachable server does NOT make the visitor anonymous: reporting it as such is what let a
+  // transient 5xx log a signed-in user out (#245). While the outage state is set this getter stays
+  // false and the router's availability branch (src/router/index.ts) decides what to render.
+  const isAnonymous = computed(() => !serverUnavailable.value && (!user.value || user.value.anonymous))
   const isAdmin = computed(() => user.value?.base_functions?.includes('ADMIN') ?? false)
   const username = computed(() => user.value?.username ?? '')
   // R-042: GET /api/user sets is_default_password to true only when the current
@@ -18,14 +53,35 @@ export const useAuthStore = defineStore('auth', () => {
     () => !isAnonymous.value && (user.value?.is_default_password ?? false),
   )
 
-  async function fetchCurrentUser() {
-    let fetched: UserInfo | null = null
+  // #245: one attempt, and — only when the failure says nothing about the session — exactly one
+  // more after a short pause. A retry that fails again rethrows, so the caller classifies the
+  // SECOND outcome: a 401 on the retry is still an ordinary anonymous session.
+  async function loadCurrentUser(): Promise<UserInfo> {
     try {
       const { data } = await getCurrentUser()
-      user.value = data
-      fetched = data
-    } catch {
+      return data
+    } catch (error) {
+      if (!isAvailabilityFailure(error)) {
+        throw error
+      }
+      await delay(AVAILABILITY_RETRY_DELAY_MS)
+      const { data } = await getCurrentUser()
+      return data
+    }
+  }
+
+  async function fetchCurrentUser() {
+    let fetched: UserInfo | null = null
+    serverUnavailable.value = false
+    try {
+      fetched = await loadCurrentUser()
+      user.value = fetched
+    } catch (error) {
+      // The session is unknown either way, so the user is cleared either way; what differs is what
+      // the app is allowed to CONCLUDE from it. An availability failure raises the outage flag and
+      // keeps isAnonymous false, so nothing downstream renders "you are logged out".
       user.value = null
+      serverUnavailable.value = isAvailabilityFailure(error)
     }
     initialized.value = true
 
@@ -78,6 +134,9 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       user.value = null
       initialized.value = false
+      // A deliberate sign-out clears the outage state too: the next fetch decides afresh, and an
+      // outage flag surviving into a logged-out app would show the error surface instead of the form.
+      serverUnavailable.value = false
       // #147 follow-up: fetchCurrentUser applies the SERVER's dark-mode preference as a live class on
       // <html> without writing it to localStorage. Logout is an SPA route change with no page reload,
       // so that class would otherwise survive the session and the next account to log in on a shared
@@ -92,5 +151,16 @@ export const useAuthStore = defineStore('auth', () => {
     return logoutUrl
   }
 
-  return { user, initialized, isAnonymous, isAdmin, username, hasDefaultPassword, fetchCurrentUser, login, logout }
+  return {
+    user,
+    initialized,
+    serverUnavailable,
+    isAnonymous,
+    isAdmin,
+    username,
+    hasDefaultPassword,
+    fetchCurrentUser,
+    login,
+    logout,
+  }
 })

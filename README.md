@@ -151,7 +151,9 @@ services:
       DATABASE_URL: "jdbc:postgresql://teedy-db:5432/teedy"
       DATABASE_USER: "teedy_db_user"
       DATABASE_PASSWORD: "teedy_db_password"
-      DATABASE_POOL_SIZE: "10"
+      # DATABASE_POOL_SIZE is intentionally unset: Teedy then sizes the connection pool from the
+      # container's CPU count, so it always has enough connections for its own background workers.
+      # Set it only to pin a value — e.g. when several instances share one PostgreSQL server.
     volumes:
       - ./docs/data:/data
     networks:

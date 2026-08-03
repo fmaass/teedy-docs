@@ -5,8 +5,16 @@ import { useAuthStore } from '../stores/auth'
 // router harness. Returns the redirect target, or null to allow navigation.
 export function resolveNavGuard(
   meta: { public?: boolean; requiresAdmin?: boolean },
-  auth: { isAnonymous: boolean; isAdmin: boolean },
+  auth: { isAnonymous: boolean; isAdmin: boolean; serverUnavailable?: boolean },
 ): RouteLocationRaw | null {
+  // #245: the server did not answer who the current user is. That is NOT anonymity, so the check
+  // below (which now reports false for this state) would let a protected view mount and fire its own
+  // doomed API calls. Route to the public login shell instead, where Login.vue renders the outage
+  // surface with a Retry. Public routes are left alone — they render their own errors, and bouncing
+  // them here would put the surface in front of a visitor who never asked for a session.
+  if (!meta.public && auth.serverUnavailable) {
+    return { name: 'login' }
+  }
   if (!meta.public && auth.isAnonymous) {
     return { name: 'login' }
   }

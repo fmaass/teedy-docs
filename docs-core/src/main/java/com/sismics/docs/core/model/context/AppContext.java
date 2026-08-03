@@ -21,6 +21,7 @@ import com.sismics.docs.core.util.PdfUtil;
 import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.util.ClasspathScanner;
+import com.sismics.util.ConcurrencySizing;
 import com.sismics.util.EnvironmentUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -394,7 +395,11 @@ public class AppContext {
         if (EnvironmentUtil.isUnitTest()) {
             return new EventBus(exceptionHandler);
         } else {
-            int threadCount = Math.max(Runtime.getRuntime().availableProcessors() / 2, 2);
+            // Sized together with the JDBC connection pool (#230): every worker that runs a listener
+            // holds a connection for its transaction, so the two budgets come from one place. The cap
+            // matters as much as the floor — an uncapped availableProcessors()/2 gives a 64-core host
+            // 64 workers per bus, more than any pool bounded by a shared PostgreSQL can serve.
+            int threadCount = ConcurrencySizing.asyncBusThreadCount();
 
             // Bounded work queue so a burst of events cannot exhaust memory. When the queue is full,
             // CallerRunsPolicy makes the producing thread run the task itself, applying backpressure

@@ -37,6 +37,13 @@ function logoutResp(data: unknown = {}) {
   return { data } as unknown as Awaited<ReturnType<typeof apiLogout>>
 }
 
+// The shape the shared axios client rejects with: `error.response.status` is populated for every
+// answered request, and absent when the request never got an answer at all. #245 turns on exactly
+// that distinction, so the fixtures have to carry it rather than being bare Errors.
+function httpError(status: number) {
+  return { response: { status } }
+}
+
 function userInfo(overrides: Record<string, unknown> = {}) {
   return {
     anonymous: false,
@@ -85,13 +92,125 @@ describe('auth store', () => {
     })
 
     it('clears the user but still sets initialized on failure', async () => {
-      mockGetCurrentUser.mockRejectedValue(new Error('401'))
+      mockGetCurrentUser.mockRejectedValue(httpError(401))
       const store = useAuthStore()
 
       await store.fetchCurrentUser()
 
       expect(store.user).toBeNull()
       expect(store.initialized).toBe(true)
+      expect(store.isAnonymous).toBe(true)
+    })
+  })
+
+  // #245: a transient 5xx or network failure at boot used to be swallowed by a bare catch and
+  // reported as "anonymous", so the router guard bounced a signed-in user to the login page over a
+  // blip. A failure that says nothing about the session must not be turned into an answer about it.
+  describe('fetchCurrentUser server-availability discrimination', () => {
+    it('does NOT report anonymous when /api/user keeps failing with a 5xx', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(500))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.serverUnavailable).toBe(true)
+      // The whole point: the guard must not read this as "logged out".
+      expect(store.isAnonymous).toBe(false)
+      expect(store.initialized).toBe(true)
+    })
+
+    it('retries exactly once on a 5xx — never a loop, because boot awaits this call (#216)', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(503))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(2)
+    })
+
+    it('recovers silently when the retry succeeds — no outage state, no bounce', async () => {
+      mockGetCurrentUser
+        .mockRejectedValueOnce(httpError(500))
+        .mockResolvedValueOnce(userResp(userInfo({ username: 'frank' })))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(2)
+      expect(store.user?.username).toBe('frank')
+      expect(store.serverUnavailable).toBe(false)
+      expect(store.isAnonymous).toBe(false)
+    })
+
+    it('treats a rejection with no response (network failure) as unavailable, not anonymous', async () => {
+      mockGetCurrentUser.mockRejectedValue(new Error('Network Error'))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.serverUnavailable).toBe(true)
+      expect(store.isAnonymous).toBe(false)
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(2)
+    })
+
+    it('leaves a 401 as an ordinary anonymous session and does NOT retry it', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(401))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.serverUnavailable).toBe(false)
+      expect(store.isAnonymous).toBe(true)
+      // A 401 is an ANSWER; re-asking it would only slow the boot down.
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(1)
+    })
+
+    it('leaves a 403 as an ordinary anonymous session and does NOT retry it', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(403))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(store.serverUnavailable).toBe(false)
+      expect(store.isAnonymous).toBe(true)
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(1)
+    })
+
+    it('classifies on the RETRY outcome: a 5xx followed by a 401 is anonymous, not an outage', async () => {
+      mockGetCurrentUser.mockRejectedValueOnce(httpError(500)).mockRejectedValueOnce(httpError(401))
+      const store = useAuthStore()
+
+      await store.fetchCurrentUser()
+
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(2)
+      expect(store.serverUnavailable).toBe(false)
+      expect(store.isAnonymous).toBe(true)
+    })
+
+    it('clears the outage state once the server answers again (the Retry path)', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(500))
+      const store = useAuthStore()
+      await store.fetchCurrentUser()
+      expect(store.serverUnavailable).toBe(true)
+
+      mockGetCurrentUser.mockReset()
+      mockGetCurrentUser.mockResolvedValue(userResp(userInfo({ username: 'grace' })))
+      await store.fetchCurrentUser()
+
+      expect(store.serverUnavailable).toBe(false)
+      expect(store.user?.username).toBe('grace')
+    })
+
+    it('clears the outage state on logout so the next visitor gets the credential form', async () => {
+      mockGetCurrentUser.mockRejectedValue(httpError(500))
+      mockApiLogout.mockResolvedValue(logoutResp())
+      const store = useAuthStore()
+      await store.fetchCurrentUser()
+      expect(store.serverUnavailable).toBe(true)
+
+      await store.logout()
+
+      expect(store.serverUnavailable).toBe(false)
       expect(store.isAnonymous).toBe(true)
     })
   })

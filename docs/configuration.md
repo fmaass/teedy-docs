@@ -36,7 +36,7 @@ external URLs correctly, always set `DOCS_BASE_URL`.
 | `DATABASE_URL` | JDBC connection string for Hibernate. **If unset, Teedy uses an embedded H2 database** (testing only) |
 | `DATABASE_USER` | Database user |
 | `DATABASE_PASSWORD` | Database password |
-| `DATABASE_POOL_SIZE` | Connection pool size |
+| `DATABASE_POOL_SIZE` | Connection pool size. Unset by default, in which case Teedy derives it from the CPU count (14 on a small host, up to 50) so the pool always covers its own background workers. Set it to pin a value, e.g. when several instances share one PostgreSQL server |
 
 ### Language / OCR
 

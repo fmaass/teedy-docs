@@ -2,6 +2,7 @@ package com.sismics.util.jpa;
 
 import com.google.common.base.Strings;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.util.ConcurrencySizing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +23,17 @@ import java.util.Properties;
  */
 public final class EMF {
     private static final Logger log = LoggerFactory.getLogger(EMF.class);
+
+    /**
+     * Hibernate property holding the maximum size of its internal connection pool.
+     */
+    static final String POOL_SIZE_PROPERTY = "hibernate.connection.pool_size";
+
+    /**
+     * Environment variable overriding the connection pool size. Wins verbatim over the adaptive
+     * default whenever it carries a value.
+     */
+    static final String POOL_SIZE_ENV = "DATABASE_POOL_SIZE";
 
     private static Properties properties;
 
@@ -90,24 +102,27 @@ public final class EMF {
             URL hibernatePropertiesUrl = EMF.class.getResource("/hibernate.properties");
             if (hibernatePropertiesUrl != null) {
                 log.info("Configuring EntityManager from hibernate.properties");
-                
+
                 InputStream is = hibernatePropertiesUrl.openStream();
                 Properties properties = new Properties();
                 properties.load(is);
+                // A hibernate.properties that pins the pool size keeps it (the test configurations
+                // do, deliberately). One that omits it — the shipped dev/H2 configuration — gets the
+                // same adaptive default as the environment path below, because this file is read
+                // BEFORE that path and would otherwise leave `mvn jetty:run` on a many-core box with
+                // whatever Hibernate defaults to while the async buses size themselves off the CPU
+                // count (#230).
+                applyPoolSize(properties, properties.getProperty(POOL_SIZE_PROPERTY));
                 return properties;
             }
         } catch (IOException | IllegalArgumentException e) {
             log.error("Error reading hibernate.properties", e);
         }
-        
+
         // Use environment parameters
         String databaseUrl = System.getenv("DATABASE_URL");
         String databaseUsername = System.getenv("DATABASE_USER");
         String databasePassword = System.getenv("DATABASE_PASSWORD");
-        String databasePoolSize = System.getenv("DATABASE_POOL_SIZE");
-        if(databasePoolSize == null) {
-            databasePoolSize = "10";
-        }
 
         log.info("Configuring EntityManager from environment parameters");
         Properties props = new Properties();
@@ -132,9 +147,48 @@ public final class EMF {
         props.put("hibernate.max_fetch_depth", "5");
         props.put("hibernate.cache.use_second_level_cache", "false");
         props.put("hibernate.connection.initial_pool_size", "1");
-        props.put("hibernate.connection.pool_size", databasePoolSize);
+        applyPoolSize(props, null);
         props.put("hibernate.connection.pool_validation_interval", "5");
         return props;
+    }
+
+    /**
+     * Resolve the effective connection pool size and write it into {@code props}, logging it so the
+     * value a deployment is actually running with is readable from the boot log.
+     *
+     * <p>Precedence: the {@value #POOL_SIZE_ENV} environment variable wins unconditionally
+     * (verbatim — an operator setting it must never be silently outvoted by a stale
+     * hibernate.properties value), then an explicit value in the configuration source, then the
+     * adaptive default derived from the CPU count by
+     * {@link ConcurrencySizing#defaultConnectionPoolSize()}. The adaptive default replaces the
+     * historical fixed 10, which lost to the application's own async worker count on many-core
+     * hosts and produced "The internal connection pool has reached its maximum size" during
+     * processing bursts (#230).</p>
+     *
+     * @param props Properties to write the resolved size into
+     * @param configuredValue Value already carried by hibernate.properties, or null/blank when absent
+     *                        (the environment path has no such source and always passes null)
+     */
+    private static void applyPoolSize(Properties props, String configuredValue) {
+        String envValue = System.getenv(POOL_SIZE_ENV);
+        if (!Strings.isNullOrEmpty(envValue)) {
+            log.info("Database connection pool size: {} (from {})", envValue, POOL_SIZE_ENV);
+            props.put(POOL_SIZE_PROPERTY, envValue);
+            return;
+        }
+        if (!Strings.isNullOrEmpty(configuredValue)) {
+            log.info("Database connection pool size: {} (explicitly configured in hibernate.properties)",
+                    configuredValue);
+            props.put(POOL_SIZE_PROPERTY, configuredValue);
+            return;
+        }
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        int poolSize = ConcurrencySizing.defaultConnectionPoolSize(availableProcessors);
+        log.info("Database connection pool size: {} (adaptive default for {} available processors, "
+                + "{} threads on each of {} async event buses plus headroom; override with {})",
+                poolSize, availableProcessors, ConcurrencySizing.asyncBusThreadCount(availableProcessors),
+                ConcurrencySizing.ASYNC_BUS_COUNT, POOL_SIZE_ENV);
+        props.put(POOL_SIZE_PROPERTY, String.valueOf(poolSize));
     }
     
     /**

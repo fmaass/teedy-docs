@@ -36,6 +36,30 @@ describe('resolveNavGuard', () => {
     expect(resolveNavGuard({ requiresAdmin: true }, anon)).toEqual({ name: 'login' })
   })
 
+  // #245: when /api/user could not be reached, the store reports serverUnavailable and — deliberately
+  // — NOT anonymous, because an unreachable server says nothing about the session. Without its own
+  // branch here, "not anonymous" would mount the protected view and fire its own doomed API calls.
+  describe('server-unavailable state', () => {
+    const unavailable = { isAnonymous: false, isAdmin: false, serverUnavailable: true }
+
+    it('routes a protected view to login so the outage surface is what renders', () => {
+      expect(resolveNavGuard({}, unavailable)).toEqual({ name: 'login' })
+    })
+
+    it('routes an admin-only view to login too — not to documents', () => {
+      expect(resolveNavGuard({ requiresAdmin: true }, unavailable)).toEqual({ name: 'login' })
+    })
+
+    it('leaves public routes alone (they render their own errors, and login IS the surface)', () => {
+      expect(resolveNavGuard({ public: true }, unavailable)).toBeNull()
+    })
+
+    it('does not disturb the ordinary paths when the server is reachable', () => {
+      expect(resolveNavGuard({}, { ...nonAdmin, serverUnavailable: false })).toBeNull()
+      expect(resolveNavGuard({}, { ...anon, serverUnavailable: false })).toEqual({ name: 'login' })
+    })
+  })
+
   // The full admin-settings route set (mirrors AppLayout's settingsAdminItems).
   const ADMIN_ROUTES = [
     'settings-config',
