@@ -116,6 +116,17 @@ assert_grep() {
   fi
 }
 
+refute_grep() {
+  local desc="$1" needle="$2" file="${3:-$repo/baseline.json}"
+  if grep -qF "$needle" "$file"; then
+    echo "FAIL - $desc (\"$needle\" unexpectedly present in $file)"
+    fail=$((fail + 1))
+  else
+    echo "ok   - $desc"
+    pass=$((pass + 1))
+  fi
+}
+
 # (a) DRIFT: insert 3 blank lines above the sink -> sink shifts 5 -> 8, content
 #     byte-identical -> remap, exit 0.
 write_canonical_sink
@@ -314,6 +325,117 @@ node "$tool" "does-not-exist-rev" --baseline "$repo/baseline.json" --root "$repo
 rc_i=$?
 set -e
 expect_rc "unresolvable old-rev -> precondition error (exit 2, not 3)" 2 "$rc_i"
+
+# (j) NO COLLATERAL EDITS (#251). A coordinate refresh moves the coordinate and refreshes
+#     its fingerprint — and touches NOTHING else in the entry.
+#
+#     `reason` is the load-bearing one: it is the human triage disposition, the
+#     justification a reviewer weighs when deciding whether suppressing this alert is
+#     still defensible. Machine-appending a provenance sentence to it (which this tool did
+#     until #251) makes a pure coordinate refresh read as a re-triage in review and in
+#     `git log`, and grows the field on every refresh. The check below is written as a
+#     key-set diff rather than a `reason` assertion alone, so ANY future field the tool
+#     starts writing has to be justified here first.
+#
+#     `sink_line` is allowed to change because it IS the coordinate's fingerprint — the
+#     drift gate compares the working tree against it, so it moves with the coordinate by
+#     definition. The fixture seeds a STALE fingerprint so that allowance is exercised
+#     rather than assumed.
+repo4="$tmp_dir/repo4"
+mkdir -p "$repo4/src"
+cat > "$repo4/src/Keys.java" <<'JAVA'
+package x;
+
+class Keys {
+  void go(java.nio.file.Path sinkPath) throws Exception {
+    Files.newInputStream(sinkPath);
+  }
+}
+JAVA
+cat > "$repo4/baseline.json" <<'JSON'
+{
+  "schema": {
+    "required": ["id", "sink_line", "finding", "reason", "owner", "introduced", "expires", "compensating_control", "removal_issue"]
+  },
+  "findings": [
+    {
+      "id": "java/path-injection@src/Keys.java:5:5",
+      "sink_line": "    STALE fingerprint from an earlier coordinate",
+      "finding": "fixture sink",
+      "reason": "Triaged already-mitigated: the path is canonicalized before use.",
+      "owner": "tester",
+      "introduced": "2026-07-18",
+      "expires": "2026-10-18",
+      "compensating_control": "n/a fixture",
+      "removal_issue": "#0"
+    }
+  ]
+}
+JSON
+git -C "$repo4" init -q
+git -C "$repo4" add src/Keys.java baseline.json
+git -C "$repo4" -c user.email=t@example.invalid -c user.name=tester commit -q -m "old-rev keys"
+OLD_REV4="$(git -C "$repo4" rev-parse HEAD)"
+cp "$repo4/baseline.json" "$tmp_dir/baseline.before.json"
+{ printf '\n\n\n'; cat "$repo4/src/Keys.java"; } > "$repo4/src/Keys.java.tmp"
+mv "$repo4/src/Keys.java.tmp" "$repo4/src/Keys.java"
+set +e
+node "$tool" "$OLD_REV4" --baseline "$repo4/baseline.json" --root "$repo4" >"$tmp_dir/out.log" 2>&1
+rc4=$?
+set -e
+expect_rc "coordinate refresh remaps the shifted sink (exit 0)" 0 "$rc4"
+assert_id "coordinate refresh moved the id to line 8" "java/path-injection@src/Keys.java:8:5" "$repo4/baseline.json"
+assert_grep "coordinate refresh left \`reason\` byte-identical" \
+  '"reason": "Triaged already-mitigated: the path is canonicalized before use."' "$repo4/baseline.json"
+refute_grep "coordinate refresh appended no provenance sentence to \`reason\`" \
+  "Coordinates refreshed" "$repo4/baseline.json"
+
+# The general form of the same invariant: diff the whole entry key by key. Anything that
+# moved other than the coordinate and its fingerprint is a failure, and the differ itself
+# fails if the fixture did not actually remap (otherwise "nothing changed" would pass
+# vacuously — the assertion has to prove the tool ran, not that it did nothing).
+cat > "$tmp_dir/diff-keys.mjs" <<'MJS'
+import { readFileSync } from 'node:fs';
+
+const [beforePath, afterPath] = process.argv.slice(2);
+const before = JSON.parse(readFileSync(beforePath, 'utf8'));
+const after = JSON.parse(readFileSync(afterPath, 'utf8'));
+const allowed = new Set(['id', 'sink_line']);
+const problems = [];
+
+if (before.findings.length !== after.findings.length) {
+  problems.push(`entry count changed: ${before.findings.length} -> ${after.findings.length}`);
+}
+for (let i = 0; i < Math.min(before.findings.length, after.findings.length); i++) {
+  const b = before.findings[i];
+  const a = after.findings[i];
+  for (const key of new Set([...Object.keys(b), ...Object.keys(a)])) {
+    if (JSON.stringify(b[key]) === JSON.stringify(a[key])) continue;
+    if (allowed.has(key)) continue;
+    problems.push(`entry ${i}: key "${key}" changed: ${JSON.stringify(b[key])} -> ${JSON.stringify(a[key])}`);
+  }
+}
+// Positive control: without an actual remap every "unchanged" assertion above is vacuous.
+if (JSON.stringify(before.findings[0]?.id) === JSON.stringify(after.findings[0]?.id)) {
+  problems.push('the fixture did not remap at all — the key-set assertion would pass vacuously');
+}
+if (problems.length > 0) {
+  console.error(problems.join('\n'));
+  process.exit(1);
+}
+MJS
+set +e
+node "$tmp_dir/diff-keys.mjs" "$tmp_dir/baseline.before.json" "$repo4/baseline.json" >"$tmp_dir/keys.log" 2>&1
+rc_keys=$?
+set -e
+if [[ "$rc_keys" -eq 0 ]]; then
+  echo "ok   - coordinate refresh changed ONLY the id and its sink_line fingerprint"
+  pass=$((pass + 1))
+else
+  echo "FAIL - coordinate refresh changed a key other than the id/sink_line"
+  sed 's/^/       /' "$tmp_dir/keys.log"
+  fail=$((fail + 1))
+fi
 
 echo
 echo "Passed: $pass, Failed: $fail"

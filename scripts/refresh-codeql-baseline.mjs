@@ -321,18 +321,30 @@ function main() {
   }
 
   // Apply the remaps (auto + interactively resolved) to the baseline object, writing
-  // the new coordinate AND its sink_line fingerprint.
+  // the new coordinate AND its sink_line fingerprint — and NOTHING else.
+  //
+  // `reason` in particular is never touched. It is the human triage disposition: the
+  // justification a reviewer weighs when deciding whether suppressing this alert is still
+  // defensible. Machine-appending a provenance sentence to it made a pure coordinate
+  // refresh indistinguishable from a re-triage in review and in `git log`, and grew the
+  // field on every refresh. The provenance itself is not lost: it is printed below, for
+  // the commit message, and the commit that moves the coordinate is its own record. It
+  // deliberately does NOT go into a new baseline field either: codeql-gate.py pins
+  // `schema.required` to its own fixed set and then checks each finding only for MISSING
+  // keys, so an extra field would be accepted — and would sit outside the declared schema,
+  // validated by nothing and read by no gate. An unread field in a security artifact rots.
   for (const r of applicable) {
     const entry = findings[r.index];
     entry.id = r.newId;
     entry.sink_line = r.sinkLine;
-    const note = ` Coordinates refreshed ${today}: sink shifted from line ${r.oldLine} to ${r.newLine} vs ${opts.oldRev}; content verified byte-identical.`;
-    entry.reason = (entry.reason || '') + note;
   }
 
-  // Report.
+  // Report. The provenance sentence lives here — copy it into the commit message.
   for (const r of applicable) {
-    console.log(`remap ${r.oldId}\n   -> ${r.newId}`);
+    console.log(
+      `remap ${r.oldId}\n   -> ${r.newId}\n` +
+      `   (${today}: sink shifted from line ${r.oldLine} to ${r.newLine} vs ${opts.oldRev}; content verified byte-identical)`,
+    );
   }
   if (stillManual.length > 0) {
     console.error(`\nMANUAL FOLLOW-UP NEEDED — ${stillManual.length} entr${stillManual.length === 1 ? 'y' : 'ies'} left unchanged:`);

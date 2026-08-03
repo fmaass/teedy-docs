@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 #
-# Runs every checker self-test in scripts/test-check-*.sh and fails if ANY of them fails.
+# Runs every script self-test in scripts/test-*.sh and fails if ANY of them fails.
 #
 # The mirror gates (db.version overlays, Jetty pin parity, version literals, CodeQL
 # baseline drift and expiry) are hand-written checkers that no unit test exercises. Each
 # has a sibling fixture test proving it still fires on a planted defect — but until #220
 # nothing ran those fixture tests, so a checker could rot into a permanent green and the
 # fixture test that would have caught it sat unexecuted in the tree.
+#
+# The glob covers scripts/test-*.sh, not just the checkers' test-check-*.sh: the same
+# false-green applied to the self-tests of the maintenance TOOLS beside them
+# (refresh-codeql-baseline, repair-mojibake), which were named outside the narrower glob
+# and so had never run here either — #251 was a defect in one of those tools that no gate
+# was in a position to catch.
 #
 # The suite is discovered by GLOB, not by a hand-maintained list, so a self-test added
 # later joins this gate by existing. The empty-glob case is an ERROR, not a pass: if the
@@ -25,12 +31,12 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 shopt -s nullglob
-tests=("${repo_root}"/scripts/test-check-*.sh)
+tests=("${repo_root}"/scripts/test-*.sh)
 shopt -u nullglob
 
 if [ ${#tests[@]} -eq 0 ]; then
-  echo "FAIL: no scripts/test-check-*.sh found — the self-test glob matched nothing." >&2
-  echo "      Either the checker self-tests were deleted, or they were renamed and this" >&2
+  echo "FAIL: no scripts/test-*.sh found — the self-test glob matched nothing." >&2
+  echo "      Either the script self-tests were deleted, or they were renamed and this" >&2
   echo "      gate now proves nothing. Fix the glob rather than deleting this step." >&2
   exit 1
 fi

@@ -48,8 +48,10 @@ one that needs a tag to compare against. None of them can be failed by a unit te
 
 Each of these checkers has a fixture self-test (`scripts/test-check-*.sh`) that plants a defect and
 asserts the checker still fires. The `build` job runs all of them through
-`scripts/run-checker-self-tests.sh`, which discovers them by glob — a self-test added later joins
-that gate by existing, and an empty glob is a failure, not a pass.
+`scripts/run-checker-self-tests.sh`, which discovers them by glob (`scripts/test-*.sh`, so the
+self-tests of the maintenance tools beside the checkers — `refresh-codeql-baseline`,
+`repair-mojibake` — are in the same gate) — a self-test added later joins that gate by existing,
+and an empty glob is a failure, not a pass.
 
 The two pre-push-only gates have no CI backstop at all, which is the point: the CodeQL baseline
 keyed to line coordinates and the two independent Jetty pins (the pom property governs only the

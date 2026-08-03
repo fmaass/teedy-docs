@@ -43,9 +43,26 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  */
 public class PostgresSchemaResetExtension implements BeforeAllCallback {
 
+    // This class BODY is duplicated verbatim in the sibling module's copy (docs-core
+    // com.sismics.util.jpa <-> docs-web com.sismics.docs.rest.util): only the package line and the
+    // class javadoc above it differ. The duplication is deliberate (see the javadoc), so keep the
+    // two bodies byte-identical — a reader has to be able to prove they have not drifted with:
+    //   diff <(sed -n '/^public class PostgresSchemaResetExtension/,$p' <copy-a>) \
+    //        <(sed -n '/^public class PostgresSchemaResetExtension/,$p' <copy-b>)
+
+    /**
+     * The pgjdbc connection parameters known to decide the ENDPOINT at driver level: {@code PGHOST}
+     * and {@code PGPORT} replace the authority-derived host and port, and {@code service} resolves
+     * both out of {@code pg_service.conf}, which can name a remote server for a URL that carries no
+     * host at all. They are listed only so the refusal can NAME what it found — the refusal itself
+     * does not depend on this list, because no query parameter is permitted at all (see
+     * {@link #firstQueryParameter}).
+     */
+    private static final String[] ENDPOINT_OVERRIDE_PARAMS = { "pghost", "pgport", "service" };
+
     @Override
     public void beforeAll(ExtensionContext context) {
-        Properties properties = loadHibernateProperties();
+        Properties properties = hibernateProperties();
         if (properties == null) {
             return;
         }
@@ -56,15 +73,21 @@ public class PostgresSchemaResetExtension implements BeforeAllCallback {
             return;
         }
 
-        // Destructive-operation guard: this extension DROPs the public schema. Refuse hard
-        // unless the target host is an explicit local/loopback/testcontainers host, so a
+        // Destructive-operation guard: this extension DROPs the public schema. Refuse hard unless
+        // the URL provably resolves to ONE explicit local/loopback/testcontainers endpoint, so a
         // misconfigured DATABASE_URL pointing at a real server can never silently wipe it.
-        String host = extractHost(jdbcUrl);
-        if (!isAllowedHost(host)) {
+        String refusal = refusalReason(jdbcUrl);
+        if (refusal != null) {
             throw new IllegalStateException(
-                    "PostgresSchemaResetExtension refuses to drop the schema on non-local host '" + host
-                            + "' (from " + jdbcUrl + "). This extension is destructive and only runs against "
-                            + "localhost/127.0.0.1/::1/testcontainers. Check DATABASE_URL / hibernate.connection.url.");
+                    "PostgresSchemaResetExtension REFUSES to drop the schema: " + refusal
+                            + " Offending URL: " + jdbcUrl
+                            + " — this extension is destructive (DROP SCHEMA public CASCADE) and runs only "
+                            + "against a single, unambiguous local endpoint named once in the URL: "
+                            + "localhost, a 127.0.0.0/8 literal, ::1, the local socket, "
+                            + "host.docker.internal or host.testcontainers.internal — and with no "
+                            + "connection parameters of any kind, since none of them can be proven "
+                            + "harmless from the URL text. "
+                            + "Check DATABASE_URL / hibernate.connection.url.");
         }
 
         String user = properties.getProperty("hibernate.connection.username");
@@ -83,19 +106,132 @@ public class PostgresSchemaResetExtension implements BeforeAllCallback {
     }
 
     /**
-     * Extract the host component from a PostgreSQL JDBC URL. Supports the common forms:
+     * Why the destructive reset must NOT run against {@code jdbcUrl}, or {@code null} when it may.
+     *
+     * <p>This is the single verdict {@link #beforeAll} asks for. {@link #extractHost} and
+     * {@link #isAllowedHost} are its parts and are NOT a verdict on their own: both read one host
+     * out of a credential-stripped authority, which three pgjdbc URL shapes make a lie. All three
+     * are refused outright rather than allowlisted, because in each of them the endpoint this guard
+     * can see is not the endpoint the driver will connect to:
      * <ul>
-     *   <li>{@code jdbc:postgresql://host:port/db}</li>
-     *   <li>{@code jdbc:postgresql://host/db}</li>
-     *   <li>{@code jdbc:postgresql://[::1]:port/db} (bracketed IPv6)</li>
-     *   <li>{@code jdbc:postgresql:///db} and {@code jdbc:postgresql:db} (local, empty host)</li>
+     *   <li>a comma-separated multi-host authority
+     *       ({@code jdbc:postgresql://localhost:1,db.prod.example.com:5432/docs}): pgjdbc tries the
+     *       endpoints in turn, so with the first one refusing connections it falls through to one
+     *       this guard never inspected — while the text still begins with {@code localhost};</li>
+     *   <li>the same, with the comma hidden in what reads as credentials
+     *       ({@code jdbc:postgresql://db.prod.example.com,ignored@localhost:5432/docs}): pgjdbc has
+     *       no userinfo concept in the URL — it splits the WHOLE authority on {@code ','} first and
+     *       only then each element on {@code ':'} — so this is two hosts to the driver, the first of
+     *       them remote, while a parser that strips through {@code '@'} sees only
+     *       {@code localhost}. The comma is therefore checked on the RAW authority;</li>
+     *   <li>any query parameter at all ({@code ?PGHOST=…}, {@code ?PGPORT=…},
+     *       {@code jdbc:postgresql:docs?service=production}): {@code PGHOST}/{@code PGPORT} replace
+     *       the authority-derived host and port, and {@code service} resolves both out of
+     *       {@code pg_service.conf} — which can put a remote server behind a URL that names no host
+     *       at all and is otherwise permitted as the local-socket form.</li>
      * </ul>
-     * Returns an empty string for the host-less local forms (treated as local/allowed).
+     *
+     * <p>The parameter rule refuses EVERY query parameter rather than enumerating the dangerous
+     * ones, and that is deliberate. Enumerating is a denylist over a driver surface that grows:
+     * pgjdbc 42.7 alone ships {@code PGHOST}, {@code PGPORT}, {@code PGDBNAME}, {@code service} and
+     * {@code socketFactory}, and a later release can add another endpoint-affecting property this
+     * guard would then silently permit. Refusing everything fails closed and needs no such
+     * tracking, and it costs nothing here: every datasource URL this repository configures carries
+     * no query string at all (the {@code test-postgres}/{@code test-web-postgres} jobs both write a
+     * bare {@code jdbc:postgresql://localhost:5432/docs}, and the extension passes user and password
+     * to {@code DriverManager} separately rather than in the URL). The price of a false refusal is a
+     * loud, self-describing failure on a test run; the price of a false permit is a dropped schema
+     * on a real server.
+     *
+     * @param jdbcUrl PostgreSQL JDBC URL from {@code hibernate.connection.url}
+     * @return A human-readable reason to refuse, or {@code null} when the reset may proceed
+     */
+    static String refusalReason(String jdbcUrl) {
+        // The RAW authority, before any credential stripping: that is the string pgjdbc splits on
+        // ',', so it is the only one in which a hidden second host is visible.
+        String rawAuthority = rawAuthority(jdbcUrl);
+        if (rawAuthority.indexOf(',') >= 0) {
+            return multiHostReason(rawAuthority);
+        }
+        // Strictly subsumed by the check above today — the credential-stripped authority is a
+        // suffix of the raw one — and kept anyway, so that narrowing rawAuthority() in future
+        // cannot silently reopen the multi-host gap without this line also being removed.
+        String authority = authority(jdbcUrl);
+        if (authority.indexOf(',') >= 0) {
+            return multiHostReason(authority);
+        }
+        String parameter = firstQueryParameter(jdbcUrl);
+        if (parameter != null) {
+            for (String known : ENDPOINT_OVERRIDE_PARAMS) {
+                if (parameter.equals(known)) {
+                    return "the JDBC URL carries the driver-level endpoint override '" + parameter
+                            + "', which pgjdbc resolves after the authority, so the endpoint it connects "
+                            + "to need not be the one this guard inspected.";
+                }
+            }
+            return "the JDBC URL carries the connection parameter '" + parameter
+                    + "'; no query parameter is permitted, because this guard cannot prove from the "
+                    + "URL text that a parameter leaves the endpoint alone.";
+        }
+        String host = extractHost(jdbcUrl);
+        if (!isAllowedHost(host)) {
+            return "host '" + host + "' is not a local/loopback/testcontainers host.";
+        }
+        return null;
+    }
+
+    private static String multiHostReason(String authority) {
+        return "the JDBC URL declares more than one host ('" + authority
+                + "'), so the driver can fall through to an endpoint this guard never inspected.";
+    }
+
+    /**
+     * The name of the first query parameter of the URL, lower-cased, or {@code null} when it has
+     * none. An {@link #ENDPOINT_OVERRIDE_PARAMS} entry anywhere in the query wins over the
+     * positional first, so a URL that hides {@code PGHOST} behind a harmless-looking parameter is
+     * still reported by the name that matters. pgjdbc matches connection-property names
+     * case-insensitively, so this comparison is case-insensitive too.
      *
      * @param jdbcUrl PostgreSQL JDBC URL
-     * @return Lower-cased host, or "" when the URL targets the local socket / no host
+     * @return The lower-cased parameter name to refuse on, or {@code null} when there is no query
      */
-    static String extractHost(String jdbcUrl) {
+    private static String firstQueryParameter(String jdbcUrl) {
+        if (jdbcUrl == null) {
+            return null;
+        }
+        int query = jdbcUrl.indexOf('?');
+        if (query < 0) {
+            return null;
+        }
+        String first = null;
+        for (String pair : jdbcUrl.substring(query + 1).split("&")) {
+            int equals = pair.indexOf('=');
+            String name = (equals >= 0 ? pair.substring(0, equals) : pair).trim().toLowerCase();
+            if (name.isEmpty()) {
+                continue; // a stray '?' or '&' names no parameter
+            }
+            for (String known : ENDPOINT_OVERRIDE_PARAMS) {
+                if (name.equals(known)) {
+                    return name;
+                }
+            }
+            if (first == null) {
+                first = name;
+            }
+        }
+        return first;
+    }
+
+    /**
+     * The authority component of a PostgreSQL JDBC URL exactly as written — credentials INCLUDED,
+     * because pgjdbc does not treat them as credentials: {@code host}, {@code host:port},
+     * {@code [::1]:port}, or a comma-separated list of those. Empty for the host-less local forms
+     * ({@code jdbc:postgresql:///db}, {@code jdbc:postgresql:db}).
+     *
+     * @param jdbcUrl PostgreSQL JDBC URL
+     * @return The raw authority, or "" when the URL targets the local socket / no host
+     */
+    private static String rawAuthority(String jdbcUrl) {
         if (jdbcUrl == null) {
             return "";
         }
@@ -115,12 +251,42 @@ public class PostgresSchemaResetExtension implements BeforeAllCallback {
                 break;
             }
         }
-        authority = authority.substring(0, end);
-        // Strip credentials if present (user:pass@host).
+        return authority.substring(0, end);
+    }
+
+    /**
+     * {@link #rawAuthority} with anything up to and including the last {@code '@'} removed, which is
+     * how a {@code user:pass@host} form is conventionally read. Used only to name the host; the
+     * safety decisions that must not be fooled by an {@code '@'} are made on the raw form.
+     *
+     * @param jdbcUrl PostgreSQL JDBC URL
+     * @return The credential-stripped authority, or "" when the URL targets the local socket
+     */
+    private static String authority(String jdbcUrl) {
+        String authority = rawAuthority(jdbcUrl);
         int at = authority.lastIndexOf('@');
-        if (at >= 0) {
-            authority = authority.substring(at + 1);
-        }
+        return at >= 0 ? authority.substring(at + 1) : authority;
+    }
+
+    /**
+     * Extract the host component from a PostgreSQL JDBC URL. Supports the common forms:
+     * <ul>
+     *   <li>{@code jdbc:postgresql://host:port/db}</li>
+     *   <li>{@code jdbc:postgresql://host/db}</li>
+     *   <li>{@code jdbc:postgresql://[::1]:port/db} (bracketed IPv6)</li>
+     *   <li>{@code jdbc:postgresql:///db} and {@code jdbc:postgresql:db} (local, empty host)</li>
+     * </ul>
+     * Returns an empty string for the host-less local forms (treated as local/allowed).
+     *
+     * <p>This reads the FIRST host of the authority and nothing else — it does not, and cannot,
+     * account for a multi-host authority or a driver-level endpoint override. It is therefore a
+     * parser, not a safety verdict: {@link #refusalReason} is the guard.
+     *
+     * @param jdbcUrl PostgreSQL JDBC URL
+     * @return Lower-cased host, or "" when the URL targets the local socket / no host
+     */
+    static String extractHost(String jdbcUrl) {
+        String authority = authority(jdbcUrl);
         // jdbc:postgresql:///db -> authority is "" (empty host, local).
         if (authority.isEmpty()) {
             return "";
@@ -201,6 +367,20 @@ public class PostgresSchemaResetExtension implements BeforeAllCallback {
             }
         }
         return octets[0].equals("127");
+    }
+
+    /**
+     * The datasource configuration this reset acts on. Package-private and overridable for ONE
+     * reason: it lets a test drive {@link #beforeAll} itself against a URL of its choosing. Without
+     * that seam the guard is only reachable through {@code /hibernate.properties}, so every test has
+     * to assert on {@link #refusalReason} instead — and deleting the call in {@code beforeAll} would
+     * leave the whole suite green while the DROP SCHEMA ran unguarded. Production behaviour is
+     * unchanged: it is always {@code /hibernate.properties}.
+     *
+     * @return The hibernate configuration, or {@code null} when there is none on the classpath
+     */
+    Properties hibernateProperties() {
+        return loadHibernateProperties();
     }
 
     private static Properties loadHibernateProperties() {

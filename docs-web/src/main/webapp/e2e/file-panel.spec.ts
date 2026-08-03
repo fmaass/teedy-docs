@@ -1,4 +1,11 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from './fixtures'
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Download,
+  type Locator,
+  type Page,
+} from './fixtures'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -724,6 +731,124 @@ test('opening a file previews it in-app; only Download targets the original (#14
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+// #246 — what the flaky run loses is the keyboard ACTIVATION, not the download event.
+//
+// Focus and the key that follows are two separate driver round trips, and the dialog is free to
+// move focus in between: its focus trap re-focuses the header's maximize button (the first control
+// in the dialog) when something inside mutates. When that lands in the gap, Enter activates the
+// maximize button instead, the anchor never sees a keydown, the browser never requests the file,
+// and the test times out waiting for a download that was never going to start. Measured on this
+// tree at 6/60 runs (10%) across both viewports with the app otherwise idle; the trace of a failing
+// run contains no request for the original file at all — only the tile thumbnail — so nothing was
+// lost in delivery.
+//
+// The activation is therefore retried, and ONLY when it provably went elsewhere. A keydown
+// recorder armed BEFORE the key goes down records which element actually received the Enter: a
+// different element means the harness lost the press and may press again; the anchor itself means
+// the control is inert, which is a PRODUCT failure and is never retried away. The download waiter
+// is armed before the first press and outlives the retries, so it cannot lose a race it has
+// already won.
+
+/** The original file's own URL — the derived `?size=…` thumbnail variants are not it. */
+function isOriginalFileRequest(url: string): boolean {
+  return /\/api\/file\/[^/]+\/data/.test(url) && !url.includes('size=')
+}
+
+/**
+ * Tab until `target` holds focus, within `budget` presses; whether it got there. The budget is
+ * generous rather than tight: focus starts on the tile control that opened the dialog, so the
+ * number of presses tracks how many focusable controls the tile carries — #178 added two per tile
+ * (preview + Download), which overran the original budget of 10. The invariant under test is
+ * reachability by keyboard alone, not the exact press count.
+ */
+async function tabUntilFocused(page: Page, target: Locator, budget = 30): Promise<boolean> {
+  for (let i = 0; i < budget; i++) {
+    await page.keyboard.press('Tab')
+    if (await target.evaluate((el) => el === document.activeElement)) return true
+  }
+  return false
+}
+
+/**
+ * Arm (once per page) a capture-phase recorder for the element that receives the next Enter, and
+ * clear whatever a previous attempt recorded. Capture phase so it sees the event whoever the
+ * target is, and first-Enter-wins so the reading is unambiguous.
+ */
+async function armEnterRecorder(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __enterTarget?: EventTarget | null; __enterArmed?: boolean }
+    w.__enterTarget = null
+    if (w.__enterArmed) return
+    w.__enterArmed = true
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key === 'Enter' && w.__enterTarget == null) w.__enterTarget = event.target
+      },
+      { capture: true },
+    )
+  })
+}
+
+/**
+ * Press Enter on `anchor` — which Tab must be able to reach — and return the download it starts.
+ *
+ * Throws rather than retrying when the Enter did reach the anchor and no download followed: that
+ * is the control being inert, which is exactly what this test exists to catch.
+ */
+async function activateWithEnter(page: Page, anchor: Locator): Promise<Download> {
+  const maxAttempts = 3
+  // Armed before the first press, and deliberately not re-armed per attempt: a download that
+  // arrives late still counts. Both settle to a value rather than rejecting, so neither can
+  // surface as an unhandled rejection while the loop is busy pressing keys.
+  const started = page
+    .waitForEvent('download', { timeout: 15_000 })
+    .then((event) => event, () => null)
+  const requested = page
+    .waitForRequest((request) => isOriginalFileRequest(request.url()), { timeout: 15_000 })
+    .then(() => true, () => false)
+
+  let lost = 0
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (!(await anchor.evaluate((el) => el === document.activeElement))) {
+      expect(
+        await tabUntilFocused(page, anchor),
+        'Tab reaches the footer Download link',
+      ).toBe(true)
+    }
+    await armEnterRecorder(page)
+    await page.keyboard.press('Enter')
+
+    const reachedAnchor = await anchor.evaluate(
+      (el) => (window as unknown as { __enterTarget?: EventTarget | null }).__enterTarget === el,
+    )
+    if (reachedAnchor) {
+      const download = await started
+      if (download) return download
+      throw new Error(
+        'Enter reached the focused Download anchor but no download started within 15s — the ' +
+          `control is inert (the browser ${(await requested) ? 'did' : 'never'} request the ` +
+          'original file). A product failure is never retried away.',
+      )
+    }
+
+    lost++
+    const stoleFocus = await page.evaluate(() => {
+      const target = (window as unknown as { __enterTarget?: EventTarget | null }).__enterTarget
+      return target instanceof Element ? target.className : String(target)
+    })
+    console.log(
+      `[#246 keyboard-download] LOST ACTIVATION: attempt ${attempt}/${maxAttempts} — Enter was ` +
+        `delivered to "${stoleFocus}" instead of the Download anchor, so focus moved between the ` +
+        'assertion and the key. Re-tabbing and pressing again.',
+    )
+  }
+  throw new Error(
+    `the Enter never reached the Download anchor in ${maxAttempts} attempts (${lost} lost to a ` +
+      'focus move) — the harness cannot keep focus on the control long enough to activate it',
+  )
+}
+
 // #181 — the footer Download is now the SINGLE affordance, so it has to be operable
 // with the keyboard alone: if Tab could not reach it, or Enter did not fire it, removing
 // the inline duplicate would have taken the only reachable control away from
@@ -744,26 +869,14 @@ test('the single Download is reachable AND activatable by keyboard alone (#181)'
   const download = dialog.locator('a.file-preview-download')
   await expect(download).toHaveCount(1)
 
-  // Tab through the dialog's focus trap until focus lands on the Download anchor. The
-  // budget is generous rather than tight: focus starts on the tile control that opened the
-  // dialog, so the number of presses tracks how many focusable controls the tile carries —
-  // #178 added two per tile (preview + Download), which overran the original budget of 10.
-  // The invariant under test is reachability by keyboard alone, not the exact press count.
-  let focused = false
-  for (let i = 0; i < 30 && !focused; i++) {
-    await page.keyboard.press('Tab')
-    focused = await download.evaluate((el) => el === document.activeElement)
-  }
-  expect(focused, 'Tab reaches the footer Download link').toBe(true)
+  // Tab through the dialog's focus trap until focus lands on the Download anchor.
+  expect(await tabUntilFocused(page, download), 'Tab reaches the footer Download link').toBe(true)
   expect(await download.getAttribute('href')).toMatch(/\/file\/[^/]+\/data/)
 
   // ACTIVATION, not merely reachability: Enter on the focused anchor must actually
   // start the download of the original file. Focus + a correct href would still pass
   // if the control were inert.
-  const [downloadEvent] = await Promise.all([
-    page.waitForEvent('download'),
-    page.keyboard.press('Enter'),
-  ])
+  const downloadEvent = await activateWithEnter(page, download)
   expect(downloadEvent.suggestedFilename()).toBe('archive.zip')
 
   await page.keyboard.press('Escape')
