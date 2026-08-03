@@ -290,7 +290,13 @@ public class DocumentSearchCriteriaUtil {
     private static void parseTagCriteria(DocumentCriteria documentCriteria, String value, List<TagDto> allTagDtoList, boolean exclusion) {
         List<TagDto> tagDtoList = TagUtil.findByName(value, allTagDtoList);
         if (tagDtoList.isEmpty()) {
-            // No tag found, the request must return nothing
+            if (exclusion) {
+                // Excluding a tag nothing carries excludes nothing: the term adds no filter and the
+                // search returns what it would have returned without it.
+                return;
+            }
+            // Requiring a tag nothing carries can only match nothing: an id no document has makes
+            // the criteria unsatisfiable.
             documentCriteria.getTagIdList().add(Lists.newArrayList(UUID.randomUUID().toString()));
         } else {
             List<String> tagIdList = Lists.newArrayList();

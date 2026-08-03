@@ -527,8 +527,8 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
     }
 
     /**
-     * In the query grammar, a trailing wildcard on a tag term selects the prefix siblings that the
-     * bare term (being an exact tag name) would collapse away.
+     * In the query grammar, a wildcard on a tag term selects the siblings that the bare term
+     * (being an exact tag name) would collapse away -- here in its trailing, prefix-matching form.
      */
     @Test
     public void testSearchQueryTagWildcard() {
@@ -631,6 +631,152 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
                 wildcardTagList()
         );
         Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getExcludedTagIdList());
+    }
+
+    /**
+     * The wildcard is a full glob in the query grammar too: it may lead the term or sit between two
+     * literals, and the criteria carries whatever tags it resolved to.
+     */
+    @Test
+    public void testSearchQueryTagGlob() {
+        DocumentCriteria contains = DocumentSearchCriteriaUtil.parseSearchQuery("tag:*rechnung*", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), contains.getTagIdList());
+
+        DocumentCriteria infix = DocumentSearchCriteriaUtil.parseSearchQuery("tag:R*korrektur", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNGSKORREKTUR)), infix.getTagIdList());
+    }
+
+    /**
+     * The negated form gets the same glob treatment, so the whole matched union is excluded.
+     */
+    @Test
+    public void testSearchQueryNotTagGlob() {
+        DocumentCriteria documentCriteria = DocumentSearchCriteriaUtil.parseSearchQuery("!tag:*rechnung*", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getExcludedTagIdList());
+    }
+
+    /**
+     * A glob match pulls in the descendants of every tag it matched, exactly as a plain term does.
+     */
+    @Test
+    public void testSearchQueryTagGlobExpandsChildren() {
+        DocumentCriteria documentCriteria = DocumentSearchCriteriaUtil.parseSearchQuery("tag:S*r", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(STEUER, UMSATZSTEUER)), documentCriteria.getTagIdList());
+    }
+
+    /**
+     * The legacy HTTP parameter resolves through the same code, so it reads the glob identically.
+     */
+    @Test
+    public void testHttpParamsTagGlob() {
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        DocumentSearchCriteriaUtil.addHttpSearchParams(
+                documentCriteria,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "*rechnung*",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                wildcardTagList()
+        );
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getTagIdList());
+    }
+
+    /**
+     * Same for the legacy negated parameter.
+     */
+    @Test
+    public void testHttpParamsNotTagGlob() {
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        DocumentSearchCriteriaUtil.addHttpSearchParams(
+                documentCriteria,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "*rechnung*",
+                null,
+                null,
+                null,
+                null,
+                null,
+                wildcardTagList()
+        );
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getExcludedTagIdList());
+    }
+
+    /**
+     * A term that matches no tag is unsatisfiable as an inclusion, so it keeps contributing the
+     * sentinel that makes the search return nothing.
+     */
+    @Test
+    public void testSearchQueryUnmatchedTagStillMatchesNothing() {
+        for (String term : List.of("tag:zzznosuchtag", "tag:*zzznosuchtag*", "tag:*")) {
+            DocumentCriteria documentCriteria = DocumentSearchCriteriaUtil.parseSearchQuery(term, wildcardTagList());
+            Assertions.assertEquals(1, documentCriteria.getTagIdList().size(), term);
+            List<String> tagIdList = documentCriteria.getTagIdList().get(0);
+            Assertions.assertEquals(1, tagIdList.size(), term);
+            Assertions.assertFalse(List.of(RECHNUNG, RECHNUNGSKORREKTUR, STEUER, UMSATZSTEUER).contains(tagIdList.get(0)), term);
+        }
+    }
+
+    /**
+     * Negated, the same term excludes nothing at all: it must add no filter to either list, so the
+     * search returns what it would have returned without the term.
+     */
+    @Test
+    public void testSearchQueryUnmatchedNotTagAddsNoFilter() {
+        for (String term : List.of("!tag:zzznosuchtag", "!tag:*zzznosuchtag*", "!tag:*", "!tag:**")) {
+            DocumentCriteria documentCriteria = DocumentSearchCriteriaUtil.parseSearchQuery(term, wildcardTagList());
+            Assertions.assertTrue(documentCriteria.getTagIdList().isEmpty(),
+                    term + " must not add an unsatisfiable inclusion filter");
+            Assertions.assertTrue(documentCriteria.getExcludedTagIdList().isEmpty(),
+                    term + " must not add an exclusion filter either");
+        }
+    }
+
+    /**
+     * The legacy negated parameter takes the same branch.
+     */
+    @Test
+    public void testHttpParamsUnmatchedNotTagAddsNoFilter() {
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        DocumentSearchCriteriaUtil.addHttpSearchParams(
+                documentCriteria,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "zzznosuchtag",
+                null,
+                null,
+                null,
+                null,
+                null,
+                wildcardTagList()
+        );
+        Assertions.assertTrue(documentCriteria.getTagIdList().isEmpty());
+        Assertions.assertTrue(documentCriteria.getExcludedTagIdList().isEmpty());
     }
 
 }

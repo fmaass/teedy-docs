@@ -78,8 +78,8 @@ public class TestValidationUtil {
 
     /**
      * An asterisk is rejected in a tag name alongside spaces and colons: the search grammar splits
-     * segments on spaces, uses the colon as the field separator, and reads a trailing asterisk as
-     * the prefix operator, so a name carrying one could not be searched for unambiguously.
+     * segments on spaces, uses the colon as the field separator, and reads an asterisk in a tag
+     * term as a wildcard, so a name carrying one could not be searched for unambiguously.
      */
     @Test
     public void validateTagNameRejectsSearchGrammarCharacters() {

@@ -308,9 +308,8 @@ public class TestTagResource extends BaseJerseyTest {
     }
 
     /**
-     * An asterisk is refused in a tag name, on creation and on rename alike: a trailing one is the
-     * prefix operator of the search grammar, so such a name could not be searched for
-     * unambiguously.
+     * An asterisk is refused in a tag name, on creation and on rename alike: it is the wildcard of
+     * the search grammar, so such a name could not be searched for unambiguously.
      */
     @Test
     public void testTagNameAsteriskRejected() {

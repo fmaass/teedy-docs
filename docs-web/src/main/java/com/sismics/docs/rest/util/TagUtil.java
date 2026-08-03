@@ -15,9 +15,9 @@ import java.util.List;
  */
 public class TagUtil {
     /**
-     * Trailing marker on a tag search term that forces prefix matching for that term.
+     * Marker on a tag search term that stands for any run of characters, the empty run included.
      */
-    private static final String WILDCARD = "*";
+    private static final char WILDCARD = '*';
 
     /**
      * Recursively find children of a tag.
@@ -46,17 +46,18 @@ public class TagUtil {
      * <ol>
      *   <li>a tag named exactly like the term wins on its own. This keeps a term that names a tag
      *       from also dragging in its longer prefix siblings, and it keeps a tag whose name really
-     *       ends with {@code *} reachable by typing that name (the tag tree sends names verbatim);</li>
-     *   <li>otherwise a single trailing {@code *} is the prefix operator: it is stripped and the
-     *       remainder prefix-matches. Asking explicitly outranks TAG_SEARCH_MODE, so this holds even
-     *       when the mode is EXACT;</li>
+     *       carries a {@code *} reachable by typing that name (the tag tree sends names verbatim);</li>
+     *   <li>otherwise an {@code *} anywhere in the term makes the term a glob: each {@code *} stands
+     *       for any run of characters, the empty run included, and the literals between them must
+     *       occur in the name in the order they were typed. Asking explicitly outranks
+     *       TAG_SEARCH_MODE, so this holds even when the mode is EXACT;</li>
      *   <li>otherwise TAG_SEARCH_MODE decides: prefix matching by default, nothing in EXACT mode
      *       (step 1 has already ruled out an exact hit).</li>
      * </ol>
      *
-     * <p>{@code *} is deliberately not general glob syntax -- tag names are free text, so an
-     * asterisk anywhere but at the end is an ordinary character of the name, and a bare {@code *}
-     * has no prefix left to match and selects nothing rather than everything.
+     * <p>A term made of asterisks only leaves no literal to match on, so it selects nothing rather
+     * than everything. Because step 1 runs first, a legacy tag whose name really is {@code *} is
+     * still reached by typing it -- new names may no longer contain one.
      *
      * @param name Name to search for
      * @param allTagDtoList List of all tags
@@ -72,12 +73,8 @@ public class TagUtil {
             return exactTagDtoList;
         }
 
-        if (name.endsWith(WILDCARD)) {
-            String prefix = name.substring(0, name.length() - WILDCARD.length());
-            if (prefix.isEmpty()) {
-                return Collections.emptyList();
-            }
-            return matchByName(prefix, allTagDtoList, false);
+        if (name.indexOf(WILDCARD) >= 0) {
+            return matchByGlob(name, allTagDtoList);
         }
 
         if (isExactMatchMode()) {
@@ -113,6 +110,123 @@ public class TagUtil {
             }
         }
         return tagDtoList;
+    }
+
+    /**
+     * Collect the tags whose name matches the glob term, preserving the order of the input list.
+     *
+     * <p>The term is not compiled into a regular expression. A tag term is user input, so every
+     * regex metacharacter it contains would have to be quoted, and a term of alternating literals
+     * and wildcards is exactly the shape that makes a backtracking matcher run super-linearly --
+     * a denial-of-service surface on a search box. The matcher below walks the name once per
+     * literal instead, never revisiting a decision.
+     */
+    private static List<TagDto> matchByGlob(String name, List<TagDto> allTagDtoList) {
+        String[] literals = splitOnWildcards(name);
+        if (literals.length == 0) {
+            return Collections.emptyList();
+        }
+        boolean anchoredStart = name.charAt(0) != WILDCARD;
+        boolean anchoredEnd = name.charAt(name.length() - 1) != WILDCARD;
+
+        List<TagDto> tagDtoList = new ArrayList<>();
+        for (TagDto tagDto : allTagDtoList) {
+            if (globMatches(literals, anchoredStart, anchoredEnd, tagDto.getName())) {
+                tagDtoList.add(tagDto);
+            }
+        }
+        return tagDtoList;
+    }
+
+    /**
+     * Cut the term into the literal runs between its wildcards, dropping the empty ones so that
+     * consecutive wildcards collapse into a single "any run" and a term of wildcards only yields
+     * no literal at all.
+     */
+    private static String[] splitOnWildcards(String name) {
+        List<String> literalList = new ArrayList<>();
+        int start = 0;
+        while (start < name.length()) {
+            int wildcard = name.indexOf(WILDCARD, start);
+            if (wildcard < 0) {
+                literalList.add(name.substring(start));
+                break;
+            }
+            if (wildcard > start) {
+                literalList.add(name.substring(start, wildcard));
+            }
+            start = wildcard + 1;
+        }
+        return literalList.toArray(new String[0]);
+    }
+
+    /**
+     * Match one name against the literals of a glob term.
+     *
+     * <p>A literal that the term anchors (one before the first wildcard, one after the last) can
+     * only sit at that end of the name, so it is checked in place. Every other literal is free to
+     * slide, and is taken at its EARLIEST occurrence after the previous one: an earlier position
+     * leaves at least as much of the name for the literals that follow, so the leftmost choice can
+     * never turn a match into a miss. That is what lets the whole match run without backtracking.
+     *
+     * <p>Comparisons use {@code regionMatches} with the ignore-case flag for the same reason the
+     * rest of this class does: it folds per character, which is the only reading correct both for
+     * ASCII names on a Turkish host and for Turkish names anywhere.
+     *
+     * @param literals Literal runs of the term, in order, none empty
+     * @param anchoredStart Whether the term begins with a literal rather than a wildcard
+     * @param anchoredEnd Whether the term ends with a literal rather than a wildcard
+     * @param name Tag name to test
+     */
+    private static boolean globMatches(String[] literals, boolean anchoredStart, boolean anchoredEnd, String name) {
+        int from = 0;
+        int to = name.length();
+        int first = 0;
+        int end = literals.length;
+
+        if (anchoredStart) {
+            String literal = literals[0];
+            if (!name.regionMatches(true, 0, literal, 0, literal.length())) {
+                return false;
+            }
+            from = literal.length();
+            first = 1;
+        }
+        // The two anchors are never the same literal: a term anchored at both ends keeps its
+        // wildcards strictly inside it, so it carries a literal on either side of them.
+        if (anchoredEnd) {
+            String literal = literals[end - 1];
+            int offset = name.length() - literal.length();
+            if (offset < from || !name.regionMatches(true, offset, literal, 0, literal.length())) {
+                return false;
+            }
+            to = offset;
+            end--;
+        }
+
+        for (int i = first; i < end; i++) {
+            String literal = literals[i];
+            int found = indexOfIgnoreCase(name, literal, from, to);
+            if (found < 0) {
+                return false;
+            }
+            from = found + literal.length();
+        }
+        return true;
+    }
+
+    /**
+     * First offset in {@code [from, to)} at which the name carries the literal, ignoring case, or
+     * -1 when it does not carry it there at all.
+     */
+    private static int indexOfIgnoreCase(String name, String literal, int from, int to) {
+        int lastStart = to - literal.length();
+        for (int start = from; start <= lastStart; start++) {
+            if (name.regionMatches(true, start, literal, 0, literal.length())) {
+                return start;
+            }
+        }
+        return -1;
     }
 
     private static boolean isExactMatchMode() {

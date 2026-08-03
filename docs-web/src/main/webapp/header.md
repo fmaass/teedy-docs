@@ -81,8 +81,8 @@ If a search `VALUE` is considered invalid, the search result will be empty.
   * `tag:VALUE`: the document must contain a tag matching `VALUE`, or a child of such a tag, case is ignored
   * `!tag:VALUE`: the document must not contain a tag matching `VALUE`, or a child of such a tag, case is ignored
   * A `VALUE` that is the name of an existing tag matches that tag only. Otherwise `VALUE` matches every tag whose name starts with it, unless the instance is configured for exact tag matching, in which case it matches nothing
-  * A single trailing `*` requests prefix matching explicitly: `tag:VALUE*` matches every tag whose name starts with `VALUE`, even when a tag is named exactly `VALUE`, and whatever the configured tag matching mode is. A tag actually named `VALUE*` still takes precedence and is matched on its own
-  * `*` is not a general wildcard: anywhere but at the end of `VALUE` it is an ordinary character of the tag name, and `tag:*` on its own matches no tag (and therefore no document)
+  * An `*` in `VALUE` stands for any run of characters, in any position and as often as needed: `tag:inv*` matches every tag whose name starts with `inv`, `tag:*inv` every tag whose name ends with it, `tag:*inv*` every tag whose name contains it, and `tag:i*e` every tag whose name starts with `i` and ends with `e`. Writing an `*` is an explicit request, so it applies even when a tag is named exactly `VALUE`, and whatever the configured tag matching mode is. A tag actually named `VALUE` still takes precedence and is matched on its own
+  * A `VALUE` made of asterisks only leaves nothing to match on, so `tag:*` matches no tag (and therefore no document)
 * Titles: several `title` can be specified, and the document must match any of the titles
   * `title:VALUE`: the title of the document must be `VALUE`
 * User

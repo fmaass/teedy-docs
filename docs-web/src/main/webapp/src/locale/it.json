@@ -41,7 +41,7 @@
       "operators_intro": "Digita una parola per cercare ovunque, oppure affina la ricerca con questi operatori:",
       "op_tag": "Documenti con questo tag (e i suoi sotto-tag)",
       "op_nottag": "Escludi i documenti con questo tag",
-      "op_tag_wildcard": "Documenti con tag che iniziano con questo testo (e i loro sotto-tag), a meno che un tag abbia esattamente questo nome",
+      "op_tag_wildcard": "Documenti con tag corrispondenti a questo schema (e i loro sotto-tag), dove * rappresenta una sequenza qualsiasi di caratteri, a meno che un tag abbia esattamente questo nome",
       "op_after": "Creati in questa data o dopo (anno, anno-mese o data completa)",
       "op_before": "Creati in questa data o prima",
       "op_uafter": "Aggiornati in questa data o dopo",

@@ -18,13 +18,15 @@ import java.util.Locale;
  *   <li>a tag whose name equals the term verbatim wins -- so a tag really named {@code Invoice*}
  *       stays reachable by typing it, and the historical "exact wins over its prefix siblings"
  *       behaviour is unchanged;</li>
- *   <li>otherwise a single trailing {@code *} is the prefix operator: it is stripped and the
- *       remainder prefix-matches, whatever TAG_SEARCH_MODE says (an explicit ask beats the mode);</li>
+ *   <li>otherwise an {@code *} anywhere in the term makes the whole term a glob: every {@code *}
+ *       stands for any run of characters, the empty run included, and what is left is matched
+ *       literally and case-insensitively. Asking explicitly beats the mode, so this holds whatever
+ *       TAG_SEARCH_MODE says;</li>
  *   <li>otherwise the configured mode decides (prefix by default, exact when TAG_SEARCH_MODE=EXACT).</li>
  * </ol>
  *
- * <p>{@code *} is not glob syntax: only a trailing one is an operator, any other is an ordinary
- * name character, and a bare {@code *} has no prefix left to match so it selects nothing.
+ * <p>A term made of asterisks only has no literal left to match on, so it selects nothing rather
+ * than every tag; step 1 is what still makes a tag literally named {@code *} reachable.
  *
  * <p>The class is transactional because TAG_SEARCH_MODE is read through the config table.
  */
@@ -34,6 +36,9 @@ public class TestTagUtil extends BaseTransactionalTest {
     private static final String RECHNUNGSKORREKTUR = "rechnungskorrektur-id";
     private static final String STEUER = "steuer-id";
     private static final String UMSATZSTEUER = "umsatzsteuer-id";
+    private static final String SAMPLE = "sample-id";
+    private static final String RESAMPLE = "resample-id";
+    private static final String SAMPLER = "sampler-id";
 
     /**
      * Two tags sharing a prefix, plus a hierarchy whose child does NOT share its parent's prefix
@@ -45,6 +50,21 @@ public class TestTagUtil extends BaseTransactionalTest {
                 tag(RECHNUNGSKORREKTUR, "Rechnungskorrektur"),
                 tag(STEUER, "Steuer"),
                 tag(UMSATZSTEUER, "Umsatzsteuer").setParentId(STEUER)
+        );
+    }
+
+    /**
+     * A name, a name that ends with it, and a name that extends it -- so a glob anchored at the
+     * start, at the end, at both or at neither can each be told apart by what it selects. Rechnung
+     * and Rechnungskorrektur are in the list as names none of the sample globs may reach.
+     */
+    private static List<TagDto> globTagList() {
+        return List.of(
+                tag(RECHNUNG, "Rechnung"),
+                tag(RECHNUNGSKORREKTUR, "Rechnungskorrektur"),
+                tag(SAMPLE, "Sample"),
+                tag(RESAMPLE, "Resample"),
+                tag(SAMPLER, "Sampler")
         );
     }
 
@@ -107,12 +127,29 @@ public class TestTagUtil extends BaseTransactionalTest {
     }
 
     /**
-     * A bare wildcard has no prefix left after stripping, so it must select nothing rather than
-     * every tag.
+     * A term made only of asterisks carries no literal to match on, so it must select nothing
+     * rather than every tag -- however many asterisks are typed.
      */
     @Test
-    public void bareWildcardSelectsNothing() {
+    public void allWildcardTermsSelectNothing() {
         Assertions.assertTrue(TagUtil.findByName("*", tagList()).isEmpty());
+        Assertions.assertTrue(TagUtil.findByName("**", tagList()).isEmpty());
+        Assertions.assertTrue(TagUtil.findByName("***", tagList()).isEmpty());
+    }
+
+    /**
+     * The verbatim-name step runs before that rule, so a legacy tag literally named {@code *} is
+     * still reachable by typing it -- and only by typing it, since a longer run of asterisks is not
+     * its name.
+     */
+    @Test
+    public void aTagNamedWithAsterisksOnlyIsStillReachableByItsOwnName() {
+        List<TagDto> tags = List.of(
+                tag("star-id", "*"),
+                tag(RECHNUNG, "Rechnung")
+        );
+        assertIds(TagUtil.findByName("*", tags), "star-id");
+        Assertions.assertTrue(TagUtil.findByName("**", tags).isEmpty());
     }
 
     /**
@@ -179,8 +216,11 @@ public class TestTagUtil extends BaseTransactionalTest {
      * </ul>
      *
      * <p>Comparing per character with the JDK's case-insensitive primitives satisfies both, which
-     * is what {@code TagUtil} does. Every case is asserted together so a regression in one is not
-     * hidden behind the failure of another.
+     * is what {@code TagUtil} does. The glob cases are asserted here too, because a glob compares
+     * its literals at offsets the prefix path never looks at -- the dotted capital I is the FIRST
+     * character compared by {@code *istanbul*} and by the anchoring literal of {@code i*stanbul},
+     * so a matcher that reached for a whole-string fold would show up here. Every case is asserted
+     * together so a regression in one is not hidden behind the failure of another.
      */
     @Test
     public void matchingIsIndependentOfTheDefaultLocale() {
@@ -199,7 +239,12 @@ public class TestTagUtil extends BaseTransactionalTest {
                     () -> assertIds(TagUtil.findByName("invoice", tags), "invoice-id"),
                     () -> assertIds(TagUtil.findByName("invoice*", tags), "invoice-id", "correction-id"),
                     () -> assertIds(TagUtil.findByName("istanbul", tags), "istanbul-id"),
-                    () -> assertIds(TagUtil.findByName("istanbul*", tags), "istanbul-id", "istanbul-district-id")
+                    () -> assertIds(TagUtil.findByName("istanbul*", tags), "istanbul-id", "istanbul-district-id"),
+                    () -> assertIds(TagUtil.findByName("*nvoice", tags), "invoice-id"),
+                    () -> assertIds(TagUtil.findByName("*invoice*", tags), "invoice-id", "correction-id"),
+                    () -> assertIds(TagUtil.findByName("i*voice", tags), "invoice-id"),
+                    () -> assertIds(TagUtil.findByName("*istanbul*", tags), "istanbul-id", "istanbul-district-id"),
+                    () -> assertIds(TagUtil.findByName("i*stanbul", tags), "istanbul-id")
             );
         } finally {
             Locale.setDefault(previous);
@@ -207,26 +252,78 @@ public class TestTagUtil extends BaseTransactionalTest {
     }
 
     /**
-     * An asterisk anywhere but at the end is an ordinary name character, not glob syntax.
+     * A leading asterisk anchors the term at the END of the name. The run it stands for may be
+     * empty, so a name that IS the rest of the term matches too.
      */
     @Test
-    public void anAsteriskInsideATermIsALiteralCharacter() {
-        List<TagDto> tags = List.of(
-                tag("star-id", "In*voiceDetail"),
-                tag("plain-id", "Invoice")
-        );
-        assertIds(TagUtil.findByName("In*voice", tags), "star-id");
+    public void aLeadingWildcardMatchesAnyEnding() {
+        assertIds(TagUtil.findByName("*sample", globTagList()), SAMPLE, RESAMPLE);
     }
 
     /**
-     * Only one trailing asterisk is the operator; a second one stays part of the prefix.
+     * Asterisks on both ends anchor nothing: the term has to occur somewhere in the name.
      */
     @Test
-    public void onlyOneTrailingAsteriskIsConsumedAsTheOperator() {
+    public void wildcardsOnBothEndsMatchAnywhereInTheName() {
+        assertIds(TagUtil.findByName("*sample*", globTagList()), SAMPLE, RESAMPLE, SAMPLER);
+    }
+
+    /**
+     * An asterisk between two literals stands for the run between them, the empty run included.
+     */
+    @Test
+    public void aWildcardInsideATermMatchesTheRunBetweenTheLiterals() {
+        assertIds(TagUtil.findByName("sam*ple", globTagList()), SAMPLE);
+    }
+
+    /**
+     * Several asterisks each match independently, and the literals between them have to occur in
+     * the order they were typed.
+     */
+    @Test
+    public void severalWildcardsMatchTheirLiteralsInOrder() {
+        assertIds(TagUtil.findByName("*sa*mple*", globTagList()), SAMPLE, RESAMPLE, SAMPLER);
+        // Same literals, opposite order: nothing in the list carries "mple" before "sa".
+        Assertions.assertTrue(TagUtil.findByName("*mple*sa*", globTagList()).isEmpty());
+    }
+
+    /**
+     * A tag whose name really contains an asterisk keeps its verbatim precedence, so it is still
+     * reachable by its own name; the same term with no such tag behind it reads as a glob.
+     */
+    @Test
+    public void aTagNamedWithAnInteriorAsteriskIsStillMatchedLiterally() {
         List<TagDto> tags = List.of(
-                tag("star-id", "Invoice*Detail"),
+                tag("star-id", "In*voice"),
                 tag("plain-id", "Invoice")
         );
-        assertIds(TagUtil.findByName("Invoice**", tags), "star-id");
+        assertIds(TagUtil.findByName("In*voice", tags), "star-id");
+        assertIds(TagUtil.findByName("In*voice", List.of(tag("plain-id", "Invoice"))), "plain-id");
+    }
+
+    /**
+     * Consecutive asterisks stand for one run between the same two literals, so doubling one adds
+     * nothing.
+     */
+    @Test
+    public void consecutiveWildcardsCollapse() {
+        List<TagDto> tags = List.of(
+                tag("invoice-id", "Invoice"),
+                tag("correction-id", "InvoiceCorrection")
+        );
+        assertIds(TagUtil.findByName("Invoice**", tags), "invoice-id", "correction-id");
+        assertIds(TagUtil.findByName("**Invoice**", tags), "invoice-id", "correction-id");
+        assertIds(TagUtil.findByName("In**voice", tags), "invoice-id");
+    }
+
+    /**
+     * A glob is a per-term ask wherever the asterisk sits, so it outranks TAG_SEARCH_MODE=EXACT
+     * exactly as the trailing one does.
+     */
+    @Test
+    public void aGlobOverridesExactMode() {
+        setExactMatchMode();
+        assertIds(TagUtil.findByName("*sample*", globTagList()), SAMPLE, RESAMPLE, SAMPLER);
+        assertIds(TagUtil.findByName("sam*ple", globTagList()), SAMPLE);
     }
 }

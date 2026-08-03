@@ -135,9 +135,9 @@ public class ValidationUtil {
      * Validate a tag name.
      *
      * <p>The rejected characters are the ones the document search grammar owns: it splits a query
-     * on spaces, separates a criteria from its value on a colon, and reads a trailing asterisk on a
-     * tag term as the prefix operator. A name carrying one of them could not be searched for
-     * unambiguously.
+     * on spaces, separates a criteria from its value on a colon, and reads an asterisk in a tag
+     * term as a wildcard standing for any run of characters. A name carrying one of them could not
+     * be searched for unambiguously.
      *
      * <p>A null name means the caller is not changing the name (a colour- or parent-only tag
      * update), so there is nothing to validate.
