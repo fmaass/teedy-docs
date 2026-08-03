@@ -26,9 +26,11 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * PDF utilities.
@@ -40,6 +42,25 @@ public class PdfUtil {
      * Logger.
      */
     private static final Logger log = LoggerFactory.getLogger(PdfUtil.class);
+
+    /**
+     * Creation date printed on the export's metadata page.
+     *
+     * <p>Every input to the rendering is pinned, because an exported PDF is a portable artifact that
+     * outlives the host that produced it and must read the same everywhere. A plain
+     * {@code SimpleDateFormat("yyyy-MM-dd")} inherited three host settings instead: the default locale's
+     * calendar (a {@code th-TH} host printed the Buddhist era, 2569 instead of 2026), its numbering
+     * system ({@code -u-nu-thai} printed Thai digits, which the metadata page's WinAnsi-encoded standard
+     * font then dropped entirely), and the default time zone. {@link DateTimeFormatter#ISO_LOCAL_DATE}
+     * carries the ISO chronology and ASCII decimal style regardless of locale, and is immutable.</p>
+     *
+     * <p>The day is the instant's UTC day, not the host's: rendering in the host zone would leave the
+     * same document exporting a different date on different servers, the same host dependence in a
+     * quieter form. This matches how this module already turns a create timestamp into a calendar day
+     * ({@link StatsBucketUtil}).</p>
+     */
+    private static final DateTimeFormatter METADATA_DATE_FORMATTER =
+            DateTimeFormatter.ISO_LOCAL_DATE.withLocale(Locale.ROOT).withZone(ZoneOffset.UTC);
 
     /**
      * Convert a document and its files to a merged PDF file.
@@ -73,11 +94,11 @@ public class PdfUtil {
                 PDPage page = new PDPage();
                 doc.addPage(page);
                 try (PdfPage pdfPage = new PdfPage(doc, page, margin * Constants.MM_PER_INCH, DocsPDType1Font.HELVETICA, 12)) {
-                    SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
                     pdfPage.addText(documentDto.getTitle(), true, DocsPDType1Font.HELVETICA_BOLD, 16)
                         .newLine()
                         .addText("Created by " + documentDto.getCreator()
-                            + " on " + dateFormat.format(new Date(documentDto.getCreateTimestamp())), true)
+                            + " on " + METADATA_DATE_FORMATTER.format(
+                                    Instant.ofEpochMilli(documentDto.getCreateTimestamp())), true)
                         .newLine()
                         .addText(DescriptionTextUtil.toPlainText(documentDto.getDescription(), 4000))
                         .newLine();
