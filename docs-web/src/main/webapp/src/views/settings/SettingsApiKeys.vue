@@ -12,8 +12,12 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
+import { useBrand } from '../../composables/useThemeBranding'
 
 const { t } = useI18n()
+// #256: the description names the API after the instance rather than the product. Shared
+// theme query — same cache entry the sidebar and About dialog already read.
+const { brandName } = useBrand()
 const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
@@ -92,7 +96,7 @@ function formatDate(ts?: number) {
     <div class="section-header">
       <div>
         <h2>{{ t('ui.apikeys.title') }}</h2>
-        <p class="section-desc">{{ t('ui.apikeys.description') }}</p>
+        <p class="section-desc">{{ t('ui.apikeys.description', { brand: brandName }) }}</p>
       </div>
       <Button :label="t('ui.apikeys.create_key')" icon="pi pi-plus" size="small" @click="showCreateDialog = true" />
     </div>

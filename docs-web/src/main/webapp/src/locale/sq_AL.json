@@ -34,7 +34,7 @@
     "type": "Lloji",
     "coverage": "Mbulimi",
     "rights": "Të drejtat",
-    "count": "{count} dokument gjetur",
+    "count": "{count} dokument u gjet | {count} dokumente u gjetën",
     "search_help": {
       "title": "Ndihmë për kërkimin",
       "contents_hint": "Kërkimi përputhet me të gjithë përmbajtjen e dokumenteve tuaja — përfshirë tekstin e nxjerrë nga PDF-të dhe imazhet me OCR — jo vetëm titujt e tyre.",
@@ -381,7 +381,7 @@
       "failed_revoke": "Revokimi i lidhjes së ndarjes dështoi",
       "view": {
         "not_found": "Ky dokument i ndarë nuk është më i disponueshëm.",
-        "footer": "Ndarë përmes Teedy"
+        "footer": "Ndarë përmes {brand}"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "Çelësat API",
-      "description": "Krijoni çelësa për të hyrë në API-në e Teedy në mënyrë programatike.",
+      "description": "Krijoni çelësa për të hyrë në API-në e {brand} në mënyrë programatike.",
       "create_key": "Krijo çelës",
       "name": "Emri",
       "key": "Çelësi",
@@ -844,7 +844,7 @@
       "config_saved": "Konfigurimi u ruajt",
       "failed_save": "Ruajtja e konfigurimit dështoi",
       "ocr_title": "OCR (Njohja Optike e Karaktereve)",
-      "ocr_hint": "Kur aktivizohet, Teedy përdor Tesseract për të nxjerrë tekst nga imazhet dhe PDF-të e skanuara. Cilësimi i gjuhës së dokumentit përcakton se cili model OCR përdoret.",
+      "ocr_hint": "Kur aktivizohet, {brand} përdor Tesseract për të nxjerrë tekst nga imazhet dhe PDF-të e skanuara. Cilësimi i gjuhës së dokumentit përcakton se cili model OCR përdoret.",
       "ocr_enabled": "OCR është i aktivizuar",
       "ocr_disabled": "OCR është i çaktivizuar",
       "ocr_toggle_failed": "Përditësimi i cilësimit të OCR dështoi",

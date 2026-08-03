@@ -34,7 +34,7 @@
     "type": "类型",
     "coverage": "覆盖",
     "rights": "权利",
-    "count": "找到{count}个文件",
+    "count": "找到 {count} 个文档",
     "search_help": {
       "title": "搜索帮助",
       "contents_hint": "搜索会匹配文档的全部内容——包括通过 OCR 从 PDF 和图片中提取的文本——而不仅仅是标题。",
@@ -381,7 +381,7 @@
       "failed_revoke": "撤销共享链接失败",
       "view": {
         "not_found": "此共享文档已不再可用。",
-        "footer": "通过 Teedy 共享"
+        "footer": "通过 {brand} 共享"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "API 密钥",
-      "description": "创建密钥以编程方式访问 Teedy API。",
+      "description": "创建密钥以编程方式访问 {brand} API。",
       "create_key": "创建密钥",
       "name": "名称",
       "key": "密钥",
@@ -844,7 +844,7 @@
       "config_saved": "配置已保存",
       "failed_save": "保存配置失败",
       "ocr_title": "OCR（光学字符识别）",
-      "ocr_hint": "启用后，Teedy 使用 Tesseract 从图片和扫描的 PDF 中提取文本。文档的语言设置决定使用哪个 OCR 模型。",
+      "ocr_hint": "启用后，{brand} 使用 Tesseract 从图片和扫描的 PDF 中提取文本。文档的语言设置决定使用哪个 OCR 模型。",
       "ocr_enabled": "OCR 已启用",
       "ocr_disabled": "OCR 已禁用",
       "ocr_toggle_failed": "更新 OCR 设置失败",

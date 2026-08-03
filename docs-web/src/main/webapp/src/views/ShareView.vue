@@ -10,6 +10,7 @@ import { displayName } from '../utils/fileName'
 import Skeleton from 'primevue/skeleton'
 import ErrorState from '../components/ErrorState.vue'
 import FilePreviewDialog, { type PreviewFile } from '../components/FilePreviewDialog.vue'
+import { useBrand } from '../composables/useThemeBranding'
 
 // Public, unauthenticated read-only view of a shared document. Reachable via the
 // share link built by buildShareUrl(): #/share/:documentId/:shareId. Every
@@ -17,6 +18,14 @@ import FilePreviewDialog, { type PreviewFile } from '../components/FilePreviewDi
 // document's SHARE ACL.
 const props = defineProps<{ documentId: string; shareId: string }>()
 const { t } = useI18n()
+
+// #256: the footer is the ONLY brand surface an external recipient of a share link ever
+// sees, so a renamed instance must not keep advertising the product name to people outside
+// the organisation. Reads the SAME public theme query (GET /api/theme is @apiPermission
+// none) that App.vue already issues on this route, so an anonymous visitor resolves the
+// instance name from the existing cache entry — no extra request, and nothing authenticated
+// is introduced onto a page that must work logged-out.
+const { brandName } = useBrand()
 
 const { data: doc, isLoading: loading, error, refetch } = useQuery({
   queryKey: computed(() => ['share', props.documentId, props.shareId]),
@@ -111,7 +120,7 @@ function formatDate(ts: number) {
 
         <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" :share-id="shareId" />
 
-        <p class="share-footer">{{ t('ui.share.view.footer') }}</p>
+        <p class="share-footer">{{ t('ui.share.view.footer', { brand: brandName }) }}</p>
       </template>
     </div>
   </div>

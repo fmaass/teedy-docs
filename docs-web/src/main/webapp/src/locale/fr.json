@@ -34,7 +34,7 @@
     "type": "Type",
     "coverage": "Couverture",
     "rights": "Droits",
-    "count": "{count} document trouvé",
+    "count": "{count} document trouvé | {count} documents trouvés",
     "search_help": {
       "title": "Aide à la recherche",
       "contents_hint": "La recherche porte sur l'intégralité du contenu de vos documents — y compris le texte extrait des PDF et des images par OCR — et pas uniquement sur leurs titres.",
@@ -381,7 +381,7 @@
       "failed_revoke": "Échec de la révocation du lien de partage",
       "view": {
         "not_found": "Ce document partagé n'est plus disponible.",
-        "footer": "Partagé via Teedy"
+        "footer": "Partagé via {brand}"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "Clés API",
-      "description": "Créez des clés pour accéder à l'API Teedy par programmation.",
+      "description": "Créez des clés pour accéder à l'API {brand} par programmation.",
       "create_key": "Créer une clé",
       "name": "Nom",
       "key": "Clé",
@@ -844,7 +844,7 @@
       "config_saved": "Configuration enregistrée",
       "failed_save": "Échec de l'enregistrement de la configuration",
       "ocr_title": "OCR (reconnaissance optique de caractères)",
-      "ocr_hint": "Lorsqu'il est activé, Teedy utilise Tesseract pour extraire le texte des images et des PDF numérisés. Le paramètre de langue du document détermine le modèle OCR utilisé.",
+      "ocr_hint": "Lorsqu'il est activé, {brand} utilise Tesseract pour extraire le texte des images et des PDF numérisés. Le paramètre de langue du document détermine le modèle OCR utilisé.",
       "ocr_enabled": "L'OCR est activé",
       "ocr_disabled": "L'OCR est désactivé",
       "ocr_toggle_failed": "Échec de la mise à jour du paramètre OCR",

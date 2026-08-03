@@ -34,10 +34,10 @@
     "type": "Typ",
     "coverage": "Geltungsbereich",
     "rights": "Rechte",
-    "count": "{count} Dokumente gefunden",
+    "count": "{count} Dokument gefunden | {count} Dokumente gefunden",
     "search_help": {
       "title": "Suchhilfe",
-      "contents_hint": "Die Suche findet Treffer im gesamten Inhalt deiner Dokumente, nicht nur in den Titeln. Dazu zählt auch Text, den teedy per OCR aus PDF-Dateien und Bildern ausliest.",
+      "contents_hint": "Die Suche findet Treffer im gesamten Inhalt deiner Dokumente, nicht nur in den Titeln. Dazu zählt auch Text, der per OCR aus PDF-Dateien und Bildern ausgelesen wird.",
       "operators_intro": "Gib ein Wort ein, um überall zu suchen, oder grenze die Suche mit diesen Operatoren ein:",
       "op_tag": "Dokumente mit diesem Tag (und seinen Unter-Tags)",
       "op_nottag": "Dokumente mit diesem Tag ausschließen",
@@ -87,7 +87,7 @@
     "menu_inbox": "Posteingang durchsuchen",
     "inbox": {
       "title": "Posteingang durchsuchen",
-      "message": "Wenn du diese Funktion aktivierst, durchsucht teedy den angegebenen Posteingang jede Minute nach <strong>ungelesenen</strong> E-Mails und importiert sie automatisch.<br/>Importierte E-Mails markiert teedy anschließend als gelesen.<br/>Hinweise zur Konfiguration von <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a> und <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
+      "message": "Wenn du diese Funktion aktivierst, wird der angegebene Posteingang jede Minute nach <strong>ungelesenen</strong> E-Mails durchsucht, die dann automatisch importiert werden.<br/>Importierte E-Mails werden anschließend als gelesen markiert.<br/>Hinweise zur Konfiguration von <a href=\"https://support.google.com/mail/answer/7126229?hl=en\" target=\"_blank\">Gmail</a>, <a href=\"https://support.office.com/en-us/article/pop-imap-and-smtp-settings-for-outlook-com-d088b986-291d-42b8-9564-9c414e2aa040\" target=\"_blank\">Outlook.com</a> und <a href=\"https://help.yahoo.com/kb/SLN4075.html\" target=\"_blank\">Yahoo</a>.",
       "enabled": "Durchsuchen des Posteingangs aktivieren",
       "hostname": "IMAP-Server",
       "port": "IMAP-Port (143 oder 993)",
@@ -381,7 +381,7 @@
       "failed_revoke": "Freigabe-Link konnte nicht widerrufen werden",
       "view": {
         "not_found": "Dieses freigegebene Dokument ist nicht mehr verfügbar.",
-        "footer": "Freigegeben über Teedy"
+        "footer": "Freigegeben über {brand}"
       }
     },
     "tags_page": {
@@ -493,7 +493,7 @@
     },
     "forgot_password": {
       "title": "Passwort zurücksetzen",
-      "message": "Gib deinen Benutzernamen ein. teedy sendet dir dann per E-Mail einen Link zum Zurücksetzen deines Passworts.",
+      "message": "Gib deinen Benutzernamen ein, um per E-Mail einen Link zum Zurücksetzen deines Passworts zu erhalten.",
       "username_placeholder": "Benutzername",
       "submit": "Link zum Zurücksetzen senden",
       "sent": "Falls dieser Benutzername existiert, wurde eine E-Mail zum Zurücksetzen des Passworts gesendet.",
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "API-Schlüssel",
-      "description": "Erstelle API-Schlüssel, um programmgesteuert auf die teedy-API zuzugreifen.",
+      "description": "Erstelle API-Schlüssel, um programmgesteuert auf die {brand}-API zuzugreifen.",
       "create_key": "Schlüssel erstellen",
       "name": "Name",
       "key": "Schlüssel",
@@ -600,7 +600,7 @@
     },
     "webhooks": {
       "title": "Webhooks",
-      "description": "teedy sendet Benachrichtigungen per HTTP POST, wenn im Lebenszyklus eines Dokuments Ereignisse auftreten.",
+      "description": "Erhalte Benachrichtigungen per HTTP POST, wenn im Lebenszyklus eines Dokuments Ereignisse auftreten.",
       "add_webhook": "Webhook hinzufügen",
       "event": "Ereignis",
       "url": "URL",
@@ -844,7 +844,7 @@
       "config_saved": "Konfiguration gespeichert",
       "failed_save": "Konfiguration konnte nicht gespeichert werden",
       "ocr_title": "OCR (Optische Zeichenerkennung)",
-      "ocr_hint": "Wenn aktiviert, verwendet Teedy Tesseract, um Text aus Bildern und gescannten PDFs zu extrahieren. Die Spracheinstellung des Dokuments bestimmt, welches OCR-Modell verwendet wird.",
+      "ocr_hint": "Wenn aktiviert, verwendet {brand} Tesseract, um Text aus Bildern und gescannten PDFs zu extrahieren. Die Spracheinstellung des Dokuments bestimmt, welches OCR-Modell verwendet wird.",
       "ocr_enabled": "OCR ist aktiviert",
       "ocr_disabled": "OCR ist deaktiviert",
       "ocr_toggle_failed": "OCR-Einstellung konnte nicht aktualisiert werden",
@@ -856,9 +856,9 @@
       "rebuild_started": "Neuaufbau des Suchindex gestartet",
       "rebuild_failed": "Neuindizierung konnte nicht gestartet werden",
       "clean_storage": "Speicher bereinigen",
-      "clean_storage_hint": "Bei der Bereinigung löscht teedy Dateien auf der Festplatte, die zu keinem Dokument mehr gehören, und entfernt verwaiste Datenbankeinträge. Führe die Bereinigung nach unerwarteten Abstürzen oder manuellen Änderungen an Dateien aus, um Speicherplatz freizugeben.",
-      "clean_storage_confirm": "Bei der Bereinigung löscht teedy verwaiste Dateien dauerhaft von der Festplatte und bereinigt die Datenbank. Dokumente und die zugehörigen Dateien bleiben unverändert. Fortfahren?",
-      "clean_storage_summary": "Bei der Bereinigung löscht teedy {count} Datei(en) dauerhaft und gibt etwa {size} Speicherplatz frei. Dokumente und die zugehörigen Dateien bleiben unverändert. Fortfahren?",
+      "clean_storage_hint": "Bei der Bereinigung werden Dateien auf der Festplatte gelöscht, die zu keinem Dokument mehr gehören, und verwaiste Datenbankeinträge entfernt. Führe die Bereinigung nach unerwarteten Abstürzen oder manuellen Änderungen an Dateien aus, um Speicherplatz freizugeben.",
+      "clean_storage_confirm": "Bei der Bereinigung werden verwaiste Dateien dauerhaft von der Festplatte gelöscht und die Datenbank wird bereinigt. Dokumente und die zugehörigen Dateien bleiben unverändert. Fortfahren?",
+      "clean_storage_summary": "Bei der Bereinigung werden {count} Datei(en) dauerhaft gelöscht und etwa {size} Speicherplatz freigegeben. Dokumente und die zugehörigen Dateien bleiben unverändert. Fortfahren?",
       "clean_storage_nothing": "Nichts zu bereinigen: Es wurden keine verwaisten Dateien oder Datenbankeinträge gefunden. Trotzdem ausführen?",
       "clean_storage_preview_failed": "Vorschau der Speicherbereinigung fehlgeschlagen",
       "clean_storage_header": "Speicher bereinigen",
@@ -912,7 +912,7 @@
     },
     "smtp": {
       "title": "E-Mail (SMTP)",
-      "hint": "Über diesen Postausgangsserver versendet teedy E-Mails zum Zurücksetzen von Passwörtern und Benachrichtigungen. Felder, deren Werte über DOCS_SMTP_*-Umgebungsvariablen festgelegt sind, werden außerhalb dieses Formulars verwaltet und sind hier deaktiviert.",
+      "hint": "Über diesen Postausgangsserver werden E-Mails zum Zurücksetzen von Passwörtern und Benachrichtigungen versendet. Felder, deren Werte über DOCS_SMTP_*-Umgebungsvariablen festgelegt sind, werden außerhalb dieses Formulars verwaltet und sind hier deaktiviert.",
       "hostname": "Servername",
       "port": "Port",
       "from": "Absenderadresse",
@@ -939,7 +939,7 @@
       "tag": "Tag für importierte Dokumente",
       "tag_hint": "Optional. Jedes importierte Dokument erhält diesen Tag.",
       "auto_tags": "Tags aus der Nachricht erkennen",
-      "auto_tags_hint": "teedy übernimmt Tags aus dem Nachrichtentext, die mit # beginnen.",
+      "auto_tags_hint": "Tags aus dem Nachrichtentext, die mit # beginnen, werden übernommen.",
       "delete_imported": "Nachrichten nach dem Import löschen",
       "delete_imported_hint": "Jede Nachricht nach dem Import aus dem Postfach entfernen.",
       "eml_attach": "Original-E-Mail anhängen",
@@ -952,7 +952,7 @@
     },
     "ldap": {
       "title": "LDAP-Authentifizierung",
-      "description": "Ist LDAP aktiviert, können sich Benutzer mit ihren LDAP-Zugangsdaten anmelden. teedy legt bei der ersten Anmeldung automatisch ein Konto an. Lokale Konten funktionieren weiterhin.",
+      "description": "Ist LDAP aktiviert, können sich Benutzer mit ihren LDAP-Zugangsdaten anmelden. Bei der ersten Anmeldung wird automatisch ein Konto angelegt. Lokale Konten funktionieren weiterhin.",
       "enabled": "LDAP-Authentifizierung ist aktiviert",
       "disabled": "LDAP-Authentifizierung ist deaktiviert",
       "host": "Host",
@@ -983,7 +983,7 @@
     },
     "oidc": {
       "title": "OIDC-Authentifizierung",
-      "description": "Ist die OIDC-Anmeldung aktiviert, können sich Benutzer über einen OpenID-Connect-Anbieter anmelden. Bei der ersten Anmeldung legt teedy automatisch ein Konto an. Auf dieser Seite konfigurierst du den Anbieter und die Claim-Einstellungen. Wie teedy Identitäten Konten zuordnet und welche Kontoregeln gelten, ist fest vorgegeben und lässt sich hier nicht ändern.",
+      "description": "Ist die OIDC-Anmeldung aktiviert, können sich Benutzer über einen OpenID-Connect-Anbieter anmelden. Bei der ersten Anmeldung wird automatisch ein Konto angelegt. Auf dieser Seite konfigurierst du den Anbieter und die Claim-Einstellungen. Wie Identitäten Konten zugeordnet werden und welche Kontoregeln gelten, ist fest vorgegeben und lässt sich hier nicht ändern.",
       "enabled": "OIDC-Authentifizierung ist aktiviert",
       "disabled": "OIDC-Authentifizierung ist deaktiviert",
       "issuer": "Issuer-URL",
@@ -994,7 +994,7 @@
       "redirect_uri": "Redirect-URI",
       "redirect_uri_hint": "Die beim Anbieter registrierte Callback-URL (endet auf /api/oidc/callback).",
       "scope": "Scope",
-      "endpoints_hint": "teedy liest die Endpunkte aus der Well-Known-Konfiguration des Issuers. Trage eigene Werte nur ein, wenn teedy sie anstelle der automatisch erkannten Endpunkte verwenden soll.",
+      "endpoints_hint": "Die Endpunkte werden aus der Well-Known-Konfiguration des Issuers gelesen. Trage eigene Werte nur ein, wenn sie die automatisch erkannten Endpunkte ersetzen sollen.",
       "authorization_endpoint": "Autorisierungs-Endpunkt",
       "token_endpoint": "Token-Endpunkt",
       "jwks_uri": "JWKS-URI",
@@ -1003,7 +1003,7 @@
       "email_claim": "E-Mail-Claim",
       "username_verbatim": "Benutzernamen-Claim unverändert übernehmen",
       "username_verbatim_hint": "Wenn aktiviert, behalten bereitgestellte OIDC-Benutzer ihren preferred_username unverändert (ohne eindeutigen Hash-Suffix). Ein späteres, anderes Konto mit demselben Namen wird automatisch eindeutig gemacht.",
-      "from_property": "Der aktuelle Wert stammt aus einer JVM-Eigenschaft. Beim Speichern legt teedy den Wert in der Datenbank ab. Dieser Datenbankwert hat dann Vorrang vor der JVM-Eigenschaft.",
+      "from_property": "Der aktuelle Wert stammt aus einer JVM-Eigenschaft. Beim Speichern wird der Wert in der Datenbank abgelegt. Dieser Datenbankwert hat dann Vorrang vor der JVM-Eigenschaft.",
       "url_invalid": "Muss eine http(s)-URL sein.",
       "issuer_required": "Issuer-URL ist erforderlich.",
       "client_id_required": "Client-ID ist erforderlich.",
@@ -1117,7 +1117,7 @@
     "reprocess_failed": "Datei konnte nicht erneut verarbeitet werden",
     "processing": "Wird verarbeitet …",
     "processing_tooltip": "OCR / Textextraktion läuft für diese Datei",
-    "text_hint": "teedy extrahiert Text aus jeder Datei – per OCR oder durch direktes Auslesen. Dieser Text ermöglicht die Volltextsuche.",
+    "text_hint": "Text, der aus jeder Datei extrahiert wird – per OCR oder durch direktes Auslesen. Dieser Text ermöglicht die Volltextsuche.",
     "no_text_hint": "Aus dieser Datei wurde kein Text extrahiert. Prüfe, ob die Dokumentsprache zum Dateiinhalt passt, und verarbeite die Datei erneut.",
     "dark_mode": "Dunkelmodus",
     "menu": "Menü",

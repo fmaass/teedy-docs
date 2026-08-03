@@ -34,7 +34,7 @@
     "type": "Tipo",
     "coverage": "Cobertura",
     "rights": "Derechos",
-    "count": "{count} documento encontrado",
+    "count": "{count} documento encontrado | {count} documentos encontrados",
     "search_help": {
       "title": "Ayuda de búsqueda",
       "contents_hint": "La búsqueda coincide con todo el contenido de sus documentos —incluido el texto extraído de PDF e imágenes mediante OCR—, no solo con sus títulos.",
@@ -381,7 +381,7 @@
       "failed_revoke": "No se pudo revocar el enlace de uso compartido",
       "view": {
         "not_found": "Este documento compartido ya no está disponible.",
-        "footer": "Compartido a través de Teedy"
+        "footer": "Compartido a través de {brand}"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "Claves de API",
-      "description": "Cree claves para acceder a la API de Teedy mediante programación.",
+      "description": "Cree claves para acceder a la API de {brand} mediante programación.",
       "create_key": "Crear clave",
       "name": "Nombre",
       "key": "Clave",
@@ -844,7 +844,7 @@
       "config_saved": "Configuración guardada",
       "failed_save": "No se pudo guardar la configuración",
       "ocr_title": "OCR (Reconocimiento óptico de caracteres)",
-      "ocr_hint": "Cuando está activado, Teedy usa Tesseract para extraer texto de imágenes y PDF escaneados. El ajuste de idioma del documento determina qué modelo de OCR se usa.",
+      "ocr_hint": "Cuando está activado, {brand} usa Tesseract para extraer texto de imágenes y PDF escaneados. El ajuste de idioma del documento determina qué modelo de OCR se usa.",
       "ocr_enabled": "El OCR está activado",
       "ocr_disabled": "El OCR está desactivado",
       "ocr_toggle_failed": "No se pudo actualizar el ajuste de OCR",

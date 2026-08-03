@@ -7,6 +7,7 @@ import { getSmtpConfig, saveSmtpConfig, smtpEnvManagedFields, cleanStorage, clea
 import { SUPPORTED_LANGUAGES } from '../../constants/languages'
 import { formatFileSize } from '../../utils/formatters'
 import { useAppInfo, useInvalidateAppInfo } from '../../composables/useAppInfo'
+import { useBrand } from '../../composables/useThemeBranding'
 import Select from 'primevue/select'
 import ToggleSwitch from 'primevue/toggleswitch'
 import InputText from 'primevue/inputtext'
@@ -21,6 +22,9 @@ const { t } = useI18n()
 const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const invalidateAppInfo = useInvalidateAppInfo()
+// #256: the OCR hint names the instance rather than the product. Shared theme query — the
+// same cache entry the sidebar and About dialog already read, so no extra request.
+const { brandName } = useBrand()
 
 const defaultLanguage = ref('eng')
 const tagSearchMode = ref('PREFIX')
@@ -276,7 +280,7 @@ function handleReindex() {
     <Card class="mb-4" style="max-width: 520px"><template #content>
       <h3>{{ t('ui.config.ocr_title') }}</h3>
       <p class="section-hint">
-        {{ t('ui.config.ocr_hint') }}
+        {{ t('ui.config.ocr_hint', { brand: brandName }) }}
       </p>
       <div class="ocr-toggle">
         <ToggleSwitch

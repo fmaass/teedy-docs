@@ -34,7 +34,7 @@
     "type": "類型",
     "coverage": "覆蓋",
     "rights": "權利",
-    "count": "{count} 文檔找到",
+    "count": "找到 {count} 個文件",
     "search_help": {
       "title": "搜尋說明",
       "contents_hint": "搜尋會比對文件的完整內容，包括透過 OCR 從 PDF 和圖片擷取的文字，而不只是標題。",
@@ -381,7 +381,7 @@
       "failed_revoke": "撤銷分享連結失敗",
       "view": {
         "not_found": "此分享的文件已不再可用。",
-        "footer": "透過 Teedy 分享"
+        "footer": "透過 {brand} 分享"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "API 金鑰",
-      "description": "建立金鑰以透過程式存取 Teedy API。",
+      "description": "建立金鑰以透過程式存取 {brand} API。",
       "create_key": "建立金鑰",
       "name": "名稱",
       "key": "金鑰",
@@ -844,7 +844,7 @@
       "config_saved": "已儲存設定",
       "failed_save": "儲存設定失敗",
       "ocr_title": "OCR（光學字元辨識）",
-      "ocr_hint": "啟用時，Teedy 會使用 Tesseract 從圖片和掃描的 PDF 擷取文字。文件的語言設定決定使用哪個 OCR 模型。",
+      "ocr_hint": "啟用時，{brand} 會使用 Tesseract 從圖片和掃描的 PDF 擷取文字。文件的語言設定決定使用哪個 OCR 模型。",
       "ocr_enabled": "OCR 已啟用",
       "ocr_disabled": "OCR 已停用",
       "ocr_toggle_failed": "更新 OCR 設定失敗",

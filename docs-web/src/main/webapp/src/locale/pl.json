@@ -34,7 +34,7 @@
     "type": "Rodzaj",
     "coverage": "Okładka",
     "rights": "Prawa",
-    "count": "{count} dokument znaleziony",
+    "count": "Znaleziono {count} dokument | Znaleziono {count} dokumenty | Znaleziono {count} dokumentów",
     "search_help": {
       "title": "Pomoc wyszukiwania",
       "contents_hint": "Wyszukiwanie przeszukuje pełną treść dokumentów — w tym tekst wyodrębniony z plików PDF i obrazów przez OCR — a nie tylko ich tytuły.",
@@ -381,7 +381,7 @@
       "failed_revoke": "Nie udało się unieważnić linku udostępniania",
       "view": {
         "not_found": "Ten udostępniony dokument nie jest już dostępny.",
-        "footer": "Udostępniono przez Teedy"
+        "footer": "Udostępniono przez {brand}"
       }
     },
     "tags_page": {
@@ -578,7 +578,7 @@
     },
     "apikeys": {
       "title": "Klucze API",
-      "description": "Twórz klucze, aby programowo uzyskiwać dostęp do API Teedy.",
+      "description": "Twórz klucze, aby programowo uzyskiwać dostęp do API {brand}.",
       "create_key": "Utwórz klucz",
       "name": "Nazwa",
       "key": "Klucz",
@@ -844,7 +844,7 @@
       "config_saved": "Zapisano konfigurację",
       "failed_save": "Nie udało się zapisać konfiguracji",
       "ocr_title": "OCR (optyczne rozpoznawanie znaków)",
-      "ocr_hint": "Po włączeniu Teedy używa Tesseract do wyodrębniania tekstu z obrazów i zeskanowanych plików PDF. Ustawienie języka dokumentu określa, który model OCR jest używany.",
+      "ocr_hint": "Po włączeniu {brand} używa Tesseract do wyodrębniania tekstu z obrazów i zeskanowanych plików PDF. Ustawienie języka dokumentu określa, który model OCR jest używany.",
       "ocr_enabled": "OCR jest włączone",
       "ocr_disabled": "OCR jest wyłączone",
       "ocr_toggle_failed": "Nie udało się zaktualizować ustawienia OCR",
