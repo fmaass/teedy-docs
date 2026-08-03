@@ -188,7 +188,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
-     * @apiError (client) IllegalTagName Spaces and colons are not allowed in tag name
+     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed in tag name
      * @apiError (client) ParentNotFound Parent not found
      * @apiPermission user
      * @apiVersion 1.5.0
@@ -209,7 +209,7 @@ public class TagResource extends BaseResource {
                             content = @Content(schema = @Schema(implementation = TagIdResult.class))),
                     @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
                     @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
-                            + "IllegalTagName - Spaces and colons are not allowed in tag name; "
+                            + "IllegalTagName - Spaces, colons and asterisks are not allowed in tag name; "
                             + "ParentNotFound - Parent not found")
             }
     )
@@ -271,7 +271,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
-     * @apiError (client) IllegalTagName Spaces and colons are not allowed in tag name
+     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed in tag name
      * @apiError (client) ParentNotFound Parent not found
      * @apiError (client) CircularReference Circular reference in parent tag
      * @apiError (client) NotFound Tag not found
@@ -300,7 +300,7 @@ public class TagResource extends BaseResource {
                     @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
                     @ApiResponse(responseCode = "404", description = "NotFound - Tag not found"),
                     @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
-                            + "IllegalTagName - Spaces and colons are not allowed in tag name; "
+                            + "IllegalTagName - Spaces, colons and asterisks are not allowed in tag name; "
                             + "ParentNotFound - Parent not found; "
                             + "CircularReference - Circular reference in parent tag")
             }

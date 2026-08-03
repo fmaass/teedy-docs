@@ -41,6 +41,7 @@
       "operators_intro": "Wpisz słowo, aby przeszukać wszędzie, lub zawęź wyniki za pomocą tych operatorów:",
       "op_tag": "Dokumenty z tą etykietą (i jej pod-etykietami)",
       "op_nottag": "Wyklucz dokumenty z tą etykietą",
+      "op_tag_wildcard": "Dokumenty z etykietami zaczynającymi się od tego tekstu (i ich pod-etykietami), chyba że etykieta ma dokładnie taką nazwę",
       "op_after": "Utworzone w tym dniu lub po nim (rok, rok-miesiąc lub pełna data)",
       "op_before": "Utworzone w tym dniu lub przed nim",
       "op_uafter": "Zaktualizowane w tym dniu lub po nim",

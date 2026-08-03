@@ -508,4 +508,129 @@ public class TestDocumentSearchCriteriaUtil extends BaseTransactionalTest {
         Assertions.assertTrue(documentCriteria.getActiveRoute());
     }
 
+    private static final String RECHNUNG = "rechnung-id";
+    private static final String RECHNUNGSKORREKTUR = "rechnungskorrektur-id";
+    private static final String STEUER = "steuer-id";
+    private static final String UMSATZSTEUER = "umsatzsteuer-id";
+
+    /**
+     * Two tags sharing a prefix, plus a hierarchy whose child does not share its parent's prefix
+     * (so the child can only arrive through the parent-link expansion).
+     */
+    private static List<TagDto> wildcardTagList() {
+        return List.of(
+                new TagDto().setId(RECHNUNG).setName("Rechnung"),
+                new TagDto().setId(RECHNUNGSKORREKTUR).setName("Rechnungskorrektur"),
+                new TagDto().setId(STEUER).setName("Steuer"),
+                new TagDto().setId(UMSATZSTEUER).setName("Umsatzsteuer").setParentId(STEUER)
+        );
+    }
+
+    /**
+     * In the query grammar, a trailing wildcard on a tag term selects the prefix siblings that the
+     * bare term (being an exact tag name) would collapse away.
+     */
+    @Test
+    public void testSearchQueryTagWildcard() {
+        DocumentCriteria bare = DocumentSearchCriteriaUtil.parseSearchQuery("tag:Rechnung", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG)), bare.getTagIdList());
+
+        DocumentCriteria wildcard = DocumentSearchCriteriaUtil.parseSearchQuery("tag:Rechnung*", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), wildcard.getTagIdList());
+    }
+
+    /**
+     * The negated form gets the same wildcard treatment, so the whole prefix union is excluded.
+     */
+    @Test
+    public void testSearchQueryNotTagWildcard() {
+        DocumentCriteria bare = DocumentSearchCriteriaUtil.parseSearchQuery("!tag:Rechnung", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG)), bare.getExcludedTagIdList());
+
+        DocumentCriteria wildcard = DocumentSearchCriteriaUtil.parseSearchQuery("!tag:Rechnung*", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), wildcard.getExcludedTagIdList());
+    }
+
+    /**
+     * Child tags are expanded for a wildcard match exactly as for a plain one.
+     */
+    @Test
+    public void testSearchQueryTagWildcardExpandsChildren() {
+        DocumentCriteria bare = DocumentSearchCriteriaUtil.parseSearchQuery("tag:Steuer", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(STEUER, UMSATZSTEUER)), bare.getTagIdList());
+
+        DocumentCriteria wildcard = DocumentSearchCriteriaUtil.parseSearchQuery("tag:Steuer*", wildcardTagList());
+        Assertions.assertEquals(List.of(List.of(STEUER, UMSATZSTEUER)), wildcard.getTagIdList());
+    }
+
+    /**
+     * A bare wildcard names no tag, so it must behave like any unmatched tag term (a criteria that
+     * no document can satisfy) rather than selecting every tag.
+     */
+    @Test
+    public void testSearchQueryBareTagWildcardMatchesNothing() {
+        DocumentCriteria documentCriteria = DocumentSearchCriteriaUtil.parseSearchQuery("tag:*", wildcardTagList());
+        Assertions.assertEquals(1, documentCriteria.getTagIdList().size());
+        List<String> tagIdList = documentCriteria.getTagIdList().get(0);
+        Assertions.assertEquals(1, tagIdList.size());
+        Assertions.assertFalse(List.of(RECHNUNG, RECHNUNGSKORREKTUR, STEUER, UMSATZSTEUER).contains(tagIdList.get(0)));
+    }
+
+    /**
+     * The legacy HTTP parameters resolve tag terms through the same code, so they honour the
+     * wildcard identically.
+     */
+    @Test
+    public void testHttpParamsTagWildcard() {
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        DocumentSearchCriteriaUtil.addHttpSearchParams(
+                documentCriteria,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Rechnung*",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                wildcardTagList()
+        );
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getTagIdList());
+    }
+
+    /**
+     * Same for the legacy negated parameter.
+     */
+    @Test
+    public void testHttpParamsNotTagWildcard() {
+        DocumentCriteria documentCriteria = new DocumentCriteria();
+        DocumentSearchCriteriaUtil.addHttpSearchParams(
+                documentCriteria,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "Rechnung*",
+                null,
+                null,
+                null,
+                null,
+                null,
+                wildcardTagList()
+        );
+        Assertions.assertEquals(List.of(List.of(RECHNUNG, RECHNUNGSKORREKTUR)), documentCriteria.getExcludedTagIdList());
+    }
+
 }

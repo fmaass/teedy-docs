@@ -41,6 +41,7 @@
       "operators_intro": "Escreva uma palavra para pesquisar em todo o lado, ou refine com estes operadores:",
       "op_tag": "Documentos com esta etiqueta (e as suas subetiquetas)",
       "op_nottag": "Excluir documentos com esta etiqueta",
+      "op_tag_wildcard": "Documentos com etiquetas que comecem por este texto (e as suas subetiquetas), salvo se uma etiqueta tiver exatamente esse nome",
       "op_after": "Criados nesta data ou depois dela (ano, ano-mês, ou data completa)",
       "op_before": "Criados nesta data ou antes dela",
       "op_uafter": "Atualizados nesta data ou depois dela",

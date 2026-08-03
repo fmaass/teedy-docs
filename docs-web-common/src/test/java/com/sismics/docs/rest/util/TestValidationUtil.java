@@ -75,4 +75,28 @@ public class TestValidationUtil {
                     "must reject a name containing a separator/NUL/control char: " + value);
         }
     }
+
+    /**
+     * An asterisk is rejected in a tag name alongside spaces and colons: the search grammar splits
+     * segments on spaces, uses the colon as the field separator, and reads a trailing asterisk as
+     * the prefix operator, so a name carrying one could not be searched for unambiguously.
+     */
+    @Test
+    public void validateTagNameRejectsSearchGrammarCharacters() {
+        Assertions.assertThrows(ClientException.class, () -> ValidationUtil.validateTagName("Report*"));
+        Assertions.assertThrows(ClientException.class, () -> ValidationUtil.validateTagName("Re*port"));
+        Assertions.assertThrows(ClientException.class, () -> ValidationUtil.validateTagName("Report 2026"));
+        Assertions.assertThrows(ClientException.class, () -> ValidationUtil.validateTagName("Report:2026"));
+        Assertions.assertDoesNotThrow(() -> ValidationUtil.validateTagName("Report-2026"));
+        Assertions.assertDoesNotThrow(() -> ValidationUtil.validateTagName("Rechnung"));
+    }
+
+    /**
+     * An absent name means "leave the name as it is" on a tag update (a colour- or parent-only
+     * edit), so it must pass validation instead of blowing up.
+     */
+    @Test
+    public void validateTagNameAcceptsAnAbsentName() {
+        Assertions.assertDoesNotThrow(() -> ValidationUtil.validateTagName(null));
+    }
 }

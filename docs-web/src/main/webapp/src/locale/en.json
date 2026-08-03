@@ -41,6 +41,7 @@
       "operators_intro": "Type a word to search everywhere, or refine with these operators:",
       "op_tag": "Documents with this tag (and its sub-tags)",
       "op_nottag": "Exclude documents with this tag",
+      "op_tag_wildcard": "Documents with tags starting with this text (and their sub-tags), unless a tag has exactly that name",
       "op_after": "Created on or after this date (year, year-month, or full date)",
       "op_before": "Created on or before this date",
       "op_uafter": "Updated on or after this date",

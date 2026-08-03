@@ -30,6 +30,10 @@ function toggleHelp(event: Event) {
 const operators: { token: string; example: string; descKey: string }[] = [
   { token: 'tag:', example: 'tag:invoice', descKey: 'document.search_help.op_tag' },
   { token: '!tag:', example: '!tag:draft', descKey: 'document.search_help.op_nottag' },
+  // A trailing "*" is the only wildcard the backend reads, and only on a tag term. The example
+  // deliberately avoids spelling out a longer tag term verbatim so each row stays uniquely
+  // identifiable by its example text.
+  { token: 'tag:*', example: 'tag:inv*', descKey: 'document.search_help.op_tag_wildcard' },
   { token: 'after:', example: 'after:2024-01', descKey: 'document.search_help.op_after' },
   { token: 'before:', example: 'before:2024-12-31', descKey: 'document.search_help.op_before' },
   { token: 'uafter:', example: 'uafter:2024', descKey: 'document.search_help.op_uafter' },

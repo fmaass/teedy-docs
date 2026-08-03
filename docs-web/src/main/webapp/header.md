@@ -78,8 +78,11 @@ If a search `VALUE` is considered invalid, the search result will be empty.
 * Shared
   * `shared:VALUE`: if `VALUE` is `yes`the document must be shared, for other `VALUE`s the criteria is ignored
 * Tags: several `tags` or `!tag:` can be specified and the document must match all filters
-  * `tag:VALUE`: the document must contain a tag or a child of a tag that starts with `VALUE`, case is ignored
-  * `!tag:VALUE`: the document must not contain a tag or a child of a tag that starts with `VALUE`, case is ignored
+  * `tag:VALUE`: the document must contain a tag matching `VALUE`, or a child of such a tag, case is ignored
+  * `!tag:VALUE`: the document must not contain a tag matching `VALUE`, or a child of such a tag, case is ignored
+  * A `VALUE` that is the name of an existing tag matches that tag only. Otherwise `VALUE` matches every tag whose name starts with it, unless the instance is configured for exact tag matching, in which case it matches nothing
+  * A single trailing `*` requests prefix matching explicitly: `tag:VALUE*` matches every tag whose name starts with `VALUE`, even when a tag is named exactly `VALUE`, and whatever the configured tag matching mode is. A tag actually named `VALUE*` still takes precedence and is matched on its own
+  * `*` is not a general wildcard: anywhere but at the end of `VALUE` it is an ordinary character of the tag name, and `tag:*` on its own matches no tag (and therefore no document)
 * Titles: several `title` can be specified, and the document must match any of the titles
   * `title:VALUE`: the title of the document must be `VALUE`
 * User

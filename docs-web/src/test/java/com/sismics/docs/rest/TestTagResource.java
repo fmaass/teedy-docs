@@ -297,4 +297,87 @@ public class TestTagResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
+
+    /**
+     * An asterisk is refused in a tag name, on creation and on rename alike: a trailing one is the
+     * prefix operator of the search grammar, so such a name could not be searched for
+     * unambiguously.
+     */
+    @Test
+    public void testTagNameAsteriskRejected() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_star");
+        String token = clientUtil.login("tag_star");
+
+        Response response = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "Report*")
+                        .param("color", "#ff0000")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "an asterisk must not be accepted in a new tag name");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "Report")
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        response = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("name", "Report*")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "an asterisk must not be accepted when renaming a tag");
+
+        // The rename was really refused
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Report", json.getString("name"));
+
+        // Cleanup
+        target().path("/user/tag_star")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * A tag update that carries no name is a colour- or parent-only edit and must leave the name
+     * alone instead of failing on the name validation.
+     */
+    @Test
+    public void testTagUpdateWithoutName() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_noname");
+        String token = clientUtil.login("tag_noname");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "Colored")
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        Response response = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("color", "#00ff00")));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "a colour-only tag update must succeed");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Colored", json.getString("name"), "the name must survive the update");
+        Assertions.assertEquals("#00ff00", json.getString("color"));
+
+        // Cleanup
+        target().path("/user/tag_noname")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
 }

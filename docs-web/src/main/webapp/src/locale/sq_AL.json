@@ -41,6 +41,7 @@
       "operators_intro": "Shkruani një fjalë për të kërkuar kudo, ose rafinoni me këta operatorë:",
       "op_tag": "Dokumentet me këtë etiketë (dhe nën-etiketat e saj)",
       "op_nottag": "Përjashto dokumentet me këtë etiketë",
+      "op_tag_wildcard": "Dokumentet me etiketa që fillojnë me këtë tekst (dhe nën-etiketat e tyre), përveç nëse një etiketë ka saktësisht atë emër",
       "op_after": "Të krijuara në ose pas kësaj date (vit, vit-muaj ose datë e plotë)",
       "op_before": "Të krijuara në ose para kësaj date",
       "op_uafter": "Të përditësuara në ose pas kësaj date",

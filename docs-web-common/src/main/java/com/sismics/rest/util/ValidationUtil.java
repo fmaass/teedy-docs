@@ -117,11 +117,22 @@ public class ValidationUtil {
     /**
      * Validate a tag name.
      *
-     * @param name Name of the tag
+     * <p>The rejected characters are the ones the document search grammar owns: it splits a query
+     * on spaces, separates a criteria from its value on a colon, and reads a trailing asterisk on a
+     * tag term as the prefix operator. A name carrying one of them could not be searched for
+     * unambiguously.
+     *
+     * <p>A null name means the caller is not changing the name (a colour- or parent-only tag
+     * update), so there is nothing to validate.
+     *
+     * @param name Name of the tag, or null when the name is left unchanged
      */
     public static void validateTagName(String name) throws ClientException {
-        if (name.contains(" ") || name.contains(":")) {
-            throw new ClientException("IllegalTagName", "Spaces and colons are not allowed in tag name");
+        if (name == null) {
+            return;
+        }
+        if (name.contains(" ") || name.contains(":") || name.contains("*")) {
+            throw new ClientException("IllegalTagName", "Spaces, colons and asterisks are not allowed in tag name");
         }
     }
 

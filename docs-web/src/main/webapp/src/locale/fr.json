@@ -41,6 +41,7 @@
       "operators_intro": "Saisissez un mot pour rechercher partout, ou affinez avec ces opérateurs :",
       "op_tag": "Documents portant ce tag (et ses sous-tags)",
       "op_nottag": "Exclure les documents portant ce tag",
+      "op_tag_wildcard": "Documents portant des tags commençant par ce texte (et leurs sous-tags), sauf si un tag porte exactement ce nom",
       "op_after": "Créés à cette date ou après (année, année-mois ou date complète)",
       "op_before": "Créés à cette date ou avant",
       "op_uafter": "Mis à jour à cette date ou après",
