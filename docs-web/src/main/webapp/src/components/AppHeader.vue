@@ -118,13 +118,19 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+/* The Branding "navigation bar color" arrives as `--teedy-navbar-bg` on :root, from the
+   server-compiled theme stylesheet. It is READ here rather than matched by a global rule: the
+   setting used to emit `.navbar { background-color: … }`, a class nothing in this UI carries, and
+   renaming that selector would not have fixed it either — this style is scoped, so a global
+   background declaration can never outweigh it whatever the load order. Undeclared (no colour
+   configured, the normal case) falls back to the surface token, which follows light/dark. */
 .action-bar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.25rem 1rem;
   border-bottom: 1px solid var(--p-content-border-color);
-  background: var(--p-content-background);
+  background: var(--teedy-navbar-bg, var(--p-content-background));
   min-height: 40px;
   flex-shrink: 0;
 }

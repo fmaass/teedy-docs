@@ -137,4 +137,30 @@ public class TestValidationUtil {
                 () -> ValidationUtil.validateHexColor(null, "color", false),
                 "a non-nullable colour must still be required");
     }
+
+    /**
+     * The predicate form answers the same question without throwing, for a caller that has to
+     * decide whether an ALREADY STORED value is usable rather than reject an incoming one — a row
+     * written before this validation was tightened can hold anything of the right length.
+     */
+    @Test
+    public void isHexColorAcceptsOnlyWellFormedColors() {
+        for (String value : new String[] { "#000000", "#ffffff", "#AABBCC", "#0f0F0f" }) {
+            Assertions.assertTrue(ValidationUtil.isHexColor(value), "must accept: " + value);
+        }
+        String[] bad = {
+                "#gggggg",
+                "#12345z",
+                "#ff00 0",
+                "1234567",
+                "##12345",
+                " #ff0000 ",
+                "",
+                "red; } body { display: none",
+        };
+        for (String value : bad) {
+            Assertions.assertFalse(ValidationUtil.isHexColor(value), "must reject: " + value);
+        }
+        Assertions.assertFalse(ValidationUtil.isHexColor(null), "must reject null");
+    }
 }

@@ -77,6 +77,13 @@ public class ThemeResource extends BaseResource {
      */
     private static final String SCRIPT_CONTENT_TYPE = "text/javascript;charset=UTF-8";
 
+    /**
+     * The CSS custom property the configured navbar colour is published as. The SPA header reads
+     * it with a fallback to its theme token, so the property is declared only when an admin has
+     * actually chosen a colour — see {@link #buildStylesheet()}.
+     */
+    private static final String NAVBAR_COLOR_PROPERTY = "--teedy-navbar-bg";
+
 	/**
      * Returns custom CSS stylesheet.
      *
@@ -272,8 +279,9 @@ public class ThemeResource extends BaseResource {
         json.add("logo_version", imageVersion("logo"));
         json.add("background_version", imageVersion("background"));
         // The text assets are keyed by a hash of the body actually served rather than by a
-        // timestamp: the stylesheet body includes the GENERATED navbar rule, so changing only the
-        // navbar color still busts it, and an unchanged file keeps its token across a rewrite.
+        // timestamp: the stylesheet body includes the GENERATED navbar declaration, so setting,
+        // changing or clearing the navbar color still busts it (clearing removes the declaration,
+        // which is a body change too), and an unchanged file keeps its token across a rewrite.
         json.add("stylesheet_version", bodyVersion(buildStylesheet()));
         json.add("script_version", bodyVersion(readAsset(CUSTOM_JS_FILE)));
         return Response.ok().entity(json.build()).build();
@@ -581,16 +589,38 @@ public class ThemeResource extends BaseResource {
     }
 
     /**
-     * Compiles the stylesheet actually served: the generated navbar rule first (so custom CSS can
-     * override it), then the legacy blob CSS, then the modern custom.css file.
+     * Compiles the stylesheet actually served: the generated navbar declaration first (so custom
+     * CSS can override it), then the legacy blob CSS, then the modern custom.css file.
+     *
+     * The navbar colour is published as a CUSTOM PROPERTY on :root, not as a background rule on a
+     * selector. The header it colours is styled by a scoped component rule, which a global
+     * selector cannot outweigh whatever the load order, so the component reads the property
+     * instead of competing with it — the `.navbar` rule this replaces was inherited from the old
+     * UI and matched no element at all.
+     *
+     * An UNSET colour emits NOTHING. The property has to stay undeclared so the component's own
+     * fallback (the theme surface token, which follows light/dark) keeps deciding; declaring the
+     * former "#ffffff" default instead would pin every unconfigured install's header to white.
+     *
+     * A stored colour that is not a well-formed #rrggbb is treated as unset for the same reason,
+     * and this is a FORMAT check rather than a presence one on purpose. Strict hex validation of
+     * this field is recent — an older write path checked its length only — so a legacy row can
+     * hold seven characters of anything. A custom property would accept that verbatim: the
+     * property would then be SET to an unusable value, and a var() fallback engages only for a
+     * property that is UNSET, never for one holding a value the consuming declaration cannot use.
+     * `background` would be invalid at computed-value time and resolve to its initial value, i.e.
+     * a TRANSPARENT header — worse than the stock one it was supposed to replace.
      *
      * @return Stylesheet body
      */
     private String buildStylesheet() {
         JsonObject themeConfig = getThemeConfig();
         StringBuilder sb = new StringBuilder();
-        sb.append(new Selector(".navbar")
-            .rule("background-color", themeConfig.getString("color", "#ffffff")));
+        // Absent and explicitly cleared (stored as JSON null) both read back as null here.
+        String navbarColor = themeConfig.getString("color", null);
+        if (ValidationUtil.isHexColor(navbarColor)) {
+            sb.append(new Selector(":root").rule(NAVBAR_COLOR_PROPERTY, navbarColor));
+        }
         sb.append(effectiveCss(themeConfig));
         return sb.toString();
     }

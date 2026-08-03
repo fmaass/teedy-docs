@@ -125,10 +125,30 @@ public class ValidationUtil {
         if (Strings.isNullOrEmpty(value)) {
             return;
         }
-        if (!HEX_COLOR_PATTERN.matcher(s).matches()) {
+        if (!isHexColor(s)) {
             throw new ClientException("ValidationError",
                     MessageFormat.format("{0} must be a hexadecimal color, for example #336699", name));
         }
+    }
+
+    /**
+     * Whether a string IS a hexadecimal color (#rrggbb) — the same test {@link #validateHexColor}
+     * rejects on, as a plain predicate.
+     *
+     * A caller that has to decide whether an ALREADY STORED value is usable needs the answer, not
+     * a rejection: strict validation of a field is only ever as old as the release that added it,
+     * so a row written by an earlier version can hold something this returns false for. Such a
+     * caller cannot reuse the validator itself, because a {@link ClientException} carries a
+     * BAD_REQUEST response — building and discarding one inside a request that is SUCCEEDING is
+     * both wasteful and one stray rethrow away from failing that request.
+     *
+     * Matched against the RAW argument, exactly as the validator does: padding is not a color.
+     *
+     * @param s String to test
+     * @return True if the string is a hexadecimal color
+     */
+    public static boolean isHexColor(String s) {
+        return s != null && HEX_COLOR_PATTERN.matcher(s).matches();
     }
 
     /**

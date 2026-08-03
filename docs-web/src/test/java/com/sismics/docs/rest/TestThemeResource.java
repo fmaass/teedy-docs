@@ -1,7 +1,11 @@
 package com.sismics.docs.rest;
 
 import com.google.common.io.Resources;
+import com.sismics.docs.core.constant.ConfigType;
+import com.sismics.docs.core.dao.ConfigDao;
+import com.sismics.docs.core.model.jpa.Config;
 import com.sismics.docs.core.util.DirectoryUtil;
+import com.sismics.docs.core.util.TransactionUtil;
 import com.sismics.docs.rest.resource.ThemeResource;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.util.filter.TokenBasedSecurityFilter;
@@ -11,17 +15,23 @@ import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import jakarta.json.Json;
 import jakarta.json.JsonObject;
+import jakarta.json.JsonObjectBuilder;
+import jakarta.json.JsonReader;
+import jakarta.json.JsonValue;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Test the theme resource.
@@ -37,10 +47,12 @@ public class TestThemeResource extends BaseJerseyTest {
         // Login admin
         String adminToken = adminToken();
 
-        // Get the stylesheet anonymously
+        // Get the stylesheet anonymously. No navbar colour is configured, so the stylesheet
+        // declares NOTHING about it: the header keeps its theme token.
         String stylesheet = target().path("/theme/stylesheet").request()
                 .get(String.class);
-        Assertions.assertTrue(stylesheet.contains("background-color: #ffffff;"));
+        Assertions.assertFalse(stylesheet.contains("--teedy-navbar-bg"));
+        Assertions.assertFalse(stylesheet.contains(".navbar"));
 
         // Get the theme configuration anonymously
         JsonObject json = target().path("/theme").request()
@@ -60,7 +72,8 @@ public class TestThemeResource extends BaseJerseyTest {
         // Get the stylesheet anonymously
         stylesheet = target().path("/theme/stylesheet").request()
                 .get(String.class);
-        Assertions.assertTrue(stylesheet.contains("background-color: #ff0000;"));
+        Assertions.assertTrue(stylesheet.contains("--teedy-navbar-bg: #ff0000;"));
+        Assertions.assertFalse(stylesheet.contains(".navbar"));
         Assertions.assertTrue(stylesheet.contains("Custom CSS"));
 
         // Get the theme configuration anonymously
@@ -272,8 +285,6 @@ public class TestThemeResource extends BaseJerseyTest {
             stylesheet = target().path("/theme/stylesheet").request().get(String.class);
             Assertions.assertFalse(stylesheet.contains(".legacy-blob"));
             Assertions.assertTrue(stylesheet.contains(".modern-file"));
-            // The generated navbar rule still comes FIRST so custom CSS can override it.
-            Assertions.assertTrue(stylesheet.indexOf("background-color") < stylesheet.indexOf(".modern-file"));
             // GET /theme keeps reporting the EFFECTIVE custom CSS for old clients.
             Assertions.assertEquals(".modern-file { color: green; }", getTheme().getString("css"));
 
@@ -281,10 +292,21 @@ public class TestThemeResource extends BaseJerseyTest {
             String stylesheetVersionModern = getTheme().getString("stylesheet_version");
             Assertions.assertNotEquals(stylesheetVersionEmpty, stylesheetVersionModern);
 
-            // The generated color rule is part of the hashed body: changing only the navbar
-            // color must still bust the stylesheet cache.
+            // The generated navbar declaration still comes FIRST so custom CSS can override it.
+            // A colour has to be CONFIGURED for that ordering to be observable at all: unset
+            // emits nothing, and an indexOf on an absent needle would pass vacuously.
+            postTheme(adminToken, new Form().param("color", "#654321"));
+            stylesheet = target().path("/theme/stylesheet").request().get(String.class);
+            int generated = stylesheet.indexOf("--teedy-navbar-bg");
+            Assertions.assertTrue(generated >= 0, "the configured navbar colour was not generated");
+            Assertions.assertTrue(generated < stylesheet.indexOf(".modern-file"));
+
+            // The generated declaration is part of the hashed body: SETTING the navbar colour
+            // and then CHANGING it must each still bust the stylesheet cache.
+            String stylesheetVersionColored = getTheme().getString("stylesheet_version");
+            Assertions.assertNotEquals(stylesheetVersionModern, stylesheetVersionColored);
             postTheme(adminToken, new Form().param("color", "#123456"));
-            Assertions.assertNotEquals(stylesheetVersionModern, getTheme().getString("stylesheet_version"));
+            Assertions.assertNotEquals(stylesheetVersionColored, getTheme().getString("stylesheet_version"));
 
             // Only an admin may write it.
             clientUtil.createUser("theme_stylesheet_user");
@@ -304,6 +326,86 @@ public class TestThemeResource extends BaseJerseyTest {
             Assertions.assertFalse(stylesheet.contains(".legacy-again"));
             Assertions.assertFalse(stylesheet.contains(".modern-file"));
             Assertions.assertEquals("", getTheme().getString("css"));
+        } finally {
+            resetTheme(adminToken);
+        }
+    }
+
+    /**
+     * The Branding navbar colour reaches the header as a CUSTOM PROPERTY on :root rather than as a
+     * background rule on a selector. The bar it colours is a SCOPED Vue component style, which no
+     * global rule can outweigh whatever the load order, so the component reads the property and
+     * keeps its own fallback — the dead `.navbar` rule this replaces matched no element at all.
+     *
+     * The UNSET case is the load-bearing one: an instance that never configured a colour must emit
+     * NO declaration, because a declared "#ffffff" default would override the theme surface token
+     * and paint the header white in dark mode on every install that never touched the setting.
+     */
+    @Test
+    public void testThemeNavbarColorCustomProperty() throws Exception {
+        String adminToken = adminToken();
+        resetTheme(adminToken);
+        try {
+            // Unset: nothing is emitted — not the property, not a default colour, not the dead
+            // .navbar rule. With no custom CSS either, the whole body is empty.
+            String stylesheet = target().path("/theme/stylesheet").request().get(String.class);
+            Assertions.assertFalse(stylesheet.contains("--teedy-navbar-bg"), stylesheet);
+            Assertions.assertFalse(stylesheet.contains("#ffffff"), stylesheet);
+            Assertions.assertFalse(stylesheet.contains(".navbar"), stylesheet);
+            Assertions.assertEquals("", stylesheet);
+
+            // Set: the configured colour is published on :root, and nothing targets .navbar.
+            postTheme(adminToken, new Form().param("color", "#336699"));
+            stylesheet = target().path("/theme/stylesheet").request().get(String.class);
+            Assertions.assertTrue(stylesheet.startsWith(":root {"), stylesheet);
+            Assertions.assertTrue(stylesheet.contains("--teedy-navbar-bg: #336699;"), stylesheet);
+            Assertions.assertFalse(stylesheet.contains(".navbar"), stylesheet);
+            Assertions.assertFalse(stylesheet.contains("background-color"), stylesheet);
+
+            // Cleared: back to emitting nothing, so the header returns to the theme token instead
+            // of staying pinned to whatever the last colour was.
+            postTheme(adminToken, new Form().param("color", ""));
+            stylesheet = target().path("/theme/stylesheet").request().get(String.class);
+            Assertions.assertEquals("", stylesheet);
+        } finally {
+            resetTheme(adminToken);
+        }
+    }
+
+    /**
+     * A legacy install can hold a `color` that is NOT a well-formed #rrggbb: strict hex validation
+     * on the write path is recent, and before it the field was checked for LENGTH only — seven
+     * characters of anything passed. Such a value used to feed the dead `.navbar` selector and was
+     * inert, so nothing ever forced it to be well formed.
+     *
+     * It must not be interpolated verbatim now that the colour reaches a real element. A custom
+     * property accepts almost any token sequence, so `--teedy-navbar-bg: #gggggg` would BE set —
+     * the component's `var(…, var(--p-content-background))` fallback only engages for a property
+     * that is UNSET, not for one holding an unusable value. `background` would then be invalid at
+     * computed-value time and resolve to its initial value: a TRANSPARENT header, which is worse
+     * than the stock one. A malformed stored colour therefore has to render exactly like unset.
+     */
+    @Test
+    public void testThemeMalformedStoredColorIsIgnored() throws Exception {
+        String adminToken = adminToken();
+        resetTheme(adminToken);
+        try {
+            // Right length, not hexadecimal — what a pre-validation install could hold.
+            storeRawThemeColor("#gggggg");
+            Assertions.assertEquals("", stylesheet());
+
+            // Padded: the write path rejects this precisely so it is never persisted.
+            storeRawThemeColor(" #ff0000 ");
+            Assertions.assertEquals("", stylesheet());
+
+            // Not a colour at all, and shaped to break out of the declaration if interpolated.
+            storeRawThemeColor("red; } body { display: none");
+            Assertions.assertEquals("", stylesheet());
+
+            // Green guard: a well-formed value stored the SAME way still renders, so the test
+            // proves a format check and not merely a dead code path.
+            storeRawThemeColor("#336699");
+            Assertions.assertEquals(":root {\n  --teedy-navbar-bg: #336699;\n}\n", stylesheet());
         } finally {
             resetTheme(adminToken);
         }
@@ -701,6 +803,36 @@ public class TestThemeResource extends BaseJerseyTest {
      */
     private JsonObject getTheme() {
         return target().path("/theme").request().get(JsonObject.class);
+    }
+
+    /**
+     * Returns the compiled stylesheet as an anonymous caller.
+     */
+    private String stylesheet() {
+        return target().path("/theme/stylesheet").request().get(String.class);
+    }
+
+    /**
+     * Writes the theme `color` field STRAIGHT into the config row, bypassing POST /theme's
+     * validation. That bypass is the point: it is the only way to reproduce a row written by a
+     * version whose write path checked the length only, which is the state this guards against.
+     * Every other field in the stored blob is carried over untouched.
+     */
+    private void storeRawThemeColor(String color) {
+        TransactionUtil.handle(() -> {
+            ConfigDao configDao = new ConfigDao();
+            JsonObjectBuilder json = Json.createObjectBuilder();
+            Config config = configDao.getById(ConfigType.THEME);
+            if (config != null) {
+                try (JsonReader reader = Json.createReader(new StringReader(config.getValue()))) {
+                    for (Map.Entry<String, JsonValue> entry : reader.readObject().entrySet()) {
+                        json.add(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            json.add("color", color);
+            configDao.update(ConfigType.THEME, json.build().toString());
+        });
     }
 
     /**
