@@ -1051,7 +1051,7 @@
     "settings": {
       "hub": {
         "heading": "Cilësimet",
-        "intro": "Menaxhoni llogarinë tuaj dhe, nëse jeni administrator, konfiguroni të gjithë instancën Teedy.",
+        "intro": "Menaxhoni llogarinë tuaj dhe, nëse jeni administrator, konfiguroni të gjithë instancën {brand}.",
         "desc": {
           "account": "Profili juaj, fjalëkalimi, gjuha, vërtetimi me dy faktorë dhe seancat aktive.",
           "apikeys": "Çelësa personalë API për skriptim dhe integrime nga palë të treta.",

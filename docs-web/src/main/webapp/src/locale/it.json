@@ -1051,7 +1051,7 @@
     "settings": {
       "hub": {
         "heading": "Impostazioni",
-        "intro": "Gestisci il tuo account e, se sei un amministratore, configura l'intera istanza di Teedy.",
+        "intro": "Gestisci il tuo account e, se sei un amministratore, configura l'intera istanza di {brand}.",
         "desc": {
           "account": "Il tuo profilo, password, lingua, autenticazione a due fattori e sessioni attive.",
           "apikeys": "Chiavi API personali per scripting e integrazioni di terze parti.",

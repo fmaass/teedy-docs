@@ -1051,7 +1051,7 @@
     "settings": {
       "hub": {
         "heading": "Ustawienia",
-        "intro": "Zarządzaj swoim kontem, a jeśli jesteś administratorem, skonfiguruj całą instancję Teedy.",
+        "intro": "Zarządzaj swoim kontem, a jeśli jesteś administratorem, skonfiguruj całą instancję {brand}.",
         "desc": {
           "account": "Twój profil, hasło, język, uwierzytelnianie dwuskładnikowe i aktywne sesje.",
           "apikeys": "Osobiste klucze API do skryptów i integracji z podmiotami zewnętrznymi.",

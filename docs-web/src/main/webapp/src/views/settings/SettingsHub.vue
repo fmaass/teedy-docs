@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useAppInfo } from '../../composables/useAppInfo'
+import { useBrand } from '../../composables/useThemeBranding'
 
 // #64: the /settings landing hub — a GROUPED, ANNOTATED list (NOT a card grid, no
 // search, no widgets, no recents). The Personal section is always shown; the three
@@ -80,13 +81,19 @@ const sections = computed<HubSection[]>(() =>
 // (same cached key AdminNavPanel/AboutDialog use — no new fetch).
 const { data: appInfo } = useAppInfo()
 const version = computed(() => appInfo.value?.current_version ?? null)
+
+// #254: the intro sentence used to hardcode the product name, so a renamed instance still read
+// as stock Teedy on the very screen its admin renames it from. Same SHARED theme query the
+// sidebar/drawer/About dialog brand already reads — no extra request, and nothing awaited before
+// mount: until the payload lands brandName is the product fallback and then swaps in.
+const { brandName } = useBrand()
 </script>
 
 <template>
   <div class="settings-hub">
     <header class="hub-head">
       <h1>{{ t('ui.settings.hub.heading') }}</h1>
-      <p class="hub-intro">{{ t('ui.settings.hub.intro') }}</p>
+      <p class="hub-intro">{{ t('ui.settings.hub.intro', { brand: brandName }) }}</p>
       <p v-if="version" class="hub-version">{{ `v${version}` }}</p>
     </header>
 

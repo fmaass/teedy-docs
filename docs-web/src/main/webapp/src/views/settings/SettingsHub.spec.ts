@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { ref } from 'vue'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { computed, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import en from '../../locale/en.json'
+import de from '../../locale/de.json'
 
 // The hub shows an optional muted version line sourced from the shared app-info
 // query (#64, same key AdminNavPanel uses). Mock it so tests drive current_version
@@ -20,6 +21,20 @@ vi.mock('../../stores/auth', () => ({
   useAuthStore: () => ({ isAdmin: isAdminRef.value }),
 }))
 
+// The hub's intro names the instance (#254), so the REAL useBrand runs here — only the
+// vue-query layer under it is stubbed. Mocking the transport rather than the composable is
+// deliberate: it keeps useBrand's unset/blank -> product-name fallback inside the unit these
+// tests exercise, instead of asserting against a hand-written stub of it.
+const themeRef = vi.hoisted(() => ({ value: undefined as { name?: string } | undefined }))
+vi.mock('@tanstack/vue-query', () => ({
+  useQuery: () => ({ data: computed(() => themeRef.value) }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}))
+// applyBrandPrimary drives PrimeVue's runtime theme service on import of the branding module;
+// the hub never calls it, and its own contract lives in theme/primary.spec.ts.
+vi.mock('../../theme/primary', () => ({ applyBrandPrimary: vi.fn() }))
+vi.mock('../../api/theme', () => ({ getTheme: vi.fn() }))
+
 import SettingsHub from './SettingsHub.vue'
 
 // Unit under test: the /settings landing hub (#64). It is a GROUPED, ANNOTATED list
@@ -28,7 +43,7 @@ import SettingsHub from './SettingsHub.vue'
 // an existing leaf route, carrying its icon, title label, and a one-line description
 // (the load-bearing feature). ROUTES are unchanged.
 
-const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
+const i18n = createI18n({ legacy: false, locale: 'en', messages: { en, de } })
 
 // A router-link stub that records its resolved route name so a test can assert the
 // entry points at the correct existing route. `to` here is a {name} location object.
@@ -46,6 +61,13 @@ function mountHub(isAdmin = false) {
     },
   })
 }
+
+// Every test starts from "no theme payload yet" — the state a cold load is in before the
+// public /api/theme query resolves.
+beforeEach(() => {
+  themeRef.value = undefined
+  i18n.global.locale.value = 'en'
+})
 
 // The full set of entries the hub renders for an admin, in group order, each with the
 // route name it must link to and the exact en.json description it must show.
@@ -151,5 +173,42 @@ describe('SettingsHub — settings landing hub (#64)', () => {
     appInfoValue.value = undefined
     expect(mountHub(false).find('.hub-version').exists()).toBe(false)
     appInfoValue.value = { current_version: '3.6.0' }
+  })
+})
+
+// #254: the intro used to hardcode the product name, so a renamed instance read as stock
+// Teedy in the exact screen an admin goes to rename it — every other brand surface (sidebar,
+// drawer, About dialog, tab title, favicon) already followed the configured name.
+describe('SettingsHub — the intro names the configured instance (#254)', () => {
+  const intro = (wrapper: ReturnType<typeof mountHub>) => wrapper.find('.hub-intro').text()
+
+  it('interpolates the configured instance name', () => {
+    themeRef.value = { name: 'Contoso Archive' }
+    const text = intro(mountHub(true))
+    expect(text).toBe(en.ui.settings.hub.intro.replace('{brand}', 'Contoso Archive'))
+    expect(text).toContain('Contoso Archive')
+    expect(text).not.toContain('Teedy')
+  })
+
+  it('falls back to the product name when the admin has cleared the instance name', () => {
+    // Asserted explicitly because the unset rendering is byte-identical to the old hardcoded
+    // sentence: without this, dropping the parameter back to a literal would still pass.
+    expect(en.ui.settings.hub.intro).toContain('{brand}')
+    // The server stores and returns "" for a cleared field, so blank must fall back too.
+    themeRef.value = { name: '   ' }
+    expect(intro(mountHub(true))).toBe(en.ui.settings.hub.intro.replace('{brand}', 'Teedy'))
+  })
+
+  it('falls back to the product name before the theme query resolves', () => {
+    themeRef.value = undefined
+    expect(intro(mountHub(true))).toBe(en.ui.settings.hub.intro.replace('{brand}', 'Teedy'))
+  })
+
+  it('interpolates into the translated sentence, not an English-ordered one', () => {
+    // A locale places the name wherever its own grammar puts it; the placeholder must
+    // survive translation rather than the sentence being rebuilt around it.
+    themeRef.value = { name: 'Contoso Archive' }
+    i18n.global.locale.value = 'de'
+    expect(intro(mountHub(true))).toBe(de.ui.settings.hub.intro.replace('{brand}', 'Contoso Archive'))
   })
 })

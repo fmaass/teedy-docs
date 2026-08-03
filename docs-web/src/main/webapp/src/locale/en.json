@@ -1051,7 +1051,7 @@
     "settings": {
       "hub": {
         "heading": "Settings",
-        "intro": "Manage your account and, if you are an administrator, configure the whole Teedy instance.",
+        "intro": "Manage your account and, if you are an administrator, configure the whole {brand} instance.",
         "desc": {
           "account": "Your profile, password, language, two-factor authentication and active sessions.",
           "apikeys": "Personal API keys for scripting and third-party integrations.",

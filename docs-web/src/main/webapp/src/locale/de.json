@@ -1051,7 +1051,7 @@
     "settings": {
       "hub": {
         "heading": "Einstellungen",
-        "intro": "Verwalte dein Konto. Als Administrator kannst du außerdem die gesamte teedy-Instanz konfigurieren.",
+        "intro": "Verwalte dein Konto. Als Administrator kannst du außerdem die gesamte {brand}-Instanz konfigurieren.",
         "desc": {
           "account": "Dein Profil, Passwort, Sprache, Zwei-Faktor-Authentifizierung und aktive Sitzungen.",
           "apikeys": "Persönliche API-Schlüssel für Skripte und Integrationen von Drittanbietern.",
