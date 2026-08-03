@@ -34,7 +34,8 @@ public class ImageFormatHandler implements FormatHandler {
     @Override
     public boolean accept(String mimeType) {
         this.mimeType = mimeType;
-        return mimeType.equals(MimeType.IMAGE_GIF) || mimeType.equals(MimeType.IMAGE_PNG) || mimeType.equals(MimeType.IMAGE_JPEG);
+        return mimeType.equals(MimeType.IMAGE_GIF) || mimeType.equals(MimeType.IMAGE_PNG)
+                || mimeType.equals(MimeType.IMAGE_JPEG) || mimeType.equals(MimeType.IMAGE_WEBP);
     }
 
     @Override
@@ -68,6 +69,11 @@ public class ImageFormatHandler implements FormatHandler {
                     break;
                 case MimeType.IMAGE_GIF:
                 case MimeType.IMAGE_PNG:
+                case MimeType.IMAGE_WEBP:
+                    // WebP has no PDF-native representation, so like GIF and PNG it is decoded by
+                    // ImageIO (the TwelveMonkeys reader) and re-embedded losslessly. Without this
+                    // branch the switch falls through to the default below, which adds no page at
+                    // all -- a PDF export would silently drop the image.
                     BufferedImage bim = ImageIO.read(storedFileInputStream);
                     pdImage = LosslessFactory.createFromImage(doc, bim);
                     break;

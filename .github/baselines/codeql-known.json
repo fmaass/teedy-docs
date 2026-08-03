@@ -159,7 +159,7 @@
       "removal_issue": "#104"
     },
     {
-      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/ImageFormatHandler.java:42:61",
+      "id": "java/path-injection@docs-core/src/main/java/com/sismics/docs/core/util/format/ImageFormatHandler.java:43:61",
       "sink_line": "        try (InputStream inputStream = Files.newInputStream(file)) {",
       "finding": "CodeQL path-injection: image source stream open for thumbnailing flagged as path injection",
       "reason": "Triaged ALREADY-MITIGATED in docs/security/sast-triage-2026-07.md (#104); the stated invariant neutralizes the flagged flow.",

@@ -5,7 +5,9 @@ import com.sismics.util.mime.MimeType;
 import com.sismics.util.mime.MimeTypeUtil;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
@@ -68,5 +70,57 @@ public class TestMimeTypeUtil extends BaseTest {
         // Detect MP4 files
         path = Paths.get(getResource(FILE_MP4).toURI());
         Assertions.assertEquals(MimeType.VIDEO_MP4, MimeTypeUtil.guessMimeType(path, FILE_MP4));
+    }
+
+    /**
+     * WebP is detected from the BYTES, not from the name. Both fixtures are copied to a
+     * name-less-looking temp file ("upload", no extension) and probed with a null name, so neither
+     * {@link java.nio.file.Files#probeContentType} nor the URLConnection filename map — the only two
+     * inference sources this utility had — can supply the answer. A host whose /etc/mime.types knows
+     * about .webp therefore cannot make this test pass for the wrong reason.
+     */
+    @Test
+    public void detectsWebpFromContentWithoutAnyFilenameHint(@TempDir Path tempDir) throws Exception {
+        for (String fixture : new String[]{FILE_WEBP, FILE_WEBP_LOSSLESS}) {
+            Path neutral = tempDir.resolve("upload-" + fixture.hashCode());
+            Files.copy(Paths.get(getResource(fixture).toURI()), neutral);
+
+            Assertions.assertEquals(MimeType.IMAGE_WEBP, MimeTypeUtil.guessMimeType(neutral, null),
+                    fixture + " must be detected from its RIFF/WEBP signature with no file name at all");
+            Assertions.assertEquals(MimeType.IMAGE_WEBP, MimeTypeUtil.guessMimeType(neutral, "upload"),
+                    fixture + " must be detected from its signature even with an extension-less name");
+        }
+    }
+
+    /**
+     * The content check must not hijack files that merely share the RIFF container (WAV, AVI) or that
+     * are too short to carry the 12-byte signature.
+     */
+    @Test
+    public void riffContainersThatAreNotWebpAreNotDetectedAsWebp(@TempDir Path tempDir) throws Exception {
+        Path wav = tempDir.resolve("sound");
+        Files.write(wav, new byte[]{'R', 'I', 'F', 'F', 4, 0, 0, 0, 'W', 'A', 'V', 'E', 0, 0, 0, 0});
+        Assertions.assertNotEquals(MimeType.IMAGE_WEBP, MimeTypeUtil.guessMimeType(wav, null),
+                "a RIFF/WAVE container is not a WebP image");
+
+        Path truncated = tempDir.resolve("tiny");
+        Files.write(truncated, new byte[]{'R', 'I', 'F', 'F'});
+        Assertions.assertNotEquals(MimeType.IMAGE_WEBP, MimeTypeUtil.guessMimeType(truncated, null),
+                "a file too short to hold the signature is not a WebP image");
+
+        Path empty = tempDir.resolve("empty");
+        Files.write(empty, new byte[0]);
+        Assertions.assertEquals(MimeType.DEFAULT, MimeTypeUtil.guessMimeType(empty, null),
+                "an empty file still falls through to the default MIME type");
+    }
+
+    /**
+     * A file uploaded without a name is written to ZIP/export paths as {@code <default>.<extension>}
+     * ({@link com.sismics.docs.core.model.jpa.File#getFullName}); without this mapping every WebP
+     * would land there as {@code .bin}.
+     */
+    @Test
+    public void webpMapsToItsFileExtension() {
+        Assertions.assertEquals("webp", MimeTypeUtil.getFileExtension(MimeType.IMAGE_WEBP));
     }
 }

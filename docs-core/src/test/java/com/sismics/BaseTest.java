@@ -35,6 +35,16 @@ public abstract class BaseTest {
 
     protected static final String FILE_WEBM = "video.webm";
 
+    /** Lossy WebP (RIFF/WEBP container, VP8 chunk), 96x64, four solid colour quadrants. */
+    protected static final String FILE_WEBP = "image.webp";
+
+    /** Lossless WebP (RIFF/WEBP container, VP8L chunk), same 96x64 quadrant image. */
+    protected static final String FILE_WEBP_LOSSLESS = "image_lossless.webp";
+
+    protected static final int FILE_WEBP_WIDTH = 96;
+
+    protected static final int FILE_WEBP_HEIGHT = 64;
+
     protected static final String FILE_XLSX = "document.xlsx";
 
     protected static final String FILE_ZIP = "document.zip";

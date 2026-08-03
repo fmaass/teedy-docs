@@ -655,6 +655,13 @@
         <version>${com.twelvemonkeys.imageio.version}</version>
       </dependency>
 
+      <!-- WebP (decode only) -->
+      <dependency>
+        <groupId>com.twelvemonkeys.imageio</groupId>
+        <artifactId>imageio-webp</artifactId>
+        <version>${com.twelvemonkeys.imageio.version}</version>
+      </dependency>
+
       <!-- JPEG 2000 -->
       <dependency>
         <groupId>com.github.jai-imageio</groupId>
