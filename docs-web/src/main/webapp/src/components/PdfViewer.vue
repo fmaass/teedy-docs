@@ -689,14 +689,14 @@ onUnmounted(() => {
       <div v-else ref="containerRef" class="pdf-canvas-container" />
       <div class="pdf-nav">
         <template v-if="totalPages > 1">
-          <Button icon="pi pi-chevron-left" text size="small" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
+          <Button icon="pi pi-chevron-left" text size="small" severity="secondary" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
           <span class="pdf-page-info">{{ currentPage }} / {{ totalPages }}</span>
-          <Button icon="pi pi-chevron-right" text size="small" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
+          <Button icon="pi pi-chevron-right" text size="small" severity="secondary" :disabled="currentPage >= totalPages" @click="nextPage" :aria-label="t('ui.next_page')" />
         </template>
         <!-- Rotation persists, so only WRITE users see the controls (READ-only/share must not). -->
         <template v-if="persistable">
-          <Button icon="pi pi-replay" text size="small" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
-          <Button icon="pi pi-refresh" text size="small" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
+          <Button icon="pi pi-replay" text size="small" severity="secondary" class="pdf-rotate-btn" @click="rotateLeft" :aria-label="t('ui.rotate_left')" />
+          <Button icon="pi pi-refresh" text size="small" severity="secondary" class="pdf-rotate-btn" @click="rotateRight" :aria-label="t('ui.rotate_right')" />
         </template>
         <a v-if="downloadable" :href="src" download rel="noopener" class="pdf-open-btn" :title="t('download')" :aria-label="t('download')">
           <i class="pi pi-download" />
