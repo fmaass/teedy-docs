@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { computed, ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PrimeVue from 'primevue/config'
@@ -24,11 +24,21 @@ const brand = vi.hoisted(() => ({
   name: 'Teedy',
   logoUrl: null as string | null,
 }))
+// The live ref the mocked useBrand hands the component for the logo URL, re-seeded from
+// `brand.logoUrl` on every mount and exposed here so a test can change the brand URL AFTER
+// mount — the reactive path the AppLayout.vue:44 logo-retry watcher depends on (#255). The
+// pre-mount tests below set `brand.logoUrl` before mountLayout(), so seeding the ref at call
+// time keeps their behaviour identical.
+const brandRefs = vi.hoisted(() => ({ logoUrl: null as unknown as Ref<string | null> }))
 vi.mock('../composables/useThemeBranding', () => ({
-  useBrand: () => ({
-    brandName: computed(() => brand.name),
-    brandLogoUrl: computed(() => brand.logoUrl),
-  }),
+  useBrand: () => {
+    const logoUrl = ref(brand.logoUrl)
+    brandRefs.logoUrl = logoUrl
+    return {
+      brandName: computed(() => brand.name),
+      brandLogoUrl: logoUrl,
+    }
+  },
 }))
 
 // Authenticated, admin — AppLayout only renders its shell when !auth.isAnonymous.
@@ -226,5 +236,33 @@ describe('AppLayout — the instance brand', () => {
     // A broken-image glyph in the top-left corner is worse than no logo at all.
     expect(wrapper.find('.panel-brand-logo').exists()).toBe(false)
     expect(wrapper.find('.panel-brand-name').text()).toBe('Contoso Archive')
+  })
+
+  // Pins the logo-retry watcher at AppLayout.vue:44 (#255, advisory 1): after a logo load
+  // failure degrades to the text brand, REPLACING the logo (a fresh upload changes the
+  // cache-busted URL) must clear the broken flag so the new image gets a fresh chance to
+  // render. This is the reactive-replacement path the fallback test above does not cover.
+  // Removing `watch(brandLogoUrl, () => { logoBroken.value = false })` leaves the flag set,
+  // the replacement never renders, and `logo.exists()` below is false — the assertion goes
+  // red, which is what makes this a real test of the watcher rather than of the fallback.
+  it('retries the logo when the brand URL changes after a prior load failure (AppLayout.vue:44 watcher)', async () => {
+    mobile.matches = false
+    brand.name = 'Contoso Archive'
+    brand.logoUrl = '/api/theme/image/logo?v=42'
+    appInfo.value = { current_version: '3.8.2', footer_links: [] }
+    const wrapper = mountLayout()
+    await flushPromises()
+
+    // First logo fails to decode -> component falls back to the text brand.
+    await wrapper.find('img.panel-brand-logo').trigger('error')
+    expect(wrapper.find('.panel-brand-logo').exists()).toBe(false)
+
+    // A replacement logo is uploaded: brandLogoUrl changes on the live instance.
+    brandRefs.logoUrl.value = '/api/theme/image/logo?v=43'
+    await flushPromises()
+
+    const logo = wrapper.find('img.panel-brand-logo')
+    expect(logo.exists()).toBe(true)
+    expect(logo.attributes('src')).toBe('/api/theme/image/logo?v=43')
   })
 })

@@ -48,6 +48,25 @@ export default defineConfig({
     trace: 'retain-on-failure',
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
+    // Pin Chromium's rasterisation so the visual baselines churn less between regenerations
+    // (#267). Headless Chromium otherwise picks CPU-specific Skia code paths and sub-pixel LCD
+    // text positioning that vary run to run, so icon-dense screens (primeicons glyphs in the
+    // header actions, the default-password banner, the settings-hub cards) regenerated
+    // byte-differently — sub-threshold, absorbed by maxDiffPixelRatio, but noisy in a diff.
+    // These flags cut that churn markedly (measured ~13 -> ~10 byte-unstable of 28 across three
+    // regenerations); they do NOT make it byte-deterministic — headless Skia icon-glyph AA is
+    // not fully byte-stable, especially at the mobile DPR 2.75 — which is exactly why the gate
+    // keeps a pixel-ratio tolerance rather than demanding byte-equality. Rendering-only flags,
+    // inert for the functional specs; the baselines are generated WITH them, so CI (same config)
+    // compares like-for-like.
+    launchOptions: {
+      args: [
+        '--disable-skia-runtime-opts',
+        '--font-render-hinting=none',
+        '--force-color-profile=srgb',
+        '--disable-lcd-text',
+      ],
+    },
   },
   projects: [
     {

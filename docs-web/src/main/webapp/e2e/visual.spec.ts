@@ -60,6 +60,40 @@ async function freeze(page: Page): Promise<void> {
         VOLATILE_HIDE_CSS,
     })
     .catch(() => {})
+  // Icon glyphs come from the async `primeicons` @font-face (src/main.ts). A capture taken
+  // before that font finishes decoding paints the glyph as an empty box and shifts the label
+  // beside it, so any icon-bearing control — the pi-key button in DefaultPasswordBanner, the
+  // header action icons — rendered differently run to run and left ~half the baselines
+  // byte-unstable even after the DataTable-overlay fix (#267). Wait for every font to finish
+  // loading before the shot; document.fonts.ready settles once all in-flight faces resolve.
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  }).catch(() => {})
+  // Drop focus so a racy autofocus ring cannot be painted in one capture and missing in the
+  // next: PrimeVue's Dialog focuses its close button on show (focusOnShow), and the About
+  // dialog's ✕ ring appeared only sometimes. Real users still get focus rings — this only
+  // settles the screenshot to a single deterministic state.
+  await page.evaluate(() => {
+    ;(document.activeElement as HTMLElement | null)?.blur()
+  }).catch(() => {})
+}
+
+// Wait for the PrimeVue DataTable loading overlay to be GONE before capturing.
+// The document list renders `<DataTable :loading="isLoading">`; PrimeVue mounts a
+// `.p-datatable-mask` (a white overlay + spinner) via `v-if="loading"` while that flag
+// is set. setLocale() does a full `page.reload()`, so the post-reload mount refetches
+// the list from scratch and the mask flashes over the table; a `fullPage` screenshot
+// caught that transient overlay ~34% (en-desktop) / ~44% (en-mobile) of the time, and
+// the committed baseline was itself one of those overlay frames (#267). The list query
+// uses `placeholderData: keepPreviousData`, so `isLoading` is monotonic — true only for
+// the first fetch of a mount, false forever after — which means the mask, once detached,
+// never returns for that page. Waiting for it to detach is therefore a permanent settle,
+// not a race window. Mirrors move.spec.ts waiting `.p-dialog-mask` down to count 0.
+async function settleDataTable(page: Page): Promise<void> {
+  await expect(
+    page.locator('.p-datatable-mask'),
+    'the DataTable loading overlay detached (the list finished loading — #267)',
+  ).toHaveCount(0)
 }
 
 // --- Deterministic seed corpus ----------------------------------------------
@@ -144,7 +178,7 @@ async function ensureCorpus(request: APIRequestContext): Promise<void> {
 // The pixel-comparison block carries the `@visual` grep tag so CI can route it to the
 // OS that its committed `*-linux.png` baselines were generated on. Playwright baselines
 // are renderer/font-sensitive: the baselines here were produced in the
-// `mcr.microsoft.com/playwright:v1.61.1-jammy` container (Ubuntu 22.04 Jammy fonts),
+// `mcr.microsoft.com/playwright:v1.62.1-jammy` container (Ubuntu 22.04 Jammy fonts),
 // but the default host e2e run happens on the GitHub `ubuntu-latest` (Noble) runner,
 // whose different system fonts would make the pixel diffs fail. So:
 //   * the HOST run (scripts/e2e-run.sh, no CI-visual flag) EXCLUDES @visual
@@ -172,6 +206,7 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
         // across locales — a good locale-agnostic settle anchor.
         await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible()
         await expect(page.getByText('ACME invoice 2026-0042', { exact: true }).first()).toBeVisible()
+        await settleDataTable(page)
         await freeze(page)
         await expect(page).toHaveScreenshot(`document-list-${locale}.png`, { fullPage: true })
       })

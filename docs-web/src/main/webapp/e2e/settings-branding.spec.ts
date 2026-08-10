@@ -307,6 +307,32 @@ test.describe('Settings › Branding › the brand shown inside the app', () => 
     await expect(dialog.locator('.about-name')).toHaveText(APP_NAME)
   })
 
+  test('#57: saving the name in the Branding form updates the in-app brand live, without a reload (invalidateTheme)', async ({
+    page,
+  }) => {
+    // Start on the document list; the brand is the product default.
+    await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    await expect(await navBrand(page)).toHaveText('Teedy')
+    await closeNav(page)
+
+    // Rename through the REAL Branding form. Every hop here is a same-document SPA navigation
+    // (never page.reload()), so the running app and its staleTime:Infinity theme cache stay live.
+    // Saving the form is the path that calls invalidateTheme().
+    await gotoRouteReady(page, '/#/settings/branding', ROUTE_ROOT.settingsBranding)
+    await page.locator('#branding-app-name').fill(APP_NAME)
+    await page.getByRole('button', { name: 'Save' }).first().click()
+    await expect(page.getByText('Branding saved')).toBeVisible()
+
+    // Back to the list by SPA navigation — still no document reload. The in-app brand now reads
+    // the new name, proving the save pushed it live via invalidateTheme() rather than proving a
+    // reload picked it up. Without that invalidation the infinite-staleTime theme cache would
+    // still hold "Teedy" here and this would fail — the direct check the form test's tab-title
+    // assertion only covers indirectly (#255 advisory 3).
+    await gotoRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    await expect(await navBrand(page)).toHaveText(APP_NAME)
+    await closeNav(page)
+  })
+
   test('#57: a 30-character name ellipsizes instead of overflowing the brand row', async ({
     page,
     request,

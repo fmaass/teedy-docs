@@ -113,7 +113,7 @@ committed Linux baseline **fails loudly** ("missing snapshot" — Playwright's d
 so a new un-baselined screen is caught; the committed baselines make CI green.
 
 Generate/refresh the baselines with the official Playwright Docker image whose tag
-**matches the repo's `@playwright/test` version** (currently `1.61.1`), pointed at the
+**matches the repo's `@playwright/test` version** (currently `1.62.1`), pointed at the
 booted RC app. The Playwright container MUST join the app container's **network
 namespace** so the app is reachable as `http://localhost:8080` — Teedy's session cookie
 only sticks on a `localhost` origin, so via `host.docker.internal`/a container DNS name
@@ -127,7 +127,7 @@ the post-login `GET /api/user` comes back anonymous and the form login never com
     docker run --rm --ipc=host --network container:teedy-visual-app \
       -v "$PWD/docs-web/src/main/webapp":/work -w /work \
       -e PLAYWRIGHT_BASE_URL="http://localhost:8080" -e CI=1 \
-      mcr.microsoft.com/playwright:v1.61.1-jammy \
+      mcr.microsoft.com/playwright:v1.62.1-jammy \
       bash -lc "npm ci && npx playwright test visual.spec --update-snapshots"
     # 3. Commit ONLY e2e/visual.spec.ts-snapshots/*-linux.png
 

@@ -322,13 +322,17 @@ describe('useThemeBranding', () => {
 // uploaded logo had no consumer at all. useBrand is the single derivation all three now read,
 // so the fallback rules live in one tested place.
 describe('useBrand', () => {
-  it('reads the SHARED theme query key (no second fetch of /api/theme)', () => {
+  // #255 (advisory 2): this asserts the query CONFIGURATION — the shared key + infinite
+  // staleTime — not network deduplication itself. That config is precisely what lets vue-query
+  // serve useBrand and useThemeBranding from one cache entry and one request, but the single
+  // fetch is TanStack's same-key guarantee (a real QueryClient with a fetch spy would be needed
+  // to observe the request count, and this file mocks useQuery). The name is worded to match
+  // what is verified rather than overstating it.
+  it('configures the shared theme query key + infinite staleTime (so vue-query serves both consumers from one cache entry)', () => {
     useQueryMock.mockReturnValue({ data: ref(undefined) })
     useBrand()
     expect(useQueryMock).toHaveBeenCalledTimes(1)
     const opts = useQueryMock.mock.calls[0][0]
-    // Same key + same staleTime as useThemeBranding, so vue-query serves both consumers from
-    // ONE cache entry and one request.
     expect(opts.queryKey).toEqual(queryKeys.theme())
     expect(opts.staleTime).toBe(Infinity)
   })
