@@ -40,6 +40,10 @@ const emit = defineEmits<{
 const popover = ref()
 const tagSelect = ref()
 const pendingTag = ref<string | null>(null)
+// Mirrors the tag Select's filter text so the trailing icon can flip between a magnifier
+// (empty) and a clear × (has text) — #274. The Select owns the filter value; this only
+// tracks it through the `filter` event a keystroke or a programmatic clear both raise.
+const tagFilter = ref('')
 
 // Resolved through the router (not hand-built) so the hash-history prefix and any
 // future route change stay correct; empty when no document is bound.
@@ -85,6 +89,7 @@ function cancelPendingOpen() {
 
 async function show(event: Event) {
   pendingTag.value = null
+  tagFilter.value = ''
   // `currentTarget` is only live while the event is being dispatched — read the anchor now,
   // not after the await.
   const anchor = (event.currentTarget ?? event.target) as HTMLElement | null
@@ -174,6 +179,33 @@ function onSelect(tagId: string | null) {
   hide()
 }
 
+// The Select raises `filter` on every keystroke in its filter box; track the current text so
+// the trailing icon knows whether to offer a clear (#274).
+function onTagFilter(event: { value: string }) {
+  tagFilter.value = event.value ?? ''
+}
+
+// PrimeVue empties the filter itself when its overlay closes but raises no `filter` for that,
+// so re-sync here or a reopened Select would show a clear × over an empty box.
+function onTagSelectHide() {
+  tagFilter.value = ''
+}
+
+// Clear (×) for the tag filter (#274), matching the main search bar's clear affordance. The
+// filter input lives inside the Select's overlay; dispatching a native `input` on it drives
+// the Select's own onFilterChange — the option list re-filters and `filter` fires, so
+// tagFilter resets through the same path a keystroke takes. Focus returns to the field so the
+// next search can be typed straight away.
+function clearTagFilter() {
+  const input = tagSelect.value?.overlay?.querySelector(
+    'input.p-select-filter',
+  ) as HTMLInputElement | null
+  if (!input) return
+  input.value = ''
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.focus()
+}
+
 function onQuickAdd(tagId: string) {
   emit('addTag', tagId)
   hide()
@@ -233,7 +265,27 @@ defineExpose({ show, hide })
           class="tqm-select"
           :autoFilterFocus="false"
           @update:modelValue="onSelect"
-        />
+          @filter="onTagFilter"
+          @hide="onTagSelectHide"
+        >
+          <!-- Clear (×) for the tag filter (#274): the parity with the main search bar's
+               "Clear" the reporter asked for, shown only once something is typed. It lives in
+               the Select's header slot, NOT the filter's icon slot — PrimeVue wraps that icon
+               in aria-hidden, which would hide a focusable control from assistive tech. Here
+               it stays in the accessibility tree and reachable by keyboard. -->
+          <template #header>
+            <div v-if="tagFilter" class="tqm-filter-header">
+              <button
+                type="button"
+                class="tqm-filter-clear"
+                @click="clearTagFilter"
+                @mousedown.prevent
+              >
+                <i class="pi pi-times" aria-hidden="true" />{{ t('document.search_clear') }}
+              </button>
+            </div>
+          </template>
+        </Select>
         <span v-else class="tqm-empty">{{ t('ui.tag_menu.all_assigned') }}</span>
 
         <div v-if="quickAddTags.length" class="tqm-chips">
@@ -302,6 +354,34 @@ defineExpose({ show, hide })
 
 .tqm-select {
   width: 100%;
+}
+
+/* Clear (×) for the tag filter (#274), right-aligned above the search box like the main
+   search bar's "Clear". Only mounted while there is filter text to clear. */
+.tqm-filter-header {
+  display: flex;
+  justify-content: flex-end;
+}
+.tqm-filter-clear {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+.tqm-filter-clear:hover {
+  color: var(--p-text-color);
+}
+.tqm-filter-clear:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px var(--p-primary-color);
 }
 
 .tqm-open-link {

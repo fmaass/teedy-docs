@@ -91,6 +91,50 @@ test('right-click tag menu adds a tag by keyboard once its Select is opened (#17
     .toContain(tagId)
 })
 
+// #274 — the tag filter box gets a clear (×), the parity with the main search bar the
+// reporter asked for. It shows only once something is typed, empties the box in one click,
+// and leaves the caret in the field so the next search can be typed straight away.
+test('the right-click tag filter offers a clear (×) that empties it and keeps the caret (#274)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
+  const name = tagName()
+  const title = unique('tqm-clear-doc')
+  const tagId = await apiCreateTag(request, name)
+  cleanup.defer('delete the clear-filter tag', () => deleteTagApi(request, tagId))
+  const docId = await apiCreateDocument(request, title)
+  cleanup.defer('purge the clear-filter document', () => deleteDocApi(request, docId))
+
+  await gotoDocumentList(page)
+  const row = page.getByRole('row', {
+    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  })
+  await expect(row).toBeVisible()
+
+  await row.click({ button: 'right' })
+  await expect(page.locator('.p-popover')).toBeVisible()
+
+  await page.locator('.tqm-select').click()
+  const filter = page.locator('.p-select-overlay input.p-select-filter')
+  await expect(filter).toBeVisible()
+
+  // Empty box → just the magnifier, no clear affordance.
+  const clear = page.locator('.p-select-overlay .tqm-filter-clear')
+  await expect(clear).toHaveCount(0)
+
+  await filter.click()
+  await filter.fill(name.slice(0, 3))
+  await expect(filter).toHaveValue(name.slice(0, 3))
+  await expect(clear, 'a clear button appears once the filter has text').toBeVisible()
+
+  await clear.click()
+  await expect(filter, 'the clear empties the filter').toHaveValue('')
+  await expect(filter, 'the caret stays in the field for the next search').toBeFocused()
+  await expect(clear, 'the magnifier is back once the box is empty').toHaveCount(0)
+})
+
 // PADDING (both #213 tests): the document list only scrolls once it is longer than the
 // viewport, and an API-created fixture document rarely makes it so. Both tests REPLAY a
 // scroll, so they pad the page first — and they do it inside the SAME evaluate as the

@@ -81,17 +81,31 @@ const selectShow = vi.fn()
 
 // Stub Select so we can read the `options` it is handed without booting the full overlay;
 // expose an update button to simulate a selection, and a `show()` that records an imperative
-// open (which the component must no longer perform on popover show).
+// open (which the component must no longer perform on popover show). It also renders the
+// filter input and the `header` slot, and publishes its root as `overlay`, so the clear-×
+// wiring (#274) — which finds the filter input through `overlay` — is exercisable.
 const SelectStub = {
   props: ['options', 'modelValue'],
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'filter', 'hide'],
+  data() {
+    return { overlay: null as HTMLElement | null }
+  },
+  mounted(this: { $el: HTMLElement; overlay: HTMLElement | null }) {
+    // The real Select exposes its overlay root; the clear-× reaches the filter input through
+    // it, so the stub exposes the same handle over its own rendered root.
+    this.overlay = this.$el
+  },
   methods: {
     show() {
       selectShow()
     },
   },
   template:
-    '<div class="select-stub" :data-count="options.length"><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
+    '<div class="select-stub" :data-count="options.length">' +
+    '<slot name="header" />' +
+    '<input class="p-select-filter" @input="$emit(\'filter\', { value: $event.target.value })" />' +
+    '<button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button>' +
+    '</div>',
 }
 
 function mountMenu(
@@ -201,6 +215,39 @@ describe('TagQuickMenu', () => {
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
     await wrapper.find('.opt[data-id="t5"]').trigger('click')
     expect(wrapper.emitted('addTag')).toEqual([['t5']])
+  })
+
+  it('offers a clear (×) only once the tag filter has text, and empties it on click (#274)', async () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    const filter = wrapper.find('.select-stub input.p-select-filter')
+    expect(filter.exists()).toBe(true)
+    // Empty box → just the magnifier, no clear affordance.
+    expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
+
+    await filter.setValue('rec')
+    const clear = wrapper.find('.tqm-filter-clear')
+    expect(clear.exists(), 'a clear button appears once text is typed').toBe(true)
+    // A labelled button (its visible text is the accessible name), reusing the main search
+    // bar's clear label — the affordance the reporter compared against.
+    expect(clear.text()).toContain('document.search_clear')
+
+    await clear.trigger('click')
+    // The click empties the real filter input and the tracked text, so the trailing icon
+    // reverts to the magnifier.
+    expect((filter.element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
+  })
+
+  it('drops the clear (×) again when the Select closes with filter text still tracked (#274)', async () => {
+    // PrimeVue empties its filter on hide without raising `filter`; the component re-syncs on
+    // the Select's `hide` so a reopened Select never shows a clear × over an empty box.
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    await wrapper.find('.select-stub input.p-select-filter').setValue('rec')
+    expect(wrapper.find('.tqm-filter-clear').exists()).toBe(true)
+
+    wrapper.findComponent(SelectStub).vm.$emit('hide')
+    await flushPromises()
+    expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
   })
 
   it('shows the assigned tags with a remove affordance and emits removeTag', async () => {
