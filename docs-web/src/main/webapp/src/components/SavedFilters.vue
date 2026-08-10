@@ -389,6 +389,14 @@ function confirmDelete(filter: SavedFilterItem) {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  /* When a savable filter is active this group renders two labelled buttons ("Saved
+     filters" + "Save current"). The parent filter row pins its children at their natural
+     width so they wrap as whole units (#67), which would leave this two-button group
+     rigid and, at a very narrow width with long (e.g. German) labels, spilling past the
+     row. Capping it at the row width and letting its own buttons wrap keeps it on-screen
+     — the buttons stack instead of the group overflowing. */
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .saved-filters-list {

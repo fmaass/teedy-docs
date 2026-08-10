@@ -767,7 +767,21 @@ async function bulkDownload() {
 
 .wf-filter-row {
   display: flex;
+  /* The filter controls (the workflow/favorites toggles, saved-filters, and the
+     view-mode + page-size selects) are wider together than a phone-width bar. Without
+     wrapping, the row spilled past the viewport and scrolled sideways with the last
+     control clipped off the right edge, while the labelled buttons squeezed their text
+     onto two lines ("Saved filters" over two rows) (#67). Wrapping to a second row lets
+     each control keep its natural width and stay whole and on-screen; `flex-shrink: 0`
+     on the children stops a button shrinking its label instead of moving to the next
+     row. At desktop width the controls fit one row, so neither rule changes anything. */
+  flex-wrap: wrap;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.wf-filter-row > * {
+  flex-shrink: 0;
 }
 
 /* --- Bulk action toolbar --- */

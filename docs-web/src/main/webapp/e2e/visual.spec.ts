@@ -369,3 +369,42 @@ test.describe('German layout — no overflow (functional)', () => {
     }
   })
 })
+
+// --- #67: the document filter toolbar must fit its row (no horizontal overflow) ----
+// The filter toolbar (.wf-filter-row: the workflow/favorites toggles, saved-filters, and
+// the view-mode + page-size selects) overflowed a phone-width bar — the row scrolled
+// sideways with the last control clipped off the right edge, and the "Saved filters"
+// label wrapped onto two lines (reporter vmario89, #67). This is a geometry check,
+// locale-independent, run at BOTH the desktop and mobile projects: it FAILS at the mobile
+// viewport before the flex-wrap fix (the row's content is ~140px wider than its box) and
+// PASSES once the controls wrap to a second row instead of spilling.
+test.describe('Document filter toolbar — no horizontal overflow (#67)', () => {
+  test('the filter toolbar does not scroll sideways at any viewport', async ({ page }) => {
+    await gotoRaw(page, '/#/document')
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    const row = page.locator('.wf-filter-row')
+    await expect(row).toBeVisible()
+    // scrollWidth > clientWidth means the controls spill past the row's box and it scrolls
+    // horizontally — the clipped-control symptom. 1px tolerance for sub-pixel rounding.
+    const overflow = await row.evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(overflow, 'filter toolbar horizontal overflow (px)').toBeLessThanOrEqual(1)
+  })
+
+  // Guard for the two-button SavedFilters state: an active savable filter renders BOTH
+  // "Saved filters" and "Save current". Pinning the row's children at natural width (so
+  // they wrap as whole units) would leave that group rigid, and at a sub-phone width with
+  // long German labels it spilled the row (~35px) even though the default toolbar did not.
+  // The group now caps its width and wraps its own buttons. 320px is deliberately below the
+  // 393px mobile project so this fails at the narrow edge before the SavedFilters wrap fix.
+  test('the saved-filters group wraps rather than overflowing at 320px/de with a savable filter (#67)', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 780 })
+    await gotoRaw(page, '/#/document?search=probe')
+    await setLocale(page, 'de')
+    await page.waitForSelector('.wf-filter-row')
+    // Guard is only meaningful when the two-button state is actually rendered.
+    await expect(page.locator('.saved-filters button')).toHaveCount(2)
+    const row = page.locator('.wf-filter-row')
+    const overflow = await row.evaluate((el) => el.scrollWidth - el.clientWidth)
+    expect(overflow, 'filter toolbar overflow at 320px/de with a savable filter (px)').toBeLessThanOrEqual(1)
+  })
+})
