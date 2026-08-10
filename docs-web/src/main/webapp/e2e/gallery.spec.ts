@@ -323,6 +323,17 @@ test('a single click on a gallery card thumbnail opens the document and keeps th
   await expect(page).toHaveURL(new RegExp(`tags=${tagId}`))
   await expect(card(page, title)).toBeVisible()
 
+  // #235: the thumbnail image is pointer-transparent, so a real click lands on the
+  // interactive .card-thumb span instead of starting a native image-drag that swallows the
+  // click. A bare <img> is draggable, so on real hardware the tiny movement in an ordinary
+  // click ate the click on cards WITH a preview (PDF/JPEG) while icon cards, which have no
+  // <img>, still opened — reporter vmario89. A regression re-enabling pointer events here
+  // brings that back.
+  await expect(
+    cardThumb(page, title).locator('img'),
+    'the thumbnail image is pointer-transparent (#235)',
+  ).toHaveCSS('pointer-events', 'none')
+
   // THE ASK: one plain click on the thumbnail region — no double-click, no slide-over
   // "Open" hop — lands on the document's content view.
   await cardThumb(page, title).click()

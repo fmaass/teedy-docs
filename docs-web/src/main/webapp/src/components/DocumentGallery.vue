@@ -276,6 +276,13 @@ function onThumbClick(event: MouseEvent, doc: DocumentListItem) {
   height: 100%;
   object-fit: cover;
   transition: transform 0.15s ease;
+  /* The thumbnail image is decorative; the .card-thumb span owns the click that opens the
+     document (#235). A bare <img> is draggable, and on real hardware the tiny pointer movement
+     in an ordinary click starts a native image-drag that swallows the click — so cards with a
+     real preview (PDF/JPEG) would not open while icon cards, which have no <img>, did (reporter
+     vmario89, #235). Making the image pointer-transparent routes every click straight to the
+     span and removes the drag entirely; the hover cue still comes from the span. */
+  pointer-events: none;
 }
 .card-thumb:hover img {
   transform: scale(1.04);
