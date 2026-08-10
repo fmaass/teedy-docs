@@ -107,26 +107,18 @@ test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, 
   const popover = page.locator('.p-popover')
   await expect(popover).toBeVisible()
 
-  // The popover opens the tag Select's overlay ITSELF (#171 TagQuickMenu.onPopoverShow →
-  // tagSelect.show()), so the overlay is already up by the time the popover is visible.
-  const overlay = page.locator('.p-select-overlay')
-
-  // Add the tag: prefer its quick-add chip; else pick it from the search Select. Which
-  // branch runs is suite-state-dependent (the chips are the top-5 MOST-USED assignable
-  // tags), so both have to be sound.
+  // The tag Select no longer auto-opens on popover show (#234 follow-up): the menu presents
+  // as a single panel with the Select closed. Add the tag: prefer its quick-add chip; else
+  // open the Select and pick it from the search list. Which branch runs is suite-state-
+  // dependent (the chips are the top-5 MOST-USED assignable tags), so both have to be sound.
   const chip = popover.locator('.tqm-chip', { hasText: tagName })
   if (await chip.count()) {
-    // The teleported option panel is positioned under the Select trigger, i.e. over the
-    // chip row — toggle it shut via the trigger before clicking a chip underneath it.
-    // Asserting it is open FIRST makes the toggle deterministic: a click that arrived
-    // before the auto-open would open the panel instead of closing it.
-    await expect(overlay).toBeVisible()
-    await popover.locator('.tqm-select').click()
-    await expect(overlay).toBeHidden()
+    // The chip row is unobscured now — no overlay opens over it — so click the chip directly.
     await chip.first().click()
   } else {
-    // NO click on .tqm-select here: the overlay is already open, and clicking the trigger
-    // would toggle it CLOSED (the double-open the spec used to depend on).
+    // Open the tag Select, then filter to the target and pick it.
+    await popover.locator('.tqm-select').click()
+    const overlay = page.locator('.p-select-overlay')
     const filter = overlay.locator('input.p-select-filter')
     await expect(filter).toBeVisible()
     await filter.fill(tagName)

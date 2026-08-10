@@ -439,11 +439,12 @@ for (const view of RIGHT_CLICK_VIEWS) {
   })
 }
 
-// The other side of "outside": the menu opens its tag Select itself (#171), and PrimeVue
-// teleports that Select's overlay to <body> — so the filter the user types in is NOT a DOM
-// descendant of the menu. Treating it as outside would make right-clicking the filter (the
-// gesture that reaches "paste") take the whole menu away, which is why the dismissal counts
-// that overlay as part of the menu. One view is enough: it is the same Select either way.
+// The other side of "outside": the user opens the menu's tag Select (#234 follow-up: it no
+// longer auto-opens), and PrimeVue teleports that Select's overlay to <body> — so the filter
+// the user types in is NOT a DOM descendant of the menu. Treating it as outside would make
+// right-clicking the filter (the gesture that reaches "paste") take the whole menu away, which
+// is why the dismissal counts that overlay as part of the menu. One view is enough: it is the
+// same Select either way.
 test('a right-click in the menu\'s own tag filter leaves the menu open (#234)', async ({
   page,
   request,
@@ -467,8 +468,10 @@ test('a right-click in the menu\'s own tag filter leaves the menu open (#234)', 
   await surface.click({ button: 'right' })
   const menu = quickTagMenu(page)
   await expect(menu).toBeVisible()
+  // The tag Select no longer auto-opens (#234 follow-up); open it with a click first.
+  await menu.locator('.tqm-select').click()
   const filter = page.locator('.p-select-overlay input.p-select-filter')
-  await expect(filter, 'the menu opened its tag Select itself (#171)').toBeVisible()
+  await expect(filter, 'the menu opened its tag Select on click (#171)').toBeVisible()
   // REALNESS: the filter really is outside the menu in the DOM, so this is the carve-out
   // being exercised and not a containment check that would have passed anyway.
   const teleported = await page.evaluate(() => {

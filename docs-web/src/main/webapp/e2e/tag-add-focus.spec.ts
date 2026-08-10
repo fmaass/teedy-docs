@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type ConsoleMessage } from './fixtures'
+import { test, expect, type APIRequestContext } from './fixtures'
 import {
   unique,
   uniqueTag,
@@ -56,7 +56,7 @@ async function keyboardAddTag(page: import('@playwright/test').Page, name: strin
   await page.keyboard.press('Enter')
 }
 
-test('right-click tag menu focuses the filter and adds a tag by keyboard alone (#171)', async ({ page, request, cleanup }) => {
+test('right-click tag menu adds a tag by keyboard once its Select is opened (#171/#234)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
   const name = tagName()
   const title = unique('tqm-focus-doc')
@@ -76,11 +76,18 @@ test('right-click tag menu focuses the filter and adds a tag by keyboard alone (
   await row.click({ button: 'right' })
   await expect(page.locator('.p-popover')).toBeVisible()
 
-  await expectFilterFocused(page)
+  // The tag Select no longer auto-opens on the right-click menu (#234 follow-up): the menu
+  // presents as a single panel. Open the Select with a click and put the caret in its filter,
+  // then add the tag by keyboard alone from there.
+  await page.locator('.tqm-select').click()
+  const filter = page.locator('.p-select-overlay input.p-select-filter')
+  await expect(filter).toBeVisible()
+  await filter.click()
+  await expect(filter, 'the tag filter takes the caret once the Select is opened').toBeFocused()
 
   await keyboardAddTag(page, name)
   await expect
-    .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard-only quick menu' })
+    .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard quick menu' })
     .toContain(tagId)
 })
 
@@ -173,10 +180,15 @@ test('a scroll finished BEFORE the right-click does not dismiss the quick menu (
     .toBe(true)
 
   // The verdict is read off a POSITIVE end state rather than waited out on a timer: a menu
-  // that survived goes on to complete its open and land focus in the tag filter (#171), and
-  // a dismissed one never gets there. Asserting only "a .p-popover exists" would not be
-  // enough — a dismissed popover is still in the DOM while it plays its leave transition.
-  await expectFilterFocused(page)
+  // that survived is live and interactive — its tag Select opens on a click and mounts an
+  // overlay — where a dismissed one never gets there. Asserting only "a .p-popover exists"
+  // would not be enough: a dismissed popover is still in the DOM while it plays its leave
+  // transition. (The menu no longer auto-opens the Select on show — #234 follow-up.)
+  await page.locator('.tqm-select').click()
+  await expect(
+    page.locator('.p-select-overlay'),
+    'the surviving menu opened its tag Select on click',
+  ).toBeVisible()
   await expect(
     page.locator('.p-popover'),
     'the quick menu survived a scroll that finished before it opened',
@@ -226,97 +238,6 @@ test('a scroll made while the quick menu is open still dismisses it (#213)', asy
     `the page actually scrolled under the open menu (scrollable range ${scrolled.range}px)`,
   ).toBe(true)
   await expect(page.locator('.p-popover'), 'the live scroll dismissed the quick menu').toHaveCount(0)
-})
-
-// #204 — the auto-open (#171) must not throw when the popover is dismissed while the
-// Select's overlay is coming up.
-//
-// MECHANISM: the quick menu's popover dismisses on any scroll of `.app-content` (the app's
-// page scroller) — that is what its ConnectedOverlayScrollHandler listens for. When such a
-// scroll is delivered while the popover is opening its Select, the popover tears that Select
-// down while PrimeVue 4.5.5 still has an unguarded `setTimeout(() => focus(this.$refs
-// .filterInput.$el), 1)` in flight — the timer then dereferences a null ref and the page
-// throws `TypeError: Cannot read properties of null (reading '$el')`.
-//
-// The popover CLOSING is expected product behaviour; the defect is console-only, so the
-// assertion here is "nothing threw", which no other spec in this file makes.
-//
-// DETERMINISM: in the wild the dismissal only wins that race on a loaded machine, which is
-// precisely why it surfaced as a flake. Hoping for the interleaving would make this spec as
-// load-sensitive as the bug. Instead a MutationObserver fires a `scroll` on `.app-content`
-// the instant the Select's overlay is inserted — the same handler, the same dismissal,
-// landing inside the same window the focus timer is armed in, on every run. That is still a
-// scroll delivered AFTER the popover opened, so #213's fix (arming the popover a rendering
-// step later, so a scroll from BEFORE the open can no longer reach it) leaves it intact.
-test('a scroll dismissal during the quick-menu auto-open raises no page error (#204)', async ({
-  page,
-  request,
-  cleanup,
-}) => {
-  test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
-  const pageErrors: string[] = []
-  page.on('pageerror', (err) => pageErrors.push(`pageerror: ${err.message}`))
-  page.on('console', (msg: ConsoleMessage) => {
-    if (msg.type() === 'error') pageErrors.push(`console: ${msg.text()}`)
-  })
-
-  // At least one assignable tag, or the Select (and with it the whole race) is absent.
-  const name = tagName()
-  const title = unique('tqm-dismiss-doc')
-  const tagId = await apiCreateTag(request, name)
-  cleanup.defer('delete the dismissal-race tag', () => deleteTagApi(request, tagId))
-  const docId = await apiCreateDocument(request, title)
-  cleanup.defer('purge the dismissal-race document', () => deleteDocApi(request, docId))
-
-  await gotoDocumentList(page)
-  const row = page.getByRole('row', {
-    name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-  })
-  await expect(row).toBeVisible()
-
-  await page.evaluate(() => {
-    const scroller = document.querySelector('.app-content')
-    const observer = new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of Array.from(record.addedNodes)) {
-          if (node instanceof HTMLElement && node.classList.contains('p-select-overlay')) {
-            observer.disconnect()
-            // The real dismissal arrives as a `scroll` event on this element — a scroll the
-            // page had already queued, delivered once the popover's handler is bound.
-            // Dispatching one directly reproduces that wakeup at the one instant that
-            // matters, without depending on machine load or popover geometry.
-            scroller?.dispatchEvent(new Event('scroll'))
-            ;(window as unknown as { __tqmOverlayDismissed?: boolean }).__tqmOverlayDismissed = true
-            return
-          }
-        }
-      }
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
-  })
-
-  await row.click({ button: 'right' })
-
-  // REALNESS: the race is only exercised if the Select's overlay actually mounted (the
-  // arming fired) AND the dismissal actually reached the popover. Without both, "no page
-  // error" would be vacuously true.
-  await expect
-    .poll(
-      () =>
-        page.evaluate(
-          () =>
-            (window as unknown as { __tqmOverlayDismissed?: boolean }).__tqmOverlayDismissed ===
-            true,
-        ),
-      { message: 'the tag Select overlay mounted and the scroll dismissal was armed' },
-    )
-    .toBe(true)
-  await expect(page.locator('.p-popover'), 'the scroll dismissed the quick menu').toHaveCount(0)
-
-  // The focus timer is armed for 1ms but only runs once the thread is free; give it — and
-  // any other deferred work the teardown left behind — room to land before asserting.
-  await page.waitForTimeout(1000)
-  expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toEqual([])
 })
 
 // The same exposure as the right-click test above, reached through the slide-over instead of

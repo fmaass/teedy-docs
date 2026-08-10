@@ -74,36 +74,24 @@ const PopoverStub = {
   },
 }
 
-// Records the auto-open (#171) the component performs on the Select through its ref.
+// Records any imperative open of the Select. The right-click menu must NOT auto-open it on
+// popover show (#234 follow-up) — this stays uncalled, so a regression that re-adds the
+// auto-open trips the "does not auto-open" assertion below.
 const selectShow = vi.fn()
 
-// Whether the stubbed Select mounts its filter input when opened. Set false to model the
-// overlay never coming up (a popover dismissed mid-open), which is the state the #204
-// focus step must survive.
-let selectMountsFilterInput = true
-
-// Stands in for the InputText the real Select exposes as `$refs.filterInput` — a
-// component ref, so the app reaches its element through `.$el` exactly as in production.
-const FilterInputStub = { template: '<input class="stub-filter-input" />' }
-
 // Stub Select so we can read the `options` it is handed without booting the full overlay;
-// expose an update button to simulate a selection, and a `show()` matching the real
-// component's imperative open (which mounts the filter one tick later).
+// expose an update button to simulate a selection, and a `show()` that records an imperative
+// open (which the component must no longer perform on popover show).
 const SelectStub = {
   props: ['options', 'modelValue'],
   emits: ['update:modelValue'],
-  components: { FilterInputStub },
-  data() {
-    return { opened: false }
-  },
   methods: {
-    show(this: { opened: boolean }) {
+    show() {
       selectShow()
-      this.opened = selectMountsFilterInput
     },
   },
   template:
-    '<div class="select-stub" :data-count="options.length"><FilterInputStub v-if="opened" ref="filterInput" /><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
+    '<div class="select-stub" :data-count="options.length"><button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button></div>',
 }
 
 function mountMenu(
@@ -129,7 +117,6 @@ beforeEach(() => {
   selectShow.mockClear()
   popoverShow.mockClear()
   popoverHide.mockClear()
-  selectMountsFilterInput = true
 })
 
 // Resolves after the animation-frame callbacks of one rendering update — the point the
@@ -234,8 +221,8 @@ describe('TagQuickMenu', () => {
     expect(link.attributes('target')).toBe('_blank')
     expect(link.attributes('rel')).toContain('noopener')
     expect(link.text()).toContain('ui.open_in_new_tab')
-    // It must precede the Select: the Select's overlay auto-opens on popover show
-    // (#171) and would otherwise cover an item placed below it.
+    // It must precede the Select: the Select's overlay opens downward and would otherwise
+    // cover an item placed below it once the user opens it.
     const html = wrapper.html()
     expect(html.indexOf('tqm-open-link')).toBeLessThan(html.indexOf('select-stub'))
   })
@@ -245,31 +232,17 @@ describe('TagQuickMenu', () => {
     expect(wrapper.find('a.tqm-open-link').exists()).toBe(false)
   })
 
-  it('opens the tag select on popover show and puts focus in its filter itself (#171, #204)', async () => {
-    // The focus is the component's own job now, not the Select's `autoFilterFocus` —
-    // PrimeVue's version of it fires from an unguarded timer that throws when the popover
-    // is dismissed first.
+  it('does not auto-open the tag select or steal focus on popover show (#234 follow-up)', async () => {
+    // The reporter read the auto-opened Select overlay as a second floating panel under the
+    // popover (#234). The menu now presents as a single panel: `show` arms only the outside-
+    // right-click dismissal, and the tag Select opens on a click. (The slide-over keeps its
+    // own auto-focus — a separate surface, covered in tag-add-focus.spec.ts.)
     const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
     const wrapper = mountMenu()
     wrapper.findComponent(PopoverStub).vm.$emit('show')
     await flushPromises()
-    expect(selectShow).toHaveBeenCalledTimes(1)
-    expect(focusSpy).toHaveBeenCalledTimes(1)
-    expect(focusSpy.mock.instances[0]).toBe(wrapper.find('input.stub-filter-input').element)
-    focusSpy.mockRestore()
-  })
-
-  it('reaches for no filter at all when the overlay never came up (#204)', async () => {
-    // What a mid-open dismissal leaves behind: the Select is opened but its overlay (and
-    // filter input) is gone by the time the focus step runs. It must skip, not throw.
-    selectMountsFilterInput = false
-    const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
-    const wrapper = mountMenu()
-    wrapper.findComponent(PopoverStub).vm.$emit('show')
-    await flushPromises()
-    expect(selectShow).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('input.stub-filter-input').exists()).toBe(false)
-    expect(focusSpy).not.toHaveBeenCalled()
+    expect(selectShow, 'the Select must not auto-open on popover show').not.toHaveBeenCalled()
+    expect(focusSpy, 'nothing steals focus on popover show').not.toHaveBeenCalled()
     focusSpy.mockRestore()
   })
 

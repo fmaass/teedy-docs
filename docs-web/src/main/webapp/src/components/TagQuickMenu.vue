@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
@@ -168,32 +168,6 @@ function unbindOutsideContextMenu() {
 // A menu unmounted while open plays no leave transition, so `hide` never arrives.
 onBeforeUnmount(unbindOutsideContextMenu)
 
-// Opening the Select on the popover's `show` gives keyboard tag entry with no click
-// (#171) — the filter only takes focus once that overlay is up. No-op when every tag is
-// already assigned (no Select rendered).
-//
-// The focus is landed HERE instead of by the Select's own `autoFilterFocus` (#204).
-// PrimeVue 4.5.5 defers that focus by one unguarded timer —
-// `setTimeout(() => focus(this.$refs.filterInput.$el), 1)` in `onOverlayEnter` — and any
-// scroll of `.app-content` delivered inside that window dismisses the popover, which is
-// what the Popover's scroll handler does. When the dismissal wins that 1 ms race the Select is
-// already unmounted and the timer throws `Cannot read properties of null` into the
-// console. Focusing from here puts every hop behind `?.`, so a popover that goes away
-// mid-open simply skips the focus instead of throwing. The popover closing is the
-// expected outcome of that scroll either way.
-async function onPopoverShow() {
-  // Before any await: the menu is on screen from this moment, so the outside-right-click
-  // dismissal has to be armed from this moment too (#234).
-  bindOutsideContextMenu()
-  await nextTick()
-  tagSelect.value?.show()
-  // The overlay — and with it the filter input — mounts a tick later; either can already
-  // be gone if the popover was dismissed in between.
-  await nextTick()
-  const filterInput = tagSelect.value?.$refs?.filterInput?.$el as HTMLElement | undefined
-  filterInput?.focus()
-}
-
 function onSelect(tagId: string | null) {
   if (!tagId) return
   emit('addTag', tagId)
@@ -213,18 +187,24 @@ defineExpose({ show, hide })
 </script>
 
 <template>
+  <!-- On show the menu only arms the outside-right-click dismissal (#234). It used to also
+       open the tag Select and focus its filter for no-click keyboard entry (#171/#204), but
+       that auto-opened overlay drew as a second floating panel under the popover and the
+       reporter read the pair as "two menus" (#234 follow-up). The Select now opens on a
+       click, so the right-click menu presents as a single panel; the slide-over keeps its
+       own auto-focus, which is correct in that context. -->
   <Popover
     ref="popover"
     class="tag-quick-menu"
-    @show="onPopoverShow"
+    @show="bindOutsideContextMenu"
     @hide="unbindOutsideContextMenu"
   >
     <div class="tqm-body">
       <!-- OPEN IN NEW TAB (#194). Right-click is claimed by this popover, so the
            browser's own "Open link in new tab" is out of reach on the surfaces that
            raise it; this is the explicit replacement. It sits ABOVE the ADD section
-           deliberately — the Select's overlay auto-opens on popover show (#171) and
-           would cover anything placed below it. -->
+           deliberately — the Select's overlay opens downward and would cover anything
+           placed below it once the user opens it. -->
       <div v-if="document" class="tqm-section">
         <a
           class="tqm-open-link"
