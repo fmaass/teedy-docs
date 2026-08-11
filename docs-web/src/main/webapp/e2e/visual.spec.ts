@@ -615,3 +615,47 @@ test.describe('Rows-per-page control wraps to its own row on narrow viewports (#
     }
   })
 })
+
+// --- #67: the filter-toolbar controls render at ONE height -----------------------------
+// Follow-up to #67 (vmario89): the workflow/favourites ToggleButtons carry size="small"
+// (~38px) but the view-mode SelectButton and the rows-per-page Select rendered at PrimeVue's
+// default (~44px), so the row read as two mismatched heights. Levelling them (size="small" on
+// the two selects) is the fix; this pins that they render within a couple of pixels of the
+// small ToggleButton reference at BOTH viewports, so a future control added without size="small"
+// reintroducing the mismatch fails here.
+test.describe('Document filter toolbar — control heights are level (#67)', () => {
+  test('the view-mode and rows-per-page selects match the small toggle-button height', async ({
+    page,
+  }) => {
+    await gotoRaw(page, '/#/document')
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    const row = page.locator('.wf-filter-row')
+    await expect(row).toBeVisible()
+    await expect(row.locator('.p-togglebutton').first()).toBeVisible()
+    await expect(row.locator('.view-mode-toggle')).toBeVisible()
+    await expect(row.locator('.per-page-select')).toBeVisible()
+
+    // One atomic read at a single layout so nothing shifts between measurements.
+    const h = await row.evaluate((el) => {
+      const height = (target: Element | null) => (target ? target.getBoundingClientRect().height : null)
+      return {
+        toggle: height(el.querySelector('.p-togglebutton')),
+        selectButton: height(el.querySelector('.view-mode-toggle')),
+        pageSize: height(el.querySelector('.per-page-select')),
+      }
+    })
+    expect(h.toggle, 'toggle button has a height').not.toBeNull()
+    expect(h.selectButton, 'view-mode SelectButton has a height').not.toBeNull()
+    expect(h.pageSize, 'rows-per-page Select has a height').not.toBeNull()
+
+    // 2px tolerance for sub-pixel rounding; the pre-fix gap was ~6px (default vs small).
+    expect(
+      Math.abs(h.selectButton! - h.toggle!),
+      `view-mode SelectButton (${h.selectButton}px) vs small toggle (${h.toggle}px)`,
+    ).toBeLessThanOrEqual(2)
+    expect(
+      Math.abs(h.pageSize! - h.toggle!),
+      `rows-per-page Select (${h.pageSize}px) vs small toggle (${h.toggle}px)`,
+    ).toBeLessThanOrEqual(2)
+  })
+})
