@@ -77,6 +77,9 @@ const MAX_LIVE_PAGES = 6
 const SCAN_RADIUS = 4
 
 let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null
+// pdf.js 6 removed PDFDocumentProxy.destroy(); teardown goes through the loading task, whose
+// destroy() tears down the document and its worker. Tracked alongside pdfDoc for that purpose.
+let pdfLoadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null
 
 // DOCUMENT-lifecycle generation: bumped by a load (src change) and by unmount, NOT by an
 // individual render. Every async step re-validates it after an await, so an operation
@@ -153,20 +156,23 @@ async function loadPdf() {
   defaultAspect.value = DEFAULT_PAGE_ASPECT
 
   try {
-    if (pdfDoc) {
-      pdfDoc.destroy()
+    if (pdfLoadingTask) {
+      pdfLoadingTask.destroy()
+      pdfLoadingTask = null
       pdfDoc = null
     }
 
-    const loadingTask = pdfjsLib.getDocument(props.src)
+    const loadingTask = pdfjsLib.getDocument({ url: props.src })
     const doc = await loadingTask.promise
     // A newer load started (src changed) or the viewer unmounted while getDocument was in
-    // flight: abandon this stale one — destroy its document and touch no state.
+    // flight: abandon this stale one — destroy its loading task (tearing down the document)
+    // and touch no state.
     if (gen !== docGeneration) {
-      doc.destroy()
+      loadingTask.destroy()
       return
     }
     pdfDoc = doc
+    pdfLoadingTask = loadingTask
     totalPages.value = pdfDoc.numPages
     currentPage.value = 1
     rotation.value = props.initialRotation
@@ -655,7 +661,7 @@ onUnmounted(() => {
   docGeneration++
   cancelAllRenders()
   teardownContinuous()
-  if (pdfDoc) pdfDoc.destroy()
+  if (pdfLoadingTask) pdfLoadingTask.destroy()
 })
 </script>
 

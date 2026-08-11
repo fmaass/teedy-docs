@@ -3,7 +3,7 @@ import { ref, shallowRef, computed, watch, nextTick, onBeforeUnmount } from 'vue
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import { useQueryClient } from '@tanstack/vue-query'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, PDFDocumentLoadingTask } from 'pdfjs-dist'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
@@ -75,14 +75,18 @@ const initialOrder = ref<Array<{ source: number; rotate: number }>>([])
 // The loaded document, shared by every thumbnail. shallowRef: a PDFDocumentProxy is a large
 // non-plain object that must not be made deeply reactive.
 const pdfDoc = shallowRef<PDFDocumentProxy | null>(null)
+// The loading task backing pdfDoc: pdf.js 6 removed PDFDocumentProxy.destroy(), so teardown
+// goes through the task, whose destroy() tears down the document and its worker.
+let pdfLoadingTask: PDFDocumentLoadingTask | null = null
 const listRef = ref<HTMLElement>()
 let dragIndex: number | null = null
 
 const gen = createGeneration()
 
 function destroyDoc() {
-  if (pdfDoc.value) {
-    pdfDoc.value.destroy()
+  if (pdfLoadingTask) {
+    pdfLoadingTask.destroy()
+    pdfLoadingTask = null
     pdfDoc.value = null
   }
 }
@@ -109,9 +113,10 @@ async function load() {
 
     const pdfjs = await loadPdfjs()
     if (!gen.isCurrent(myGen)) return
-    const doc = await pdfjs.getDocument(getFileUrl(props.fileId)).promise
+    const loadingTask = pdfjs.getDocument({ url: getFileUrl(props.fileId) })
+    const doc = await loadingTask.promise
     if (!gen.isCurrent(myGen)) {
-      doc.destroy()
+      loadingTask.destroy()
       return
     }
     // Seed each page's rotation from its INTRINSIC pdf.js orientation (an absolute angle) so the
@@ -122,10 +127,11 @@ async function load() {
       Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1)),
     )
     if (!gen.isCurrent(myGen)) {
-      doc.destroy()
+      loadingTask.destroy()
       return
     }
     pdfDoc.value = doc
+    pdfLoadingTask = loadingTask
     const items: PageItem[] = proxies.map((page, i) => ({
       key: nextKey(),
       source: i,

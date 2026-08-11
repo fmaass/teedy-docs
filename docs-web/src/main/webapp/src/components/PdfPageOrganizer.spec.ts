@@ -8,12 +8,15 @@ const getPageMock = vi.fn(async () => ({
   render: () => ({ promise: Promise.resolve() }),
 }))
 const destroyMock = vi.fn()
-const getDocumentMock = vi.fn((_src: string) => ({
-  promise: Promise.resolve({ numPages: 3, getPage: getPageMock, destroy: destroyMock }),
+// pdf.js 6: getDocument takes a params object and returns a loading task whose destroy()
+// tears down the document (PDFDocumentProxy.destroy() was removed).
+const getDocumentMock = vi.fn((_params: { url: string }) => ({
+  promise: Promise.resolve({ numPages: 3, getPage: getPageMock }),
+  destroy: destroyMock,
 }))
 vi.mock('pdfjs-dist', () => ({
   GlobalWorkerOptions: {},
-  getDocument: (...args: unknown[]) => getDocumentMock(...(args as [string])),
+  getDocument: (...args: unknown[]) => getDocumentMock(...(args as [{ url: string }])),
 }))
 
 const getFileVersionsMock = vi.fn(async () => [
@@ -100,8 +103,9 @@ beforeEach(() => {
     getViewport: () => ({ width: 200, height: 200 }),
     render: () => ({ promise: Promise.resolve() }),
   }))
-  getDocumentMock.mockImplementation((_src: string) => ({
-    promise: Promise.resolve({ numPages: 3, getPage: getPageMock, destroy: destroyMock }),
+  getDocumentMock.mockImplementation((_params: { url: string }) => ({
+    promise: Promise.resolve({ numPages: 3, getPage: getPageMock }),
+    destroy: destroyMock,
   }))
   getFileVersionsMock.mockImplementation(async () => [
     { id: 'f1', name: 'doc.pdf', version: 2, mimetype: 'application/pdf', create_date: 0 },
@@ -119,7 +123,7 @@ describe('PdfPageOrganizer', () => {
     await openDialog(wrapper)
 
     expect(getFileVersionsMock).toHaveBeenCalledWith('f1')
-    expect(getDocumentMock).toHaveBeenCalledWith('api/file/f1/data')
+    expect(getDocumentMock).toHaveBeenCalledWith({ url: 'api/file/f1/data' })
     expect(sources(wrapper)).toEqual(['0', '1', '2'])
     expect(wrapper.findAll('.thumb').map((t) => t.attributes('data-position'))).toEqual(['1', '2', '3'])
   })
@@ -221,7 +225,10 @@ describe('PdfPageOrganizer', () => {
   })
 
   it('shows a load-error state and reloads on retry', async () => {
-    getDocumentMock.mockImplementationOnce(() => ({ promise: Promise.reject(new Error('boom')) }))
+    getDocumentMock.mockImplementationOnce(() => ({
+      promise: Promise.reject(new Error('boom')),
+      destroy: destroyMock,
+    }))
     const wrapper = await mountAndOpen()
     expect(wrapper.find('.error-state').exists()).toBe(true)
     expect(wrapper.find('[data-test="organizer-grid"]').exists()).toBe(false)

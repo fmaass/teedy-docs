@@ -70,8 +70,9 @@ const getDocumentMock = vi.fn(() => ({
   promise: Promise.resolve({
     numPages: 3,
     getPage: getPageMock,
-    destroy: vi.fn(),
   }),
+  // pdf.js 6: destroy() lives on the loading task, not the document proxy.
+  destroy: vi.fn(),
 }))
 
 vi.mock('pdfjs-dist', () => ({
@@ -373,7 +374,8 @@ describe('PdfViewer — original-URL control is Download-only (#144)', () => {
     getDocumentMock
       .mockReturnValueOnce({ promise: new Promise((_resolve, reject) => (rejectA = reject)) })
       .mockReturnValueOnce({
-        promise: Promise.resolve({ numPages: 2, getPage: getPageMock, destroy: vi.fn() }),
+        promise: Promise.resolve({ numPages: 2, getPage: getPageMock }),
+        destroy: vi.fn(),
       })
 
     const wrapper = mountViewer('blob:A')
@@ -404,8 +406,10 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     const destroy = vi.fn(() => {
       if (opts.rejectOnDestroy) settle?.reject(new Error('document destroyed'))
     })
+    // pdf.js 6: destroy() is on the loading task and tears down the document it resolved to.
+    const doc = { numPages: opts.numPages ?? 1, getPage }
     return {
-      doc: { numPages: opts.numPages ?? 1, getPage, destroy },
+      task: { promise: Promise.resolve(doc), destroy },
       getPage,
       resolvePage: (p: unknown) => settle?.resolve(p),
     }
@@ -416,8 +420,8 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     const a = controllableDoc({ rejectOnDestroy: true })
     const bDoc = { numPages: 2, getPage: getPageMock, destroy: vi.fn() }
     getDocumentMock
-      .mockReturnValueOnce({ promise: Promise.resolve(a.doc) })
-      .mockReturnValueOnce({ promise: Promise.resolve(bDoc) })
+      .mockReturnValueOnce(a.task)
+      .mockReturnValueOnce({ promise: Promise.resolve(bDoc), destroy: vi.fn() })
 
     const wrapper = mountViewer('blob:A')
     await flushPromises()
@@ -438,8 +442,8 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     const a = controllableDoc()
     const bDoc = { numPages: 2, getPage: getPageMock, destroy: vi.fn() }
     getDocumentMock
-      .mockReturnValueOnce({ promise: Promise.resolve(a.doc) })
-      .mockReturnValueOnce({ promise: Promise.resolve(bDoc) })
+      .mockReturnValueOnce(a.task)
+      .mockReturnValueOnce({ promise: Promise.resolve(bDoc), destroy: vi.fn() })
 
     const wrapper = mountViewer('blob:A')
     await flushPromises() // A suspended at getPage
@@ -464,7 +468,7 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     // going null on unmount both stop it — so this documents the behaviour rather than
     // isolating one guard.)
     const only = controllableDoc()
-    getDocumentMock.mockReturnValueOnce({ promise: Promise.resolve(only.doc) })
+    getDocumentMock.mockReturnValueOnce(only.task)
 
     const wrapper = mountViewer('blob:only')
     await flushPromises()
@@ -485,15 +489,20 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     // viewer, which would leak it), and must not emit.
     const destroy = vi.fn()
     let resolveDoc!: (d: unknown) => void
-    getDocumentMock.mockReturnValueOnce({ promise: new Promise((res) => (resolveDoc = res)) })
+    getDocumentMock.mockReturnValueOnce({
+      promise: new Promise((res) => (resolveDoc = res)),
+      destroy,
+    })
 
     const wrapper = mountViewer('blob:only')
     await flushPromises() // loadPdf suspended at getDocument
 
     wrapper.unmount() // bumps the generation
-    resolveDoc({ numPages: 1, getPage: getPageMock, destroy })
+    resolveDoc({ numPages: 1, getPage: getPageMock })
     await flushPromises()
 
+    // pdf.js 6: the late-resolved load is torn down through its loading task's destroy(), not
+    // left attached to the dead viewer.
     expect(destroy).toHaveBeenCalled()
     expect(wrapper.emitted('error')).toBeFalsy()
   })
