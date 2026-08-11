@@ -24,15 +24,47 @@ export default defineConfig({
     // Playwright name-spaces them by OS (`*-linux.png`), and CI runs Linux, so ONLY the
     // committed `*-linux.png` baselines are authoritative — a macOS PNG must NEVER be
     // committed as the source of truth (see e2e/COVERAGE.md for the Docker generation
-    // recipe). A generous maxDiffPixelRatio absorbs sub-pixel AA noise; `animations`
-    // freezes CSS/Web animations at capture so a shot is a settled frame.
+    // recipe). maxDiffPixelRatio absorbs sub-pixel AA noise — and nothing more than that,
+    // see the calibration below; `animations` freezes CSS/Web animations at capture so a
+    // shot is a settled frame.
     toHaveScreenshot: {
-      // Absorbs sub-pixel AA noise at mask boundaries and font hinting (observed
-      // run-to-run diffs land at 0.03-0.04) while staying far below a REAL layout
-      // break — a German-overflow / broken-CSS regression produces a 0.13-0.45 diff
-      // (measured), so this comfortably separates noise from a genuine glitch.
-      maxDiffPixelRatio: 0.06,
-      // Anti-alias / hinting differences on individual pixels shouldn't trip a diff.
+      // CALIBRATED, not guessed (#259). The previous 0.06 was ~1500x looser than the
+      // noise it was meant to absorb, so it swallowed real changes: a reworded UI string
+      // passed green against a baseline showing the OLD wording. The value below was
+      // derived from measurements taken in the pinned jammy container this gate runs in
+      // (2026-08-11, 4 compare runs over all 28 baselines + two deliberate red probes).
+      //
+      // AA FLOOR — the diff a re-run produces with NO code change, at threshold 0.2:
+      //   26 of 28 baselines: 0 differing pixels, three runs in a row.
+      //   gallery-{en,de}-desktop: exactly 70 px of 921,600 (= 0.000076) in every run —
+      //     scattered glyph/icon AA against baselines generated in an earlier session;
+      //     stable, not jitter. Those two calls carry a per-call opt-out (visual.spec.ts).
+      //   (At threshold 0 — raw byte equality — 7 baselines differ, by 1..108 px. That is
+      //    the sub-pixel primeicons AA the gate deliberately does not chase; see the
+      //    threshold note below.)
+      //
+      // SIGNAL — what a real change costs, measured with probes that were then reverted:
+      //   one reworded description line  -> settings-hub-en:    1289 px mobile / 684 px desktop
+      //   one reworded field label       -> settings-config-en:  271 px mobile / 260 px desktop
+      //   one extra admin card on the hub-> settings-hub, ALL four combos: 1021/1145 px
+      //                                     desktop en/de, 1048/1177 px mobile en/de
+      //                                     (the ffc31d5f case the old 0.06 swallowed)
+      //
+      // 0.00004 (40 ppm) sits above every globally-governed screen's measured floor (0 px)
+      // and at least 2.1x below the smallest probe signal — the binding case is the
+      // largest image, settings-config-en-desktop: 3,072,000 px x 40 ppm = 122 px allowed
+      // against the 260 px a short label reword moves. Per-screen budgets run from 2 px
+      // (rich-editor mobile, 60,722 px) to 122 px (settings-config desktop).
+      //
+      // If a screen ever shows a STABLE small delta on another renderer, the fix is a
+      // per-call opt-out on that one screenshot carrying the measured number (as gallery
+      // desktop has) — NOT a looser global, which is how the gate went blind in the first
+      // place.
+      maxDiffPixelRatio: 0.00004,
+      // Per-pixel YIQ tolerance: an anti-aliased edge whose colour drifts slightly is not
+      // a difference. Kept at 0.2 — measured: it removes ~90% of the raw AA noise (the 7
+      // baselines that differ by 1..108 px at threshold 0 collapse to 2 at threshold 0.2)
+      // while every probe signal above is counted at 0.2, so it costs no sensitivity.
       threshold: 0.2,
       animations: 'disabled',
     },

@@ -104,6 +104,51 @@ Locale is set by seeding `localStorage['teedy-locale']` before a reload (the key
 `main.ts` reads at boot), which renders the whole screen in the target locale without
 a per-screen Settings click.
 
+### Below-the-fold sight, and what the tolerance is calibrated to (#259)
+
+**`fullPage: true` does not see below the fold in this app.** The shell is a fixed 100vh
+layout and the scrolling happens *inside* `.app-content` (`AppLayout.vue`,
+`overflow-y: auto`), so the page itself never exceeds the viewport: a full-page capture is
+exactly 1280x720 (desktop) / 393x727 (mobile — the Pixel 5 descriptor's **viewport** height;
+its 851 is `screen.height`, not the captured box). Commit `ffc31d5f` added a seventh admin
+card to the settings hub and the baselines still matched byte for byte. An element
+screenshot cannot rescue it either — a Playwright element shot of an `overflow: auto` box
+captures its **client** box, not its `scrollHeight`.
+
+The mechanism that works is a **taller viewport for the tests whose surface is taller than
+the fold**: `growViewport()` + the `TALL_VIEWPORT` table in `visual.spec.ts` set the height
+(width and device scale factor untouched) so the container no longer scrolls, and the
+ordinary capture then contains the whole screen. It is applied to **settings-hub**
+(1280x1600 / 393x2000) and **settings-config** (1280x2400 / 393x2700), sized from the
+measured content height plus ~15% headroom — deliberately not more, because a taller frame
+dilutes every diff ratio. Two checks then run **after `freeze()`, immediately before the
+capture** (so they read the same layout the screenshot takes — `freeze()` waits on
+`document.fonts.ready`, and a late font reflows the content):
+`expectBottomInFrame()` asserts the bottom edge of the screen's structurally-last element
+lies inside the viewport, and `expectSurfaceFitsViewport()` asserts `.app-content` has
+nothing left to scroll. A screen that outgrows its taller viewport therefore fails **by
+name** instead of silently cropping again. (`toBeVisible()` alone would not do: Playwright
+calls an element visible whenever it has a box, in frame or not.) document-list and gallery keep the standard
+viewport on purpose: the 4-document seed corpus fits above the fold, so the treatment would
+only churn their baselines.
+
+**The tolerance is measured, and it is tight.** `maxDiffPixelRatio` is 0.00004 (40 ppm), not
+the old 0.06 — at 0.06 a reworded string passed green against a baseline showing the old
+wording, which is the other half of #259. The numbers behind it (and the one per-call
+opt-out, gallery at desktop) are recorded in `playwright.config.ts`; regenerate them the
+same way if the environment changes: run the gate 3x at `maxDiffPixelRatio: 0` for the noise
+floor, then reword one visible string / add one card, rebuild the image and re-run for the
+signal.
+
+**Byte-0 reproducibility is NOT the bar.** A regeneration that leaves a few baselines
+byte-different from the previous ones is expected: headless Skia's icon-glyph anti-aliasing
+(primeicons) is not byte-deterministic, and it is worst at the mobile DPR of 2.75. Measured
+here: a fresh run differs from 7 of the 28 committed baselines by 1..108 raw pixels, of
+which only 2 survive the per-pixel YIQ threshold of 0.2 (70 px each, gallery desktop, which
+is why those two carry the per-call opt-out). So the gate is verified by
+**repeated green compare runs**, never by `git diff --stat` on the PNGs — and a handful of
+byte-changed baselines after a deliberate regeneration is not a defect to chase.
+
 ### Authoritative Linux baselines (the operational crux)
 
 Playwright name-spaces baselines by OS (`*-linux.png`); **CI runs Linux, so a macOS

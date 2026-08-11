@@ -78,6 +78,82 @@ async function freeze(page: Page): Promise<void> {
   }).catch(() => {})
 }
 
+// --- Below-the-fold sight (#259) ---------------------------------------------
+// The app shell is a fixed 100vh layout whose scrolling happens INSIDE `.app-content`
+// (AppLayout.vue, `overflow-y: auto`, wraps the router-view of every authenticated
+// route). The PAGE therefore never exceeds the viewport, so `fullPage: true` captures
+// exactly the viewport and everything below the fold is invisible to this gate — commit
+// ffc31d5f added a seventh admin card to the settings hub and the baselines still matched
+// byte for byte (#259). An element screenshot cannot rescue it: a Playwright element shot
+// of an `overflow: auto` box captures its CLIENT box, not its scrollHeight.
+//
+// The mechanism that DOES work is a taller viewport for the tests whose surface is taller
+// than the fold: size the viewport so the container no longer scrolls, and the ordinary
+// capture then contains the whole surface. Only the HEIGHT changes — the width (1280
+// desktop / 393 mobile) and the device scale factor are what the projects' layout and
+// baselines depend on, and `setViewportSize` leaves both alone.
+//
+// Measured `.app-content` scrollHeight at the standard viewport (2026-08-11, admin,
+// seeded instance; clientHeight there is 675 desktop / 682 mobile — the fixed header
+// takes 45px of the 720/727 viewport):
+//   settings-hub     desktop en 1326 / de 1376    mobile en 1593 / de 1689
+//   settings-config  desktop en 1854 / de 2034    mobile en 2164 / de 2315
+// The heights below are the worst locale + those 45px + ~15% headroom, i.e. room for a
+// few more rows before the guard below has to be revisited. They are deliberately NOT
+// larger: a taller frame dilutes every diff ratio (the same reworded line is a smaller
+// fraction of a bigger image), which is the sensitivity this gate is calibrated on.
+const TALL_VIEWPORT = {
+  settingsHub: { desktop: 1600, mobile: 2000 },
+  settingsConfig: { desktop: 2400, mobile: 2700 },
+} as const
+
+// Grow the CURRENT project's viewport to `heights` for this test only (Playwright gives
+// each test a fresh context, so nothing leaks to the next one). Called BEFORE the first
+// navigation so the surface is laid out at its final size from the first paint — there is
+// no post-resize reflow left to settle out, and the per-test route-ready + content
+// assertions + freeze() (fonts.ready, blur) that follow are the settle before capture.
+async function growViewport(page: Page, heights: { desktop: number; mobile: number }): Promise<void> {
+  const width = page.viewportSize()!.width
+  await page.setViewportSize({ width, height: isMobileViewport(page) ? heights.mobile : heights.desktop })
+}
+
+// Assert that the BOTTOM EDGE of the surface's structurally-last element lies inside the
+// viewport. `toBeVisible()` is not enough for this job: Playwright counts an element as
+// visible when it has a non-empty box, whether or not that box is inside the frame the
+// screenshot captures — so a cropped capture would still pass. The bottom edge is the
+// thing the taller viewport is supposed to buy, so it is the thing asserted.
+// Runs AFTER freeze() so it measures the same layout the capture takes.
+async function expectBottomInFrame(page: Page, anchor: Locator, label: string): Promise<void> {
+  const box = await anchor.boundingBox()
+  expect(box, `${label}: the bottom anchor has a layout box`).not.toBeNull()
+  expect(
+    Math.ceil(box!.y + box!.height),
+    `${label}: the bottom of the surface must lie inside the captured frame (#259) — ` +
+      `the last element ends at y=${Math.ceil(box!.y + box!.height)} in a ${page.viewportSize()!.height}px viewport`,
+  ).toBeLessThanOrEqual(page.viewportSize()!.height)
+}
+
+// LOUD-FAIL guard for the mechanism above: the taller viewport only buys below-fold sight
+// while the surface actually FITS it. If the screen grows past that height the container
+// starts scrolling again and the capture silently crops — the exact #259 blindness, and a
+// stale baseline would keep passing. Asserting "the scroll container has nothing left to
+// scroll" makes that failure loud and self-explaining instead. Called AFTER freeze() and
+// immediately before the capture: freeze() waits on document.fonts.ready, and a font that
+// lands late reflows the content, so a pre-freeze reading would not be the geometry the
+// screenshot actually takes.
+async function expectSurfaceFitsViewport(page: Page, screen: string): Promise<void> {
+  const box = await page.locator('.app-content').evaluate((el) => ({
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }))
+  expect(
+    box.scrollHeight,
+    `${screen}: the surface must fit the taller viewport, else the capture crops below the fold (#259). ` +
+      `.app-content scrollHeight=${box.scrollHeight} > clientHeight=${box.clientHeight}: raise TALL_VIEWPORT.${screen} ` +
+      `and regenerate this screen's baselines.`,
+  ).toBeLessThanOrEqual(box.clientHeight)
+}
+
 // Wait for the PrimeVue DataTable loading overlay to be GONE before capturing.
 // The document list renders `<DataTable :loading="isLoading">`; PrimeVue mounts a
 // `.p-datatable-mask` (a white overlay + spinner) via `v-if="loading"` while that flag
@@ -196,6 +272,11 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
   // Run the SAME screen twice (en, de) inside one test so the two shots share setup.
   for (const locale of ['en', 'de'] as const) {
     test.describe(`locale=${locale}`, () => {
+      // document list + gallery deliberately KEEP the standard project viewport: the seed
+      // corpus is 4 documents, which fits above the fold at both sizes, so the taller-
+      // viewport treatment (#259) would only churn their baselines and buy no coverage.
+      // If the corpus ever grows past the fold, give them TALL_VIEWPORT entries + the
+      // expectSurfaceFitsViewport guard like the settings screens.
       test(`document list [${locale}]`, async ({ page, request }) => {
         await ensureCorpus(request)
         await gotoRaw(page, '/#/document')
@@ -223,7 +304,17 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
           page.locator('.doc-gallery').getByText('ACME invoice 2026-0042', { exact: true }).first(),
         ).toBeVisible()
         await freeze(page)
-        await expect(page).toHaveScreenshot(`gallery-${locale}.png`, { fullPage: true })
+        await expect(page).toHaveScreenshot(`gallery-${locale}.png`, {
+          fullPage: true,
+          // The ONE per-screen opt-out from the calibrated global tolerance (#259). At the
+          // DESKTOP viewport this screen renders exactly 70 differing pixels of 921,600
+          // (0.000076) against its committed baseline in every run — scattered glyph/icon
+          // AA from the session the baseline was generated in, stable rather than jittery,
+          // and above the 40 ppm global. 0.0002 is ~2.6x that measured floor and still ~300x
+          // tighter than the 0.06 this gate used to run at. Mobile is NOT excepted: it
+          // measures 0 differing pixels and keeps the global value.
+          ...(isMobileViewport(page) ? {} : { maxDiffPixelRatio: 0.0002 }),
+        })
         // Leave the preference as list so unrelated specs are unaffected.
         await page.evaluate(() => localStorage.setItem('teedy_document_view_mode', 'list'))
       })
@@ -243,18 +334,32 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
         await expect(slideOver).toHaveScreenshot(`slide-over-long-title-${locale}.png`)
       })
 
+      // The settings hub is ~2x the fold at both viewports (an admin sees 16 link cards:
+      // 2 personal + 14 across the three admin groups), so it captures at a TALLER
+      // viewport — see TALL_VIEWPORT (#259).
       test(`settings hub [${locale}]`, async ({ page }) => {
+        await growViewport(page, TALL_VIEWPORT.settingsHub)
         await gotoRaw(page, '/#/settings')
         await setLocale(page, locale)
         await expectRouteReady(page, '/#/settings', ROUTE_ROOT.settingsHub)
         await expect(
           page.getByRole('heading', { name: locale === 'de' ? 'Einstellungen' : 'Settings' }),
         ).toBeVisible()
+        // The LAST card of the LAST admin group — ~600px below the standard fold.
+        const lastHubCard = page
+          .locator('.settings-hub')
+          .getByRole('link', { name: locale === 'de' ? 'Überwachung' : 'Monitoring' })
+        await expect(lastHubCard).toBeVisible()
         await freeze(page)
+        await expectBottomInFrame(page, lastHubCard, 'settingsHub')
+        await expectSurfaceFitsViewport(page, 'settingsHub')
         await expect(page).toHaveScreenshot(`settings-hub-${locale}.png`, { fullPage: true })
       })
 
+      // The Config form is ~3x the fold at both viewports, so it too captures at a TALLER
+      // viewport — see TALL_VIEWPORT (#259).
       test(`settings config form [${locale}]`, async ({ page }) => {
+        await growViewport(page, TALL_VIEWPORT.settingsConfig)
         await gotoRaw(page, '/#/settings/config')
         await setLocale(page, locale)
         await expectRouteReady(page, '/#/settings/config', ROUTE_ROOT.settingsConfig)
@@ -262,7 +367,16 @@ test.describe('@visual visual regression — key screens × {desktop,mobile} × 
         // section which is present regardless of env-managed state.
         await expect(page.locator('.settings-config, form, .p-card').first()).toBeVisible()
         await expect(page.locator('h2').first()).toBeVisible()
+        // The structurally LAST element of the form: the closing hint of the maintenance
+        // ("danger zone") card, which is the last child of the last card of
+        // SettingsConfig.vue. Class-based, so it is the same anchor in both locales, and
+        // it sits ~1100px below the standard fold. (The page renders exactly ONE h2 — the
+        // title at the very top — so an `h2` locator can never be a bottom anchor here.)
+        const lastConfigElement = page.locator('.config-settings .danger-zone .clean-storage-hint')
+        await expect(lastConfigElement).toBeVisible()
         await freeze(page)
+        await expectBottomInFrame(page, lastConfigElement, 'settingsConfig')
+        await expectSurfaceFitsViewport(page, 'settingsConfig')
         await expect(page).toHaveScreenshot(`settings-config-${locale}.png`, { fullPage: true })
       })
 
