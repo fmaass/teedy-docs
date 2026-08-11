@@ -823,4 +823,14 @@ async function bulkDownload() {
   .bulk-bar-wrap { padding: 0 1rem; }
   .doc-area { padding: 0.75rem 1rem 1rem; }
 }
+
+/* #272: at phone width the page-size control wrapped organically but kept its natural
+   width, so it sat on a short line with dead space to its right while the document list
+   went without that width. Below the app's existing 640px breakpoint (shared with
+   DocumentEdit, DocumentView and SettingsMetadata) it takes its own full-width row, so
+   the list reclaims the width on the screens that have the least to spare. Above 640px no
+   rule applies and the desktop toolbar is unchanged. */
+@media (max-width: 640px) {
+  .wf-filter-row .per-page-select { flex-basis: 100%; }
+}
 </style>

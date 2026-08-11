@@ -557,3 +557,61 @@ test.describe('Document filter toolbar — no horizontal overflow (#67)', () => 
     expect(overflow, 'filter toolbar overflow at 320px/de with a savable filter (px)').toBeLessThanOrEqual(1)
   })
 })
+
+// --- #272: the rows-per-page control gets its own full-width row on a phone -----------
+// At phone width the "count / page" control (.per-page-select, the last child of
+// .wf-filter-row) packed onto the same line as the view-mode toggle, spending width the
+// document list needs (reporter vmario89, #272). The fix gives it flex-basis:100% below the
+// app's existing 640px breakpoint (already used by DocumentEdit/DocumentView/SettingsMetadata)
+// so it wraps to its own row and spans the full toolbar width; desktop (above 640px) is
+// untouched. Geometry check, locale-independent, run at BOTH projects: it FAILS at the 393px
+// mobile project before the fix (the select shares the toggle's line at its natural width) and
+// PASSES once it takes its own full-width row. The desktop branch pins that the control keeps
+// its natural width there, so the mobile rule can't leak upward.
+test.describe('Rows-per-page control wraps to its own row on narrow viewports (#272)', () => {
+  test('the per-page control takes a full-width row below the breakpoint, natural width above', async ({
+    page,
+  }) => {
+    await gotoRaw(page, '/#/document')
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+    const row = page.locator('.wf-filter-row')
+    await expect(row).toBeVisible()
+    await expect(row.locator('.view-mode-toggle')).toBeVisible()
+    await expect(row.locator('.per-page-select')).toBeVisible()
+
+    // One atomic read: the toolbar row, the view-mode toggle and the page-size select, all at
+    // a single layout so nothing shifts between measurements.
+    const geom = await row.evaluate((el) => {
+      const box = (target: Element) => {
+        const r = target.getBoundingClientRect()
+        return { x: r.x, y: r.y, width: r.width, height: r.height }
+      }
+      return {
+        row: box(el),
+        toggle: box(el.querySelector('.view-mode-toggle')!),
+        select: box(el.querySelector('.per-page-select')!),
+      }
+    })
+
+    if (isMobileViewport(page)) {
+      // Its OWN row: the control sits below the view-mode toggle (top at or past the toggle's
+      // bottom edge), not sharing its line. Before the fix the two share a line and this fails.
+      expect(
+        geom.select.y,
+        'per-page control is on its own line below the view-mode toggle',
+      ).toBeGreaterThanOrEqual(geom.toggle.y + geom.toggle.height - 2)
+      // …and it spans the full toolbar width (flex-basis:100% on its own line).
+      expect(
+        geom.select.width,
+        'per-page control spans the full toolbar width',
+      ).toBeGreaterThanOrEqual(geom.row.width - 2)
+    } else {
+      // Desktop is unchanged: the control keeps its natural (small) width and never takes a
+      // full-width row — pinned by assertion, not by inspection.
+      expect(
+        geom.select.width,
+        'desktop per-page control keeps its natural width',
+      ).toBeLessThan(geom.row.width / 2)
+    }
+  })
+})
