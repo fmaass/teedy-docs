@@ -88,6 +88,27 @@ export function buildPreset(base: ThemePreset) {
   return definePreset(base, {
     semantic: {
       primary: getBrandPrimary(),
+      colorScheme: {
+        // #263: the light-mode primary is painted BOTH as text (brand links via `--teedy-brand`)
+        // and as the background under a WHITE label (every default Button plus three CSS badges —
+        // 58 surfaces in all). PrimeVue maps light `primary.color` to palette step 500, which
+        // measures 2.67:1 against white for the stock brand — under AA's 4.5:1 bar for normal text —
+        // and an admin-configured `main_color` can be worse still. Shifting the LIGHT ramp two steps
+        // darker (500→700, with hover/active following) lands step 700 at ~5:1 while staying
+        // recognisably the same hue. Because this is the ONE point where a colour becomes a palette,
+        // it holds for a custom `main_color` too (its own derived 700 step), not just the stock
+        // scale — and `updatePrimaryPalette` (the runtime custom-colour path) only merges the palette
+        // steps, so this colour-scheme override survives it. `contrastColor` stays the base's
+        // `#ffffff` (white on step 700 is ~5:1). Dark mode is deliberately untouched: there the
+        // primary is read as a light step (400) against a dark surface and already clears AA.
+        light: {
+          primary: {
+            color: '{primary.700}',
+            hoverColor: '{primary.800}',
+            activeColor: '{primary.900}',
+          },
+        },
+      },
     },
   })
 }

@@ -75,6 +75,43 @@ describe('buildPreset — the single preset builder', () => {
   })
 })
 
+// WCAG relative luminance / contrast against white, to tie the chosen step to the AA rationale.
+function contrastVsWhite(hex: string): number {
+  const n = hex.replace('#', '')
+  const rgb = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255)
+  const lin = rgb.map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)))
+  const l = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+  return 1.05 / (l + 0.05)
+}
+
+describe('buildPreset — WCAG AA primary (#263)', () => {
+  it('darkens the LIGHT-mode primary ramp two steps, at the palette-derivation point', () => {
+    // The single override that clears AA for every white-on-primary surface (buttons, badges) AND
+    // every brand-as-text surface, for the stock scale and any custom main_color alike.
+    const preset = buildPreset(fakeFamily('Lara')) as {
+      semantic: { colorScheme: { light: { primary: Record<string, string> } } }
+    }
+    const light = preset.semantic.colorScheme.light.primary
+    expect(light.color).toBe('{primary.700}')
+    expect(light.hoverColor).toBe('{primary.800}')
+    expect(light.activeColor).toBe('{primary.900}')
+  })
+
+  it('leaves DARK mode untouched — the primary already clears AA against a dark surface there', () => {
+    const preset = buildPreset(fakeFamily('Lara')) as {
+      semantic: { colorScheme: { light: object; dark?: object } }
+    }
+    expect(preset.semantic.colorScheme.dark).toBeUndefined()
+  })
+
+  it('targets step 700 because the shipped default (500) fails AA on white and 700 clears it', () => {
+    // Pins the rationale: a future palette edit that regressed either step would fail here rather
+    // than silently reintroduce the 2.67:1 defect.
+    expect(contrastVsWhite(teedyPrimary['500'])).toBeLessThan(4.5)
+    expect(contrastVsWhite(teedyPrimary['700'])).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
 describe('applyBrandPrimary', () => {
   it('derives the configured colour and pushes it to the running theme', () => {
     applyBrandPrimary('#ff5722')

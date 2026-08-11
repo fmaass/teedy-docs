@@ -1,6 +1,8 @@
 :root {
-  /* Brand */
-  --teedy-brand: var(--p-primary-color);
+  /* Brand — brand colour painted as TEXT on a light surface (login links, file-list/doc-edit
+     accents). #263: step 500 is 2.67:1 on white, under AA; step 700 is ~5:1, so the brand text
+     token takes the darker step exactly as every --teedy-*-text token below already does. */
+  --teedy-brand: var(--p-primary-700);
 
   /* Semantic status colors */
   --teedy-success-bg: var(--p-green-50);
@@ -24,6 +26,10 @@
 
 .dark-mode {
   --teedy-pdf-chrome: #1e1e1e;
+
+  /* #263: on a dark surface the brand text takes the LIGHT step (300, ~9.7:1), mirroring the
+     --teedy-*-text tokens' light/dark 700/300 split. */
+  --teedy-brand: var(--p-primary-300);
 
   --teedy-success-bg: color-mix(in srgb, var(--p-green-500) 15%, transparent);
   --teedy-success-text: var(--p-green-300);
