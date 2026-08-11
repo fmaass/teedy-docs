@@ -103,7 +103,10 @@ selector — there is no auto-refresh.
 - **Storage by user** — global usage plus the top 10 users by current storage
   (descending, ties broken by username).
 
-All day buckets are UTC `[start, end)` calendar days and are zero-filled across the window.
+All day buckets are the server's local `[start, end)` calendar days and are zero-filled across the
+window. The same local time zone resolves the date-range / `at:` search bounds and the PDF export
+date, so a document created near midnight is counted, found and exported under one calendar day
+rather than two (#265).
 
 > **Caveat — activity reflects RETAINED audit rows only.** The storage-cleanup job
 > (`POST /api/app/batch/clean_storage`) hard-deletes "orphan" audit logs. Because that

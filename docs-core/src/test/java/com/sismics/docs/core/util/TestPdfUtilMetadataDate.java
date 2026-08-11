@@ -20,15 +20,18 @@ import java.util.TimeZone;
 /**
  * Contract for the creation date {@link PdfUtil#convertToPdf} prints on the export's metadata page.
  *
- * <p>The exported PDF is a portable artifact that outlives the server that produced it, so its date must
- * read the same no matter which host ran the export. The pre-fix code built a {@code SimpleDateFormat}
- * with no {@link Locale} and no time zone, so it inherited three separate host settings: the default
- * locale's <em>calendar system</em> (a {@code th-TH} host printed the Buddhist era — 2569 instead of
- * 2026), the default locale's <em>numbering system</em> ({@code -u-nu-thai} printed Thai digits), and
- * the default <em>time zone</em> (a UTC+14 host printed the following calendar day).</p>
+ * <p>The <em>calendar system</em> and <em>numbering</em> read the same no matter which host ran the
+ * export: the pre-fix code built a {@code SimpleDateFormat} with no {@link Locale}, so a {@code th-TH}
+ * host printed the Buddhist era (2569 instead of 2026) and {@code -u-nu-thai} printed Thai digits.
+ * Those stay pinned to ISO Gregorian, ASCII digits.</p>
  *
- * <p>Each test therefore renders a real PDF through the production path and reads the date back out of
- * the generated page, rather than asserting on the formatter in isolation.</p>
+ * <p>The calendar <em>day</em>, by contrast, is deliberately the SERVER's local day (#265): a UTC+14
+ * host prints its own calendar day, matching the day the date-range/{@code at:} search and the
+ * statistics buckets resolve, so a document created near midnight reads one date everywhere rather
+ * than two. The accepted trade is that the exported day now depends on the exporting host's zone.</p>
+ *
+ * <p>Each test renders a real PDF through the production path and reads the date back out of the
+ * generated page, rather than asserting on the formatter in isolation.</p>
  */
 public class TestPdfUtilMetadataDate extends BaseTest {
 
@@ -38,8 +41,17 @@ public class TestPdfUtilMetadataDate extends BaseTest {
      */
     private static final Instant CREATED_AT = Instant.parse("2026-08-03T23:30:00Z");
 
-    /** The instant's UTC calendar day, in ISO-8601 proleptic Gregorian form with ASCII digits. */
+    /**
+     * The creation day, ISO-8601 proleptic Gregorian with ASCII digits. The two host-locale tests
+     * below pin the zone to UTC, so the server-local day equals the UTC day (2026-08-03) for them.
+     */
     private static final String EXPECTED_LINE = "Created by test on 2026-08-03";
+
+    /**
+     * The creation day on a UTC+14 host: 23:30 UTC on the 3rd is already 13:30 on the 4th there, so
+     * the export prints 2026-08-04 — the SERVER-local day (#265), not the UTC day.
+     */
+    private static final String EXPECTED_LINE_LOCAL_PLUS14 = "Created by test on 2026-08-04";
 
     private Locale hostLocale;
     private Locale hostDisplayLocale;
@@ -93,17 +105,18 @@ public class TestPdfUtilMetadataDate extends BaseTest {
     }
 
     @Test
-    public void metadataDateIsRenderedInUtcNotTheHostTimeZone() throws Exception {
-        // Pacific/Kiritimati is UTC+14: at CREATED_AT the host calendar already reads 2026-08-04.
+    public void metadataDateIsRenderedInTheServerLocalZoneNotUtc() throws Exception {
+        // Pacific/Kiritimati is UTC+14: at CREATED_AT (23:30Z on the 3rd) the host calendar already
+        // reads 2026-08-04, so the export prints the local day — matching the statistics and search.
         Locale.setDefault(Locale.US);
         TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Kiritimati"));
 
         String text = renderMetadataPage();
 
-        Assertions.assertTrue(text.contains(EXPECTED_LINE),
-                "the metadata page must render the creation instant as its UTC calendar day so the same"
-                        + " document exports to the same date on every host, expected \"" + EXPECTED_LINE
-                        + "\" in: " + text);
+        Assertions.assertTrue(text.contains(EXPECTED_LINE_LOCAL_PLUS14),
+                "the metadata page must render the creation instant as its SERVER-local calendar day"
+                        + " (#265) so it matches the statistics and search, expected \""
+                        + EXPECTED_LINE_LOCAL_PLUS14 + "\" in: " + text);
     }
 
     /**

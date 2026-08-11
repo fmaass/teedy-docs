@@ -27,7 +27,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
@@ -54,13 +54,16 @@ public class PdfUtil {
      * font then dropped entirely), and the default time zone. {@link DateTimeFormatter#ISO_LOCAL_DATE}
      * carries the ISO chronology and ASCII decimal style regardless of locale, and is immutable.</p>
      *
-     * <p>The day is the instant's UTC day, not the host's: rendering in the host zone would leave the
-     * same document exporting a different date on different servers, the same host dependence in a
-     * quieter form. This matches how this module already turns a create timestamp into a calendar day
-     * ({@link StatsBucketUtil}).</p>
+     * <p>The day itself is the instant's day in the server's local time zone (#265), matching how
+     * this module and the date-range/{@code at:} search already turn a create timestamp into a
+     * calendar day ({@link StatsBucketUtil}), so a document created near midnight exports, is counted
+     * and is found under one calendar day rather than two. The accepted trade is that the exported
+     * date now depends on the exporting host's zone; only the day does, the calendar and numbering
+     * above stay host-independent. The zone is bound at each render (see the call site), NOT on this
+     * shared formatter, so it reflects the running server's zone rather than the one at class load.</p>
      */
     private static final DateTimeFormatter METADATA_DATE_FORMATTER =
-            DateTimeFormatter.ISO_LOCAL_DATE.withLocale(Locale.ROOT).withZone(ZoneOffset.UTC);
+            DateTimeFormatter.ISO_LOCAL_DATE.withLocale(Locale.ROOT);
 
     /**
      * Convert a document and its files to a merged PDF file.
@@ -97,7 +100,7 @@ public class PdfUtil {
                     pdfPage.addText(documentDto.getTitle(), true, DocsPDType1Font.HELVETICA_BOLD, 16)
                         .newLine()
                         .addText("Created by " + documentDto.getCreator()
-                            + " on " + METADATA_DATE_FORMATTER.format(
+                            + " on " + METADATA_DATE_FORMATTER.withZone(ZoneId.systemDefault()).format(
                                     Instant.ofEpochMilli(documentDto.getCreateTimestamp())), true)
                         .newLine()
                         .addText(DescriptionTextUtil.toPlainText(documentDto.getDescription(), 4000))
