@@ -203,6 +203,15 @@ function imageLabel(type: ThemeImageType): string {
   return t('ui.branding.image_favicon')
 }
 
+// Per-image guidance on the recommended file format and pixel size (#273). Each image is
+// rendered differently — the logo is scaled down to fit the header, the background covers the
+// login screen, the favicon is a fixed small square — so the advice is per-type, not shared.
+function imageHint(type: ThemeImageType): string {
+  if (type === 'logo') return t('ui.branding.image_logo_hint')
+  if (type === 'background') return t('ui.branding.image_background_hint')
+  return t('ui.branding.image_favicon_hint')
+}
+
 const imageInput = ref<HTMLInputElement | null>(null)
 const pendingImageType = ref<ThemeImageType | null>(null)
 const busyImageType = ref<ThemeImageType | null>(null)
@@ -321,6 +330,7 @@ async function resetImage(type: ThemeImageType) {
           :aria-label="`${t('ui.branding.reset')} ${imageLabel(type)}`"
           @click="resetImage(type)"
         />
+        <small class="field-hint image-hint">{{ imageHint(type) }}</small>
       </div>
       <input ref="imageInput" type="file" accept="image/*" hidden @change="onImagePicked" />
     </template></Card>
@@ -393,11 +403,19 @@ h3 { margin: 0 0 1rem; font-size: 1.125rem; }
   border-radius: 4px;
   background: var(--p-content-background);
 }
+/* #273: the label heads its own full-width line above the preview and buttons, rather than
+   competing with them for one row. The long German "Anmeldehintergrund" used to shrink against
+   the Upload button (it had min-width:0 and could fall below its content width); as a heading it
+   always has room, in every locale, and the layout stays consistent whatever the string length. */
 .image-label {
-  flex: 1 1 6rem;
-  min-width: 0;
+  order: -1;
+  flex: 0 0 100%;
   font-size: 0.875rem;
   font-weight: 500;
+}
+/* The format/size guidance sits on its own line below the controls. */
+.image-hint {
+  flex: 0 0 100%;
 }
 .code-area {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
