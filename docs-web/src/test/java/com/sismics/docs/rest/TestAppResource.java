@@ -2192,12 +2192,13 @@ public class TestAppResource extends BaseJerseyTest {
             Assertions.assertNotNull(bucket.getString("date"));
             Assertions.assertNotNull(bucket.getJsonNumber("count"));
         }
-        // The buckets are ascending, contiguous UTC days ending today.
-        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        // The buckets are ascending, contiguous LOCAL days ending today: StatsBucketUtil labels each
+        // bucket via ZoneId.systemDefault() since #265/ADR-0027, so the expected labels must too.
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneId.systemDefault());
         Assertions.assertEquals(today.toString(),
-                documentsCreated.getJsonObject(6).getString("date"), "last bucket is today (UTC)");
+                documentsCreated.getJsonObject(6).getString("date"), "last bucket is today (local zone)");
         Assertions.assertEquals(today.minusDays(6).toString(),
-                documentsCreated.getJsonObject(0).getString("date"), "first bucket is six UTC days ago");
+                documentsCreated.getJsonObject(0).getString("date"), "first bucket is six local days ago");
 
         // --- ADVISORY: the response shape has EXACTLY the pinned keys at each level (no extras). ---
         assertExactKeys(totals, "totals", "documents", "files", "users", "tags", "favorites");
@@ -2227,7 +2228,7 @@ public class TestAppResource extends BaseJerseyTest {
         //   activity class set is EXACTLY {Document,File,Comment,Route,Tag} ; global storage sum.
         // ============================================================================
 
-        // A document with an explicit create_date of "now" (UTC-today bucket).
+        // A document with an explicit create_date of "now" (today's bucket in the server local zone).
         JsonObject docJson = target().path("/document").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .put(Entity.form(new Form()
@@ -2368,7 +2369,7 @@ public class TestAppResource extends BaseJerseyTest {
                 "users total counts the disabled (non-deleted) user");
         // (global storage was asserted exactly above in its own isolated delta window.)
 
-        // documents_created: today's UTC bucket grew by the one ACTIVE seeded document (the
+        // documents_created: today's local bucket grew by the one ACTIVE seeded document (the
         // deleted doc, also created today, must NOT appear — the series filters deleteDate null).
         JsonArray afterDocsCreated = after.getJsonObject("series").getJsonArray("documents_created");
         Assertions.assertEquals(todayDocsBefore + 1,
@@ -2396,14 +2397,16 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
-     * Counts the audit-log rows dated within today's UTC day whose entity class is in the pinned
-     * activity set {Document, File, Comment, Route, Tag} — the exact set the endpoint must use.
-     * Computed independently here (not via StatsDao) so it is a real oracle for the class filter.
+     * Counts the audit-log rows dated within today's LOCAL day (ZoneId.systemDefault(), mirroring
+     * StatsBucketUtil since #265/ADR-0027) whose entity class is in the pinned activity set
+     * {Document, File, Comment, Route, Tag} — the exact set the endpoint must use. Computed
+     * independently here (not via StatsDao) so it is a real oracle for the class filter.
      */
     private long countTodayActivityInSet() {
-        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
-        java.util.Date start = java.util.Date.from(today.atStartOfDay(java.time.ZoneOffset.UTC).toInstant());
-        java.util.Date end = java.util.Date.from(today.plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant());
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        java.time.LocalDate today = java.time.LocalDate.now(zone);
+        java.util.Date start = java.util.Date.from(today.atStartOfDay(zone).toInstant());
+        java.util.Date end = java.util.Date.from(today.plusDays(1).atStartOfDay(zone).toInstant());
         EntityManager prev = ThreadLocalContext.get().getEntityManager();
         EntityManager em = EMF.get().createEntityManager();
         EntityTransaction tx = em.getTransaction();
@@ -2426,27 +2429,35 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
-     * B2 — DB-level boundary seeding for BOTH series. Rows are placed at precise UTC instants:
-     * exactly at the window start (00:00:00.000 UTC of the first day — INCLUDED), the last
-     * representable instant before the window end (INCLUDED), and exactly at the window end
-     * (00:00:00.000 UTC of today+1 — EXCLUDED), for documents_created (DOC_CREATEDATE_D) and
-     * activity (LOG_CREATEDATE_D). The instants are computed via java.time with ZoneOffset.UTC so
-     * the assertions hold regardless of the JVM's ambient timezone (also covering the non-UTC
-     * concern durably). A mutation of the native predicates {@code >=}→{@code >} or {@code <}→{@code <=}
-     * in either StatsDao query must break this test.
+     * B2 — DB-level boundary seeding for BOTH series. Rows are placed at precise instants relative to
+     * the server's LOCAL calendar day: exactly at the window start (00:00:00.000 local of the first
+     * day — INCLUDED), the last representable instant before the window end (INCLUDED), and exactly at
+     * the window end (00:00:00.000 local of today+1 — EXCLUDED), for documents_created
+     * (DOC_CREATEDATE_D) and activity (LOG_CREATEDATE_D). The instants are computed via java.time in
+     * {@link java.time.ZoneId#systemDefault()} to MIRROR StatsBucketUtil, which buckets every day in
+     * the server's local zone since #265/ADR-0027; resolving the boundaries in the same zone the code
+     * buckets in makes the assertions hold in EVERY JVM zone AND genuinely exercises the local-zone
+     * path (this test was deterministically red in any positive-offset zone while it used UTC). A
+     * mutation of the native predicates {@code >=}→{@code >} or {@code <}→{@code <=} in either StatsDao
+     * query must break this test.
      */
     @Test
     public void testStatsBoundarySeeding() {
         String adminToken = adminToken();
         int window = 7;
 
-        // Window boundaries as EXACT UTC instants (mirrors StatsBucketUtil.windowStart/windowEnd).
-        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
-        java.time.Instant startInstant = today.minusDays(window - 1L).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
-        java.time.Instant endInstant = today.plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        // Window boundaries as EXACT instants in the server's local zone. Computed via
+        // ZoneId.systemDefault() to MIRROR StatsBucketUtil.windowStart/windowEnd, which resolve every
+        // calendar day in that same zone since #265/ADR-0027 — computing the boundaries in the zone the
+        // code buckets in is what keeps the assertions valid in EVERY JVM zone (they were red in any
+        // positive-offset zone while this test still computed them in UTC).
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        java.time.LocalDate today = java.time.LocalDate.now(zone);
+        java.time.Instant startInstant = today.minusDays(window - 1L).atStartOfDay(zone).toInstant();
+        java.time.Instant endInstant = today.plusDays(1).atStartOfDay(zone).toInstant();
         long startMs = startInstant.toEpochMilli();
-        long lastBeforeEndMs = endInstant.toEpochMilli() - 1L; // last representable instant in today's UTC bucket
-        long endMs = endInstant.toEpochMilli();                // exactly tomorrow 00:00 UTC — must be excluded
+        long lastBeforeEndMs = endInstant.toEpochMilli() - 1L; // last representable instant in today's local bucket
+        long endMs = endInstant.toEpochMilli();                // exactly tomorrow 00:00 local — must be excluded
 
         String firstBucketDate = today.minusDays(window - 1L).toString();
         String lastBucketDate = today.toString();
@@ -2475,7 +2486,7 @@ public class TestAppResource extends BaseJerseyTest {
         // (today) bucket (INCLUDED); end-instant doc → EXCLUDED entirely (>= end). When start and last
         // buckets differ (window > 1) these are +1 each; the total-in-window delta is exactly 2.
         Assertions.assertEquals(docFirstBefore + 1, bucketCount(afterDocs, "documents_created", firstBucketDate),
-                "a document at the exact window start (00:00 UTC) is INCLUDED in the first bucket");
+                "a document at the exact window start (00:00 local) is INCLUDED in the first bucket");
         Assertions.assertEquals(docLastBefore + 1, bucketCount(afterDocs, "documents_created", lastBucketDate),
                 "a document at the last instant before end is INCLUDED in the last (today) bucket");
         long docTotalDelta = totalSeriesCount(afterDocs, "documents_created") - docTotalBefore;
@@ -2500,7 +2511,7 @@ public class TestAppResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .get(JsonObject.class);
         Assertions.assertEquals(actFirstBefore + 1, bucketCount(afterAct, "activity", firstBucketDate),
-                "an audit row at the exact window start (00:00 UTC) is INCLUDED in the first bucket");
+                "an audit row at the exact window start (00:00 local) is INCLUDED in the first bucket");
         Assertions.assertEquals(actLastBefore + 1, bucketCount(afterAct, "activity", lastBucketDate),
                 "an audit row at the last instant before end is INCLUDED in the last (today) bucket");
         long actTotalDelta = totalSeriesCount(afterAct, "activity") - actTotalBefore;
@@ -2526,7 +2537,7 @@ public class TestAppResource extends BaseJerseyTest {
         return id;
     }
 
-    /** Returns the count in the named series' bucket for a given yyyy-MM-dd UTC date. */
+    /** Returns the count in the named series' bucket for a given yyyy-MM-dd local date. */
     private static long bucketCount(JsonObject stats, String series, String date) {
         JsonArray arr = stats.getJsonObject("series").getJsonArray(series);
         for (int i = 0; i < arr.size(); i++) {
