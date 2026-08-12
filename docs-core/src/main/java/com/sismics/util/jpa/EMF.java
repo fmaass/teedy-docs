@@ -35,6 +35,25 @@ public final class EMF {
      */
     static final String POOL_SIZE_ENV = "DATABASE_POOL_SIZE";
 
+    /**
+     * Environment variables overriding the pgjdbc client-side connection timeouts (all in seconds).
+     * See {@link #buildEnvironmentProperties} for why these exist. pgjdbc reads {@code 0} as
+     * "infinite", which is the supported way an operator disables a given timeout.
+     */
+    static final String CONNECT_TIMEOUT_ENV = "DATABASE_CONNECT_TIMEOUT";
+    static final String SOCKET_TIMEOUT_ENV = "DATABASE_SOCKET_TIMEOUT";
+    static final String LOGIN_TIMEOUT_ENV = "DATABASE_LOGIN_TIMEOUT";
+
+    /**
+     * Default pgjdbc client-side timeouts (seconds). socketTimeout is deliberately generous
+     * (no legitimate single statement in this deployment class approaches 30s) yet still bounds a
+     * dead socket, so a network blip surfaces as a failed request the healthcheck recovers from
+     * rather than a container that hangs unhealthy indefinitely.
+     */
+    static final int DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
+    static final int DEFAULT_SOCKET_TIMEOUT_SECONDS = 30;
+    static final int DEFAULT_LOGIN_TIMEOUT_SECONDS = 10;
+
     private static Properties properties;
 
     private static EntityManagerFactory emfInstance;
@@ -120,10 +139,43 @@ public final class EMF {
         }
 
         // Use environment parameters
-        String databaseUrl = System.getenv("DATABASE_URL");
-        String databaseUsername = System.getenv("DATABASE_USER");
-        String databasePassword = System.getenv("DATABASE_PASSWORD");
+        return buildEnvironmentProperties(
+                System.getenv("DATABASE_URL"),
+                System.getenv("DATABASE_USER"),
+                System.getenv("DATABASE_PASSWORD"),
+                System.getenv(CONNECT_TIMEOUT_ENV),
+                System.getenv(SOCKET_TIMEOUT_ENV),
+                System.getenv(LOGIN_TIMEOUT_ENV));
+    }
 
+    /**
+     * Build the EntityManager properties from the deployment environment. Extracted from the
+     * environment path of {@link #getEntityManagerProperties()} — with the timeout inputs passed
+     * in rather than read from {@link System#getenv} inside — so the production (Postgres) branch
+     * and its client-side timeouts are reachable from a unit test without mutating process env.
+     * Runtime behaviour is unchanged: {@link #getEntityManagerProperties()} calls this with the
+     * same environment variables it read before.
+     *
+     * <p>The Postgres branch carries client-side connect/socket/login timeouts because on
+     * 2026-08-10 a transient Postgres network blip left a dead socket that Hibernate's built-in
+     * connection pool never timed out on: it has no borrow timeout and no on-checkout liveness
+     * check, so every request thread parked forever acquiring a connection and only a container
+     * restart recovered. Without a client-side socket timeout the JDBC read on that dead socket
+     * blocks indefinitely; these bound the TCP connect, socket read and login handshake so the
+     * blip surfaces as a thrown error the healthcheck recovers from instead of a permanent hang.
+     * They are set only on the Postgres branch — the H2 driver does not understand them.</p>
+     *
+     * @param databaseUrl JDBC URL from the environment (blank/null selects the embedded H2 fallback)
+     * @param databaseUsername Database user (Postgres branch only)
+     * @param databasePassword Database password (Postgres branch only)
+     * @param connectTimeoutEnv Raw {@value #CONNECT_TIMEOUT_ENV} value, or null/blank when unset
+     * @param socketTimeoutEnv Raw {@value #SOCKET_TIMEOUT_ENV} value, or null/blank when unset
+     * @param loginTimeoutEnv Raw {@value #LOGIN_TIMEOUT_ENV} value, or null/blank when unset
+     * @return The resolved EntityManager properties
+     */
+    static Properties buildEnvironmentProperties(String databaseUrl, String databaseUsername,
+            String databasePassword, String connectTimeoutEnv, String socketTimeoutEnv,
+            String loginTimeoutEnv) {
         log.info("Configuring EntityManager from environment parameters");
         Properties props = new Properties();
         Path dbDirectory = DirectoryUtil.getDbDirectory();
@@ -140,6 +192,15 @@ public final class EMF {
             props.put("hibernate.connection.url", databaseUrl);
             props.put("hibernate.connection.username", databaseUsername);
             props.put("hibernate.connection.password", databasePassword);
+            // Client-side timeouts against the 2026-08-10 pool-wedge outage (see method javadoc).
+            // Passed through to pgjdbc as connection properties (Hibernate strips the
+            // "hibernate.connection." prefix). Values are in seconds; pgjdbc treats 0 as infinite.
+            props.put("hibernate.connection.connectTimeout", String.valueOf(
+                    resolveTimeoutSeconds(connectTimeoutEnv, DEFAULT_CONNECT_TIMEOUT_SECONDS, CONNECT_TIMEOUT_ENV)));
+            props.put("hibernate.connection.socketTimeout", String.valueOf(
+                    resolveTimeoutSeconds(socketTimeoutEnv, DEFAULT_SOCKET_TIMEOUT_SECONDS, SOCKET_TIMEOUT_ENV)));
+            props.put("hibernate.connection.loginTimeout", String.valueOf(
+                    resolveTimeoutSeconds(loginTimeoutEnv, DEFAULT_LOGIN_TIMEOUT_SECONDS, LOGIN_TIMEOUT_ENV)));
         }
         props.put("hibernate.hbm2ddl.auto", "");
         props.put("hibernate.show_sql", "false");
@@ -150,6 +211,34 @@ public final class EMF {
         applyPoolSize(props, null);
         props.put("hibernate.connection.pool_validation_interval", "5");
         return props;
+    }
+
+    /**
+     * Resolve a client-side timeout in seconds from a raw environment value, never failing EMF
+     * construction on bad input: a missing, blank, non-numeric or negative value falls back to
+     * {@code defaultSeconds}. A value of {@code 0} passes through unchanged — pgjdbc reads it as
+     * "infinite", the supported way an operator disables the timeout.
+     *
+     * @param envValue Raw environment value, or null/blank when unset
+     * @param defaultSeconds Default to use when the value is absent or unusable
+     * @param envName Environment variable name, for the warning log only
+     * @return The resolved timeout in seconds
+     */
+    static int resolveTimeoutSeconds(String envValue, int defaultSeconds, String envName) {
+        if (Strings.isNullOrEmpty(envValue)) {
+            return defaultSeconds;
+        }
+        try {
+            int parsed = Integer.parseInt(envValue.trim());
+            if (parsed < 0) {
+                log.warn("Ignoring negative {}={}; falling back to {}s", envName, envValue, defaultSeconds);
+                return defaultSeconds;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            log.warn("Ignoring non-numeric {}={}; falling back to {}s", envName, envValue, defaultSeconds);
+            return defaultSeconds;
+        }
     }
 
     /**
