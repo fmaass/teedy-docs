@@ -1128,6 +1128,10 @@
       "title": "Informazioni",
       "whats_new_title": "Novità in {version}",
       "view_releases": "Visualizza tutte le versioni",
+      "report_bug": "Segnala un bug su GitHub",
+      "copy_diagnostics": "Copia diagnostica",
+      "diagnostics_copied": "Diagnostica copiata negli appunti",
+      "diagnostics_copy_failed": "Impossibile copiare la diagnostica",
       "highlights": {
         "email_original_attached": "La posta importata nella posta in arrivo conserva ora il messaggio originale come allegato .eml, non più solo un estratto di testo: le installazioni esistenti lo attivano nelle impostazioni della posta in arrivo.",
         "preview_fullscreen": "L'anteprima dei file può passare a schermo intero, così un PDF o un'immagine di grandi dimensioni sfrutta finalmente tutto lo schermo.",

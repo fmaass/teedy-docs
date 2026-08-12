@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, ref } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -8,10 +8,19 @@ import { dirname, resolve as resolvePath } from 'node:path'
 import en from '../locale/en.json'
 import de from '../locale/de.json'
 import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
+import { buildDiagnosticsBlock, buildReportUrl } from './aboutDiagnostics'
+import type { AppDiagnostics } from '../api/app'
 
 // The running version drives the rendered heading; mock useAppInfo so a test can
 // set the app version and assert the "What's new in X" heading uses major.minor.
-const appInfoValue = vi.hoisted(() => ({ value: undefined as { current_version: string; commit_id?: string } | undefined }))
+const appInfoValue = vi.hoisted(
+  () =>
+    ({ value: undefined }) as {
+      value:
+        | { current_version: string; commit_id?: string; oidc_enabled?: boolean; header_authentication_enabled?: boolean }
+        | undefined
+    },
+)
 vi.mock('../composables/useAppInfo', () => ({
   useAppInfo: () => ({ data: ref(appInfoValue.value) }),
 }))
@@ -22,6 +31,23 @@ vi.mock('../composables/useAppInfo', () => ({
 const brandNameValue = vi.hoisted(() => ({ value: 'Teedy' }))
 vi.mock('../composables/useThemeBranding', () => ({
   useBrand: () => ({ brandName: computed(() => brandNameValue.value), brandLogoUrl: ref(null) }),
+}))
+
+// #275 diagnostics affordance: admin gate, the diagnostics fetch and the toast are dependencies of
+// the dialog, mocked so the tests drive admin-ness, the server payload and observe the outcomes.
+const isAdminValue = vi.hoisted(() => ({ value: false }))
+vi.mock('../stores/auth', () => ({
+  useAuthStore: () => ({ isAdmin: isAdminValue.value }),
+}))
+
+const getAppDiagnosticsMock = vi.hoisted(() => vi.fn())
+vi.mock('../api/app', () => ({
+  getAppDiagnostics: getAppDiagnosticsMock,
+}))
+
+const toastAdd = vi.hoisted(() => vi.fn())
+vi.mock('primevue/usetoast', () => ({
+  useToast: () => ({ add: toastAdd }),
 }))
 
 import AboutDialog from './AboutDialog.vue'
@@ -167,6 +193,148 @@ describe('AboutDialog build commit (#275)', () => {
     expect(mountDialog().find('.about-commit').exists()).toBe(false)
   })
 })
+
+// #275 part 2: the admin-only report-a-bug / diagnostics affordance. The two buttons render only for
+// an admin; the copy button writes the composed environment block to the clipboard, and the report
+// button opens a prefilled GitHub issue with that block URL-encoded into the body. The raw block is
+// deliberately NOT rendered as text (only static button labels are), so nothing volatile enters the
+// visual baseline.
+describe('AboutDialog diagnostics affordance (#275)', () => {
+  const SHA = '1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f'
+  const APP_INFO = {
+    current_version: '3.8.3',
+    commit_id: SHA,
+    oidc_enabled: false,
+    header_authentication_enabled: false,
+  }
+  const DIAG: AppDiagnostics = {
+    jetty_version: '12.1.11',
+    java_version: '21.0.4',
+    java_vendor: 'Eclipse Adoptium',
+    os_name: 'Linux',
+    os_version: '6.1.0',
+    os_arch: 'amd64',
+  }
+
+  beforeEach(() => {
+    isAdminValue.value = false
+    getAppDiagnosticsMock.mockReset()
+    getAppDiagnosticsMock.mockResolvedValue(DIAG)
+    toastAdd.mockReset()
+    appInfoValue.value = { ...APP_INFO }
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('renders both admin actions for an admin and neither for a non-admin', async () => {
+    isAdminValue.value = true
+    const admin = mountDiagnostics()
+    await flushPromises()
+    expect(admin.find('.about-report-bug').exists()).toBe(true)
+    expect(admin.find('.about-copy-diagnostics').exists()).toBe(true)
+
+    getAppDiagnosticsMock.mockClear()
+    isAdminValue.value = false
+    const user = mountDiagnostics()
+    await flushPromises()
+    expect(user.find('.about-report-bug').exists()).toBe(false)
+    expect(user.find('.about-copy-diagnostics').exists()).toBe(false)
+    // A non-admin never triggers the admin-only diagnostics fetch.
+    expect(getAppDiagnosticsMock).not.toHaveBeenCalled()
+  })
+
+  it('copies the composed environment block and toasts success', async () => {
+    isAdminValue.value = true
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    const wrapper = mountDiagnostics()
+    await flushPromises()
+    await wrapper.find('.about-copy-diagnostics').trigger('click')
+    await flushPromises()
+
+    const expectedBlock = [
+      '### Environment',
+      '- Teedy version: 3.8.3',
+      `- Build commit: ${SHA}`,
+      '- Jetty: 12.1.11',
+      '- Java: 21.0.4 (Eclipse Adoptium)',
+      '- OS: Linux 6.1.0 (amd64)',
+      '- Auth mode: internal',
+    ].join('\n')
+    // The block the component composes must match the builder's output exactly.
+    expect(buildDiagnosticsBlock(APP_INFO, DIAG)).toBe(expectedBlock)
+    expect(writeText).toHaveBeenCalledWith(expectedBlock)
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' }))
+  })
+
+  it('toasts an error when the clipboard is unavailable (insecure origin)', async () => {
+    isAdminValue.value = true
+    // A plain-http origin has no navigator.clipboard: reading .writeText throws synchronously and
+    // must land in the error toast, not escape as an unhandled rejection (the FileActionMenu guard).
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+
+    const wrapper = mountDiagnostics()
+    await flushPromises()
+    await wrapper.find('.about-copy-diagnostics').trigger('click')
+    await flushPromises()
+
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' }))
+  })
+
+  it('opens a prefilled, correctly-encoded GitHub issue on report', async () => {
+    isAdminValue.value = true
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+
+    const wrapper = mountDiagnostics()
+    await flushPromises()
+    await wrapper.find('.about-report-bug').trigger('click')
+    await flushPromises()
+
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    const [rawUrl, target, features] = openSpy.mock.calls[0]
+    expect(target).toBe('_blank')
+    expect(features).toBe('noopener')
+    expect(rawUrl).toBe(buildReportUrl(buildDiagnosticsBlock(APP_INFO, DIAG)))
+
+    // Independent of the builder: the query is genuinely URL-encoded and decodes back to a body that
+    // carries the human scaffold AND the environment block.
+    const url = new URL(rawUrl as string)
+    expect(url.origin + url.pathname).toBe('https://github.com/fmaass/teedy-docs/issues/new')
+    expect(url.searchParams.get('labels')).toBe('bug')
+    const body = url.searchParams.get('body') ?? ''
+    expect(body).toContain('Steps to reproduce')
+    expect(body).toContain('### Environment')
+    expect(body).toContain('- Teedy version: 3.8.3')
+    expect(body).toContain(`- Build commit: ${SHA}`)
+    expect(body).toContain('- Java: 21.0.4 (Eclipse Adoptium)')
+    // The raw '#' is percent-encoded on the wire (%23), so the block is not sitting in the URL plain.
+    expect(rawUrl).toContain('%23%23%23%20Environment')
+    expect(rawUrl).not.toContain('### Environment')
+  })
+})
+
+// Mount AboutDialog (visible) with admin actions clickable: Dialog renders its default slot inline,
+// and Button is a lightweight stub that forwards @click so the two action handlers can be exercised.
+function mountDiagnostics() {
+  const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } })
+  return mount(AboutDialog, {
+    props: { visible: true },
+    global: {
+      plugins: [i18n],
+      stubs: {
+        Dialog: { template: '<div><slot /></div>' },
+        Button: {
+          props: ['label', 'icon', 'severity', 'text', 'size', 'outlined'],
+          emits: ['click'],
+          template: '<button @click="$emit(\'click\', $event)">{{ label }}</button>',
+        },
+      },
+    },
+  })
+}
 
 // Mount AboutDialog (visible) with the overlay machinery stubbed out, so its body is in the DOM.
 function mountDialog() {

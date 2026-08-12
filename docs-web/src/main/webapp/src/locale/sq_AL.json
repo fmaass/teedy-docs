@@ -1128,6 +1128,10 @@
       "title": "Rreth",
       "whats_new_title": "Çfarë ka të re në {version}",
       "view_releases": "Shiko të gjitha versionet",
+      "report_bug": "Raporto një gabim në GitHub",
+      "copy_diagnostics": "Kopjo diagnostikën",
+      "diagnostics_copied": "Diagnostika u kopjua në kujtesën e fragmenteve",
+      "diagnostics_copy_failed": "Diagnostika nuk u kopjua dot",
       "highlights": {
         "email_original_attached": "Posta e importuar në kutinë hyrëse tani e ruan mesazhin origjinal si bashkëngjitje .eml dhe jo vetëm një fragment teksti — instalimet ekzistuese e aktivizojnë këtë te cilësimet e kutisë hyrëse.",
         "preview_fullscreen": "Pamja paraprake e skedarit mund të kalojë në ekran të plotë, kështu që një PDF ose imazh i madh e shfrytëzon më në fund të gjithë ekranin.",

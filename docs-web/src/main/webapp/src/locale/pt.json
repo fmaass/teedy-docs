@@ -1128,6 +1128,10 @@
       "title": "Acerca",
       "whats_new_title": "Novidades na {version}",
       "view_releases": "Ver todas as versões",
+      "report_bug": "Reportar um erro no GitHub",
+      "copy_diagnostics": "Copiar diagnóstico",
+      "diagnostics_copied": "Diagnóstico copiado para a área de transferência",
+      "diagnostics_copy_failed": "Não foi possível copiar o diagnóstico",
       "highlights": {
         "email_original_attached": "O correio importado para a caixa de entrada mantém agora a mensagem original como anexo .eml e não apenas um excerto de texto — as instalações existentes ativam-no nas definições da caixa de entrada.",
         "preview_fullscreen": "A pré-visualização de ficheiros pode passar a ecrã inteiro, pelo que um PDF ou uma imagem grandes aproveitam finalmente todo o ecrã.",

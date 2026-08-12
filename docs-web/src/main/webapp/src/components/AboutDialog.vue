@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useAppInfo } from '../composables/useAppInfo'
 import { useBrand } from '../composables/useThemeBranding'
+import { useAuthStore } from '../stores/auth'
+import { getAppDiagnostics, type AppDiagnostics } from '../api/app'
 import { HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
+import { buildDiagnosticsBlock, buildReportUrl } from './aboutDiagnostics'
 
 const visible = defineModel<boolean>('visible', { required: true })
 
 const { t } = useI18n()
+const toast = useToast()
 
 // The brand line used to be a hardcoded "teedy" — the third such literal in the app, so an
 // instance renamed in Branding still introduced itself by the product name here. Same shared
@@ -42,6 +47,69 @@ const shortCommit = computed(() => (commitId.value ? commitId.value.slice(0, 7) 
 const commitUrl = computed(() =>
   commitId.value ? `https://github.com/fmaass/teedy-docs/commit/${commitId.value}` : null,
 )
+
+// #275 (report-a-bug / diagnostics): admin-only. The server-stack fingerprint (Jetty/Java/OS) is
+// admin-restricted (GET /app is anonymous, so it is NOT there), so the whole affordance renders only
+// for an admin and the extra fetch never runs for a regular user.
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
+
+// The admin-only stack fields, fetched lazily from GET /app/diagnostics. Cached behind a single
+// in-flight promise so the dialog-open prefetch and a fast button click share one request and every
+// awaiter sees the completed result. A failed fetch leaves this null; the block then degrades those
+// fields to "unknown" rather than blocking the affordance.
+const diagnostics = ref<AppDiagnostics | null>(null)
+let diagnosticsPromise: Promise<void> | null = null
+function ensureDiagnostics(): Promise<void> {
+  if (!diagnosticsPromise) {
+    diagnosticsPromise = getAppDiagnostics()
+      .then((d) => {
+        diagnostics.value = d
+      })
+      .catch(() => {
+        // Leave diagnostics null: the block reports the six fields as "unknown".
+      })
+  }
+  return diagnosticsPromise
+}
+
+// Prefetch when an admin opens the dialog so a subsequent click acts on loaded data. immediate so a
+// dialog mounted already-open (the app's usage) prefetches too.
+watch(
+  visible,
+  (open) => {
+    if (open && isAdmin.value) {
+      void ensureDiagnostics()
+    }
+  },
+  { immediate: true },
+)
+
+async function copyDiagnostics() {
+  // Build from the ALREADY-loaded diagnostics (the dialog-open prefetch populates it). Awaiting the
+  // fetch here would break the click's transient user activation and let the browser silently block
+  // the clipboard write; a rare click-before-prefetch degrades the stack fields to "unknown", which
+  // is strictly better than a blocked write. The writeText CALL is synchronous inside the click task —
+  // only its promise is awaited — so activation is preserved.
+  const block = buildDiagnosticsBlock(appInfo.value, diagnostics.value)
+  // Same try/catch+toast shape as FileActionMenu's copyLink: on a plain-http (non-secure) origin
+  // `navigator.clipboard` is undefined and reading `.writeText` throws synchronously, which must land
+  // in the error toast rather than escape as an unhandled rejection.
+  try {
+    await navigator.clipboard.writeText(block)
+    toast.add({ severity: 'success', summary: t('ui.about.diagnostics_copied'), life: 2000 })
+  } catch {
+    toast.add({ severity: 'error', summary: t('ui.about.diagnostics_copy_failed'), life: 3000 })
+  }
+}
+
+function reportBug() {
+  // Synchronous so window.open runs inside the click's transient user activation — an await first
+  // would let the browser treat the popup as unrequested and block it. Built from the prefetched
+  // diagnostics; a click before the prefetch resolves degrades the stack fields to "unknown".
+  const block = buildDiagnosticsBlock(appInfo.value, diagnostics.value)
+  window.open(buildReportUrl(block), '_blank', 'noopener')
+}
 </script>
 
 <template>
@@ -65,6 +133,26 @@ const commitUrl = computed(() =>
           class="about-commit"
         >{{ shortCommit }}</a>
       </div>
+
+      <section v-if="isAdmin" class="about-admin-actions">
+        <Button
+          :label="t('ui.about.report_bug')"
+          icon="pi pi-external-link"
+          size="small"
+          severity="secondary"
+          class="about-report-bug"
+          @click="reportBug"
+        />
+        <Button
+          :label="t('ui.about.copy_diagnostics')"
+          icon="pi pi-copy"
+          size="small"
+          severity="secondary"
+          outlined
+          class="about-copy-diagnostics"
+          @click="copyDiagnostics"
+        />
+      </section>
 
       <section class="about-section">
         <h3 class="about-heading">{{ t('ui.about.whats_new_title', { version: whatsNewVersion }) }}</h3>
@@ -140,5 +228,10 @@ const commitUrl = computed(() =>
 .about-releases-link {
   text-decoration: none;
   margin-right: auto;
+}
+.about-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 </style>

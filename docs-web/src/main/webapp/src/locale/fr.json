@@ -1128,6 +1128,10 @@
       "title": "À propos",
       "whats_new_title": "Nouveautés de {version}",
       "view_releases": "Voir toutes les versions",
+      "report_bug": "Signaler un bug sur GitHub",
+      "copy_diagnostics": "Copier les diagnostics",
+      "diagnostics_copied": "Diagnostics copiés dans le presse-papiers",
+      "diagnostics_copy_failed": "Impossible de copier les diagnostics",
       "highlights": {
         "email_original_attached": "Les messages importés dans la boîte de réception conservent désormais l'e-mail d'origine en pièce jointe .eml, et plus seulement un extrait de texte — les installations existantes l'activent dans les paramètres de la boîte de réception.",
         "preview_fullscreen": "L'aperçu de fichier passe en plein écran, si bien qu'un PDF ou une image de grande taille occupe enfin tout l'écran.",

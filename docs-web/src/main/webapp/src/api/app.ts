@@ -15,6 +15,9 @@ export interface AppInfo {
   min_version?: string
   guest_login?: boolean
   oidc_enabled?: boolean
+  // True when the deployment authenticates via a trusted reverse-proxy header. Used with
+  // oidc_enabled to derive the deployment auth-mode line in the About diagnostics block.
+  header_authentication_enabled?: boolean
   // Trash retention window (days) before automatic purge; absent on older servers.
   trash_retention_days?: number
   // Admin-configurable settings surfaced to the Config screen (absent on older servers).
@@ -39,6 +42,25 @@ export function saveFooterLinks(links: FooterLink[]) {
 // (the backend already strips any "-SNAPSHOT" suffix before returning it).
 export function getAppInfo() {
   return api.get<AppInfo>('/app').then((r) => r.data)
+}
+
+// The server-stack fingerprint (#275). Served from GET /api/app/diagnostics, which is ADMIN-only:
+// GET /api/app is anonymous, so these details are deliberately NOT on it. The About dialog composes
+// them with the version/commit it already holds from GET /api/app to build the report/diagnostics
+// block. `jetty_version` reads "unknown" on a server built before the version was stamped.
+export interface AppDiagnostics {
+  jetty_version: string
+  java_version: string
+  java_vendor: string
+  os_name: string
+  os_version: string
+  os_arch: string
+}
+
+// GET /api/app/diagnostics (ADMIN). Returns only the admin-restricted stack additions; the About
+// dialog calls it lazily and only when the current user is an admin.
+export function getAppDiagnostics() {
+  return api.get<AppDiagnostics>('/app/diagnostics').then((r) => r.data)
 }
 
 /**

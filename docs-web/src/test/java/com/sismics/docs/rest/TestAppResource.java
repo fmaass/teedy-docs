@@ -110,6 +110,40 @@ public class TestAppResource extends BaseJerseyTest {
     }
 
     /**
+     * #275: the server-stack diagnostics endpoint is admin-only and returns the Jetty/Java/OS
+     * fingerprint. An admin gets every field; a non-admin and an anonymous caller are forbidden, so
+     * these details never leak off the anonymous GET /app.
+     */
+    @Test
+    public void testDiagnostics() {
+        // An admin sees the full stack fingerprint
+        String adminToken = adminToken();
+        JsonObject json = target().path("/app/diagnostics").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .get(JsonObject.class);
+        Assertions.assertNotNull(json.getString("jetty_version"));
+        Assertions.assertNotNull(json.getString("java_version"));
+        Assertions.assertNotNull(json.getString("java_vendor"));
+        Assertions.assertNotNull(json.getString("os_name"));
+        Assertions.assertNotNull(json.getString("os_version"));
+        Assertions.assertNotNull(json.getString("os_arch"));
+
+        // A non-admin is forbidden — this is what the checkBaseFunction(ADMIN) gate enforces
+        clientUtil.createUser("diagnostics_nonadmin");
+        String userToken = clientUtil.login("diagnostics_nonadmin");
+        Response response = target().path("/app/diagnostics").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, userToken)
+                .get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
+                "diagnostics is admin-only");
+
+        // An anonymous caller is forbidden too (no session)
+        response = target().path("/app/diagnostics").request().get();
+        Assertions.assertEquals(Status.FORBIDDEN, Status.fromStatusCode(response.getStatus()),
+                "diagnostics requires an authenticated session");
+    }
+
+    /**
      * A soft-deleted user who still owns a saved filter must not wedge the storage purge.
      *
      * T_SAVED_FILTER.FK_SFL_IDUSER_C is ON DELETE RESTRICT, so unless clean_storage first

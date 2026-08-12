@@ -1128,6 +1128,10 @@
       "title": "關於",
       "whats_new_title": "{version} 的新功能",
       "view_releases": "檢視所有版本",
+      "report_bug": "在 GitHub 上回報問題",
+      "copy_diagnostics": "複製診斷資訊",
+      "diagnostics_copied": "診斷資訊已複製到剪貼簿",
+      "diagnostics_copy_failed": "無法複製診斷資訊",
       "highlights": {
         "email_original_attached": "匯入收件箱的郵件現在會把原始郵件保留為 .eml 附件，而不再只有一段文字摘要——既有安裝可在收件箱設定中開啟。",
         "preview_fullscreen": "檔案預覽可以切換到全螢幕，大尺寸的 PDF 或圖片終於能用滿整個畫面。",

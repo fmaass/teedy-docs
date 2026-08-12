@@ -1128,6 +1128,10 @@
       "title": "About",
       "whats_new_title": "What's new in {version}",
       "view_releases": "View all releases",
+      "report_bug": "Report a bug on GitHub",
+      "copy_diagnostics": "Copy diagnostics",
+      "diagnostics_copied": "Diagnostics copied to clipboard",
+      "diagnostics_copy_failed": "Could not copy the diagnostics",
       "highlights": {
         "email_original_attached": "Mail imported into the inbox now keeps the original message as an .eml attachment instead of only a text excerpt — existing installations turn it on in the inbox settings.",
         "preview_fullscreen": "The file preview can go fullscreen, so a large PDF or image finally uses the whole screen instead of a fixed window.",

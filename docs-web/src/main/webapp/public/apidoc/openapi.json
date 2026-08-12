@@ -597,6 +597,20 @@
         }
       }
     },
+    "/app/diagnostics": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "summary": "Get server diagnostics",
+        "operationId": "get_app_diagnostics",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/app/batch/reindex": {
       "post": {
         "tags": [

@@ -253,6 +253,58 @@ public class AppResource extends BaseResource {
     }
 
     /**
+     * Returns the server-stack fingerprint used to triage a running instance (#275).
+     *
+     * <p>Admin-only, and served from its OWN endpoint rather than being folded into the anonymous
+     * GET /app, because GET /app is reachable without a session — the Jetty/Java/OS details would
+     * leak the exact stack of an unauthenticated deployment. The About dialog composes these with the
+     * version and commit it already has from GET /app.
+     *
+     * @api {get} /app/diagnostics Get server diagnostics
+     * @apiName GetAppDiagnostics
+     * @apiGroup App
+     * @apiSuccess {String} jetty_version Jetty version the server was built against
+     * @apiSuccess {String} java_version Java runtime version
+     * @apiSuccess {String} java_vendor Java runtime vendor
+     * @apiSuccess {String} os_name Operating system name
+     * @apiSuccess {String} os_version Operating system version
+     * @apiSuccess {String} os_arch Operating system architecture
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission admin
+     * @apiVersion 1.5.0
+     *
+     * @return Response
+     */
+    @GET
+    @Path("diagnostics")
+    public Response diagnostics() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // Jetty version is stamped into config.properties at build time (jetty.version ->
+        // the pom's org.eclipse.jetty.version) — the same mechanism as build.commit, so a build
+        // predating the stamp reads it as absent and falls back to "unknown" identically.
+        String jettyVersion;
+        try {
+            jettyVersion = ConfigUtil.getConfigBundle().getString("jetty.version");
+        } catch (MissingResourceException e) {
+            jettyVersion = "unknown";
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("jetty_version", jettyVersion)
+                .add("java_version", System.getProperty("java.version"))
+                .add("java_vendor", System.getProperty("java.vendor"))
+                .add("os_name", System.getProperty("os.name"))
+                .add("os_version", System.getProperty("os.version"))
+                .add("os_arch", System.getProperty("os.arch"));
+
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
      * Update the configurable footer/imprint links.
      *
      * @api {post} /app/footer_links Set the footer/imprint links

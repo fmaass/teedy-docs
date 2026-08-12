@@ -1128,6 +1128,10 @@
       "title": "Über",
       "whats_new_title": "Neu in {version}",
       "view_releases": "Alle Versionen anzeigen",
+      "report_bug": "Fehler auf GitHub melden",
+      "copy_diagnostics": "Diagnosedaten kopieren",
+      "diagnostics_copied": "Diagnosedaten in die Zwischenablage kopiert",
+      "diagnostics_copy_failed": "Die Diagnosedaten konnten nicht kopiert werden",
       "highlights": {
         "email_original_attached": "E-Mails, die in den Posteingang importiert werden, behalten jetzt die Originalnachricht als .eml-Anhang statt nur eines Textauszugs – bestehende Installationen schalten das in den Posteingangs-Einstellungen ein.",
         "preview_fullscreen": "Die Dateivorschau lässt sich auf Vollbild schalten, sodass große PDFs und Bilder endlich den ganzen Bildschirm nutzen.",

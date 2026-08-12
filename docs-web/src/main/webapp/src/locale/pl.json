@@ -1128,6 +1128,10 @@
       "title": "Informacje",
       "whats_new_title": "Co nowego w {version}",
       "view_releases": "Zobacz wszystkie wydania",
+      "report_bug": "Zgłoś błąd w serwisie GitHub",
+      "copy_diagnostics": "Kopiuj dane diagnostyczne",
+      "diagnostics_copied": "Dane diagnostyczne skopiowane do schowka",
+      "diagnostics_copy_failed": "Nie udało się skopiować danych diagnostycznych",
       "highlights": {
         "email_original_attached": "Poczta importowana do skrzynki wejściowej zachowuje teraz oryginalną wiadomość jako załącznik .eml, a nie tylko fragment tekstu — istniejące instalacje włączają to w ustawieniach skrzynki wejściowej.",
         "preview_fullscreen": "Podgląd pliku można przełączyć w tryb pełnoekranowy, więc duży PDF lub obraz wreszcie wykorzystuje cały ekran.",
