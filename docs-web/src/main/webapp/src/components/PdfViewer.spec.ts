@@ -79,6 +79,12 @@ vi.mock('pdfjs-dist', () => ({
   GlobalWorkerOptions: {},
   getDocument: (...args: unknown[]) => getDocumentMock(...(args as [])),
 }))
+// The body fetch is a DEPENDENCY of the load path, mocked at its module boundary: these specs
+// exercise the viewer's rotation/generation/download logic, not the shared-fetch cache (which
+// has its own spec, pdfBytesCache.spec.ts). It resolves a fixed ArrayBuffer by default; a hoisted
+// reference lets one test hold it pending to supersede a load INSIDE the shared-fetch window (#247).
+const getPdfBytesMock = vi.hoisted(() => vi.fn(async () => new ArrayBuffer(8)))
+vi.mock('../api/pdfBytesCache', () => ({ getPdfBytes: getPdfBytesMock }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
 
 import PdfViewer from './PdfViewer.vue'
@@ -379,6 +385,10 @@ describe('PdfViewer — original-URL control is Download-only (#144)', () => {
       })
 
     const wrapper = mountViewer('blob:A')
+    // Let A finish its shared body fetch and REACH getDocument(A) — this test is about a load
+    // superseded AFTER getDocument, whose getDocument then rejects late. (A supersede DURING the
+    // body fetch is a different path, covered by the #247 post-fetch-guard spec below.)
+    await flushPromises()
     await wrapper.setProps({ src: 'blob:B' })
     await flushPromises()
     await settleRenders()
@@ -505,5 +515,34 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     // left attached to the dead viewer.
     expect(destroy).toHaveBeenCalled()
     expect(wrapper.emitted('error')).toBeFalsy()
+  })
+
+  it('a src change DURING the shared body fetch abandons the load before getDocument (#247)', async () => {
+    // The #247 shared body fetch is a suspension point BEFORE getDocument. A load superseded while
+    // it is in flight must return at the post-fetch generation guard and NEVER spin up a pdf.js
+    // parse for a document no longer wanted. getPdfBytes(A) is held pending so the supersede lands
+    // squarely inside that window; B (default, immediately-resolving getPdfBytes) loads normally.
+    let releaseA!: (bytes: ArrayBuffer) => void
+    getPdfBytesMock.mockReturnValueOnce(new Promise<ArrayBuffer>((resolve) => (releaseA = resolve)))
+    getDocumentMock.mockReturnValueOnce({
+      promise: Promise.resolve({ numPages: 2, getPage: getPageMock }),
+      destroy: vi.fn(),
+    })
+
+    const wrapper = mountViewer('blob:A') // gen1 suspended inside getPdfBytes(A)
+    await wrapper.setProps({ src: 'blob:B' }) // gen2 loads B fully (B's getDocument is the only call)
+    await flushPromises()
+    await settleRenders()
+
+    const getDocCallsForB = getDocumentMock.mock.calls.length
+    releaseA(new ArrayBuffer(8)) // A's shared fetch resolves LATE, after the generation moved on
+    await flushPromises()
+
+    // The superseded load parsed nothing: it created NO loading task (no new getDocument call) and
+    // never flipped the current (B) preview to an error. Remove the post-fetch guard and A wrongly
+    // calls getDocument here, so this count grows.
+    expect(getDocumentMock.mock.calls.length).toBe(getDocCallsForB)
+    expect(wrapper.emitted('error')).toBeFalsy()
+    expect(wrapper.find('.pdf-error').exists()).toBe(false)
   })
 })

@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as pdfjsLib from 'pdfjs-dist'
 import Button from 'primevue/button'
+import { getPdfBytes } from '../api/pdfBytesCache'
 
 const { t } = useI18n()
 
@@ -162,7 +163,22 @@ async function loadPdf() {
       pdfDoc = null
     }
 
-    const loadingTask = pdfjsLib.getDocument({ url: props.src })
+    // Fetch the body ONCE for this src, shared with any other viewer of the same file
+    // (getPdfBytes dedups concurrent GETs). This deliberately replaces pdf.js's own internal
+    // (possibly ranged) {url} fetch with one explicit full-body fetch shared between consumers:
+    // the double-fetch that races the disk cache is the #247 defect being removed, and teedy
+    // serves the full body anyway.
+    const bytes = await getPdfBytes(props.src)
+    // The shared fetch is a NEW suspension point before getDocument. A load superseded during it
+    // (src changed, or the viewer unmounted) must abandon here — parsing a doomed document on a
+    // pdf.js worker is wasted work, and the state it would touch belongs to a newer load.
+    if (gen !== docGeneration) return
+
+    // Parse a COPY of the shared bytes: pdf.js transfers/detaches the `data` ArrayBuffer onto
+    // its worker, so handing both viewers the same buffer would let the first detach it and
+    // leave the second with a zero-length buffer. The cache holds the canonical bytes (fetched
+    // once); each viewer parses its own slice.
+    const loadingTask = pdfjsLib.getDocument({ data: bytes.slice(0) })
     const doc = await loadingTask.promise
     // A newer load started (src changed) or the viewer unmounted while getDocument was in
     // flight: abandon this stale one — destroy its loading task (tearing down the document)
