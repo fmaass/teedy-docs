@@ -11,7 +11,7 @@ import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS, headingVersion } from './aboutHighl
 
 // The running version drives the rendered heading; mock useAppInfo so a test can
 // set the app version and assert the "What's new in X" heading uses major.minor.
-const appInfoValue = vi.hoisted(() => ({ value: undefined as { current_version: string } | undefined }))
+const appInfoValue = vi.hoisted(() => ({ value: undefined as { current_version: string; commit_id?: string } | undefined }))
 vi.mock('../composables/useAppInfo', () => ({
   useAppInfo: () => ({ data: ref(appInfoValue.value) }),
 }))
@@ -144,6 +144,27 @@ describe('AboutDialog brand name', () => {
     brandNameValue.value = 'Contoso Archive'
     appInfoValue.value = { current_version: '3.8.2' }
     expect(mountDialog().get('.about-version').text()).toBe('v3.8.2')
+  })
+})
+
+// #275: the About dialog links the running build to its GitHub commit — a short, monospace SHA
+// beside the version. It appears only when the server stamped one (commit_id present); an
+// unstamped/local build (commit_id absent) shows only the version.
+describe('AboutDialog build commit (#275)', () => {
+  const SHA = '1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f'
+
+  it('links the short commit SHA to its GitHub commit when the server provides one', () => {
+    appInfoValue.value = { current_version: '3.8.3', commit_id: SHA }
+    const link = mountDialog().get('.about-commit')
+    expect(link.text()).toBe('1e2f3a4') // the 7-character short form
+    expect(link.attributes('href')).toBe(`https://github.com/fmaass/teedy-docs/commit/${SHA}`)
+    expect(link.attributes('title')).toBe(SHA) // the full SHA on hover
+    expect(link.attributes('target')).toBe('_blank')
+  })
+
+  it('shows no commit link on a build that did not stamp one (commit_id absent)', () => {
+    appInfoValue.value = { current_version: '3.8.3' }
+    expect(mountDialog().find('.about-commit').exists()).toBe(false)
   })
 })
 

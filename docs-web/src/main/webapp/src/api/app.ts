@@ -9,6 +9,9 @@ export interface FooterLink {
 
 export interface AppInfo {
   current_version: string
+  // Build commit id the running server was built from (#275). ABSENT on an unstamped/local build
+  // and on older servers, so the About dialog then shows only the version.
+  commit_id?: string
   min_version?: string
   guest_login?: boolean
   oidc_enabled?: boolean

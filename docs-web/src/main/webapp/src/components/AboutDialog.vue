@@ -32,6 +32,16 @@ const whatsNewVersion = computed(() => headingVersion(version.value))
 const highlightKeys = HIGHLIGHT_KEYS
 
 const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
+
+// Build commit the running server was built from (#275): a short, monospace SHA beside the version,
+// linked to the exact GitHub commit for triage. ABSENT on an unstamped/local build (the server omits
+// commit_id when it is "unknown"), so About then shows only the version. The full SHA is the link
+// title; the visible text is the 7-character short form.
+const commitId = computed(() => appInfo.value?.commit_id ?? null)
+const shortCommit = computed(() => (commitId.value ? commitId.value.slice(0, 7) : null))
+const commitUrl = computed(() =>
+  commitId.value ? `https://github.com/fmaass/teedy-docs/commit/${commitId.value}` : null,
+)
 </script>
 
 <template>
@@ -46,6 +56,14 @@ const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
       <div class="about-brand">
         <span class="about-name">{{ brandName }}</span>
         <span v-if="version" class="about-version">{{ `v${version}` }}</span>
+        <a
+          v-if="shortCommit"
+          :href="commitUrl!"
+          :title="commitId!"
+          target="_blank"
+          rel="noopener"
+          class="about-commit"
+        >{{ shortCommit }}</a>
       </div>
 
       <section class="about-section">
@@ -92,6 +110,15 @@ const releasesUrl = 'https://github.com/fmaass/teedy-docs/releases'
   font-size: 0.9375rem;
   color: var(--p-text-muted-color);
   font-variant-numeric: tabular-nums;
+}
+.about-commit {
+  font-size: 0.8125rem;
+  color: var(--teedy-brand);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+}
+.about-commit:hover {
+  text-decoration: underline;
 }
 .about-heading {
   margin: 0 0 0.5rem;

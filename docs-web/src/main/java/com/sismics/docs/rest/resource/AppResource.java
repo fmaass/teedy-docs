@@ -211,6 +211,20 @@ public class AppResource extends BaseResource {
             response.add("footer_links", footerLinks);
         }
 
+        // Build commit id (#275): stamped into config.properties at build time (build.commit ->
+        // GITHUB_SHA in CI, "unknown" for an unstamped/local build). Surfaced so the About dialog can
+        // link the running build to its GitHub commit. ABSENT when unstamped, so today's About is
+        // unchanged for a local build.
+        String buildCommit;
+        try {
+            buildCommit = configBundle.getString("build.commit");
+        } catch (MissingResourceException e) {
+            buildCommit = null;
+        }
+        if (buildCommit != null && !buildCommit.isBlank() && !"unknown".equals(buildCommit)) {
+            response.add("commit_id", buildCommit);
+        }
+
         return Response.ok().entity(response.build()).build();
     }
 

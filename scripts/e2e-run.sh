@@ -84,7 +84,10 @@ if [ -z "${image}" ]; then
   war_glob=("${repo_root}"/docs-web/target/docs-web-*.war)
   if [ ! -e "${war_glob[0]}" ]; then
     echo "Building production WAR (./mvnw -Pprod -DskipTests clean install)..."
-    "${repo_root}/mvnw" -f "${repo_root}/pom.xml" -Pprod -DskipTests clean install
+    # Stamp the build commit (#275) so the About dialog matches the CI-built image (CI stamps
+    # GITHUB_SHA); an unstamped build renders no commit link and diverges from the visual baseline.
+    "${repo_root}/mvnw" -f "${repo_root}/pom.xml" -Pprod -DskipTests clean install \
+      -Dbuild.commit="$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || echo unknown)"
   else
     # A REUSED WAR must match the current pom version — a stale WAR (e.g. a v3.3.0
     # artifact left in target while the tree is v3.4.0) silently boots the OLD app

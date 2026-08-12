@@ -49,8 +49,9 @@ async function setLocale(page: Page, locale: 'en' | 'de'): Promise<void> {
 //     runtime-created doc); .meta-val also hides language/creator (harmless, not the
 //     screen's subject).
 //   * .about-version — the live running-version badge (e.g. "v3.6.0").
+//   * .about-commit — the build commit SHA link (#275), which changes every build.
 const VOLATILE_HIDE_CSS =
-  '.doc-meta, .meta-val, .about-version { visibility: hidden !important; }'
+  '.doc-meta, .meta-val, .about-version, .about-commit { visibility: hidden !important; }'
 
 async function freeze(page: Page): Promise<void> {
   await page

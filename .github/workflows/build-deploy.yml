@@ -272,7 +272,9 @@ jobs:
         run: cd docs-web/src/main/webapp && npm run test:unit
 
       - name: Build with Maven
-        run: ./mvnw --batch-mode -Pprod clean install -DskipTests
+        # -Dbuild.commit stamps the running commit into config.properties (#275) so the About
+        # dialog can link the built image to its GitHub commit; unset local builds default to "unknown".
+        run: ./mvnw --batch-mode -Pprod clean install -DskipTests -Dbuild.commit="${GITHUB_SHA}"
 
       - name: Upload war artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
