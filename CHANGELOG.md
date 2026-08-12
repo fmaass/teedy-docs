@@ -9,12 +9,23 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 ## [Unreleased]
 
 ### Added
+- The About dialog shows the build's commit id next to the version, linked to the commit on GitHub; a build without a stamped commit omits it (#275).
+- The right-click tag-search filter has a clear button (#274).
 
 ### Changed
+- The right-click tag menu opens as a single panel instead of auto-opening its search field (#234).
+- The Branding page gives the image labels their own row and states each image's expected format and size (#273).
+- The file-viewer rotation controls share one neutral colour (#276).
+- The brand primary is applied at a darker palette step, so brand-coloured text and buttons meet WCAG AA contrast with the stock palette; a custom main colour gets the same darker derivation, though an extreme choice can still fall short (#263).
 
 ### Fixed
+- Statistics and export dates resolve in the server's local time zone (#265).
+- Gallery thumbnail images are pointer-transparent, so every click on a tile opens its document (#235).
+- The document filter toolbar wraps on mobile instead of overflowing, and its control heights are level (#67).
+- The rows-per-page control wraps onto its own row below 640px (#272).
 
 ### Security
+- pdfjs-dist, nanoid and js-yaml bumped past their HIGH-severity CVEs.
 
 ## [3.8.2] - 2026-08-04
 
