@@ -56,7 +56,7 @@ async function keyboardAddTag(page: import('@playwright/test').Page, name: strin
   await page.keyboard.press('Enter')
 }
 
-test('right-click tag menu adds a tag by keyboard once its Select is opened (#171/#234)', async ({ page, request, cleanup }) => {
+test('right-click tag menu adds a tag by keyboard from its inline search box (#171/#234)', async ({ page, request, cleanup }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
   const name = tagName()
   const title = unique('tqm-focus-doc')
@@ -76,25 +76,32 @@ test('right-click tag menu adds a tag by keyboard once its Select is opened (#17
   await row.click({ button: 'right' })
   await expect(page.locator('.p-popover')).toBeVisible()
 
-  // The tag Select no longer auto-opens on the right-click menu (#234 follow-up): the menu
-  // presents as a single panel. Open the Select with a click and put the caret in its filter,
-  // then add the tag by keyboard alone from there.
-  await page.locator('.tqm-select').click()
-  const filter = page.locator('.p-select-overlay input.p-select-filter')
-  await expect(filter).toBeVisible()
+  // The tag add control is an inline search box, not a teleported Select overlay (TEEDY-86):
+  // the menu presents as a single panel. Put the caret in the search box and add the tag by
+  // keyboard alone — type the name, press Enter, which commits the top filtered match.
+  const filter = page.locator('.p-popover input.tqm-filter-input')
   await filter.click()
-  await expect(filter, 'the tag filter takes the caret once the Select is opened').toBeFocused()
+  await expect(filter, 'the inline search box takes the caret on click').toBeFocused()
 
-  await keyboardAddTag(page, name)
+  await filter.fill(name)
+  // SETTLE BEFORE COMMITTING: the typed filter re-renders the option list, and Enter commits
+  // whatever the top match is. The unique single-token name resolves the list to exactly one
+  // survivor, so waiting for that collapse guarantees Enter commits the intended tag.
+  const options = page.locator('.p-popover .tqm-option')
+  await expect(options, 'the filtered tag list settled to one survivor').toHaveCount(1)
+  await expect(options.first()).toContainText(name)
+  await filter.press('Enter')
+
   await expect
     .poll(() => apiDocTagIds(request, docId), { message: 'tag added via keyboard quick menu' })
     .toContain(tagId)
 })
 
-// #274 — the tag filter box gets a clear (×), the parity with the main search bar the
+// #274 — the tag search box gets a clear (×), the parity with the main search bar the
 // reporter asked for. It shows only once something is typed, empties the box in one click,
-// and leaves the caret in the field so the next search can be typed straight away.
-test('the right-click tag filter offers a clear (×) that empties it and keeps the caret (#274)', async ({
+// and leaves the caret in the field so the next search can be typed straight away. Reworked
+// in TEEDY-86 to drive our own InputText rather than reach into PrimeVue's private filter DOM.
+test('the inline tag search box offers a clear (×) that empties it and keeps the caret (#274)', async ({
   page,
   request,
   cleanup,
@@ -116,21 +123,20 @@ test('the right-click tag filter offers a clear (×) that empties it and keeps t
   await row.click({ button: 'right' })
   await expect(page.locator('.p-popover')).toBeVisible()
 
-  await page.locator('.tqm-select').click()
-  const filter = page.locator('.p-select-overlay input.p-select-filter')
+  const filter = page.locator('.p-popover input.tqm-filter-input')
   await expect(filter).toBeVisible()
 
   // Empty box → just the magnifier, no clear affordance.
-  const clear = page.locator('.p-select-overlay .tqm-filter-clear')
+  const clear = page.locator('.p-popover .tqm-filter-clear')
   await expect(clear).toHaveCount(0)
 
   await filter.click()
   await filter.fill(name.slice(0, 3))
   await expect(filter).toHaveValue(name.slice(0, 3))
-  await expect(clear, 'a clear button appears once the filter has text').toBeVisible()
+  await expect(clear, 'a clear button appears once the search box has text').toBeVisible()
 
   await clear.click()
-  await expect(filter, 'the clear empties the filter').toHaveValue('')
+  await expect(filter, 'the clear empties the search box').toHaveValue('')
   await expect(filter, 'the caret stays in the field for the next search').toBeFocused()
   await expect(clear, 'the magnifier is back once the box is empty').toHaveCount(0)
 })
@@ -224,14 +230,17 @@ test('a scroll finished BEFORE the right-click does not dismiss the quick menu (
     .toBe(true)
 
   // The verdict is read off a POSITIVE end state rather than waited out on a timer: a menu
-  // that survived is live and interactive — its tag Select opens on a click and mounts an
-  // overlay — where a dismissed one never gets there. Asserting only "a .p-popover exists"
-  // would not be enough: a dismissed popover is still in the DOM while it plays its leave
-  // transition. (The menu no longer auto-opens the Select on show — #234 follow-up.)
-  await page.locator('.tqm-select').click()
+  // that survived is live and interactive — its inline search box and tag list are present —
+  // where a dismissed one never gets there. Asserting only "a .p-popover exists" would not be
+  // enough: a dismissed popover is still in the DOM while it plays its leave transition. (The
+  // tag add control is inline now, not a teleported Select overlay — TEEDY-86.)
   await expect(
-    page.locator('.p-select-overlay'),
-    'the surviving menu opened its tag Select on click',
+    page.locator('.p-popover input.tqm-filter-input'),
+    'the surviving menu shows its inline search box',
+  ).toBeVisible()
+  await expect(
+    page.locator('.p-popover .tqm-option').first(),
+    'and its tag list is present',
   ).toBeVisible()
   await expect(
     page.locator('.p-popover'),

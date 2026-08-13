@@ -3,21 +3,27 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
-import Select from 'primevue/select'
+import InputText from 'primevue/inputtext'
+import IconField from 'primevue/iconfield'
+import InputIcon from 'primevue/inputicon'
 import { type Tag } from '../api/tag'
 import { type DocumentListItem } from '../api/document'
 import TagBadge from './TagBadge.vue'
-import { assignableTags, topUsedTags } from '../utils/tagQuickMenu'
+import { assignableTags, filterTagsByName, topUsedTags } from '../utils/tagQuickMenu'
 import { nextFrame } from '../utils/nextFrame'
 
 /**
  * Compact right-click "tags" menu (#71). Replaces the former full-tag-tree context
  * menu, which overflowed and got cut off on instances with many tags.
  *
- * ADD  — a searchable Select over every assignable (not-yet-assigned) tag, plus a
- *        row of the most-used tags as quick-add chips (usage from `tagCounts`, which
- *        the app already fetches for the sidebar facets). Selecting either adds the
- *        tag. Bounded height, scrolls inside — never overflows the viewport.
+ * ADD  — an owned search box (an InputText, not PrimeVue's built-in Select filter) over a
+ *        scrollable list of add-action buttons, one per assignable (not-yet-assigned) tag,
+ *        plus a row of the most-used tags as quick-add chips (usage from `tagCounts`, which
+ *        the app already fetches for the sidebar facets). Selecting either adds the tag. Each
+ *        list row is a stateless "add this tag" button — NOT a stateful single-select widget
+ *        (a Listbox's sticky selection could swallow a re-click of the just-added tag when
+ *        the popover reopens on the same instance mid-fade). Bounded and scrolls inline —
+ *        never overflows the viewport, and never teleports an overlay.
  * REMOVE — the document's currently-assigned tags as removable chips.
  *
  * Add/remove reuse the parent's existing tag mutations (useDocumentTags) via emits;
@@ -38,12 +44,15 @@ const emit = defineEmits<{
 }>()
 
 const popover = ref()
-const tagSelect = ref()
-const pendingTag = ref<string | null>(null)
-// Mirrors the tag Select's filter text so the trailing icon can flip between a magnifier
-// (empty) and a clear × (has text) — #274. The Select owns the filter value; this only
-// tracks it through the `filter` event a keystroke or a programmatic clear both raise.
-const tagFilter = ref('')
+const filterInput = ref()
+
+// The search box is OURS (TEEDY-86). The add control used to be a PrimeVue Select whose
+// built-in filter lived in a teleported overlay; clearing it meant querySelector-ing that
+// private DOM (`input.p-select-filter`) and dispatching a synthetic input event — a hard
+// coupling to PrimeVue internals with no supported alternative in 4.x (#274). It is now a
+// plain InputText feeding a list of add-action buttons rendered inline in the popover, so the
+// filter text is a ref we own: the clear × just empties it, and the list is a computed over it.
+const filterText = ref('')
 
 // Resolved through the router (not hand-built) so the hash-history prefix and any
 // future route change stay correct; empty when no document is bound.
@@ -59,7 +68,12 @@ const assignedTagIds = computed(
 
 const assignable = computed(() => assignableTags(props.allTags, assignedTagIds.value))
 
-// Top-5 most-used quick-add chips (falls back to first-5-by-name when no usage data).
+// The assignable tags narrowed by the owned search box. `filterTagsByName` is the same pure,
+// unit-tested selector the util exposes; an empty query returns the full list unchanged.
+const filtered = computed(() => filterTagsByName(assignable.value, filterText.value))
+
+// Top-5 most-used quick-add chips (falls back to first-5-by-name when no usage data). Ranked
+// over all assignable tags, not the filtered view — the chips are a shortcut, not the search.
 const quickAddTags = computed(() => topUsedTags(assignable.value, props.tagCounts))
 
 const assignedTags = computed(() => props.document?.tags ?? [])
@@ -88,8 +102,7 @@ function cancelPendingOpen() {
 }
 
 async function show(event: Event) {
-  pendingTag.value = null
-  tagFilter.value = ''
+  filterText.value = ''
   // `currentTarget` is only live while the event is being dispatched — read the anchor now,
   // not after the await.
   const anchor = (event.currentTarget ?? event.target) as HTMLElement | null
@@ -151,11 +164,12 @@ function hide() {
 function onOutsideContextMenu(event: MouseEvent) {
   const target = event.target
   if (!(target instanceof Node)) return
-  // The tag Select's overlay is teleported to <body>, so it belongs to this menu without
-  // being a DOM descendant of it. Counting it as outside would let a right-click in the tag
-  // filter — the gesture that reaches "paste" — take the whole menu away.
-  const ownRoots: unknown[] = [popover.value?.container, tagSelect.value?.overlay]
-  if (ownRoots.some((root) => root instanceof Node && root.contains(target))) return
+  // The whole menu — search box, tag list and all — now renders inline inside the popover, so
+  // "inside" is simply a DOM-descendant test against the popover's own container. (The old
+  // teleported Select overlay needed a second own-root; going inline removed it. A right-click
+  // in the search box is inside this container, so it never takes the menu away.)
+  const container = popover.value?.container
+  if (container instanceof Node && container.contains(target)) return
   hide()
 }
 
@@ -173,37 +187,33 @@ function unbindOutsideContextMenu() {
 // A menu unmounted while open plays no leave transition, so `hide` never arrives.
 onBeforeUnmount(unbindOutsideContextMenu)
 
-function onSelect(tagId: string | null) {
-  if (!tagId) return
+// On leave: drop the dismissal listener and reset the owned filter, so a reopened menu starts
+// on the full list with no stale search text (and no clear × over an empty box).
+function onPopoverHide() {
+  unbindOutsideContextMenu()
+  filterText.value = ''
+}
+
+// Add-action for a tag row (or the Enter-committed top match). Each row is a plain button, so
+// this only ever runs on a real add — there is no stateful selection to toggle or go stale.
+function onSelect(tagId: string) {
   emit('addTag', tagId)
   hide()
 }
 
-// The Select raises `filter` on every keystroke in its filter box; track the current text so
-// the trailing icon knows whether to offer a clear (#274).
-function onTagFilter(event: { value: string }) {
-  tagFilter.value = event.value ?? ''
+// Clear (×) for the owned filter (#274, reworked in TEEDY-86): empty our ref and return the
+// caret so the next search can be typed straight away. No DOM reach, no synthetic events.
+function clearFilter() {
+  filterText.value = ''
+  ;(filterInput.value?.$el as HTMLInputElement | undefined)?.focus()
 }
 
-// PrimeVue empties the filter itself when its overlay closes but raises no `filter` for that,
-// so re-sync here or a reopened Select would show a clear × over an empty box.
-function onTagSelectHide() {
-  tagFilter.value = ''
-}
-
-// Clear (×) for the tag filter (#274), matching the main search bar's clear affordance. The
-// filter input lives inside the Select's overlay; dispatching a native `input` on it drives
-// the Select's own onFilterChange — the option list re-filters and `filter` fires, so
-// tagFilter resets through the same path a keystroke takes. Focus returns to the field so the
-// next search can be typed straight away.
-function clearTagFilter() {
-  const input = tagSelect.value?.overlay?.querySelector(
-    'input.p-select-filter',
-  ) as HTMLInputElement | null
-  if (!input) return
-  input.value = ''
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  input.focus()
+// Enter in the search box commits the top match, so a tag can be added by keyboard alone
+// (#171/#204) without leaving the field. Mouse users click a row; keyboard users can also tab
+// onto the row buttons and press Enter.
+function onFilterEnter() {
+  const top = filtered.value[0]
+  if (top) onSelect(top.id)
 }
 
 function onQuickAdd(tagId: string) {
@@ -219,24 +229,23 @@ defineExpose({ show, hide })
 </script>
 
 <template>
-  <!-- On show the menu only arms the outside-right-click dismissal (#234). It used to also
-       open the tag Select and focus its filter for no-click keyboard entry (#171/#204), but
-       that auto-opened overlay drew as a second floating panel under the popover and the
-       reporter read the pair as "two menus" (#234 follow-up). The Select now opens on a
-       click, so the right-click menu presents as a single panel; the slide-over keeps its
-       own auto-focus, which is correct in that context. -->
+  <!-- On show the menu only arms the outside-right-click dismissal (#234); it does not steal
+       focus or auto-open anything (the earlier auto-opened Select overlay drew as a second
+       floating panel, which the reporter read as "two menus" — #234 follow-up). The search
+       box and tag list are plain inline content of this one popover panel, so the menu always
+       presents as a single panel; the caret goes to the search box on a click, and Enter there
+       adds the top match for keyboard-only entry (#171/#204). -->
   <Popover
     ref="popover"
     class="tag-quick-menu"
     @show="bindOutsideContextMenu"
-    @hide="unbindOutsideContextMenu"
+    @hide="onPopoverHide"
   >
     <div class="tqm-body">
       <!-- OPEN IN NEW TAB (#194). Right-click is claimed by this popover, so the
            browser's own "Open link in new tab" is out of reach on the surfaces that
-           raise it; this is the explicit replacement. It sits ABOVE the ADD section
-           deliberately — the Select's overlay opens downward and would cover anything
-           placed below it once the user opens it. -->
+           raise it; this is the explicit replacement. It sits ABOVE the ADD section,
+           the natural reading order for the menu's primary link. -->
       <div v-if="document" class="tqm-section">
         <a
           class="tqm-open-link"
@@ -252,40 +261,54 @@ defineExpose({ show, hide })
       <!-- ADD -->
       <div class="tqm-section">
         <span class="tqm-label">{{ t('ui.context_add_tag') }}</span>
-        <Select
-          v-if="assignable.length"
-          ref="tagSelect"
-          v-model="pendingTag"
-          :options="assignable"
-          optionLabel="name"
-          optionValue="id"
-          filter
-          :filterPlaceholder="t('ui.tag_menu.search')"
-          :placeholder="t('ui.tag_menu.search')"
-          class="tqm-select"
-          :autoFilterFocus="false"
-          @update:modelValue="onSelect"
-          @filter="onTagFilter"
-          @hide="onTagSelectHide"
-        >
-          <!-- Clear (×) for the tag filter (#274): the parity with the main search bar's
-               "Clear" the reporter asked for, shown only once something is typed. It lives in
-               the Select's header slot, NOT the filter's icon slot — PrimeVue wraps that icon
-               in aria-hidden, which would hide a focusable control from assistive tech. Here
-               it stays in the accessibility tree and reachable by keyboard. -->
-          <template #header>
-            <div v-if="tagFilter" class="tqm-filter-header">
-              <button
-                type="button"
-                class="tqm-filter-clear"
-                @click="clearTagFilter"
-                @mousedown.prevent
-              >
-                <i class="pi pi-times" aria-hidden="true" />{{ t('document.search_clear') }}
-              </button>
+        <template v-if="assignable.length">
+          <div class="tqm-filter-row">
+            <IconField class="tqm-filter-field">
+              <InputIcon class="pi pi-search" />
+              <InputText
+                ref="filterInput"
+                v-model="filterText"
+                :placeholder="t('ui.tag_menu.search')"
+                :aria-label="t('ui.tag_menu.search')"
+                class="tqm-filter-input"
+                size="small"
+                @keydown.enter.prevent="onFilterEnter"
+              />
+            </IconField>
+            <!-- Clear (×) for the search box (#274): the parity with the main search bar's
+                 "Clear" the reporter asked for, shown only once something is typed. A real,
+                 focusable button in the accessibility tree — reachable by keyboard. -->
+            <button
+              v-if="filterText"
+              type="button"
+              class="tqm-filter-clear"
+              @click="clearFilter"
+              @mousedown.prevent
+            >
+              <i class="pi pi-times" aria-hidden="true" />{{ t('document.search_clear') }}
+            </button>
+          </div>
+          <!-- The tag list is a set of ADD ACTIONS, not a persistent selection: each row is a
+               stateless button that just adds its tag. A PrimeVue single-select Listbox would
+               keep a sticky internal selection and toggle it off on a re-click, silently
+               swallowing a re-add of the just-added tag when the popover reopens on the same
+               instance mid-fade (the reported regression). Buttons have no such state. -->
+          <div class="tqm-tag-list">
+            <button
+              v-for="tag in filtered"
+              :key="tag.id"
+              type="button"
+              class="tqm-option"
+              :aria-label="t('ui.tag_menu.add_named', { name: tag.name })"
+              @click="onSelect(tag.id)"
+            >
+              {{ tag.name }}
+            </button>
+            <div v-if="!filtered.length" class="tqm-option-empty">
+              {{ t('primevue.empty_filter_message') }}
             </div>
-          </template>
-        </Select>
+          </div>
+        </template>
         <span v-else class="tqm-empty">{{ t('ui.tag_menu.all_assigned') }}</span>
 
         <div v-if="quickAddTags.length" class="tqm-chips">
@@ -352,16 +375,55 @@ defineExpose({ show, hide })
   color: var(--p-text-muted-color);
 }
 
-.tqm-select {
+/* Search box + clear, the clear tucked to the right like the main search bar's "Clear". */
+.tqm-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.tqm-filter-field {
+  flex: 1;
+  min-width: 0;
+}
+.tqm-filter-input {
   width: 100%;
 }
 
-/* Clear (×) for the tag filter (#274), right-aligned above the search box like the main
-   search bar's "Clear". Only mounted while there is filter text to clear. */
-.tqm-filter-header {
+/* Bounded, scrolling list of add-action rows (#71). */
+.tqm-tag-list {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  max-height: 12rem;
+  overflow-y: auto;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius, 4px);
 }
+.tqm-option {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--p-text-color);
+  text-align: left;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tqm-option:hover {
+  background: var(--p-content-hover-background, var(--p-surface-100));
+  color: var(--p-content-hover-color, var(--p-text-color));
+}
+.tqm-option:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--p-primary-color);
+}
+.tqm-option-empty {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--p-text-muted-color);
+}
+
 .tqm-filter-clear {
   cursor: pointer;
   display: inline-flex;
@@ -374,6 +436,8 @@ defineExpose({ show, hide })
   font: inherit;
   font-size: 0.75rem;
   line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tqm-filter-clear:hover {
   color: var(--p-text-color);

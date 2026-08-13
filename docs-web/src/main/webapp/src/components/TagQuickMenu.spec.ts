@@ -74,39 +74,12 @@ const PopoverStub = {
   },
 }
 
-// Records any imperative open of the Select. The right-click menu must NOT auto-open it on
-// popover show (#234 follow-up) — this stays uncalled, so a regression that re-adds the
-// auto-open trips the "does not auto-open" assertion below.
-const selectShow = vi.fn()
-
-// Stub Select so we can read the `options` it is handed without booting the full overlay;
-// expose an update button to simulate a selection, and a `show()` that records an imperative
-// open (which the component must no longer perform on popover show). It also renders the
-// filter input and the `header` slot, and publishes its root as `overlay`, so the clear-×
-// wiring (#274) — which finds the filter input through `overlay` — is exercisable.
-const SelectStub = {
-  props: ['options', 'modelValue'],
-  emits: ['update:modelValue', 'filter', 'hide'],
-  data() {
-    return { overlay: null as HTMLElement | null }
-  },
-  mounted(this: { $el: HTMLElement; overlay: HTMLElement | null }) {
-    // The real Select exposes its overlay root; the clear-× reaches the filter input through
-    // it, so the stub exposes the same handle over its own rendered root.
-    this.overlay = this.$el
-  },
-  methods: {
-    show() {
-      selectShow()
-    },
-  },
-  template:
-    '<div class="select-stub" :data-count="options.length">' +
-    '<slot name="header" />' +
-    '<input class="p-select-filter" @input="$emit(\'filter\', { value: $event.target.value })" />' +
-    '<button v-for="o in options" :key="o.id" class="opt" :data-id="o.id" @click="$emit(\'update:modelValue\', o.id)">{{ o.name }}</button>' +
-    '</div>',
-}
+// The tag list rows are stateless "add this tag" buttons rendered by the component itself — no
+// Listbox, so nothing to stub. Leaving them REAL is deliberate: a stateful single-select
+// Listbox toggled its sticky selection and swallowed a re-add of the just-added tag (the
+// regression that motivated TEEDY-86's second iteration); plain buttons cannot. The
+// InputText/IconField/InputIcon search box is likewise left real — the owned control this
+// rework is about.
 
 function mountMenu(
   props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {},
@@ -122,13 +95,17 @@ function mountMenu(
     attachTo,
     global: {
       plugins: [PrimeVue, makeRouter()],
-      stubs: { Popover: PopoverStub, Select: SelectStub },
+      stubs: { Popover: PopoverStub },
     },
   })
 }
 
+// The add-action row for a given tag name (the list rows carry the tag name as their text).
+function optionByText(wrapper: ReturnType<typeof mountMenu>, name: string) {
+  return wrapper.findAll('.tqm-option').find((o) => o.text() === name)
+}
+
 beforeEach(() => {
-  selectShow.mockClear()
   popoverShow.mockClear()
   popoverHide.mockClear()
 })
@@ -153,12 +130,13 @@ function attachedRow(): HTMLElement {
 }
 
 // Menus mounted INTO the document — the outside-right-click dismissal listens on `document`,
-// so the menu has to really be in it for an event to reach both. Unmounted after every case so
-// no document-level listener outlives the test that armed it.
+// so the menu has to really be in it for an event to reach both, and focus only moves for an
+// element that is connected. Unmounted after every case so no document-level listener (or
+// stray input) outlives the test that armed it.
 const attachedMenus: ReturnType<typeof mountMenu>[] = []
 
-function mountAttachedMenu() {
-  const wrapper = mountMenu({}, document.body)
+function mountAttachedMenu(props: Partial<InstanceType<typeof TagQuickMenu>['$props']> = {}) {
+  const wrapper = mountMenu(props, document.body)
   attachedMenus.push(wrapper)
   return wrapper
 }
@@ -181,14 +159,30 @@ function rightClickOn(anchor: HTMLElement): Event {
 }
 
 describe('TagQuickMenu', () => {
-  it('offers only assignable (not-yet-assigned) tags in the search select', () => {
+  it('offers only assignable (not-yet-assigned) tags in the tag list', () => {
     const wrapper = mountMenu({ document: makeDoc(['t1', 't3']) })
-    const select = wrapper.find('.select-stub')
-    // 6 total - 2 assigned = 4 assignable.
-    expect(select.attributes('data-count')).toBe('4')
-    const ids = select.findAll('.opt').map((b) => b.attributes('data-id'))
-    expect(ids).not.toContain('t1')
-    expect(ids).not.toContain('t3')
+    const names = wrapper.findAll('.tqm-option').map((o) => o.text())
+    // 6 total - 2 assigned = 4 assignable; the two assigned tags are absent.
+    expect(names).toHaveLength(4)
+    expect(names).not.toContain('Invoice') // t1, assigned
+    expect(names).not.toContain('Bank') // t3, assigned
+  })
+
+  it('narrows the tag list through the owned search box, case-insensitively (TEEDY-86)', async () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    // All five assignable tags before any search text.
+    expect(wrapper.findAll('.tqm-option')).toHaveLength(5)
+
+    await wrapper.find('input.tqm-filter-input').setValue('rec')
+    const names = wrapper.findAll('.tqm-option').map((o) => o.text())
+    expect(names).toEqual(['Receipt']) // only "Receipt" matches "rec"
+  })
+
+  it('shows a no-results message and no rows when the search matches no tag', async () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    await wrapper.find('input.tqm-filter-input').setValue('zzz')
+    expect(wrapper.findAll('.tqm-option')).toHaveLength(0)
+    expect(wrapper.find('.tqm-option-empty').exists()).toBe(true)
   })
 
   it('renders the top-5 most-used assignable tags as quick-add chips, most-used first', () => {
@@ -211,41 +205,76 @@ describe('TagQuickMenu', () => {
     expect(wrapper.emitted('addTag')).toEqual([['t2']])
   })
 
-  it('emits addTag when a tag is chosen from the search select', async () => {
+  it('emits addTag when a tag is chosen from the tag list', async () => {
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
-    await wrapper.find('.opt[data-id="t5"]').trigger('click')
+    await optionByText(wrapper, 'Contract')!.trigger('click') // t5
     expect(wrapper.emitted('addTag')).toEqual([['t5']])
   })
 
-  it('offers a clear (×) only once the tag filter has text, and empties it on click (#274)', async () => {
+  it('re-adds the SAME tag when the reused menu instance is clicked again (no toggle-swallow, TEEDY-86)', async () => {
+    // Regression guard: a stateful single-select Listbox kept a sticky selection and toggled
+    // it off on a re-click, emitting a null "deselect" that the add-handler swallowed — so
+    // batch-tagging several documents with the same tag (right-click doc B during doc A's
+    // menu fade, click the same tag) silently failed on the reused instance. The row buttons
+    // hold no selection, so the same tag adds every time. hide() here does not unmount the
+    // stubbed popover's slot, so the second click lands on the very same rendered rows.
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
-    const filter = wrapper.find('.select-stub input.p-select-filter')
-    expect(filter.exists()).toBe(true)
+    await optionByText(wrapper, 'Contract')!.trigger('click')
+    await optionByText(wrapper, 'Contract')!.trigger('click')
+    expect(wrapper.emitted('addTag')).toEqual([['t5'], ['t5']])
+  })
+
+  it('adds the top filtered match when Enter is pressed in the search box (#171/#204)', async () => {
+    // Keyboard-only entry: type a name, press Enter, the top match is committed without ever
+    // leaving the search box.
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    const input = wrapper.find('input.tqm-filter-input')
+    await input.setValue('rec')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('addTag')).toEqual([['t2']])
+  })
+
+  it('does nothing on Enter when the search box matches no tag', async () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    const input = wrapper.find('input.tqm-filter-input')
+    await input.setValue('zzz')
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('addTag')).toBeUndefined()
+  })
+
+  it('offers a clear (×) only once the owned search box has text, and empties it on click (#274)', async () => {
+    // The clear lives against OUR InputText — no reach into PrimeVue's private filter DOM.
+    const wrapper = mountAttachedMenu({ document: makeDoc(['t1']) })
+    const input = wrapper.find('input.tqm-filter-input')
+    expect(input.exists()).toBe(true)
     // Empty box → just the magnifier, no clear affordance.
     expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
 
-    await filter.setValue('rec')
+    await input.setValue('rec')
     const clear = wrapper.find('.tqm-filter-clear')
     expect(clear.exists(), 'a clear button appears once text is typed').toBe(true)
     // A labelled button (its visible text is the accessible name), reusing the main search
     // bar's clear label — the affordance the reporter compared against.
     expect(clear.text()).toContain('document.search_clear')
 
+    const focusSpy = vi.spyOn(input.element as HTMLInputElement, 'focus')
     await clear.trigger('click')
-    // The click empties the real filter input and the tracked text, so the trailing icon
-    // reverts to the magnifier.
-    expect((filter.element as HTMLInputElement).value).toBe('')
+    // The click empties the real search box and the tracked text, so the clear affordance
+    // reverts to the magnifier, and the caret returns to the field.
+    expect((input.element as HTMLInputElement).value).toBe('')
     expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
+    expect(focusSpy, 'the caret returns to the search box').toHaveBeenCalled()
+    focusSpy.mockRestore()
   })
 
-  it('drops the clear (×) again when the Select closes with filter text still tracked (#274)', async () => {
-    // PrimeVue empties its filter on hide without raising `filter`; the component re-syncs on
-    // the Select's `hide` so a reopened Select never shows a clear × over an empty box.
+  it('drops the clear (×) again when the menu hides with search text still in the box (#274)', async () => {
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
-    await wrapper.find('.select-stub input.p-select-filter').setValue('rec')
+    await wrapper.find('input.tqm-filter-input').setValue('rec')
     expect(wrapper.find('.tqm-filter-clear').exists()).toBe(true)
 
-    wrapper.findComponent(SelectStub).vm.$emit('hide')
+    // The popover's leave resets the owned filter, so a reopened menu never shows a clear ×
+    // over an empty box.
+    wrapper.findComponent(PopoverStub).vm.$emit('hide')
     await flushPromises()
     expect(wrapper.find('.tqm-filter-clear').exists()).toBe(false)
   })
@@ -258,7 +287,7 @@ describe('TagQuickMenu', () => {
     expect(wrapper.emitted('removeTag')).toEqual([['t1']])
   })
 
-  it('offers an "open in new tab" link to the document view, ABOVE the tag select (#194)', () => {
+  it('offers an "open in new tab" link to the document view, ABOVE the tag search (#194)', () => {
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
     const link = wrapper.find('a.tqm-open-link')
     expect(link.exists()).toBe(true)
@@ -268,10 +297,10 @@ describe('TagQuickMenu', () => {
     expect(link.attributes('target')).toBe('_blank')
     expect(link.attributes('rel')).toContain('noopener')
     expect(link.text()).toContain('ui.open_in_new_tab')
-    // It must precede the Select: the Select's overlay opens downward and would otherwise
-    // cover an item placed below it once the user opens it.
+    // It must precede the search box and list, the natural reading order for the menu.
     const html = wrapper.html()
-    expect(html.indexOf('tqm-open-link')).toBeLessThan(html.indexOf('select-stub'))
+    expect(html.indexOf('tqm-open-link')).toBeLessThan(html.indexOf('tqm-filter-input'))
+    expect(html.indexOf('tqm-open-link')).toBeLessThan(html.indexOf('tqm-tag-list'))
   })
 
   it('renders no "open in new tab" link when there is no document bound', () => {
@@ -279,16 +308,15 @@ describe('TagQuickMenu', () => {
     expect(wrapper.find('a.tqm-open-link').exists()).toBe(false)
   })
 
-  it('does not auto-open the tag select or steal focus on popover show (#234 follow-up)', async () => {
-    // The reporter read the auto-opened Select overlay as a second floating panel under the
-    // popover (#234). The menu now presents as a single panel: `show` arms only the outside-
-    // right-click dismissal, and the tag Select opens on a click. (The slide-over keeps its
-    // own auto-focus — a separate surface, covered in tag-add-focus.spec.ts.)
+  it('does not steal focus on popover show (#234 follow-up)', async () => {
+    // The reporter read the earlier auto-opened Select overlay as a second floating panel
+    // under the popover (#234). The menu now presents as a single panel and `show` arms only
+    // the outside-right-click dismissal — nothing grabs focus. (The slide-over keeps its own
+    // auto-focus — a separate surface, covered in tag-add-focus.spec.ts.)
     const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus')
     const wrapper = mountMenu()
     wrapper.findComponent(PopoverStub).vm.$emit('show')
     await flushPromises()
-    expect(selectShow, 'the Select must not auto-open on popover show').not.toHaveBeenCalled()
     expect(focusSpy, 'nothing steals focus on popover show').not.toHaveBeenCalled()
     focusSpy.mockRestore()
   })
@@ -410,9 +438,11 @@ describe('TagQuickMenu', () => {
     expect(passedTarget).toBe(latest)
   })
 
-  it('shows an all-assigned notice and no chips when every tag is already on the doc', () => {
+  it('shows an all-assigned notice and no search or chips when every tag is already on the doc', () => {
     const wrapper = mountMenu({ document: makeDoc(['t1', 't2', 't3', 't4', 't5', 't6']) })
-    expect(wrapper.find('.select-stub').exists()).toBe(false)
+    expect(wrapper.find('.tqm-tag-list').exists()).toBe(false)
+    expect(wrapper.findAll('.tqm-option')).toHaveLength(0)
+    expect(wrapper.find('input.tqm-filter-input').exists()).toBe(false)
     expect(wrapper.findAll('.tqm-chip')).toHaveLength(0)
     expect(wrapper.text()).toContain('ui.tag_menu.all_assigned')
   })
@@ -443,6 +473,18 @@ describe('TagQuickMenu — outside right-click dismissal (#234)', () => {
     wrapper.findComponent(PopoverStub).vm.$emit('show')
 
     dispatchContextMenu(wrapper.find('.tqm-body').element)
+
+    expect(popoverHide).not.toHaveBeenCalled()
+  })
+
+  it('leaves the menu alone when the right-click lands in the inline search box (TEEDY-86)', () => {
+    // The search box is now a real DOM descendant of the popover (no teleported Select
+    // overlay), so a right-click in it — the gesture that reaches "paste" — is inside the
+    // menu and must not take it away.
+    const wrapper = mountAttachedMenu()
+    wrapper.findComponent(PopoverStub).vm.$emit('show')
+
+    dispatchContextMenu(wrapper.find('input.tqm-filter-input').element)
 
     expect(popoverHide).not.toHaveBeenCalled()
   })
