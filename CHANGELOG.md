@@ -8,8 +8,13 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.3] - 2026-08-13
+
+There is no database migration; the schema level remains 64.
+
 ### Added
 - The About dialog shows the build's commit id next to the version, linked to the commit on GitHub; a build without a stamped commit omits it (#275).
+- Administrators get a "Report a bug" action in the About dialog that opens a prefilled GitHub issue, and a "Copy diagnostics" action that copies the server's Jetty, Java and operating-system versions to paste into a report (#275).
 - The right-click tag-search filter has a clear button (#274).
 
 ### Changed
@@ -23,6 +28,8 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 - Gallery thumbnail images are pointer-transparent, so every click on a tile opens its document (#235).
 - The document filter toolbar wraps on mobile instead of overflowing, and its control heights are level (#67).
 - The rows-per-page control wraps onto its own row below 640px (#272).
+- Opening a PDF in the document view fetches the file once instead of twice (#247).
+- The application no longer hangs indefinitely when the database connection drops or stalls. The PostgreSQL connection now has bounded connect, socket and login timeouts, so a transient database outage surfaces as an error and recovers instead of wedging every request.
 
 ### Security
 - pdfjs-dist, nanoid and js-yaml bumped past their HIGH-severity CVEs.
@@ -588,7 +595,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...HEAD
+[3.8.3]: https://github.com/fmaass/teedy-docs/compare/v3.8.2...v3.8.3
 [3.8.2]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...v3.8.2
 [3.8.1]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/fmaass/teedy-docs/compare/v3.7.2...v3.8.0
