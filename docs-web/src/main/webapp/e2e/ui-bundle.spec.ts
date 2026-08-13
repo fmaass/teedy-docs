@@ -107,19 +107,17 @@ test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, 
   const popover = page.locator('.p-popover')
   await expect(popover).toBeVisible()
 
-  // The tag Select no longer auto-opens on popover show (#234 follow-up): the menu presents
-  // as a single panel with the Select closed. Add the tag: prefer its quick-add chip; else
-  // open the Select and pick it from the search list. Which branch runs is suite-state-
-  // dependent (the chips are the top-5 MOST-USED assignable tags), so both have to be sound.
+  // The tag search box + list render inline in the popover now (TEEDY-86): the menu presents as
+  // a single panel. Add the tag: prefer its quick-add chip; else type into the inline search box
+  // and click the matching add button. Which branch runs is suite-state-dependent (the chips are
+  // the top-5 MOST-USED assignable tags), so both have to be sound.
   const chip = popover.locator('.tqm-chip', { hasText: tagName })
   if (await chip.count()) {
     // The chip row is unobscured now — no overlay opens over it — so click the chip directly.
     await chip.first().click()
   } else {
-    // Open the tag Select, then filter to the target and pick it.
-    await popover.locator('.tqm-select').click()
-    const overlay = page.locator('.p-select-overlay')
-    const filter = overlay.locator('input.p-select-filter')
+    // Type into the always-visible inline search box, then click the matching add button.
+    const filter = popover.locator('input.tqm-filter-input')
     await expect(filter).toBeVisible()
     await filter.fill(tagName)
     // SETTLE BEFORE CLICKING: the client-side filter re-renders the option list, and a
@@ -127,7 +125,7 @@ test('gallery right-click adds a tag to the document (#50/#71)', async ({ page, 
     // stable"). Matching the target by its own text is satisfied a beat too early — it is
     // already count-1 before the rerender — so wait for the WHOLE list to collapse to the
     // single survivor, which only the post-filter render can satisfy.
-    const options = overlay.locator('.p-select-option')
+    const options = popover.locator('.tqm-option')
     await expect(options, 'the filtered option list has settled to one survivor').toHaveCount(1)
     await options.filter({ hasText: tagName }).click()
   }

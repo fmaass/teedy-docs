@@ -439,19 +439,19 @@ for (const view of RIGHT_CLICK_VIEWS) {
   })
 }
 
-// The other side of "outside": the user opens the menu's tag Select (#234 follow-up: it no
-// longer auto-opens), and PrimeVue teleports that Select's overlay to <body> — so the filter
-// the user types in is NOT a DOM descendant of the menu. Treating it as outside would make
-// right-clicking the filter (the gesture that reaches "paste") take the whole menu away, which
-// is why the dismissal counts that overlay as part of the menu. One view is enough: it is the
-// same Select either way.
+// The other side of "outside": a right-click inside the menu's own inline tag search box must
+// NOT dismiss the menu. Since TEEDY-86 the search box and its tag list render INLINE inside the
+// popover (no teleported Select overlay anymore), so the filter the user right-clicks IS a DOM
+// descendant of the menu — the genuine "inside" case that onOutsideContextMenu's
+// `popover.container.contains(target)` guard passes over. One view is enough: the inline menu is
+// the same either way.
 test('a right-click in the menu\'s own tag filter leaves the menu open (#234)', async ({
   page,
   request,
   cleanup,
 }) => {
   test.skip(isMobileViewport(page), 'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent')
-  // At least one assignable tag, or no Select is rendered and there is no overlay to click.
+  // At least one assignable tag, or the inline search box + tag list are not rendered.
   const tagName = uniqueTag('ctx-inside').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const tagRes = await request.put('/api/tag', { form: { name: tagName, color: '#3399cc' } })
   expect(tagRes.ok(), 'create the tag-filter tag').toBeTruthy()
@@ -468,18 +468,17 @@ test('a right-click in the menu\'s own tag filter leaves the menu open (#234)', 
   await surface.click({ button: 'right' })
   const menu = quickTagMenu(page)
   await expect(menu).toBeVisible()
-  // The tag Select no longer auto-opens (#234 follow-up); open it with a click first.
-  await menu.locator('.tqm-select').click()
-  const filter = page.locator('.p-select-overlay input.p-select-filter')
-  await expect(filter, 'the menu opened its tag Select on click (#171)').toBeVisible()
-  // REALNESS: the filter really is outside the menu in the DOM, so this is the carve-out
-  // being exercised and not a containment check that would have passed anyway.
-  const teleported = await page.evaluate(() => {
+  // The tag search box is inline and always visible now (TEEDY-86) — no open step.
+  const filter = page.locator('.p-popover input.tqm-filter-input')
+  await expect(filter, 'the menu shows its inline tag search box (#171)').toBeVisible()
+  // REALNESS: the filter really is a DOM descendant of the menu, so this exercises the
+  // `container.contains(target)` "inside" carve-out and not a check that would pass anyway.
+  const inside = await page.evaluate(() => {
     const popover = document.querySelector('.p-popover')
-    const input = document.querySelector('.p-select-overlay input.p-select-filter')
-    return !!popover && !!input && !popover.contains(input)
+    const input = document.querySelector('.p-popover input.tqm-filter-input')
+    return !!popover && !!input && popover.contains(input)
   })
-  expect(teleported, 'the tag filter is teleported out of the menu').toBe(true)
+  expect(inside, 'the tag filter is a descendant of the menu').toBe(true)
 
   await filter.click({ button: 'right' })
 
