@@ -43,6 +43,7 @@ public class TestCsrfGetInventory {
             "/app/config_ldap",
             "/app/config_oidc",
             "/app/config_smtp",
+            "/app/diagnostics",
             "/app/log",
             "/app/stats",
             "/auditlog",

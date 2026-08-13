@@ -61,10 +61,13 @@ public class TestOidcAccessorGuard {
      * Known NON-OIDC property keys read directly in the auth classes. A getProperty of one of these
      * (outside the accessor) is allowed; anything else in an auth class is a violation. Enumerated
      * from the current tree: {@code docs.logout_url} (UserResource logout), {@code
-     * docs.header_authentication} (AppResource app info).
+     * docs.header_authentication} (AppResource app info), and the JVM/OS identity properties the
+     * AppResource {@code /app/diagnostics} endpoint reports ({@code java.version}, {@code
+     * java.vendor}, {@code os.name}, {@code os.version}, {@code os.arch}).
      */
     private static final List<String> AUTH_CLASS_ALLOWLISTED_KEYS =
-            List.of("docs.logout_url", "docs.header_authentication");
+            List.of("docs.logout_url", "docs.header_authentication",
+                    "java.version", "java.vendor", "os.name", "os.version", "os.arch");
 
     /**
      * The argument literally references an OIDC key. Broad on the OIDC side (constant/variable names
