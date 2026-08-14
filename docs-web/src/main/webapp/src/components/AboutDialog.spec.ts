@@ -9,6 +9,7 @@ import en from '../locale/en.json'
 import de from '../locale/de.json'
 import { HIGHLIGHTS_VERSION, HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
 import { buildDiagnosticsBlock, buildReportUrl } from './aboutDiagnostics'
+import { DEFAULT_APP_NAME } from '../composables/useThemeBranding'
 import type { AppDiagnostics } from '../api/app'
 
 // The running version drives the rendered heading; mock useAppInfo so a test can
@@ -25,11 +26,16 @@ vi.mock('../composables/useAppInfo', () => ({
   useAppInfo: () => ({ data: ref(appInfoValue.value) }),
 }))
 
-// The dialog's brand line renders the CONFIGURED instance name (it used to be a hardcoded
-// "teedy"). useBrand owns that derivation and is tested in useThemeBranding.spec.ts; here it is a
-// dependency, so it is mocked and the test asserts what the component renders from it.
+// #282: the About product-identity line must show the DEFAULT product name (the built-in "Teedy"),
+// NOT the operator's Branding override — About is where a user reads the real product + build to
+// file a bug, so a renamed instance must still identify itself there. Keep the module's real
+// exports (DEFAULT_APP_NAME is what the dialog renders) and stub useBrand to report a CONFIGURED
+// brand name; the dialog must IGNORE it. brandNameValue drives that override so a test can prove
+// About stays on the product identity even with a brand set (this is also what makes the assertions
+// fail against the pre-#282 dialog, which rendered brandName).
 const brandNameValue = vi.hoisted(() => ({ value: 'Teedy' }))
-vi.mock('../composables/useThemeBranding', () => ({
+vi.mock('../composables/useThemeBranding', async (importActual) => ({
+  ...(await importActual<typeof import('../composables/useThemeBranding')>()),
   useBrand: () => ({ brandName: computed(() => brandNameValue.value), brandLogoUrl: ref(null) }),
 }))
 
@@ -149,24 +155,28 @@ describe('AboutDialog highlights', () => {
   })
 })
 
-// The About dialog was the THIRD place that hardcoded the product name (it read "teedy v3.8.1"
-// on every instance, lowercase, regardless of what the operator had called their deployment).
-// It now renders the configured brand, with the same fallback as the rest of the chrome.
-describe('AboutDialog brand name', () => {
-  it('renders the CONFIGURED application name, not a hardcoded product name', () => {
+// #282: the About dialog identifies the real PRODUCT, not the operator's branding. Since v3.8.2 the
+// Branding feature renames the product throughout the chrome (sidebar, drawer, footer, login,
+// settings); About is the one place that must keep the built-in identity, because it is where a
+// user reads the product + build to file a bug (next to the version, commit and report-a-bug
+// affordance). The line renders DEFAULT_APP_NAME even when a brand name is configured.
+describe('AboutDialog product identity (#282)', () => {
+  it('shows the DEFAULT product name even when a brand name is configured', () => {
+    // A configured Branding name that the rest of the chrome would show everywhere...
     brandNameValue.value = 'Contoso Archive'
-    expect(mountDialog().get('.about-name').text()).toBe('Contoso Archive')
+    // ...must NOT rename the product in About: it stays the built-in identity.
+    expect(mountDialog().get('.about-name').text()).toBe(DEFAULT_APP_NAME)
   })
 
-  it('renders the fallback brand on an instance that has not been renamed', () => {
+  it('shows the product identity on an un-renamed instance too', () => {
     brandNameValue.value = 'Teedy'
     const name = mountDialog().get('.about-name').text()
-    expect(name).toBe('Teedy')
-    // The old literal was lowercase; the brand is the product name proper.
+    expect(name).toBe(DEFAULT_APP_NAME)
+    // The old hardcoded literal was lowercase; the identity is the product name proper.
     expect(name).not.toBe('teedy')
   })
 
-  it('keeps the running version beside the brand', () => {
+  it('keeps the running version beside the product name', () => {
     brandNameValue.value = 'Contoso Archive'
     appInfoValue.value = { current_version: '3.8.2' }
     expect(mountDialog().get('.about-version').text()).toBe('v3.8.2')

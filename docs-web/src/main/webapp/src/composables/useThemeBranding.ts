@@ -4,7 +4,11 @@ import { getTheme, type ThemeConfig } from '../api/theme'
 import { queryKeys } from '../api/queryKeys'
 import { applyBrandPrimary } from '../theme/primary'
 
-const DEFAULT_APP_NAME = 'Teedy'
+// The built-in product identity. This is the name Branding OVERRIDES for the chrome, and the
+// fallback the chrome shows when no instance name is configured. The About dialog imports it to
+// show the ACTUAL product name regardless of Branding (#282): About is where a user identifies the
+// real product + build for a bug report, so it must not be renamed by the operator's brand.
+export const DEFAULT_APP_NAME = 'Teedy'
 const FAVICON_ENDPOINT = '/api/theme/image/favicon'
 const LOGO_ENDPOINT = '/api/theme/image/logo'
 const BACKGROUND_ENDPOINT = '/api/theme/image/background'

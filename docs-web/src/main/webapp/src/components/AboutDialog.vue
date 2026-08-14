@@ -5,7 +5,7 @@ import { useToast } from 'primevue/usetoast'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import { useAppInfo } from '../composables/useAppInfo'
-import { useBrand } from '../composables/useThemeBranding'
+import { DEFAULT_APP_NAME } from '../composables/useThemeBranding'
 import { useAuthStore } from '../stores/auth'
 import { getAppDiagnostics, type AppDiagnostics } from '../api/app'
 import { HIGHLIGHT_KEYS, headingVersion } from './aboutHighlights'
@@ -16,10 +16,12 @@ const visible = defineModel<boolean>('visible', { required: true })
 const { t } = useI18n()
 const toast = useToast()
 
-// The brand line used to be a hardcoded "teedy" — the third such literal in the app, so an
-// instance renamed in Branding still introduced itself by the product name here. Same shared
-// query and same fallback as the panel brand.
-const { brandName } = useBrand()
+// The product-identity line shows the built-in product name, NOT the operator's Branding override
+// (#282). About is exactly where a user reads off the REAL product to file a bug (alongside the
+// version + commit and the report-a-bug affordance from #275); a renamed instance must still
+// identify itself as Teedy here. The rest of the chrome (sidebar, drawer, footer, login, settings)
+// stays branded via useBrand.
+const productName = DEFAULT_APP_NAME
 
 // Live running version from the shared app-info query (v{version} brand badge).
 const { data: appInfo } = useAppInfo()
@@ -122,7 +124,7 @@ function reportBug() {
   >
     <div class="about-body">
       <div class="about-brand">
-        <span class="about-name">{{ brandName }}</span>
+        <span class="about-name">{{ productName }}</span>
         <span v-if="version" class="about-version">{{ `v${version}` }}</span>
         <a
           v-if="shortCommit"
