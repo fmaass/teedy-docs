@@ -63,13 +63,12 @@ public final class EMF {
             properties = getEntityManagerProperties();
 
             String jdbcUrl = (String) properties.get("hibernate.connection.url");
-            String jdbcUser = (String) properties.get("hibernate.connection.username");
-            String jdbcPassword = (String) properties.getOrDefault("hibernate.connection.password", "");
 
             // Keep the bootstrap connection open until the EMF is created.
             // This is required for in-memory databases (H2 mem:) where the
             // schema would be lost when the last connection closes.
-            Connection bootstrapConnection = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword);
+            Connection bootstrapConnection = DriverManager.getConnection(jdbcUrl,
+                    buildBootstrapConnectionProperties(properties));
             bootstrapConnection.setAutoCommit(false);
 
             try {
@@ -112,6 +111,52 @@ public final class EMF {
         if (!openHelper.getExceptions().isEmpty()) {
             throw new IllegalStateException("Database schema update reported "
                     + openHelper.getExceptions().size() + " error(s); refusing to start on a partial schema");
+        }
+    }
+
+    /**
+     * Build the {@link DriverManager} properties for the bootstrap/migration connection from the
+     * resolved EntityManager properties. Extracted from the static initializer so the boot path's
+     * connection properties are unit-testable (the static init itself only runs once per JVM).
+     *
+     * <p>The bootstrap connection bypasses Hibernate's pool, so it does not inherit the client-side
+     * timeouts of {@link #buildEnvironmentProperties}. It carries the resolved {@code connectTimeout}
+     * and {@code loginTimeout} (when the Postgres branch resolved them) so an unreachable or
+     * mid-handshake-stalling database at startup fails boot fast and lets the container restart
+     * policy retry, instead of hanging the static initializer forever. It deliberately does NOT
+     * carry {@code socketTimeout}: the dbupdate migrations run on this connection, and a socket
+     * read timeout would kill a legitimately long migration mid-apply, risking a partially-applied
+     * schema. The H2 branch resolves no timeouts, so nothing is copied there — the H2 driver
+     * rejects unknown connection settings.</p>
+     *
+     * @param emProperties The resolved EntityManager properties
+     * @return The DriverManager connection properties for the bootstrap connection
+     */
+    static Properties buildBootstrapConnectionProperties(Properties emProperties) {
+        Properties props = new Properties();
+        String username = (String) emProperties.get("hibernate.connection.username");
+        if (username != null) {
+            props.put("user", username);
+        }
+        props.put("password", emProperties.getOrDefault("hibernate.connection.password", ""));
+        copyConnectionProperty(emProperties, props, "connectTimeout");
+        copyConnectionProperty(emProperties, props, "loginTimeout");
+        return props;
+    }
+
+    /**
+     * Copy a resolved {@code hibernate.connection.*} entry into raw driver properties, stripping
+     * the prefix Hibernate would strip at runtime. Absent entries (the H2 branch, a pinned
+     * hibernate.properties file) are skipped.
+     *
+     * @param emProperties The resolved EntityManager properties
+     * @param driverProps The raw DriverManager properties to copy into
+     * @param key The driver-level property name
+     */
+    private static void copyConnectionProperty(Properties emProperties, Properties driverProps, String key) {
+        String value = emProperties.getProperty("hibernate.connection." + key);
+        if (value != null) {
+            driverProps.put(key, value);
         }
     }
 
@@ -215,9 +260,12 @@ public final class EMF {
 
     /**
      * Resolve a client-side timeout in seconds from a raw environment value, never failing EMF
-     * construction on bad input: a missing, blank, non-numeric or negative value falls back to
-     * {@code defaultSeconds}. A value of {@code 0} passes through unchanged — pgjdbc reads it as
-     * "infinite", the supported way an operator disables the timeout.
+     * construction on bad input: a missing, blank, non-numeric, negative or overlarge value falls
+     * back to {@code defaultSeconds}. A value of {@code 0} passes through unchanged — pgjdbc reads
+     * it as "infinite", the supported way an operator disables the timeout. The upper bound is
+     * {@code Integer.MAX_VALUE / 1000}: pgjdbc converts its timeout seconds to milliseconds with a
+     * 32-bit multiply, so anything larger overflows to a negative/short value that breaks
+     * Socket.connect/setSoTimeout instead of meaning "very long".
      *
      * @param envValue Raw environment value, or null/blank when unset
      * @param defaultSeconds Default to use when the value is absent or unusable
@@ -232,6 +280,11 @@ public final class EMF {
             int parsed = Integer.parseInt(envValue.trim());
             if (parsed < 0) {
                 log.warn("Ignoring negative {}={}; falling back to {}s", envName, envValue, defaultSeconds);
+                return defaultSeconds;
+            }
+            if (parsed > Integer.MAX_VALUE / 1000) {
+                log.warn("Ignoring overlarge {}={} (would overflow pgjdbc's millisecond conversion); "
+                        + "falling back to {}s", envName, envValue, defaultSeconds);
                 return defaultSeconds;
             }
             return parsed;

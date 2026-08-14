@@ -85,6 +85,69 @@ public class TestEmfConnectionTimeouts {
     }
 
     /**
+     * Guards the bootstrap/migration connection built in EMF's static initializer. That connection
+     * is opened with {@link java.sql.DriverManager} directly — it never goes through Hibernate's
+     * pool — so without its own properties an unreachable or mid-handshake-stalling Postgres at
+     * STARTUP hangs boot forever, which the container restart policy cannot recover from. The
+     * bootstrap properties must carry the resolved connectTimeout and loginTimeout (fail fast, let
+     * the restart policy retry) but must NOT carry socketTimeout: migrations run on this connection,
+     * and a socket read timeout would kill a legitimately long dbupdate mid-apply.
+     */
+    @Test
+    public void bootstrapConnectionCarriesConnectAndLoginTimeoutsButNotSocketTimeout() {
+        // Postgres branch, defaults: connect/login carried at 10s, socketTimeout absent.
+        Properties bootDefaults = EMF.buildBootstrapConnectionProperties(postgresProps(null, null, null));
+        Assertions.assertEquals("10", bootDefaults.getProperty("connectTimeout"));
+        Assertions.assertEquals("10", bootDefaults.getProperty("loginTimeout"));
+        Assertions.assertNull(bootDefaults.getProperty("socketTimeout"),
+                "socketTimeout on the bootstrap connection would kill a long dbupdate migration mid-apply");
+
+        // Environment overrides flow through to the bootstrap connection unchanged.
+        Properties bootOverridden = EMF.buildBootstrapConnectionProperties(postgresProps("3", "7", "4"));
+        Assertions.assertEquals("3", bootOverridden.getProperty("connectTimeout"));
+        Assertions.assertEquals("4", bootOverridden.getProperty("loginTimeout"));
+        Assertions.assertNull(bootOverridden.getProperty("socketTimeout"));
+
+        // Credentials keep the pre-existing DriverManager semantics.
+        Assertions.assertEquals("docs", bootDefaults.getProperty("user"));
+        Assertions.assertEquals("secret", bootDefaults.getProperty("password"));
+
+        // H2 branch (blank URL): no timeouts at all — the H2 driver rejects unknown settings.
+        Properties bootH2 = EMF.buildBootstrapConnectionProperties(
+                EMF.buildEnvironmentProperties("", "sa", "", null, null, null));
+        Assertions.assertNull(bootH2.getProperty("connectTimeout"));
+        Assertions.assertNull(bootH2.getProperty("socketTimeout"));
+        Assertions.assertNull(bootH2.getProperty("loginTimeout"));
+        Assertions.assertEquals("sa", bootH2.getProperty("user"));
+    }
+
+    /**
+     * Upper-bound clamp: pgjdbc converts its timeout seconds to milliseconds with a 32-bit
+     * {@code seconds * 1000}, so any value above {@code Integer.MAX_VALUE / 1000} (2,147,483 s)
+     * overflows to a negative/short millisecond value and breaks Socket.connect/setSoTimeout
+     * instead of meaning "very long". Such values must fall back to the default like the other
+     * unusable inputs; the largest non-overflowing value still passes through verbatim.
+     */
+    @Test
+    public void overflowingTimeoutValueFallsBackToDefault() {
+        int max = Integer.MAX_VALUE / 1000;
+
+        // One past the overflow boundary falls back to the default.
+        Assertions.assertEquals(30, EMF.resolveTimeoutSeconds(String.valueOf(max + 1), 30, "TEST_ENV"));
+        // Integer.MAX_VALUE itself parses fine (fits an int) but would overflow *1000: fall back.
+        Assertions.assertEquals(10, EMF.resolveTimeoutSeconds(String.valueOf(Integer.MAX_VALUE), 10, "TEST_ENV"));
+        // The largest safe value passes through verbatim.
+        Assertions.assertEquals(max, EMF.resolveTimeoutSeconds(String.valueOf(max), 30, "TEST_ENV"));
+
+        // And through the full production properties path.
+        Properties overlarge = postgresProps(String.valueOf(max + 1), String.valueOf(Integer.MAX_VALUE), "2147483648");
+        Assertions.assertEquals("10", overlarge.getProperty(CONNECT_KEY));
+        Assertions.assertEquals("30", overlarge.getProperty(SOCKET_KEY));
+        // 2147483648 does not fit an int at all: the existing non-numeric fallback catches it.
+        Assertions.assertEquals("10", overlarge.getProperty(LOGIN_KEY));
+    }
+
+    /**
      * Realistic-red incident reproduction of the 2026-08-10 signature: a socket that accepts the TCP
      * connection but never sends a byte back (TCP up, no data). A pgjdbc connection built with the
      * same timeout properties EMF applies — but short values — must THROW within a bounded wall-clock
