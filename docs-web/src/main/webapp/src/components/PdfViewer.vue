@@ -33,13 +33,38 @@ const props = withDefaults(
     // it is maximized, where the dialog IS the screen and one page at a time is the wrong
     // shape). Every other consumer keeps the single-page viewer unchanged.
     continuous?: boolean
+    // OPENABLE (#235): the single-page canvas area becomes an activation surface that emits
+    // `open` — for a viewer embedded as a card preview, where clicking the page is how a user
+    // expects to reach the full view. DEFAULT FALSE: the viewer is normally already the full
+    // view (the preview dialog), and there it must stay inert. It deliberately covers the page
+    // area ONLY — the nav bar is a sibling, so page-nav, rotation and Download can never be
+    // hijacked by it. Continuous mode has no single page area and ignores this.
+    openable?: boolean
+    // The accessible name of that activation surface (the page area carries no text of its
+    // own). Required in practice whenever `openable` is set; the parent owns the wording.
+    openLabel?: string
   }>(),
-  { initialRotation: 0, persistable: false, downloadable: true, continuous: false },
+  {
+    initialRotation: 0,
+    persistable: false,
+    downloadable: true,
+    continuous: false,
+    openable: false,
+    openLabel: '',
+  },
 )
 
 // `error` lets a parent degrade to its own fallback (e.g. the preview dialog's
 // "preview unavailable + Download" state) instead of showing this viewer's error UI.
-const emit = defineEmits<{ rotate: [degrees: number]; error: [] }>()
+// `open` is the openable page area's activation (#235) — the parent decides what opening means.
+const emit = defineEmits<{ rotate: [degrees: number]; error: []; open: [] }>()
+
+// Pointer AND keyboard activation of the page area. Guarded on the prop rather than the
+// listeners being conditional, so a viewer that is not openable emits nothing whatever
+// reaches it.
+function activateOpen() {
+  if (props.openable) emit('open')
+}
 
 const containerRef = ref<HTMLDivElement>()
 const pagesRef = ref<HTMLDivElement>()
@@ -708,7 +733,21 @@ onUnmounted(() => {
           :style="{ aspectRatio: pageAspects.get(p) ?? defaultAspect }"
         />
       </div>
-      <div v-else ref="containerRef" class="pdf-canvas-container" />
+      <!-- The page area. When `openable` (#235) it is also a button: Enter and Space activate
+           it like any other, and both are prevented so Space opens rather than page-scrolling
+           the box. Arrow keys still scroll it. -->
+      <div
+        v-else
+        ref="containerRef"
+        class="pdf-canvas-container"
+        :class="{ 'pdf-canvas-container--openable': openable }"
+        :role="openable ? 'button' : undefined"
+        :tabindex="openable ? 0 : undefined"
+        :aria-label="openable ? openLabel : undefined"
+        @click="activateOpen"
+        @keydown.enter.prevent="activateOpen"
+        @keydown.space.prevent="activateOpen"
+      />
       <div class="pdf-nav">
         <template v-if="totalPages > 1">
           <Button icon="pi pi-chevron-left" text size="small" severity="secondary" :disabled="currentPage <= 1" @click="prevPage" :aria-label="t('ui.previous_page')" />
@@ -745,6 +784,10 @@ onUnmounted(() => {
 }
 .pdf-canvas-container canvas {
   display: block;
+}
+/* #235 — the page area answers the pointer as the openable surface it is. */
+.pdf-canvas-container--openable {
+  cursor: pointer;
 }
 
 /* CONTINUOUS mode (#237). The viewer becomes a column: a scrollable page list that takes

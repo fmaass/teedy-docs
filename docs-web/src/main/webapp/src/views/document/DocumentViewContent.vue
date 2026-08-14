@@ -1557,15 +1557,30 @@ onUnmounted(() => {
                  Before, the controls added their own row on top of the stage, dropping an image
                  card's title/buttons below a neighbouring PDF or icon card's. -->
             <div class="image-preview-media">
-              <div class="image-preview-stage">
+              <!-- The stage IS the open control (#235), exactly as the generic card's icon stage
+                   is: a real <button> routing to the same `openPreview`, so the picture a user
+                   clicks behaves like the icon they can already click — and the keyboard reaches
+                   it too. It wraps ONLY the stage, never the rotation controls below, so those
+                   stay ordinary buttons rather than nested-in-a-button.
+                   `draggable="false"` is load-bearing, not defensive: an <img> is a native drag
+                   source, so a press that travelled even a few pixels started an image drag and
+                   the browser delivered NO click at all — the same swallow the gallery card was
+                   fixed for in 126ea8e8. -->
+              <button
+                type="button"
+                class="image-preview-stage media-open"
+                :aria-label="t('ui.file_view.open_file', { name: displayName(file.name, t) })"
+                @click="openPreview(file)"
+              >
                 <img
                   v-if="previewObjectUrls[file.id]"
                   :src="previewObjectUrls[file.id]"
                   :alt="displayName(file.name, t)"
                   class="rotatable-image"
+                  draggable="false"
                 />
                 <i v-else class="pi pi-spin pi-spinner preview-loading-spinner" aria-hidden="true" />
-              </div>
+              </button>
               <div v-if="doc.writable" class="image-preview-controls">
                 <Button
                   icon="pi pi-replay"
@@ -1652,12 +1667,20 @@ onUnmounted(() => {
                  row aligns with the image and generic cards; the page scrolls inside the box and
                  the page-nav stays pinned at its foot (styles below). -->
             <div class="pdf-preview-media">
+              <!-- `openable` (#235): the PAGE AREA opens the preview, the image stage and the
+                   generic icon stage do. It is a viewer prop rather than a click handler on this
+                   wrapper because the page area and the nav bar are siblings INSIDE the viewer —
+                   binding it there is what makes "page-nav and rotation are never hijacked" a
+                   structural fact instead of a target test this file would have to keep right. -->
               <PdfViewer
                 :src="getFileUrl(file.id)"
                 :initial-rotation="file.rotation ?? 0"
                 :persistable="doc.writable"
                 :downloadable="false"
+                openable
+                :open-label="t('ui.file_view.open_file', { name: displayName(file.name, t) })"
                 @rotate="(deg: number) => persistRotation(file, deg)"
+                @open="openPreview(file)"
               />
             </div>
             <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
@@ -2016,6 +2039,12 @@ onUnmounted(() => {
   border-radius: var(--p-content-border-radius, 6px);
   background: var(--p-content-background);
 }
+/* Every card type opens now (#235), so the primary-border hover the GENERIC card has carried
+   since #144 belongs to all three: a card that opens has to read as one, and a grid of mixed
+   file types must not answer the pointer in two different colours depending on the type. */
+.file-preview-card:hover {
+  border-color: var(--p-primary-color);
+}
 /* The image card's media band: the stage AND the rotation controls together fill one
    shared-height box (#283). The controls therefore no longer stack ON TOP of the stage and push
    the filename down — they sit inside the band, so an image card's title + actions align with the
@@ -2037,6 +2066,15 @@ onUnmounted(() => {
   justify-content: center;
   overflow: hidden;
   background: var(--p-content-hover-background);
+  /* The stage is a <button> since #235. Every declaration below strips UA button chrome that
+     would otherwise reach the media band's geometry and break the shared card height (#283). */
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 .rotatable-image {
   display: block;
@@ -2117,9 +2155,6 @@ onUnmounted(() => {
   background: var(--p-content-hover-background);
   color: var(--p-text-muted-color);
   font-size: 3rem;
-}
-.file-preview-generic:hover {
-  border-color: var(--p-primary-color);
 }
 
 /* The grid PDF preview is boxed to the SAME shared media height (#283) so its filename + action

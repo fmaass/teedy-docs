@@ -546,3 +546,67 @@ describe('PdfViewer — one generation guards load AND render (#144)', () => {
     expect(wrapper.find('.pdf-error').exists()).toBe(false)
   })
 })
+
+// #235 — a viewer embedded as a CARD preview has to open the full view when its page is
+// clicked; a viewer that already IS the full view (the preview dialog) must not. The
+// affordance therefore covers the page area only, is opt-in, and leaves the nav bar — page
+// navigation, rotation, Download — an ordinary row of controls beside it.
+describe('PdfViewer — openable page area (#235)', () => {
+  async function mountReady(extraProps: Record<string, unknown> = {}) {
+    const wrapper = mountViewer('blob:doc-1', extraProps)
+    await flushPromises()
+    await settleRenders()
+    return wrapper
+  }
+
+  it('is inert by default: no button semantics on the page area, and nothing it can emit', async () => {
+    const wrapper = await mountReady()
+    const area = wrapper.find('.pdf-canvas-container')
+    expect(area.exists()).toBe(true)
+    expect(area.attributes('role')).toBeUndefined()
+    expect(area.attributes('tabindex')).toBeUndefined()
+    expect(area.classes()).not.toContain('pdf-canvas-container--openable')
+
+    await area.trigger('click')
+    await area.trigger('keydown.enter')
+
+    expect(wrapper.emitted('open')).toBeUndefined()
+  })
+
+  it('openable makes the page area a named button that opens on click, Enter and Space', async () => {
+    const wrapper = await mountReady({ openable: true, openLabel: 'Open report.pdf' })
+    const area = wrapper.find('.pdf-canvas-container')
+    // The page area carries no text of its own, so the accessible name has to be supplied.
+    expect(area.attributes('role')).toBe('button')
+    expect(area.attributes('tabindex')).toBe('0')
+    expect(area.attributes('aria-label')).toBe('Open report.pdf')
+
+    await area.trigger('click')
+    expect(wrapper.emitted('open')).toHaveLength(1)
+
+    await area.trigger('keydown.enter')
+    expect(wrapper.emitted('open')).toHaveLength(2)
+
+    // Space activates a button; the default (scrolling the box) is prevented so it opens.
+    await area.trigger('keydown', { key: ' ' })
+    expect(wrapper.emitted('open')).toHaveLength(3)
+  })
+
+  it('the nav bar is beside the openable area, so page-nav and rotation never open', async () => {
+    const wrapper = await mountReady({ openable: true, openLabel: 'Open report.pdf' })
+    // Structural: the controls are NOT inside the activation surface — no target test can drift.
+    expect(wrapper.find('.pdf-canvas-container').findAll('button')).toHaveLength(0)
+
+    await wrapper.get('button[aria-label="ui.next_page"]').trigger('click')
+    await flushPromises()
+    await settleRenders()
+    expect(wrapper.find('.pdf-page-info').text()).toBe('2 / 3')
+
+    await wrapper.get('button[aria-label="ui.rotate_right"]').trigger('click')
+    await flushPromises()
+    await settleRenders()
+    expect(wrapper.emitted('rotate')).toHaveLength(1)
+
+    expect(wrapper.emitted('open')).toBeUndefined()
+  })
+})

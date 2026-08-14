@@ -113,7 +113,13 @@ const PdfViewerStub = defineComponent({
     initialRotation: { type: Number, default: 0 },
     persistable: { type: Boolean, default: false },
     downloadable: { type: Boolean, default: true },
+    // #235: the page area's open affordance. Declared with the real component's OFF default for
+    // the same reason `downloadable` is — an unset `openable` and an explicit one must not look
+    // alike, or the card losing its open affordance again would be invisible here.
+    openable: { type: Boolean, default: false },
+    openLabel: { type: String, default: '' },
   },
+  emits: ['rotate', 'error', 'open'],
   render: () => h('div', { class: 'pdf-viewer-stub' }),
 })
 
@@ -587,6 +593,107 @@ describe('DocumentViewContent — #178 preview + download from the tile action m
     const labels = tile.findAll('.file-card-actions button').map((b) => b.attributes('aria-label'))
     expect(labels).not.toContain('rename')
     expect(labels).not.toContain('ui.remove_file')
+  })
+})
+
+// #235 — the grid card's PICTURE opens the file. Only the generic tile ever had an open
+// affordance on its media (`.generic-open`); the image and PDF tiles carried mouse/drag
+// handlers and nothing else, so clicking the thing a user actually points at — the photo, the
+// page — did nothing at all, three shipped fixes notwithstanding (they all landed on the
+// document GALLERY, a different surface). The contract has two halves and both are asserted
+// here: the media opens, and the controls sitting ON the media (rotation, and inside the
+// viewer the page-nav) keep working and never open.
+describe('DocumentViewContent — the grid image and PDF media open the preview (#235)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setRotationMock.mockClear()
+  })
+
+  function openableDoc(writable = true): DocumentDetail {
+    return makeDoc({
+      relations: [],
+      writable,
+      files: [
+        { id: 'f-img', name: 'a.jpg', mimetype: 'image/jpeg', size: 1, version: 0, create_date: 0, creator: 'admin' },
+        { id: 'f-pdf', name: 'b.pdf', mimetype: 'application/pdf', size: 1, version: 0, create_date: 0, creator: 'admin' },
+      ],
+    } as unknown as Partial<DocumentDetail>)
+  }
+
+  function tile(wrapper: ReturnType<typeof mountView>['wrapper'], label: string) {
+    return wrapper
+      .findAll('.file-preview-card')
+      .find((c) => c.find('.file-preview-label').text() === label)!
+  }
+
+  it('the image stage is a real button and opens the in-app preview on that file', async () => {
+    const { wrapper } = mountView(openableDoc())
+    await flushPromises()
+    const stage = tile(wrapper, 'a.jpg').find('.image-preview-stage')
+    expect(stage.exists()).toBe(true)
+    // A BUTTON, like the generic card's stage: the same affordance for the pointer and the
+    // keyboard, rather than a click handler on a div that no key can reach.
+    expect(stage.element.tagName).toBe('BUTTON')
+    expect(stage.attributes('aria-label')).toBe('ui.file_view.open_file')
+
+    await stage.trigger('click')
+
+    const dialog = wrapper.findComponent(FilePreviewDialog)
+    expect(dialog.props('visible')).toBe(true)
+    expect(dialog.props('file')).toMatchObject({ id: 'f-img', mimetype: 'image/jpeg' })
+  })
+
+  it('the stage image is not a native drag source, so a press that travels still clicks', async () => {
+    const { wrapper } = mountView(openableDoc())
+    await flushPromises()
+    const img = tile(wrapper, 'a.jpg').find('img.rotatable-image')
+    expect(img.exists()).toBe(true)
+    // An <img> drags natively: without this the browser turns a few pixels of travel into an
+    // image drag and delivers NO click, which is exactly how the fix bounced on the gallery.
+    expect(img.attributes('draggable')).toBe('false')
+  })
+
+  it('the rotation controls sit OUTSIDE the open button: they rotate and never open', async () => {
+    const { wrapper } = mountView(openableDoc())
+    await flushPromises()
+    const card = tile(wrapper, 'a.jpg')
+    // Structural half of the non-hijack contract: no control is nested inside the open button,
+    // so a rotation press can never be swallowed by (or double-fire with) the open.
+    expect(card.find('.image-preview-stage').findAll('button')).toHaveLength(0)
+    const rotate = card.findAll('.image-preview-controls button')
+    expect(rotate).toHaveLength(2)
+
+    await rotate[1].trigger('click')
+    await flushPromises()
+
+    expect(setRotationMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent(FilePreviewDialog).props('visible')).toBe(false)
+  })
+
+  it('the PDF tile viewer is openable and its open routes to the same dialog', async () => {
+    const { wrapper } = mountView(openableDoc())
+    await flushPromises()
+    const pdf = wrapper.findComponent(PdfViewerStub)
+    expect(pdf.props('openable')).toBe(true)
+    expect(pdf.props('openLabel')).toBe('ui.file_view.open_file')
+
+    pdf.vm.$emit('open')
+    await wrapper.vm.$nextTick()
+
+    const dialog = wrapper.findComponent(FilePreviewDialog)
+    expect(dialog.props('visible')).toBe(true)
+    expect(dialog.props('file')).toMatchObject({ id: 'f-pdf', mimetype: 'application/pdf' })
+  })
+
+  it('a read-only tile still opens (preview is a read action, above the writable gate)', async () => {
+    const { wrapper } = mountView(openableDoc(false))
+    await flushPromises()
+    const card = tile(wrapper, 'a.jpg')
+    // The rotation controls are gated away, the open affordance is not.
+    expect(card.findAll('.image-preview-controls')).toHaveLength(0)
+    await card.find('.image-preview-stage').trigger('click')
+    expect(wrapper.findComponent(FilePreviewDialog).props('visible')).toBe(true)
+    expect(wrapper.findComponent(PdfViewerStub).props('openable')).toBe(true)
   })
 })
 

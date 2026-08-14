@@ -69,6 +69,21 @@ function zipFile(name: string) {
   return { name, mimeType: 'application/zip', path: zip }
 }
 
+// #235 seeds. wide.png (60x20) is used rather than the 1x1 pixel: the moved-press below has to
+// travel real pixels INSIDE the painted image, which a 1px raster cannot offer. multipage.pdf is
+// used rather than sample.pdf because the page-nav controls only render above one page — and
+// "page-nav still navigates and never opens" is half the contract under test.
+const widePng = resolve(here, 'fixtures/wide.png')
+const multiPagePdf = resolve(here, 'fixtures/multipage.pdf')
+
+function widePngFile(name: string) {
+  return { name, mimeType: 'image/png', path: widePng }
+}
+
+function multiPagePdfFile(name: string) {
+  return { name, mimeType: 'application/pdf', path: multiPagePdf }
+}
+
 // #229 — what gates a reorder spec is the order the SERVER stored, never the toast.
 //
 // The toast is a self-dismissing element (`life: 2000` in DocumentViewContent's reorder
@@ -881,4 +896,143 @@ test('the single Download is reachable AND activatable by keyboard alone (#181)'
 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+// #235 — clicking the PICTURE on an in-document grid card opens the file.
+//
+// Only the GENERIC tile ever had an open affordance on its media (`.generic-open`, #144). The
+// image and PDF tiles carried mouse/drag handlers and nothing else, so the two card types a user
+// actually points at — the photo, the page — answered a click with nothing at all. (Three earlier
+// fixes were verified against the document GALLERY, which is a different component; this spec
+// pins the surface the report is about.)
+//
+// The contract has two halves and both are asserted here, because a fix for the first that broke
+// the second would be a worse regression than the bug: the MEDIA opens, and every control that
+// sits on or beside the media — image rotation, the viewer's page-nav — keeps doing its own job
+// and never opens.
+
+/** True once every file's async processing has produced its real raster/preview. */
+async function filesProcessed(request: APIRequestContext, documentId: string): Promise<boolean> {
+  const res = await request.get(`/api/file/list?id=${documentId}`)
+  if (!res.ok()) return false
+  const body = await res.json()
+  return body.files.length > 0 && body.files.every((f: { processing: boolean }) => !f.processing)
+}
+
+/** The AUTHORITATIVE persisted rotation of a named file, straight from the API. */
+async function persistedRotationOf(
+  request: APIRequestContext,
+  documentId: string,
+  name: string,
+): Promise<number | undefined> {
+  const res = await request.get(`/api/document/${documentId}?files=true`)
+  if (!res.ok()) return undefined
+  const body = await res.json()
+  return body.files.find((f: { name: string; rotation: number }) => f.name === name)?.rotation
+}
+
+test('#235 — the image and PDF grid media open the preview; their controls still do not', async ({
+  page,
+  cleanup,
+}) => {
+  const id = await seedDoc(page.request, unique('grid-open'), [
+    widePngFile('photo.png'),
+    multiPagePdfFile('report.pdf'),
+  ])
+  cleanup.defer('purge the seeded document', () => deleteDocApi(page.request, id))
+  await gotoRouteReady(page, `/#/document/view/${id}/content`, ROUTE_ROOT.documentContent)
+  await expect(page.locator('.file-preview-grid')).toBeVisible()
+  // The real rasters, not the square placeholder: the presses below are geometric.
+  await expect.poll(() => filesProcessed(page.request, id)).toBe(true)
+
+  const imageCard = page.locator('.file-preview-card', { hasText: 'photo.png' })
+  const pdfCard = page.locator('.file-preview-card', { hasText: 'report.pdf' })
+  const stage = imageCard.locator('.image-preview-stage')
+  const pageArea = pdfCard.locator('.pdf-canvas-container')
+  await expect(imageCard.locator('img.rotatable-image')).toBeVisible()
+  await expect(pdfCard.locator('.pdf-canvas-container canvas')).toBeVisible()
+
+  // (a) A plain click on the image opens the in-app preview ON THAT FILE.
+  await stage.click()
+  let dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.p-dialog-title')).toHaveText('photo.png')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // (b) THE REPORTED GESTURE: a press that travels a few pixels before release. An <img> is a
+  // native drag source, so without draggable="false" the browser turns this into an image drag
+  // and delivers NO click — the affordance is there and the user still gets nothing. The
+  // dragstart counter is what distinguishes "the click worked" from "the click worked because
+  // this run happened not to trip the drag".
+  const box = (await imageCard.locator('img.rotatable-image').boundingBox())!
+  await page.evaluate(() => {
+    const w = window as unknown as { __dragstarts: number }
+    w.__dragstarts = 0
+    document.addEventListener('dragstart', () => (w.__dragstarts += 1), true)
+  })
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2 + 4, { steps: 8 })
+  await page.mouse.up()
+  dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.p-dialog-title')).toHaveText('photo.png')
+  expect(
+    await page.evaluate(() => (window as unknown as { __dragstarts: number }).__dragstarts),
+    'the press never became a native image drag',
+  ).toBe(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // (c) The PDF page area opens the same way.
+  await pageArea.click()
+  dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.p-dialog-title')).toHaveText('report.pdf')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // Both media are named, keyboard-reachable open controls — the same affordance the generic
+  // card has had since #144 (each card also carries the action-menu preview of the same name,
+  // hence two per card).
+  await expect(imageCard.getByRole('button', { name: 'Open photo.png', exact: true })).toHaveCount(2)
+  await expect(pdfCard.getByRole('button', { name: 'Open report.pdf', exact: true })).toHaveCount(2)
+
+  // …and by keyboard, which is the half a click handler on a bare div would have missed.
+  await stage.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await pageArea.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // (d) NON-HIJACK: the image rotation control rotates and does NOT open. Asserted against the
+  // server's stored rotation, not a spinner — the control has to still DO its job.
+  expect(await persistedRotationOf(page.request, id, 'photo.png')).toBe(0)
+  await imageCard.getByRole('button', { name: 'Rotate right' }).click()
+  await expect.poll(() => persistedRotationOf(page.request, id, 'photo.png')).toBe(90)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // (e) NON-HIJACK: the viewer's page-nav navigates and does NOT open.
+  const pageInfo = pdfCard.locator('.pdf-page-info')
+  await expect(pageInfo).toHaveText(/^1 \/ [2-9]/)
+  await pdfCard.getByRole('button', { name: 'Next page' }).click()
+  await expect(pageInfo).toHaveText(/^2 \/ [2-9]/)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  // #283 stays intact: the media band is one shared height, so the filename sits at the same
+  // offset WITHIN every card type. Turning the image stage into a button is exactly the kind of
+  // change that could have re-introduced the misalignment. Measured as an offset from each
+  // card's own top rather than an absolute y, so it holds in the one-column mobile grid too.
+  async function labelOffset(card: Locator): Promise<number> {
+    const cardBox = (await card.boundingBox())!
+    const labelBox = (await card.locator('.file-preview-label').boundingBox())!
+    return labelBox.y - cardBox.y
+  }
+  expect(Math.abs((await labelOffset(imageCard)) - (await labelOffset(pdfCard)))).toBeLessThanOrEqual(1)
 })
