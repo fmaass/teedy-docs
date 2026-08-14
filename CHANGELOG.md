@@ -8,6 +8,18 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.4] - 2026-08-14
+
+There is no database migration; the schema level remains 64.
+
+### Changed
+- The right-click tag menu's add-tag control is now a search box over an inline list of tag buttons — the whole menu is one panel, typing narrows the list, and the clear button simply empties the search (#274).
+- In the document's grid view, file cards share one media height, so an image card and a PDF card keep their filename and actions aligned; a PDF scrolls inside its card instead of stretching it (#283).
+
+### Fixed
+- Clicking a gallery thumbnail reliably opens the document. The card's link was a native drag source, so the few pixels a real click travels could silently start a drag and swallow the click — thumbnails were affected, icon cards were not (#235).
+- The About dialog shows the product name and build regardless of a configured brand name, so a bug report always identifies the actual product; every other surface keeps the brand (#282).
+
 ## [3.8.3] - 2026-08-13
 
 There is no database migration; the schema level remains 64.
@@ -595,7 +607,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.4...HEAD
+[3.8.4]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...v3.8.4
 [3.8.3]: https://github.com/fmaass/teedy-docs/compare/v3.8.2...v3.8.3
 [3.8.2]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...v3.8.2
 [3.8.1]: https://github.com/fmaass/teedy-docs/compare/v3.8.0...v3.8.1
