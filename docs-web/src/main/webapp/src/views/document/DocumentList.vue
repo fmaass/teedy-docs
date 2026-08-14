@@ -824,6 +824,31 @@ async function bulkDownload() {
   .address-bar { padding: 0.75rem 1rem 0; }
   .bulk-bar-wrap { padding: 0 1rem; }
   .doc-area { padding: 0.75rem 1rem 1rem; }
+
+  /* #277: the quick filter is the first child of the scrolling .doc-area, so on a phone
+     it scrolled out of view with the list — exactly what the reporter's screenshots show.
+     Pinning it sticky against .doc-area (the one scroll container it lives in) keeps it
+     reachable while the list scrolls, without a floating duplicate. Mobile breakpoint
+     only: on desktop the taller viewport keeps it a scroll-flick away, and the desktop
+     layout must not change. The margin→padding swap keeps its resting geometry
+     pixel-identical (the 0.75rem gap below moves inside the box) while giving the pinned
+     row an opaque body-coloured surface, so rows slide under it instead of showing through
+     the transparent gap. Deliberately NO negative top margin to cover .doc-area's thin
+     top-padding band (rows show faintly through it while scrolling, the standard sticky
+     look): Chrome applies the sticky inset to the margin edge, so a negative top margin
+     permanently pushes the row down by its own magnitude even at scrollTop 0 — measured
+     +12px at rest — which is exactly the resting-layout change this rule must not make. */
+  .quick-filter-row {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--p-surface-50);
+    margin-bottom: 0;
+    padding-bottom: 0.75rem;
+  }
+  :global(.dark-mode) .quick-filter-row {
+    background: var(--p-surface-950);
+  }
 }
 
 /* #272: at phone width the page-size control wrapped organically but kept its natural

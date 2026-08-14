@@ -330,7 +330,15 @@ function handleMobileTagSelect(tagId: string) {
 .app-layout {
   display: flex;
   flex-direction: column;
+  /* #277: on a phone, 100vh is the LARGE viewport (browser chrome retracted) — with the
+     URL bar visible the shell overhangs the visible viewport by the chrome height, so the
+     PAGE itself scrolls and drags the "pinned" header/toolbar chrome along before any
+     inner container moves. 100dvh tracks the dynamic viewport, so the shell always fits
+     exactly and the only vertical scrolling is the intended inner containers'. The vh
+     line stays as the fallback for engines without dvh (identical there to today's
+     behaviour); on desktop dvh === vh, so nothing changes. */
   height: 100vh;
+  height: 100dvh;
 }
 
 .app-body {

@@ -180,6 +180,96 @@ test.describe('mobile layout (Pixel 5 viewport)', () => {
     await expect(slideOver).toBeHidden()
   })
 
+  test('the quick filter stays pinned above the scrolling document list (#277)', async ({
+    page,
+    request,
+    cleanup,
+  }) => {
+    // #277 (vmario89): the quick filter ("Filter loaded results…", #53) rendered as the
+    // FIRST CHILD of the scrolling `.doc-area`, so on a phone it scrolled out of view
+    // with the list — his screenshots show it sliding under the filter toolbar. The fix
+    // pins it (position:sticky) to the top of the list scrollport at the ≤1024px mobile
+    // breakpoint. This asserts the pin: scroll the list to its end, the quick filter's
+    // bounding box must still sit inside the viewport, below the (non-scrolling) filter
+    // toolbar. RED before the fix: its box ends up hundreds of px above the viewport top.
+    //
+    // Seed enough documents that the list overflows the mobile scrollport by several
+    // hundred px (the default page size of 20 keeps them all on one page). Seeded over
+    // the API — 14 UI round-trips through the add form would dominate the test's runtime.
+    const ids: string[] = []
+    for (let i = 0; i < 14; i++) {
+      const res = await request.put('/api/document', {
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        data: new URLSearchParams([
+          ['title', unique(`Pin-scroll-doc-${i}`)],
+          ['language', 'eng'],
+        ]).toString(),
+      })
+      expect(res.ok(), `seed document ${i} for the scroll corpus`).toBeTruthy()
+      ids.push((await res.json()).id as string)
+    }
+    cleanup.defer('delete the #277 scroll corpus', async () => {
+      for (const id of ids) await request.delete(`/api/document/${id}`)
+    })
+
+    await gotoDocumentList(page)
+    const docArea = page.locator('.doc-area')
+    const quickFilter = page.locator('.quick-filter-row')
+    const toolbar = page.locator('.wf-filter-row')
+    await expect(quickFilter).toBeVisible()
+    await expect(toolbar).toBeVisible()
+
+    // Precondition, not politeness: the assertion below is vacuous unless the list
+    // genuinely overflows its scrollport. Poll until the seeded rows are rendered and
+    // the container has real scroll range.
+    await expect
+      .poll(() => docArea.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        message: 'the document list overflows its scrollport by several rows',
+      })
+      .toBeGreaterThan(300)
+
+    // The user scrolls the list to its end.
+    await docArea.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    // Positive control: the container actually scrolled (the pin must not be proven
+    // against a list that never moved).
+    await expect
+      .poll(() => docArea.evaluate((el) => el.scrollTop), {
+        message: 'the list scrolled',
+      })
+      .toBeGreaterThan(200)
+
+    const vh = page.viewportSize()!.height
+    const quickBox = await quickFilter.boundingBox()
+    const toolbarBox = await toolbar.boundingBox()
+    expect(quickBox, 'quick filter has a layout box').not.toBeNull()
+    expect(toolbarBox, 'filter toolbar has a layout box').not.toBeNull()
+
+    // The pin itself — RED before the fix (the row's top edge lands far above y=0).
+    expect(quickBox!.y, 'quick filter top edge stays within the viewport').toBeGreaterThanOrEqual(0)
+    expect(
+      quickBox!.y + quickBox!.height,
+      'quick filter bottom edge stays within the viewport',
+    ).toBeLessThanOrEqual(vh + 1)
+    // Pinned ABOVE the list, BELOW the toolbar — not floating over other chrome.
+    expect(
+      quickBox!.y,
+      'quick filter sits below the filter toolbar',
+    ).toBeGreaterThanOrEqual(toolbarBox!.y + toolbarBox!.height - 1)
+    // And the filter toolbar itself is still fully on screen after the scroll
+    // (the ticket's acceptance line: the toolbar stays visible while the list scrolls).
+    expect(toolbarBox!.y, 'filter toolbar top edge on screen').toBeGreaterThanOrEqual(0)
+    expect(
+      toolbarBox!.y + toolbarBox!.height,
+      'filter toolbar bottom edge on screen',
+    ).toBeLessThanOrEqual(vh + 1)
+    // The quick filter must still be interactive while pinned: type into it and the
+    // client-side narrowing responds (the row is a control, not a decoration).
+    await quickFilter.locator('input').fill('Pin-scroll-doc')
+    await expect(quickFilter.locator('input')).toHaveValue('Pin-scroll-doc')
+  })
+
   // NOTE: the toHaveScreenshot glitch-detectors that once lived here (gated behind
   // E2E_VISUAL=1, no committed baselines) were REPLACED by the standing, default-on
   // visual-regression gate in `visual.spec.ts`, which covers the document list and the
