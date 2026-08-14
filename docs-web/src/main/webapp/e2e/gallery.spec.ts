@@ -350,6 +350,48 @@ test('a single click on a gallery card thumbnail opens the document and keeps th
   await expect(page.locator(ROUTE_ROOT.documentList)).toBeVisible()
 })
 
+test('a REAL (moved) click on a gallery thumbnail with a rendered image opens the document — the card link must not native-drag the click away (#235)', async ({
+  page,
+  request,
+  cleanup,
+}) => {
+  const title = unique('gal-thumbdrag')
+  const docId = await apiCreateDocument(request, title)
+  cleanup.defer('purge the thumbnail-drag document', () => deleteDocApi(request, docId))
+  // A real attached image, so the click lands on an actual rendered thumbnail — the exact case
+  // the reporter saw fail (cards WITH a preview did not open; icon cards did).
+  await apiAttachFile(request, docId, widePng, 'wide.png', 'image/png')
+
+  await gotoDocumentList(page)
+  await switchToGallery(page)
+
+  const thumb = cardThumb(page, title)
+  await expect(thumb.locator('img')).toBeVisible()
+
+  // REPRODUCE A REAL CLICK. A bare Playwright `.click()` presses and releases on the SAME pixel
+  // with zero travel, so it never triggers the native drag this bug is about — which is why the
+  // sibling #235 test (a clean .click()) passed while the feature stayed broken and the fix
+  // shipped twice. A hand always moves the pointer a few px between press and release; the card's
+  // open region is an <a href>, a native drag SOURCE, so that travel starts a native link-drag on
+  // the anchor that SWALLOWS the click (no `click` event fires) and the document never opens. The
+  // fix is draggable="false" on that anchor. This gesture — press, a few px of travel INSIDE the
+  // thumbnail, release — fails against the pre-fix build (no navigation) and passes after it.
+  const box = await thumb.boundingBox()
+  if (!box) throw new Error('the thumbnail region has no bounding box')
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+  await page.mouse.move(cx, cy)
+  await page.mouse.down()
+  await page.mouse.move(cx + 12, cy + 12, { steps: 6 })
+  await page.mouse.up()
+
+  // ACCEPTANCE: the moved click opened the document's content view (a real navigation, not a
+  // slide-over and not a no-op).
+  await expectRouteReady(page, `/#/document/view/${docId}/content`, ROUTE_ROOT.documentContent)
+  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  await expect(page.locator('.slide-over-title')).toHaveCount(0)
+})
+
 test('the rest of the gallery card keeps its contract: title click opens the slide-over, a modified thumbnail click is not intercepted (#235)', async ({
   page,
   context,
