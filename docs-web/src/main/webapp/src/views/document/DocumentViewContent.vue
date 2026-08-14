@@ -1552,36 +1552,42 @@ onUnmounted(() => {
             @drop.prevent="onGridDrop(index)"
             @dragend="onGridDragEnd"
           >
-            <div class="image-preview-stage">
-              <img
-                v-if="previewObjectUrls[file.id]"
-                :src="previewObjectUrls[file.id]"
-                :alt="displayName(file.name, t)"
-                class="rotatable-image"
-              />
-              <i v-else class="pi pi-spin pi-spinner preview-loading-spinner" aria-hidden="true" />
-            </div>
-            <div v-if="doc.writable" class="image-preview-controls">
-              <Button
-                icon="pi pi-replay"
-                text
-                rounded
-                size="small"
-                severity="secondary"
-                :disabled="rotating[file.id]"
-                @click="rotateImageLeft(file)"
-                :aria-label="t('ui.rotate_left')"
-              />
-              <Button
-                icon="pi pi-refresh"
-                text
-                rounded
-                size="small"
-                severity="secondary"
-                :disabled="rotating[file.id]"
-                @click="rotateImageRight(file)"
-                :aria-label="t('ui.rotate_right')"
-              />
+            <!-- The image and its rotation controls share ONE fixed-height media band (#283) so the
+                 filename + action row below sit at the SAME offset as the PDF and generic cards.
+                 Before, the controls added their own row on top of the stage, dropping an image
+                 card's title/buttons below a neighbouring PDF or icon card's. -->
+            <div class="image-preview-media">
+              <div class="image-preview-stage">
+                <img
+                  v-if="previewObjectUrls[file.id]"
+                  :src="previewObjectUrls[file.id]"
+                  :alt="displayName(file.name, t)"
+                  class="rotatable-image"
+                />
+                <i v-else class="pi pi-spin pi-spinner preview-loading-spinner" aria-hidden="true" />
+              </div>
+              <div v-if="doc.writable" class="image-preview-controls">
+                <Button
+                  icon="pi pi-replay"
+                  text
+                  rounded
+                  size="small"
+                  severity="secondary"
+                  :disabled="rotating[file.id]"
+                  @click="rotateImageLeft(file)"
+                  :aria-label="t('ui.rotate_left')"
+                />
+                <Button
+                  icon="pi pi-refresh"
+                  text
+                  rounded
+                  size="small"
+                  severity="secondary"
+                  :disabled="rotating[file.id]"
+                  @click="rotateImageRight(file)"
+                  :aria-label="t('ui.rotate_right')"
+                />
+              </div>
             </div>
             <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
@@ -1641,14 +1647,19 @@ onUnmounted(() => {
           >
             <!-- `downloadable=false`: the tile's own action menu now carries the explicit
                  Download (#178), so the viewer's built-in one would be a second, unlabelled
-                 control on the same card — the duplicate #181 removed from the dialog. -->
-            <PdfViewer
-              :src="getFileUrl(file.id)"
-              :initial-rotation="file.rotation ?? 0"
-              :persistable="doc.writable"
-              :downloadable="false"
-              @rotate="(deg: number) => persistRotation(file, deg)"
-            />
+                 control on the same card — the duplicate #181 removed from the dialog.
+                 The viewer is boxed to the shared media height (#283) so the filename + action
+                 row aligns with the image and generic cards; the page scrolls inside the box and
+                 the page-nav stays pinned at its foot (styles below). -->
+            <div class="pdf-preview-media">
+              <PdfViewer
+                :src="getFileUrl(file.id)"
+                :initial-rotation="file.rotation ?? 0"
+                :persistable="doc.writable"
+                :downloadable="false"
+                @rotate="(deg: number) => persistRotation(file, deg)"
+              />
+            </div>
             <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
             <div class="file-card-actions">
               <span
@@ -1993,6 +2004,10 @@ onUnmounted(() => {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
+  /* One media height shared by EVERY card type's preview (image band, PDF box, generic icon
+     stage), so the filename + action row lands at the same offset on every card and adjacent
+     cards line up regardless of file type (#283). */
+  --file-card-media-height: 400px;
 }
 
 .file-preview-card {
@@ -2001,11 +2016,22 @@ onUnmounted(() => {
   border-radius: var(--p-content-border-radius, 6px);
   background: var(--p-content-background);
 }
-/* Rotation stage: a fixed-height box that centers the image. The image itself is
-   physically rotated server-side (the served _web raster), so the stage only needs
-   to fit-contain it — no CSS transform, no sideways sizing. */
+/* The image card's media band: the stage AND the rotation controls together fill one
+   shared-height box (#283). The controls therefore no longer stack ON TOP of the stage and push
+   the filename down — they sit inside the band, so an image card's title + actions align with the
+   PDF and generic cards beside it. */
+.image-preview-media {
+  height: var(--file-card-media-height);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Rotation stage: fills the band and centers the image. The image itself is physically rotated
+   server-side (the served _web raster), so the stage only needs to fit-contain it — no CSS
+   transform, no sideways sizing. */
 .image-preview-stage {
-  height: 400px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2084,7 +2110,7 @@ onUnmounted(() => {
   font: inherit;
 }
 .generic-preview-stage {
-  height: 400px;
+  height: var(--file-card-media-height);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2094,6 +2120,32 @@ onUnmounted(() => {
 }
 .file-preview-generic:hover {
   border-color: var(--p-primary-color);
+}
+
+/* The grid PDF preview is boxed to the SAME shared media height (#283) so its filename + action
+   row aligns with the image and generic cards. The viewer becomes a column INSIDE the box: the
+   page column scrolls within the media area while the page-nav bar stays pinned at its foot. This
+   :deep is scoped to the grid card's viewer only — the fullscreen preview is a SEPARATE PdfViewer
+   instance (FilePreviewDialog, continuous mode) and is untouched. */
+.pdf-preview-media {
+  height: var(--file-card-media-height);
+  display: flex;
+  overflow: hidden;
+}
+.pdf-preview-media :deep(.pdf-viewer) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pdf-preview-media :deep(.pdf-canvas-container) {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  /* Top-align the width-fitted page so a page taller than the box scrolls from its top edge
+     (centering a taller-than-container flex item hides its top behind an unreachable scroll). */
+  align-items: flex-start;
 }
 
 /* Per-tile action row: hosts the shared FileActionMenu (or the grid inline-rename
