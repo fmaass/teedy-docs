@@ -277,7 +277,7 @@ test.describe('Settings › Branding › the brand shown inside the app', () => 
     cleanup.defer('reset branding to the bundled defaults', () => resetBranding(request))
   })
 
-  test('#57: the configured application name is the brand in the navigation and in About', async ({
+  test('#57/#282: the configured application name is the nav brand; About keeps the product identity', async ({
     page,
     request,
   }) => {
@@ -300,11 +300,13 @@ test.describe('Settings › Branding › the brand shown inside the app', () => 
     await expect(brand).toHaveAttribute('href', /#\/document$/)
     await closeNav(page)
 
-    // The About dialog carried a THIRD hardcoded copy of the brand.
+    // The About dialog no longer follows the brand override (#282): it shows the product
+    // identity ("Teedy") regardless of the operator's rename, so a bug reporter always sees
+    // which product and build they are on. The nav and drawer stay branded (asserted above).
     await page.getByRole('button', { name: 'About', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
-    await expect(dialog.locator('.about-name')).toHaveText(APP_NAME)
+    await expect(dialog.locator('.about-name')).toHaveText('Teedy')
   })
 
   test('#57: saving the name in the Branding form updates the in-app brand live, without a reload (invalidateTheme)', async ({
