@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * {@code docs.oidc_*} configuration values must be read ONLY through the single accessor chokepoint
  * in {@link OidcResource} — {@code resolveEffective} (the DB → property → env → default resolver)
  * and {@code oidcConfigSource} (the UI source hint). A read elsewhere silently bypasses a DB
- * override (Saturn regression risk), so the build fails on ANY such read outside that chokepoint.
+ * override (a production regression risk), so the build fails on ANY such read outside that chokepoint.
  *
  * <p>Both process-global tiers are guarded SYMMETRICALLY: a {@code docs.oidc_*} JVM property read
  * ({@code System.getProperty}) and a {@code DOCS_OIDC_*} environment read ({@code System.getenv})
