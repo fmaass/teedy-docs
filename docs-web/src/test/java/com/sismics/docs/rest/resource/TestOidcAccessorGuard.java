@@ -15,26 +15,35 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Accessor-completeness guard (#44, HIGH-effort auth-surface blocker): the twelve
+ * Accessor-completeness guard (#44, HIGH-effort auth-surface blocker): the 13
  * {@code docs.oidc_*} configuration values must be read ONLY through the single accessor chokepoint
- * in {@link OidcResource} — {@code resolveEffective} (the DB → property → default resolver) and
- * {@code oidcConfigSource} (the UI source hint). A read elsewhere silently bypasses a DB override
- * (Saturn regression risk), so the build fails on ANY such read outside that chokepoint.
+ * in {@link OidcResource} — {@code resolveEffective} (the DB → property → env → default resolver)
+ * and {@code oidcConfigSource} (the UI source hint). A read elsewhere silently bypasses a DB
+ * override (Saturn regression risk), so the build fails on ANY such read outside that chokepoint.
  *
- * <p>Two complementary scans, both comment-and-string-aware (the lexer of
+ * <p>Both process-global tiers are guarded SYMMETRICALLY: a {@code docs.oidc_*} JVM property read
+ * ({@code System.getProperty}) and a {@code DOCS_OIDC_*} environment read ({@code System.getenv})
+ * are the same bypass, so the environment tier introduced alongside the property tier is fenced by
+ * the same rules rather than being an unguarded second door.
+ *
+ * <p>Two complementary scans per tier, both comment-and-string-aware (the lexer of
  * {@link TestOidcSubjectLogGuard}):
  * <ol>
  *   <li><b>Auth-class strict scan.</b> Within the classes that legitimately deal with these keys —
  *       {@code OidcResource}, {@code AppResource}, {@code UserResource} — ANY {@code
- *       System.getProperty(} call outside the whitelisted accessor location is a violation
- *       REGARDLESS of its argument, EXCEPT an explicit allowlist of known non-OIDC keys read there
- *       ({@code docs.logout_url}, {@code docs.header_authentication}). This catches a read laundered
- *       through a neutrally-named local ({@code String k = "docs.oidc_issuer"; System.getProperty(k)})
- *       without any data-flow analysis.</li>
+ *       System.getProperty(} / {@code System.getenv(} call outside the whitelisted accessor location
+ *       is a violation REGARDLESS of its argument, EXCEPT an explicit allowlist of known non-OIDC
+ *       keys read there ({@code docs.logout_url}, {@code docs.header_authentication};
+ *       {@code DOCS_MAX_UPLOAD_SIZE}, {@code Constants.GLOBAL_QUOTA_ENV}, the SMTP env constants).
+ *       This catches a read laundered through a neutrally-named local
+ *       ({@code String k = "docs.oidc_issuer"; System.getProperty(k)}, or the {@code DOCS_OIDC_*}
+ *       equivalent) without any data-flow analysis.</li>
  *   <li><b>Cross-root literal/constant scan.</b> Across ALL main-source roots (docs-core, docs-web,
  *       docs-web-common), any {@code System.getProperty(...)} whose argument literally references an
  *       OIDC key (a {@code "docs.oidc..."} literal, {@code OidcKey}, {@code .propertyName()}, a
- *       {@code PROP_*}/{@code *OIDC*} constant) outside the accessor is a violation.</li>
+ *       {@code PROP_*}/{@code *OIDC*} constant) outside the accessor is a violation — and likewise
+ *       any {@code System.getenv(...)} whose argument references one (a {@code "DOCS_OIDC..."}
+ *       literal, {@code OidcKey}, {@code .envName()}, an {@code *OIDC*} constant).</li>
  * </ol>
  *
  * <p>The accessor whitelist is scoped to the EXACT location (file {@code OidcResource.java} AND one
@@ -47,6 +56,9 @@ public class TestOidcAccessorGuard {
 
     /** Start of a property read: System.getProperty( — the '(' anchors the argument scan. */
     private static final Pattern GET_PROPERTY = Pattern.compile("System\\s*\\.\\s*getProperty\\s*\\(");
+
+    /** Start of an environment read: System.getenv( — the mirror of {@link #GET_PROPERTY}. */
+    private static final Pattern GET_ENV = Pattern.compile("System\\s*\\.\\s*getenv\\s*\\(");
 
     /** The file that hosts the accessor chokepoint. The whitelist is scoped to THIS file. */
     private static final String ACCESSOR_FILE = "OidcResource.java";
@@ -70,6 +82,20 @@ public class TestOidcAccessorGuard {
                     "java.version", "java.vendor", "os.name", "os.version", "os.arch");
 
     /**
+     * Known NON-OIDC environment variables read directly in the auth classes — the mirror of
+     * {@link #AUTH_CLASS_ALLOWLISTED_KEYS} for {@code System.getenv}. Enumerated from the current
+     * tree: the global-quota variable ({@code AppResource} app info, {@code OidcResource}
+     * provisioning), the upload cap, and the SMTP settings the {@code /app} endpoint reports as
+     * configured. Each entry is accepted either as a bare constant reference (the form the tree
+     * uses, e.g. {@code Constants.GLOBAL_QUOTA_ENV}) or as a quoted string literal of the same
+     * text — anything else read in an auth class is a violation.
+     */
+    private static final List<String> AUTH_CLASS_ALLOWLISTED_ENV_KEYS =
+            List.of("Constants.GLOBAL_QUOTA_ENV", "DOCS_MAX_UPLOAD_SIZE",
+                    "Constants.SMTP_HOSTNAME_ENV", "Constants.SMTP_PORT_ENV",
+                    "Constants.SMTP_USERNAME_ENV");
+
+    /**
      * The argument literally references an OIDC key. Broad on the OIDC side (constant/variable names
      * caught), while a plain non-OIDC key literal is NOT matched.
      */
@@ -80,6 +106,13 @@ public class TestOidcAccessorGuard {
             + "|\\bPROP_[A-Z_]*"                // legacy PROP_* constant name
             + "|OIDC[A-Z_]*");                  // any *OIDC*-named constant
 
+    /** The {@link #OIDC_ARGUMENT} mirror for an environment read: the argument names an OIDC key. */
+    private static final Pattern OIDC_ENV_ARGUMENT = Pattern.compile(
+            "DOCS_OIDC"                         // "DOCS_OIDC_*" string literal
+            + "|OidcKey"                        // OidcKey enum reference
+            + "|envName\\s*\\(\\s*\\)"          // key.envName()
+            + "|OIDC[A-Z_]*");                  // any *OIDC*-named constant
+
     // Lexical states, one per source character.
     private static final byte CODE = 0;
     private static final byte STRING = 1;
@@ -87,13 +120,18 @@ public class TestOidcAccessorGuard {
     private static final byte LINE_COMMENT = 3;
     private static final byte BLOCK_COMMENT = 4;
 
+    /**
+     * The gate itself, over BOTH process-global tiers: no {@code docs.oidc_*} property read and no
+     * {@code DOCS_OIDC_*} environment read may live outside the accessor chokepoint.
+     */
     @Test
     public void noDirectOidcPropertyReadOutsideTheAccessor() throws Exception {
         List<String> violations = scanAllRoots(true);
         Assertions.assertTrue(violations.isEmpty(),
-                "Every docs.oidc_* property must be read through the OidcResource accessor chokepoint "
-                        + "(DB-first precedence). In an auth class ANY non-allowlisted System.getProperty "
-                        + "outside the accessor is a violation (catches a laundered variable read). "
+                "Every docs.oidc_* property AND DOCS_OIDC_* environment variable must be read through "
+                        + "the OidcResource accessor chokepoint (DB-first precedence). In an auth class "
+                        + "ANY non-allowlisted System.getProperty/System.getenv outside the accessor is "
+                        + "a violation (catches a laundered variable read). "
                         + "Offending read(s): " + violations);
     }
 
@@ -111,6 +149,93 @@ public class TestOidcAccessorGuard {
         Assertions.assertTrue(withoutWhitelist.stream().anyMatch(v -> v.contains(ACCESSOR_FILE)),
                 "the un-whitelisted scan must flag the read inside OidcResource's accessor, got: "
                         + withoutWhitelist);
+    }
+
+    /**
+     * The {@link #guardIsNotInert_removingTheWhitelistFindsTheAccessorRead} mirror for the
+     * environment tier: with the accessor whitelist DISABLED, the scan MUST report the accessor's
+     * own {@code System.getenv} read. Without this, an env scan that never actually inspects the
+     * accessor (a typo in the pattern, a scan never invoked) would pass vacuously and the whole
+     * environment tier would be unguarded.
+     */
+    @Test
+    public void guardIsNotInert_removingTheWhitelistFindsTheAccessorEnvRead() throws Exception {
+        List<String> withoutWhitelist = scanAllRoots(false);
+        Assertions.assertTrue(
+                withoutWhitelist.stream()
+                        .anyMatch(v -> v.contains(ACCESSOR_FILE) && v.contains("System.getenv(")),
+                "the un-whitelisted scan must flag the DOCS_OIDC_* getenv read inside OidcResource's "
+                        + "accessor; an absent one means the environment tier is unguarded, got: "
+                        + withoutWhitelist);
+    }
+
+    /**
+     * A {@code DOCS_OIDC_*} environment read outside the accessor bypasses the DB and property
+     * tiers exactly as a bare property read does, so the cross-root scan must flag it.
+     */
+    @Test
+    public void guardFlagsAnOidcEnvReadOutsideTheAccessor() {
+        String source = ""
+                + "package com.sismics.docs.core.util;\n"
+                + "class SomeHelper {\n"
+                + "    static String issuer() {\n"
+                + "        return System.getenv(\"DOCS_OIDC_ISSUER\");\n"
+                + "    }\n"
+                + "}\n";
+        List<String> violations = new ArrayList<>();
+        scanSource("SomeHelper.java", source, true, violations);
+        Assertions.assertFalse(violations.isEmpty(),
+                "a DOCS_OIDC_* getenv outside the accessor must be flagged");
+        Assertions.assertTrue(violations.stream().anyMatch(v -> v.contains("DOCS_OIDC_ISSUER")),
+                "the flagged violation must name the offending read; got: " + violations);
+    }
+
+    /**
+     * Negative control: the environment scan must not turn every {@code System.getenv} in the tree
+     * into a violation. A non-OIDC variable read outside the auth classes ({@code DATABASE_PASSWORD}
+     * in {@code EMF}) is legitimate and must stay silent — otherwise the guard is unusable and gets
+     * disabled.
+     */
+    @Test
+    public void guardIgnoresANonOidcEnvRead() {
+        String source = ""
+                + "package com.sismics.util.jpa;\n"
+                + "class EMF {\n"
+                + "    static String password() {\n"
+                + "        return System.getenv(\"DATABASE_PASSWORD\");\n"
+                + "    }\n"
+                + "}\n";
+        List<String> violations = new ArrayList<>();
+        scanSource("EMF.java", source, true, violations);
+        Assertions.assertTrue(violations.isEmpty(),
+                "a non-OIDC getenv outside the auth classes must not be flagged; got: " + violations);
+    }
+
+    /**
+     * The strict auth-class rule applies to the environment tier too: a read laundered through a
+     * neutrally-named local has no OIDC literal in its argument, so only the strict rule catches it.
+     * The allowlisted non-OIDC reads in the same file must stay silent.
+     */
+    @Test
+    public void guardFlagsALaunderedEnvReadInAnAuthClass() {
+        String source = ""
+                + "package com.sismics.docs.rest.resource;\n"
+                + "class AppResource {\n"
+                + "    static String quota() {\n"
+                + "        return System.getenv(Constants.GLOBAL_QUOTA_ENV);\n"
+                + "    }\n"
+                + "    static String sneaky() {\n"
+                + "        String k = \"DOCS_OIDC_CLIENT_SECRET\";\n"
+                + "        return System.getenv(k);\n"
+                + "    }\n"
+                + "}\n";
+        List<String> violations = new ArrayList<>();
+        scanSource("AppResource.java", source, true, violations);
+        Assertions.assertEquals(1, violations.size(),
+                "exactly the laundered read must be flagged (the allowlisted quota read must not); "
+                        + "got: " + violations);
+        Assertions.assertTrue(violations.get(0).contains("System.getenv(k)"),
+                "the flagged violation must be the laundered read; got: " + violations);
     }
 
     /**
@@ -192,15 +317,38 @@ public class TestOidcAccessorGuard {
      */
     static void scanSource(String fileName, String source, boolean applyWhitelist,
             List<String> violations) {
-        if (!source.contains("System.getProperty") && !source.contains("System . getProperty")) {
+        boolean hasPropertyRead =
+                source.contains("System.getProperty") || source.contains("System . getProperty");
+        boolean hasEnvRead = source.contains("System.getenv") || source.contains("System . getenv");
+        if (!hasPropertyRead && !hasEnvRead) {
             return;
         }
-        boolean authClass = AUTH_CLASS_FILES.contains(fileName);
         byte[] states = lexStates(source);
-        Matcher m = GET_PROPERTY.matcher(source);
+        if (hasPropertyRead) {
+            scanReads(fileName, source, states, applyWhitelist, violations,
+                    GET_PROPERTY, "System.getProperty", OIDC_ARGUMENT, AUTH_CLASS_ALLOWLISTED_KEYS);
+        }
+        if (hasEnvRead) {
+            scanReads(fileName, source, states, applyWhitelist, violations,
+                    GET_ENV, "System.getenv", OIDC_ENV_ARGUMENT, AUTH_CLASS_ALLOWLISTED_ENV_KEYS);
+        }
+    }
+
+    /**
+     * One tier's scan: every {@code readPattern} match in the source, judged by the accessor
+     * whitelist, then by the strict auth-class rule or the cross-root literal rule. Parameterized
+     * over the tier so the {@code System.getProperty} and {@code System.getenv} scans are literally
+     * the same logic — an environment read of an OIDC key cannot be fenced more loosely than a
+     * property read of one.
+     */
+    private static void scanReads(String fileName, String source, byte[] states,
+            boolean applyWhitelist, List<String> violations, Pattern readPattern, String readLabel,
+            Pattern oidcArgument, List<String> allowlist) {
+        boolean authClass = AUTH_CLASS_FILES.contains(fileName);
+        Matcher m = readPattern.matcher(source);
         while (m.find()) {
             if (states[m.start()] != CODE) {
-                continue; // a getProperty inside a comment/string is not a real read
+                continue; // a read inside a comment/string is not a real read
             }
             int openParen = source.indexOf('(', m.start());
             int closeParen = matchingParen(source, states, openParen);
@@ -213,8 +361,8 @@ public class TestOidcAccessorGuard {
             if (applyWhitelist && fileName.equals(ACCESSOR_FILE)) {
                 String enclosing = enclosingMethod(source, states, m.start());
                 Assertions.assertNotNull(enclosing,
-                        "the accessor guard could not resolve the method enclosing a System.getProperty "
-                                + "read in " + ACCESSOR_FILE + " at line " + lineOf(source, m.start())
+                        "the accessor guard could not resolve the method enclosing a " + readLabel
+                                + " read in " + ACCESSOR_FILE + " at line " + lineOf(source, m.start())
                                 + " [" + snippet(source, m.start()) + "], so it cannot tell whether the "
                                 + "read is inside a whitelisted accessor; treat as a guard failure");
                 if (ACCESSOR_METHODS.contains(enclosing)) {
@@ -225,28 +373,43 @@ public class TestOidcAccessorGuard {
             if (authClass) {
                 // Strict: any read here that is not an allowlisted non-OIDC key is a violation,
                 // regardless of argument form (a laundered variable has no literal to match).
-                if (isAllowlistedNonOidc(argument)) {
+                if (isAllowlistedNonOidc(argument, allowlist)) {
                     continue;
                 }
-                violations.add(fileName + ": System.getProperty(" + collapse(argument) + ")");
+                violations.add(fileName + ": " + readLabel + "(" + collapse(argument) + ")");
             } else {
                 // Other classes: only a literal/constant OIDC-key reference is a violation.
-                if (OIDC_ARGUMENT.matcher(argument).find()) {
-                    violations.add(fileName + ": System.getProperty(" + collapse(argument) + ")");
+                if (oidcArgument.matcher(argument).find()) {
+                    violations.add(fileName + ": " + readLabel + "(" + collapse(argument) + ")");
                 }
             }
         }
     }
 
-    /** True when the argument is a string literal of a known non-OIDC allowlisted key. */
-    private static boolean isAllowlistedNonOidc(String argument) {
+    /**
+     * True when the argument is a known non-OIDC allowlisted key, either as a string literal
+     * ({@code "docs.logout_url"}, {@code "DOCS_MAX_UPLOAD_SIZE"}) or — only for an entry shaped
+     * like a qualified constant reference — as the bare reference the tree actually writes
+     * ({@code Constants.GLOBAL_QUOTA_ENV}). Restricting the bare form to that shape keeps a
+     * neutrally-named LOCAL from ever matching an allowlist entry and laundering a read.
+     */
+    private static boolean isAllowlistedNonOidc(String argument, List<String> allowlist) {
         String trimmed = argument.trim();
-        for (String key : AUTH_CLASS_ALLOWLISTED_KEYS) {
+        for (String key : allowlist) {
             if (trimmed.equals("\"" + key + "\"")) {
+                return true;
+            }
+            if (isQualifiedConstantReference(key) && trimmed.equals(key)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** True for a {@code Owner.CONSTANT_NAME} reference — the only non-literal allowlist form. */
+    private static boolean isQualifiedConstantReference(String key) {
+        int dot = key.lastIndexOf('.');
+        return dot > 0 && key.substring(dot + 1).matches("[A-Z][A-Z0-9_]*");
     }
 
     /** Index of the ')' matching the '(' at {@code open}, honoring literals/comments. -1 if none. */

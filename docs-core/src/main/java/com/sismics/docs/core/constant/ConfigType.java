@@ -115,7 +115,8 @@ public enum ConfigType {
      * OIDC (OpenID Connect) authentication configuration. Per-field entries mirror the
      * LDAP pattern so the client secret is a separately-stored, write-only value. A blank
      * or absent DB value means UNSET: the effective value falls through to the
-     * {@code docs.oidc_*} system property, then to a built-in default. See
+     * {@code docs.oidc_*} system property, then to the {@code DOCS_OIDC_*} environment variable
+     * (an empty one counts as unset), then to a built-in default. See
      * {@code OidcResource.oidcConfig} — the single accessor with that precedence.
      */
     OIDC_ENABLED,

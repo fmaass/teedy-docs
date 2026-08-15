@@ -29,7 +29,8 @@ import java.util.function.Supplier;
 
 /**
  * DB-first OIDC configuration (#44): the {@code /app/config_oidc} endpoints, the single
- * {@link OidcResource#oidcConfig} accessor with DB → property → default precedence, the
+ * {@link OidcResource#oidcConfig} accessor with DB → property → {@code DOCS_OIDC_*} env →
+ * default precedence, the
  * write-only client-secret contract, the value-keyed caches (config change with no restart), and
  * the ADR-0015-fenced surface. The login-redirect assertions prove the LOGIN path itself uses the
  * accessor (not only the callback), and the zero-config assertions prove a no-DB deployment
@@ -97,6 +98,104 @@ public class TestOidcConfig extends BaseJerseyTest {
             Assertions.assertEquals("property", inTx(() -> OidcResource.oidcConfigSource(OidcResource.OidcKey.SCOPE)));
         } finally {
             System.clearProperty("docs.oidc_scope");
+        }
+    }
+
+    // =========================================================================================
+    // (a2) PURE precedence resolver: DB → property → DOCS_OIDC_* env → default, over raw values
+    //      (no process state mutated, so every tier combination is reachable from a unit test)
+    // =========================================================================================
+
+    /**
+     * The full precedence matrix of the pure resolver, for the secret key (the reason the
+     * environment tier exists — a secret must not travel through {@code JAVA_TOOL_OPTIONS}) and a
+     * non-secret key with a null default.
+     */
+    @Test
+    public void pureResolverAppliesDbThenPropertyThenEnvThenDefault() {
+        OidcResource.OidcKey secret = OidcResource.OidcKey.CLIENT_SECRET;
+        OidcResource.OidcKey issuer = OidcResource.OidcKey.ISSUER;
+
+        // DB wins over every other tier.
+        Assertions.assertEquals("db-secret",
+                OidcResource.resolveEffective(secret, "db-secret", "prop-secret", "env-secret"));
+        Assertions.assertEquals("https://db.example",
+                OidcResource.resolveEffective(issuer, "https://db.example", "https://prop.example",
+                        "https://env.example"));
+
+        // A blank DB value is UNSET: it falls through instead of overriding with emptiness.
+        Assertions.assertEquals("prop-secret",
+                OidcResource.resolveEffective(secret, "   ", "prop-secret", "env-secret"),
+                "a blank DB value must fall through to the property tier");
+        Assertions.assertEquals("env-secret",
+                OidcResource.resolveEffective(secret, "", null, "env-secret"),
+                "a blank DB value with no property must fall through to the environment tier");
+
+        // Property beats env (the JVM convention: an existing -D operator keeps winning).
+        Assertions.assertEquals("prop-secret",
+                OidcResource.resolveEffective(secret, null, "prop-secret", "env-secret"),
+                "the JVM property must beat the environment variable");
+        Assertions.assertEquals("https://prop.example",
+                OidcResource.resolveEffective(issuer, null, "https://prop.example", "https://env.example"));
+
+        // Env is used when no property is set.
+        Assertions.assertEquals("env-secret",
+                OidcResource.resolveEffective(secret, null, null, "env-secret"),
+                "the environment variable must be used when no property is set");
+        Assertions.assertEquals("https://env.example",
+                OidcResource.resolveEffective(issuer, null, null, "https://env.example"));
+
+        // An EMPTY-STRING env value is UNSET (a compose file renders an unset variable as KEY=):
+        // it falls through to the default, unlike an empty property, which stays a set value.
+        Assertions.assertNull(OidcResource.resolveEffective(secret, null, null, ""),
+                "an empty-string environment value must be treated as UNSET");
+        Assertions.assertEquals("", OidcResource.resolveEffective(secret, null, "", "env-secret"),
+                "an empty PROPERTY stays a deliberate set value (unchanged behaviour)");
+
+        // Nothing set anywhere: the built-in default (null for a key that has none).
+        Assertions.assertNull(OidcResource.resolveEffective(secret, null, null, null));
+        Assertions.assertNull(OidcResource.resolveEffective(issuer, null, null, null));
+        Assertions.assertEquals("openid profile email",
+                OidcResource.resolveEffective(OidcResource.OidcKey.SCOPE, null, null, null));
+        Assertions.assertEquals("openid profile email",
+                OidcResource.resolveEffective(OidcResource.OidcKey.SCOPE, "  ", null, ""),
+                "blank DB and empty env both fall through to the built-in default");
+    }
+
+    /** The source classifier must name exactly the tier the resolver takes the value from. */
+    @Test
+    public void pureSourceOfNamesTheTierTheValueComesFrom() {
+        Assertions.assertEquals("db", OidcResource.sourceOf("db-value", "prop", "env"));
+        Assertions.assertEquals("property", OidcResource.sourceOf(null, "prop", "env"));
+        Assertions.assertEquals("property", OidcResource.sourceOf("  ", "prop", "env"),
+                "a blank DB value must not report source=db");
+        Assertions.assertEquals("env", OidcResource.sourceOf(null, null, "env"),
+                "a value coming from DOCS_OIDC_* must report source=env");
+        Assertions.assertEquals("env", OidcResource.sourceOf("", null, "env"));
+        Assertions.assertEquals("default", OidcResource.sourceOf(null, null, null));
+        Assertions.assertEquals("default", OidcResource.sourceOf(null, null, ""),
+                "an empty-string environment value is UNSET, so the source is the default");
+        Assertions.assertEquals("property", OidcResource.sourceOf(null, "", null),
+                "an empty property is still a set value, so the source is the property");
+    }
+
+    /**
+     * {@code envName()} is DERIVED from {@code propertyName()} (uppercase, non-alphanumerics to
+     * underscore), so a new key cannot forget its environment variable or spell it differently.
+     */
+    @Test
+    public void envNameIsDerivedFromThePropertyName() {
+        Assertions.assertEquals("DOCS_OIDC_CLIENT_SECRET",
+                OidcResource.OidcKey.CLIENT_SECRET.envName());
+        Assertions.assertEquals("DOCS_OIDC_ISSUER", OidcResource.OidcKey.ISSUER.envName());
+        Assertions.assertEquals("DOCS_OIDC_USERNAME_VERBATIM",
+                OidcResource.OidcKey.USERNAME_VERBATIM.envName());
+        for (OidcResource.OidcKey key : OidcResource.OidcKey.values()) {
+            Assertions.assertEquals(
+                    key.propertyName().toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "_"),
+                    key.envName(), "every key's env name must be derived from its property name");
+            Assertions.assertTrue(key.envName().startsWith("DOCS_OIDC_"),
+                    "every OIDC env name must be namespaced DOCS_OIDC_: " + key);
         }
     }
 
@@ -248,7 +347,7 @@ public class TestOidcConfig extends BaseJerseyTest {
 
     @Test
     public void zeroDbConfigMatchesPropertyTier() {
-        // Set ALL 12 docs.oidc_* properties so the "all 12 keys" parity assertion is exact.
+        // Set ALL 13 docs.oidc_* properties so the "all 13 keys" parity assertion is exact.
         Map<OidcResource.OidcKey, String> props = new java.util.LinkedHashMap<>();
         props.put(OidcResource.OidcKey.ENABLED, "true");
         props.put(OidcResource.OidcKey.ISSUER, "https://iss.example");
@@ -262,13 +361,16 @@ public class TestOidcConfig extends BaseJerseyTest {
         props.put(OidcResource.OidcKey.USERINFO_ENDPOINT, "https://iss.example/userinfo");
         props.put(OidcResource.OidcKey.USERNAME_CLAIM, "preferred_username");
         props.put(OidcResource.OidcKey.EMAIL_CLAIM, "email");
+        props.put(OidcResource.OidcKey.USERNAME_VERBATIM, "true");
+        Assertions.assertEquals(OidcResource.OidcKey.values().length, props.size(),
+                "the parity fixture must cover every OidcKey");
         for (Map.Entry<OidcResource.OidcKey, String> e : props.entrySet()) {
             System.setProperty(e.getKey().propertyName(), e.getValue());
         }
         try {
             OidcResource.resetConfigCacheForTest();
 
-            // Part 1: the accessor returns exactly the property-tier value for all 12 keys (no DB),
+            // Part 1: the accessor returns exactly the property-tier value for all 13 keys (no DB),
             // and each key reports source=property.
             for (Map.Entry<OidcResource.OidcKey, String> e : props.entrySet()) {
                 Assertions.assertEquals(e.getValue(), inTx(() -> OidcResource.oidcConfig(e.getKey())),

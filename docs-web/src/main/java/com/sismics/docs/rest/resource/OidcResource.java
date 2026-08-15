@@ -173,11 +173,13 @@ public class OidcResource extends BaseResource {
 
         private final ConfigType configType;
         private final String propertyName;
+        private final String envName;
         private final String defaultValue;
 
         OidcKey(ConfigType configType, String propertyName, String defaultValue) {
             this.configType = configType;
             this.propertyName = propertyName;
+            this.envName = toEnvName(propertyName);
             this.defaultValue = defaultValue;
         }
 
@@ -188,15 +190,32 @@ public class OidcResource extends BaseResource {
         String propertyName() {
             return propertyName;
         }
+
+        /**
+         * The environment-variable name of this key, DERIVED from {@link #propertyName()} so the
+         * two can never drift: uppercased, with every non-alphanumeric character replaced by an
+         * underscore ({@code docs.oidc_client_secret} → {@code DOCS_OIDC_CLIENT_SECRET}).
+         */
+        String envName() {
+            return envName;
+        }
+
+        private static String toEnvName(String propertyName) {
+            return propertyName.toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "_");
+        }
     }
 
     /**
      * The SINGLE accessor for every OIDC configuration value (the one chokepoint). Precedence:
      * a non-blank DB value (T_CONFIG) wins; else the {@code docs.oidc_*} system property; else the
-     * built-in default. A BLANK/empty DB value is UNSET — it falls through to the property tier
-     * and never overrides with emptiness. This is the ONLY method in this class permitted to read
-     * a {@code docs.oidc_*} property; {@link com.sismics.docs.rest.resource.TestOidcAccessorGuard}
-     * fails the build on any other {@code System.getProperty("docs.oidc_...")} read.
+     * {@code DOCS_OIDC_*} environment variable; else the built-in default. A BLANK/empty DB value
+     * is UNSET — it falls through and never overrides with emptiness. The environment tier lets the
+     * client secret be delivered as {@code DOCS_OIDC_CLIENT_SECRET} instead of a
+     * {@code JAVA_TOOL_OPTIONS} {@code -D} flag, which the JVM echoes to stderr at startup.
+     * This is the ONLY method in this class permitted to read a {@code docs.oidc_*} property or a
+     * {@code DOCS_OIDC_*} environment variable;
+     * {@link com.sismics.docs.rest.resource.TestOidcAccessorGuard} fails the build on any other
+     * {@code System.getProperty("docs.oidc_...")} or {@code System.getenv("DOCS_OIDC_...")} read.
      *
      * @param key The configuration key
      * @return The effective value, or null when unset with no default
@@ -209,28 +228,87 @@ public class OidcResource extends BaseResource {
     }
 
     /**
-     * Applies the DB → property → default precedence to a key given its ALREADY-READ DB value
-     * (null when absent). Kept as the single place the property tier is read (guard-enforced), so a
-     * blank DB value falls through to the property, then the default. Used both by
+     * Applies the precedence to a key given its ALREADY-READ DB value (null when absent). The thin
+     * {@link System} wrapper around {@link #resolveEffective(OidcKey, String, String, String)}:
+     * it reads the two process-global tiers and hands raw values to the pure resolver, so the
+     * precedence itself is unit-testable without mutating process state. Kept as the single place
+     * the property AND environment tiers are read (guard-enforced). Used both by
      * {@link #oidcConfig(OidcKey)} (per-key read) and by {@link #snapshot()} (which supplies DB
      * values from ONE atomic batch read).
      */
     private static String resolveEffective(OidcKey key, String dbValue) {
+        return resolveEffective(key, dbValue,
+                System.getProperty(key.propertyName()), System.getenv(key.envName()));
+    }
+
+    /**
+     * The PURE precedence resolver over ALREADY-READ raw values — no {@link System} access, so a
+     * test can exercise every tier combination without touching process state (the pattern
+     * {@code EMF.buildEnvironmentProperties} uses).
+     *
+     * <p>Precedence: a non-blank DB value (T_CONFIG) wins; else the {@code docs.oidc_*} JVM system
+     * property; else the {@code DOCS_OIDC_*} environment variable; else the built-in default. The
+     * property beats the environment variable by JVM/Spring convention, so an operator's existing
+     * {@code -D} override keeps winning after the environment tier is introduced.
+     *
+     * <p>Two deliberate asymmetries:
+     * <ul>
+     *   <li>A BLANK/whitespace DB value is UNSET — it falls through instead of overriding with
+     *       emptiness (an admin clearing a field must restore the deployment's configuration).</li>
+     *   <li>An EMPTY-STRING environment value is UNSET and falls through to the default, because
+     *       an unset variable in a compose file is routinely rendered as {@code KEY=} rather than
+     *       being omitted; an empty {@code -D} property, by contrast, stays a deliberate set value
+     *       (unchanged behaviour).</li>
+     * </ul>
+     *
+     * @param key The configuration key (supplies the built-in default)
+     * @param dbValue The T_CONFIG value, or null when there is no row
+     * @param propertyValue The {@code docs.oidc_*} system property value, or null when unset
+     * @param envValue The {@code DOCS_OIDC_*} environment value, or null when unset
+     * @return The effective value, or null when unset with no default
+     */
+    static String resolveEffective(OidcKey key, String dbValue, String propertyValue, String envValue) {
         if (dbValue != null && !StringUtils.isBlank(dbValue)) {
             return dbValue;
         }
-        String property = System.getProperty(key.propertyName());
-        if (property != null) {
-            return property;
+        if (propertyValue != null) {
+            return propertyValue;
+        }
+        if (envValue != null && !envValue.isEmpty()) {
+            return envValue;
         }
         return key.defaultValue;
+    }
+
+    /**
+     * The PURE source-tier classifier, the exact mirror of
+     * {@link #resolveEffective(OidcKey, String, String, String)}: it names the tier that resolver
+     * would return the value from, so the admin UI's hint can never disagree with the effective
+     * value. Same unset rules — blank DB and empty-string environment fall through.
+     *
+     * @return {@code db}, {@code property}, {@code env} or {@code default}
+     */
+    static String sourceOf(String dbValue, String propertyValue, String envValue) {
+        if (dbValue != null && !StringUtils.isBlank(dbValue)) {
+            return "db";
+        }
+        if (propertyValue != null) {
+            return "property";
+        }
+        if (envValue != null && !envValue.isEmpty()) {
+            return "env";
+        }
+        return "default";
     }
 
     /**
      * The system-property-only override for the RP-initiated-logout {@code end_session_endpoint}.
      * Deliberately NOT an {@link OidcKey}: it has no {@code T_CONFIG}/DB tier, no admin-UI surface,
      * and no default. An operator sets it via a JVM property only, to force a specific
-     * end_session_endpoint (e.g. when discovery is unreachable or advertises none).
+     * end_session_endpoint (e.g. when discovery is unreachable or advertises none). It is
+     * deliberately left out of the {@code DOCS_OIDC_*} environment tier as well: it is not a
+     * secret, so it has nothing to gain from it, and keeping it property-only preserves the
+     * single-tier contract logout composes against.
      */
     static final String END_SESSION_ENDPOINT_PROPERTY = "docs.oidc_end_session_endpoint";
 
@@ -245,17 +323,17 @@ public class OidcResource extends BaseResource {
         return System.getProperty(propertyName);
     }
 
-    /** The effective source tier of a key, so the admin UI can hint "currently from JVM property". */
+    /**
+     * The effective source tier of a key, so the admin UI can hint "currently from JVM property"
+     * or "currently from an environment variable". The thin {@link System} wrapper around
+     * {@link #sourceOf(String, String, String)}, mirroring {@link #resolveEffective(OidcKey, String)}
+     * so the hint and the effective value are always resolved by the same precedence.
+     */
     static String oidcConfigSource(OidcKey key) {
         ConfigDao configDao = new ConfigDao();
         Config config = configDao.getById(key.configType());
-        if (config != null && !StringUtils.isBlank(config.getValue())) {
-            return "db";
-        }
-        if (System.getProperty(key.propertyName()) != null) {
-            return "property";
-        }
-        return "default";
+        String dbValue = config == null ? null : config.getValue();
+        return sourceOf(dbValue, System.getProperty(key.propertyName()), System.getenv(key.envName()));
     }
 
     /**
@@ -321,8 +399,8 @@ public class OidcResource extends BaseResource {
      * Builds a request-scoped snapshot of all effective values. The DB tier is read in ONE
      * atomic query (a single {@code SELECT ... WHERE CFG_ID_C IN (...)}), so the snapshot cannot be
      * torn by a save that commits between two per-key reads — every DB value in the snapshot is from
-     * the same committed instant. The property/default tiers are then applied per key via the single
-     * {@link #resolveEffective(OidcKey, String)} chokepoint, and the property-only
+     * the same committed instant. The property/environment/default tiers are then applied per key via
+     * the single {@link #resolveEffective(OidcKey, String)} chokepoint, and the property-only
      * {@link #END_SESSION_ENDPOINT_PROPERTY} override is resolved once (via the same chokepoint) into
      * the snapshot. Every subsequent read in the request uses this immutable snapshot.
      */
