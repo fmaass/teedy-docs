@@ -19,6 +19,7 @@ There is no database migration; the schema level remains 64.
 
 ### Changed
 - On a narrow screen, the document list's quick-filter row stays pinned above the scrolling list instead of scrolling away with it (#277).
+- Database connections are pooled by HikariCP instead of Hibernate's built-in pool. `DATABASE_POOL_SIZE` keeps its meaning and precedence but is now a ceiling rather than a reservation: connections above an idle floor of 2 are closed again after 10 minutes, a burst larger than the pool waits up to 30 s for a connection instead of failing immediately (#230), a connection is validated before it is handed out, and one held for more than 5 minutes logs an apparent-leak warning with the stack that took it. See ADR-0025.
 
 ### Fixed
 - Image and PDF cards in a document's grid ("Raster") view open the file preview when clicked, the same as the icon cards — the earlier fixes had addressed the document-list gallery, a different view (#235).
