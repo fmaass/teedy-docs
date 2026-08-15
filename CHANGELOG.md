@@ -8,8 +8,21 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.5] - 2026-08-15
+
+There is no database migration; the schema level remains 64.
+
 ### Added
 - Every OIDC setting can be supplied as a `DOCS_OIDC_*` environment variable (`docs.oidc_client_secret` → `DOCS_OIDC_CLIENT_SECRET`), so the client secret no longer has to travel through `JAVA_TOOL_OPTIONS`, whose full value the JVM prints to stderr at startup. Precedence is unchanged where it existed: a value saved in the admin UI wins, then the `-D` system property, then the environment variable, then the built-in default; an empty environment variable counts as unset. The admin UI labels a field resolved from the environment the same way it already labels one resolved from a JVM property.
+- The tag management tree has a search box that filters the tree in place, revealing matches nested inside collapsed parents so a tag can be found by typing instead of expanding branches one by one (#279).
+- The tag edit page shows the tag's document count and has a "view documents" action that opens the document list filtered to that tag (#281).
+
+### Changed
+- On a narrow screen, the document list's quick-filter row stays pinned above the scrolling list instead of scrolling away with it (#277).
+
+### Fixed
+- Image and PDF cards in a document's grid ("Raster") view open the file preview when clicked, the same as the icon cards — the earlier fixes had addressed the document-list gallery, a different view (#235).
+- The database connection opened during startup and migrations now has bounded connect and login timeouts, so an unreachable database at boot fails fast and lets the container restart instead of hanging indefinitely; an over-large timeout value is clamped rather than overflowing.
 
 ## [3.8.4] - 2026-08-14
 
@@ -610,7 +623,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.4...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.5...HEAD
+[3.8.5]: https://github.com/fmaass/teedy-docs/compare/v3.8.4...v3.8.5
 [3.8.4]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...v3.8.4
 [3.8.3]: https://github.com/fmaass/teedy-docs/compare/v3.8.2...v3.8.3
 [3.8.2]: https://github.com/fmaass/teedy-docs/compare/v3.8.1...v3.8.2
