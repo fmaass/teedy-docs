@@ -165,6 +165,7 @@ public class TestEmfConnectionTimeouts {
 
         Assertions.assertEquals("org.hibernate.hikaricp.internal.HikariCPConnectionProvider",
                 production.getProperty("hibernate.connection.provider_class"));
+        Assertions.assertEquals("false", production.getProperty("hibernate.hikari.autoCommit"));
         Assertions.assertEquals("10", production.getProperty("hibernate.hikari.dataSource.connectTimeout"));
         Assertions.assertEquals("30", production.getProperty("hibernate.hikari.dataSource.socketTimeout"));
         Assertions.assertEquals("10", production.getProperty("hibernate.hikari.dataSource.loginTimeout"));
@@ -179,6 +180,7 @@ public class TestEmfConnectionTimeouts {
         Properties h2 = EMF.applyConnectionPool(EMF.buildEnvironmentProperties("", "sa", "", null, null, null));
         Assertions.assertEquals("org.hibernate.hikaricp.internal.HikariCPConnectionProvider",
                 h2.getProperty("hibernate.connection.provider_class"));
+        Assertions.assertEquals("false", h2.getProperty("hibernate.hikari.autoCommit"));
         Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.connectTimeout"));
         Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.socketTimeout"));
         Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.loginTimeout"));

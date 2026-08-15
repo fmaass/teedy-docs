@@ -392,7 +392,9 @@ public final class EMF {
      * it as an apparent leak.</p>
      *
      * <p>The size resolved by {@link #applyPoolSize} is HikariCP's MAXIMUM; that key stays in the
-     * properties as the single source of the resolved value. The pgjdbc timeouts are mirrored into
+     * properties as the single source of the resolved value. autoCommit is pinned false to match the
+     * built-in provider's default (HikariCP would otherwise turn it on), so the swap changes nothing
+     * about how a connection behaves. The pgjdbc timeouts are mirrored into
      * {@code hibernate.hikari.dataSource.*}, the only route left to the driver once HikariCP owns
      * the connections.</p>
      *
@@ -401,6 +403,9 @@ public final class EMF {
      */
     static Properties applyConnectionPool(Properties props) {
         props.put(PROVIDER_CLASS_PROPERTY, HIKARI_PROVIDER_CLASS);
+        // Pin autoCommit false: the built-in provider handed out connections with autoCommit off and
+        // HikariCP defaults it on, so pinning it keeps the physical-connection semantics unchanged.
+        props.put(HIKARI_PREFIX + "autoCommit", "false");
         props.put(HIKARI_PREFIX + "idleTimeout", HIKARI_IDLE_TIMEOUT_MS);
         props.put(HIKARI_PREFIX + "connectionTimeout", HIKARI_CONNECTION_TIMEOUT_MS);
         props.put(HIKARI_PREFIX + "poolName", HIKARI_POOL_NAME);

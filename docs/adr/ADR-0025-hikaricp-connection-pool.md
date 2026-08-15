@@ -63,6 +63,9 @@ Pinning `DATABASE_POOL_SIZE` low would only trade the idle-connection problem fo
      legitimate long holders (a mail send, a search-index rebuild) so that a warning is worth
      reading.
    - `poolName` = `teedy`, so the pool's log lines are identifiable in a shared log stream.
+   - `autoCommit` = false, pinned to match the built-in provider's default so the pool swap is
+     behavior-preserving: Hibernate still owns each transaction and no statement autocommits on its
+     own. HikariCP would otherwise default autoCommit on.
 
 6. **Two timeout layers coexist, deliberately.** HikariCP's `connectionTimeout` bounds the *borrow*
    (how long a caller queues for a connection). The pgjdbc `connectTimeout`, `loginTimeout` and

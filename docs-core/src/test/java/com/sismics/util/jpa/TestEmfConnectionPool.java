@@ -45,6 +45,9 @@ public class TestEmfConnectionPool {
         Assertions.assertEquals("30000", props.getProperty("hibernate.hikari.connectionTimeout"));
         Assertions.assertEquals("teedy", props.getProperty("hibernate.hikari.poolName"));
         Assertions.assertEquals("300000", props.getProperty("hibernate.hikari.leakDetectionThreshold"));
+        // Pinned false so the physical connections keep the built-in provider's semantics (Hibernate
+        // owns the transaction; no per-statement autocommit). HikariCP would otherwise default it true.
+        Assertions.assertEquals("false", props.getProperty("hibernate.hikari.autoCommit"));
         Assertions.assertEquals("30", props.getProperty(EMF.POOL_SIZE_PROPERTY));
     }
 

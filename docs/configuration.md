@@ -36,7 +36,7 @@ external URLs correctly, always set `DOCS_BASE_URL`.
 | `DATABASE_URL` | JDBC connection string for Hibernate. **If unset, Teedy uses an embedded H2 database** (testing only) |
 | `DATABASE_USER` | Database user |
 | `DATABASE_PASSWORD` | Database password |
-| `DATABASE_POOL_SIZE` | Maximum connection pool size. Unset by default, in which case Teedy derives it from the CPU count (14 on a small host, up to 50) so the pool always covers its own background workers. Set it to pin a value, e.g. when several instances share one PostgreSQL server. It is a ceiling, not a reservation: idle connections shrink back to 2 after 10 minutes, under saturation a caller waits up to 30 s for a connection before the request fails, and a connection held longer than 5 minutes logs an apparent-leak warning with the stack that took it |
+| `DATABASE_POOL_SIZE` | Maximum connection pool size. Unset by default, in which case Teedy derives it from the CPU count (14 on a small host, up to 50) so the pool always covers its own background workers. Set it to pin a value, e.g. when several instances share one PostgreSQL server. It is a ceiling, not a reservation: idle connections shrink back to 2 after 10 minutes, under saturation a caller waits up to 30 s for a connection before the request fails, and a connection held longer than 5 minutes logs an apparent-leak warning with the stack that took it. Connections keep autocommit off (Hibernate owns the transaction), the same as before, so the switch changes no query behaviour |
 
 ### Language / OCR
 
