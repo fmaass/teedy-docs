@@ -26,6 +26,13 @@ const tagApiMock = vi.hoisted(() => ({
 }))
 vi.mock('../../api/tag', () => tagApiMock)
 
+// #281: TagEdit navigates through the tag-filter store's canonical selectTag
+// path. The real store drags in the router, more of the tag API surface, and
+// Pinia — none of which this component test needs; the contract under test is
+// only "the click hands THIS tag's id to selectTag".
+const tagFilterStoreMock = vi.hoisted(() => ({ selectTag: vi.fn() }))
+vi.mock('../../stores/tagFilter', () => ({ useTagFilterStore: () => tagFilterStoreMock }))
+
 beforeAll(() => {
   if (typeof globalThis.ResizeObserver !== 'function') {
     globalThis.ResizeObserver = class {
@@ -93,6 +100,33 @@ describe('TagEdit — parent Select (#14 filter)', () => {
     const select = wrapper.findComponent({ name: 'Select' })
     expect(select.exists()).toBe(true)
     expect(select.props('filter')).toBe(true)
+  })
+})
+
+// #281: the per-tag document count was fetched but never displayed, and the only
+// way from the edit page to the tag's documents was rebuilding the filter by hand.
+// The page now shows the count and offers a one-click "view documents" action that
+// must route through tagFilterStore.selectTag (the sidebar chips' canonical path).
+describe('TagEdit — document count and view documents (#281)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTag.mockReset().mockResolvedValue({
+      data: { id: 'b', name: 'Bravo', creator: 'admin', color: '#222222', parent: null, writable: false, acls: [] },
+    })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: { b: 4 } } })
+    tagFilterStoreMock.selectTag.mockReset()
+  })
+
+  it('displays the fetched document count', async () => {
+    const wrapper = await mountEdit()
+    expect(wrapper.find('.tag-doc-count').text()).toBe('Documents with this tag: 4')
+  })
+
+  it('routes the view-documents click through the canonical selectTag path', async () => {
+    const wrapper = await mountEdit()
+    await wrapper.find('button.view-docs-btn').trigger('click')
+    expect(tagFilterStoreMock.selectTag).toHaveBeenCalledTimes(1)
+    expect(tagFilterStoreMock.selectTag).toHaveBeenCalledWith('b')
   })
 })
 

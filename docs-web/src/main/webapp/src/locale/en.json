@@ -409,7 +409,9 @@
       "delete_tag": "Delete tag",
       "delete_confirm": "Delete tag \"{name}\"? Documents will not be deleted.",
       "tag_deleted": "Tag deleted",
-      "failed_delete": "Failed to delete tag"
+      "failed_delete": "Failed to delete tag",
+      "document_count": "Documents with this tag: {count}",
+      "view_documents": "View documents"
     },
     "account": {
       "title": "User account",

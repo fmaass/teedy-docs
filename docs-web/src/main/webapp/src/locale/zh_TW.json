@@ -409,7 +409,9 @@
       "delete_tag": "刪除標籤",
       "delete_confirm": "刪除標籤「{name}」？文件不會被刪除。",
       "tag_deleted": "已刪除標籤",
-      "failed_delete": "刪除標籤失敗"
+      "failed_delete": "刪除標籤失敗",
+      "document_count": "帶有此標籤的文件：{count}",
+      "view_documents": "檢視文件"
     },
     "account": {
       "title": "使用者帳號",

@@ -409,7 +409,9 @@
       "delete_tag": "Fshi etiketën",
       "delete_confirm": "Të fshihet etiketa \"{name}\"? Dokumentet nuk do të fshihen.",
       "tag_deleted": "Etiketa u fshi",
-      "failed_delete": "Fshirja e etiketës dështoi"
+      "failed_delete": "Fshirja e etiketës dështoi",
+      "document_count": "Dokumente me këtë etiketë: {count}",
+      "view_documents": "Shiko dokumentet"
     },
     "account": {
       "title": "Llogaria e përdoruesit",

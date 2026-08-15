@@ -409,7 +409,9 @@
       "delete_tag": "Eliminar etiqueta",
       "delete_confirm": "Eliminar a etiqueta \"{name}\"? Os documentos não serão eliminados.",
       "tag_deleted": "Etiqueta eliminada",
-      "failed_delete": "Falha ao eliminar a etiqueta"
+      "failed_delete": "Falha ao eliminar a etiqueta",
+      "document_count": "Documentos com esta etiqueta: {count}",
+      "view_documents": "Ver documentos"
     },
     "account": {
       "title": "Conta de utilizador",

@@ -409,7 +409,9 @@
       "delete_tag": "Tag löschen",
       "delete_confirm": "Tag \"{name}\" löschen? Dokumente werden nicht gelöscht.",
       "tag_deleted": "Tag gelöscht",
-      "failed_delete": "Tag konnte nicht gelöscht werden"
+      "failed_delete": "Tag konnte nicht gelöscht werden",
+      "document_count": "Dokumente mit diesem Tag: {count}",
+      "view_documents": "Dokumente anzeigen"
     },
     "account": {
       "title": "Benutzerkonto",

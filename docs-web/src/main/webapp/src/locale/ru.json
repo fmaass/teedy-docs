@@ -409,7 +409,9 @@
       "delete_tag": "Удалить тег",
       "delete_confirm": "Удалить тег «{name}»? Документы не будут удалены.",
       "tag_deleted": "Тег удалён",
-      "failed_delete": "Не удалось удалить тег"
+      "failed_delete": "Не удалось удалить тег",
+      "document_count": "Документы с этим тегом: {count}",
+      "view_documents": "Показать документы"
     },
     "account": {
       "title": "Учётная запись пользователя",

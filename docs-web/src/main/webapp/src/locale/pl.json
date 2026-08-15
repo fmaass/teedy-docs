@@ -409,7 +409,9 @@
       "delete_tag": "Usuń etykietę",
       "delete_confirm": "Usunąć etykietę „{name}”? Dokumenty nie zostaną usunięte.",
       "tag_deleted": "Usunięto etykietę",
-      "failed_delete": "Nie udało się usunąć etykiety"
+      "failed_delete": "Nie udało się usunąć etykiety",
+      "document_count": "Dokumenty z tą etykietą: {count}",
+      "view_documents": "Pokaż dokumenty"
     },
     "account": {
       "title": "Konto użytkownika",

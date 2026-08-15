@@ -3,9 +3,11 @@ import {
   unique,
   uniqueTag,
   confirmDanger,
+  createDocument,
   toggleTagFilter,
   expectTagNodeState,
   openNav,
+  deleteDocApi,
   deleteTagByNameApi,
   ROUTE_ROOT,
   gotoDocumentList,
@@ -101,6 +103,71 @@ test.describe('tag management', () => {
     await filterInput.fill('')
     await expect(page.locator('.tag-tree').getByText(parent, { exact: true })).toBeVisible()
     await expect(page.locator('.tag-tree').getByText(child, { exact: true })).toHaveCount(0)
+  })
+})
+
+// --- #281: jump from the tag edit page to the documents carrying the tag -----
+// TagEdit always FETCHED the per-tag document count but never displayed it, and
+// the only way from /tag/<id> to those documents was rebuilding the filter by
+// hand in the left panel. The edit page now shows the count and offers a
+// one-click "View documents" action that routes through the SAME
+// tagFilterStore.selectTag path the sidebar chips use — so the landing state is
+// the canonical filtered document list (URL tags=, panel node selected), not a
+// hand-built URL.
+test.describe('tag edit — view documents (#281)', () => {
+  test('shows the document count and one click opens the list filtered to the tag', async ({ page, cleanup }) => {
+    const tagName = uniqueTag('vdc')
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+    await page.getByPlaceholder('Tag name').fill(tagName)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.locator('.tag-tree').getByText(tagName, { exact: true })).toBeVisible()
+    cleanup.defer('delete the view-documents tag', () => deleteTagByNameApi(page.request, tagName))
+
+    // Seed TWO documents carrying the tag — so the count assertion cannot pass
+    // on a lucky "1" default — plus ONE without it, so the landing list being
+    // FILTERED (not merely navigated-to) is observable in the result set.
+    const taggedA = unique('vdc-in-a')
+    const taggedB = unique('vdc-in-b')
+    const untagged = unique('vdc-out')
+    for (const title of [taggedA, taggedB]) {
+      await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
+      await page.locator('#edit-title').fill(title)
+      await page.locator('#edit-tags').click()
+      await page.getByRole('option', { name: tagName }).click()
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Save' }).click()
+      await expect(page).toHaveURL(/#\/document\/view\//)
+      const docId = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+      cleanup.defer(`delete tagged document ${title}`, () => deleteDocApi(page.request, docId))
+    }
+    const { id: untaggedId } = await createDocument(page, untagged)
+    cleanup.defer('delete the untagged document', () => deleteDocApi(page.request, untaggedId))
+
+    // Open the tag's edit page. gotoRouteReady is a full page load, so the
+    // tag-stats query refetches AFTER the documents above were created — the
+    // displayed count cannot be a stale pre-seed cache hit.
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+    await page.locator('.tag-tree').getByText(tagName, { exact: true }).click()
+    await expect(page).toHaveURL(/#\/tag\//)
+    const tagId = page.url().split('/tag/')[1].split(/[/?#]/)[0]
+
+    // The already-fetched count is DISPLAYED (it was fetch-only before #281).
+    await expect(page.locator('.tag-doc-count')).toHaveText('Documents with this tag: 2')
+
+    // ONE click lands on the document list already filtered to this tag.
+    await page.getByRole('button', { name: 'View documents' }).click()
+    await expect(page).toHaveURL(/#\/document\?/)
+    const query = page.url().slice(page.url().indexOf('?') + 1)
+    expect(new URLSearchParams(query).get('tags'), 'URL carries tags=<this tag>').toBe(tagId)
+
+    // The result set is filtered: both tagged documents show, the untagged one does not.
+    await expect(page.getByText(taggedA, { exact: true })).toBeVisible()
+    await expect(page.getByText(taggedB, { exact: true })).toBeVisible()
+    await expect(page.getByText(untagged, { exact: true })).toHaveCount(0)
+
+    // And the filter panel reflects the selection — the same state a sidebar
+    // chip click produces (selectTag), not a bare URL that hydrates nothing.
+    await expectTagNodeState(page, new RegExp(tagName), { pressed: 'true' })
   })
 })
 

@@ -409,7 +409,9 @@
       "delete_tag": "Elimina tag",
       "delete_confirm": "Eliminare il tag \"{name}\"? I documenti non verranno eliminati.",
       "tag_deleted": "Tag eliminato",
-      "failed_delete": "Impossibile eliminare il tag"
+      "failed_delete": "Impossibile eliminare il tag",
+      "document_count": "Documenti con questo tag: {count}",
+      "view_documents": "Visualizza documenti"
     },
     "account": {
       "title": "Account utente",

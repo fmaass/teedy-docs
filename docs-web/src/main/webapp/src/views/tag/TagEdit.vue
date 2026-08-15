@@ -13,6 +13,7 @@ import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { useTagFilterStore } from '../../stores/tagFilter'
 import AclEditor from '../../components/AclEditor.vue'
 
 const props = defineProps<{ id: string }>()
@@ -22,6 +23,7 @@ const toast = useToast()
 const confirm = useConfirm()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
+const tagFilter = useTagFilterStore()
 
 const name = ref('')
 const color = ref('2aabd2')
@@ -50,6 +52,14 @@ const { data: tagStats } = useQuery({
 const tagAcls = computed<AclEntry[]>(() => detail.value?.acls ?? [])
 const tagWritable = computed(() => detail.value?.writable ?? false)
 const docCount = computed(() => tagStats.value?.[props.id] ?? 0)
+
+// #281: one click from here to the documents carrying this tag. Routes through the
+// store's selectTag — the same canonical path the sidebar/table/gallery tag chips
+// use — so the landing document list carries the full filter state (URL query,
+// selected panel node, tree-mode ancestors), not a hand-built URL.
+function viewDocuments() {
+  tagFilter.selectTag(props.id)
+}
 
 // Distinct WRITE holders currently on the tag (by target id). The server refuses to remove
 // the final one; the client mirrors that so the UI never offers a doomed delete.
@@ -163,6 +173,18 @@ function handleDelete() {
       </router-link>
     </div>
 
+    <div class="doc-count-row">
+      <p class="tag-doc-count">{{ t('ui.tag_edit.document_count', { count: docCount }) }}</p>
+      <Button
+        class="view-docs-btn"
+        :label="t('ui.tag_edit.view_documents')"
+        icon="pi pi-file"
+        link
+        size="small"
+        @click="viewDocuments"
+      />
+    </div>
+
     <Card style="max-width: 480px">
       <template #content>
         <div class="form-field">
@@ -243,6 +265,24 @@ function handleDelete() {
 .back-link:hover {
   color: var(--p-primary-color);
   text-decoration: none;
+}
+
+.doc-count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: 480px;
+  margin-bottom: 0.75rem;
+}
+.tag-doc-count {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--p-text-muted-color);
+}
+.view-docs-btn {
+  padding-block: 0;
+  padding-inline: 0;
 }
 
 .form-field {

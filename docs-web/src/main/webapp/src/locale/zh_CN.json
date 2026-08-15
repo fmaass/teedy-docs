@@ -409,7 +409,9 @@
       "delete_tag": "删除标签",
       "delete_confirm": "删除标签“{name}”？文档不会被删除。",
       "tag_deleted": "标签已删除",
-      "failed_delete": "删除标签失败"
+      "failed_delete": "删除标签失败",
+      "document_count": "带有此标签的文档：{count}",
+      "view_documents": "查看文档"
     },
     "account": {
       "title": "用户帐号",
