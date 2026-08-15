@@ -65,6 +65,41 @@ const parentOptions = computed(() => [
   ...tagList.value.map((tag) => ({ label: tag.name, value: tag.id })),
 ])
 
+const expandedKeys = ref<Record<string, boolean>>({})
+
+// The tree filter must REVEAL matches nested under collapsed parents (#279):
+// PrimeVue's Tree filter winnows the rendered nodes to matches and their
+// ancestors, but leaves expansion entirely to expandedKeys — without help, a
+// matching child would stay invisible inside its still-collapsed parent. So
+// while a query is active every parent node is force-expanded (the filtered
+// tree contains only matching branches, so this reveals exactly the matches),
+// and the user's own expansion state is restored once the query is cleared.
+// The handler listens for the native `input` event — which falls through to the
+// Tree's root element, and the filter box is the only input the Tree renders —
+// rather than the component's `filter` event, which fires on keyup only and
+// would miss a mouse-driven paste or cut.
+let preFilterExpandedKeys: Record<string, boolean> | null = null
+
+const allParentKeys = computed(() => {
+  const keys: Record<string, boolean> = {}
+  for (const tag of tagList.value) {
+    if (tag.parent) keys[tag.parent] = true
+  }
+  return keys
+})
+
+function onTreeFilterInput(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  if (!input || typeof input.value !== 'string') return
+  if (input.value.trim().length > 0) {
+    preFilterExpandedKeys ??= { ...expandedKeys.value }
+    expandedKeys.value = { ...allParentKeys.value }
+  } else if (preFilterExpandedKeys) {
+    expandedKeys.value = preFilterExpandedKeys
+    preFilterExpandedKeys = null
+  }
+}
+
 const { mutate: addTag } = useMutation({
   mutationFn: () => createTag(newTagName.value.trim(), '#' + newTagColor.value, newTagParent.value ?? undefined),
   onSuccess: () => {
@@ -128,11 +163,21 @@ function selectTag(node: { key: string }) {
     <Card>
       <template #content>
         <div v-if="isLoading" class="text-muted text-sm">{{ t('ui.tags_page.loading_tags') }}</div>
+        <!-- filterMode "lenient" (the default, stated deliberately — #279): a query
+             matching a nested tag keeps its ancestor chain visible, and a query
+             matching a parent keeps the parent's whole subtree. "strict" would prune
+             every non-matching child of a matched parent — hiding exactly the
+             sub-tags being looked for under a remembered branch name. -->
         <Tree
           v-else-if="tagTreeNodes.length"
           :value="tagTreeNodes"
+          v-model:expandedKeys="expandedKeys"
           selectionMode="single"
+          filter
+          filterMode="lenient"
+          :filterPlaceholder="t('ui.tags_page.filter_placeholder')"
           @node-select="selectTag"
+          @input="onTreeFilterInput"
           class="tag-tree"
         >
           <template #default="{ node }">

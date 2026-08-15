@@ -389,6 +389,7 @@
       "subtitle": "Organisez les documents avec des tags. Cliquez sur un tag pour modifier son nom, sa couleur ou son parent.",
       "create_tag": "Créer un tag",
       "tag_name_placeholder": "Nom du tag",
+      "filter_placeholder": "Filtrer les tags",
       "parent_placeholder": "Tag parent (facultatif)",
       "none_root": "(aucun — niveau racine)",
       "tag_created": "Tag créé",

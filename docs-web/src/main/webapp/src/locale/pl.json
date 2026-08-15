@@ -389,6 +389,7 @@
       "subtitle": "Porządkuj dokumenty za pomocą etykiet. Kliknij etykietę, aby edytować jej nazwę, kolor lub etykietę nadrzędną.",
       "create_tag": "Utwórz etykietę",
       "tag_name_placeholder": "Nazwa etykiety",
+      "filter_placeholder": "Filtruj etykiety",
       "parent_placeholder": "Etykieta nadrzędna (opcjonalnie)",
       "none_root": "(brak — poziom główny)",
       "tag_created": "Utworzono etykietę",

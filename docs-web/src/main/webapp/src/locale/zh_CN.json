@@ -389,6 +389,7 @@
       "subtitle": "使用标签整理文档。点击标签可编辑其名称、颜色或父级。",
       "create_tag": "创建标签",
       "tag_name_placeholder": "标签名称",
+      "filter_placeholder": "筛选标签",
       "parent_placeholder": "父标签（可选）",
       "none_root": "（无 — 根级别）",
       "tag_created": "标签已创建",

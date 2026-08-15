@@ -389,6 +389,7 @@
       "subtitle": "使用標籤整理文件。按一下標籤即可編輯其名稱、顏色或上層標籤。",
       "create_tag": "建立標籤",
       "tag_name_placeholder": "標籤名稱",
+      "filter_placeholder": "篩選標籤",
       "parent_placeholder": "上層標籤（選填）",
       "none_root": "（無 — 根層級）",
       "tag_created": "已建立標籤",

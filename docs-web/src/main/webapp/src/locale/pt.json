@@ -389,6 +389,7 @@
       "subtitle": "Organize documentos com etiquetas. Clique numa etiqueta para editar o seu nome, cor ou etiqueta-pai.",
       "create_tag": "Criar etiqueta",
       "tag_name_placeholder": "Nome da etiqueta",
+      "filter_placeholder": "Filtrar etiquetas",
       "parent_placeholder": "Etiqueta-pai (opcional)",
       "none_root": "(nenhuma — nível de raiz)",
       "tag_created": "Etiqueta criada",

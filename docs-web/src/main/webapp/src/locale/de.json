@@ -389,6 +389,7 @@
       "subtitle": "Organisiere Dokumente mit Tags. Klicke auf ein Tag, um Name, Farbe oder übergeordnetes Tag zu bearbeiten.",
       "create_tag": "Tag erstellen",
       "tag_name_placeholder": "Tag-Name",
+      "filter_placeholder": "Tags filtern",
       "parent_placeholder": "Übergeordnetes Tag (optional)",
       "none_root": "(keines — oberste Ebene)",
       "tag_created": "Tag erstellt",

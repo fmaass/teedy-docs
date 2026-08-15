@@ -389,6 +389,7 @@
       "subtitle": "Organizza i documenti con i tag. Clicca su un tag per modificarne il nome, il colore o il genitore.",
       "create_tag": "Crea tag",
       "tag_name_placeholder": "Nome del tag",
+      "filter_placeholder": "Filtra i tag",
       "parent_placeholder": "Tag genitore (facoltativo)",
       "none_root": "(nessuno — livello radice)",
       "tag_created": "Tag creato",

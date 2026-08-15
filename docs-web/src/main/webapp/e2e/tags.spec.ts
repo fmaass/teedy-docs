@@ -49,6 +49,59 @@ test.describe('tag management', () => {
     await expect(page).toHaveURL(/#\/tag$/)
     await expect(page.locator('.tag-tree').getByText(renamed, { exact: true })).toHaveCount(0)
   })
+
+  test('tree filter reveals a tag nested inside a collapsed parent', async ({ page, cleanup }) => {
+    // #279: with many hierarchical tags, finding an existing one meant expanding
+    // collapsed parents one by one. The tree filter must surface a nested match
+    // WITHOUT the user pre-expanding its parent — so this test deliberately leaves
+    // the parent collapsed (fresh page state) before filtering.
+    const parent = uniqueTag('tfp')
+    const child = uniqueTag('tfc')
+
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+    await page.getByPlaceholder('Tag name').fill(parent)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.locator('.tag-tree').getByText(parent, { exact: true })).toBeVisible()
+    // Cleanup runs FIFO, so the child is registered first — it must go before its parent.
+    cleanup.defer('delete the nested child tag', () => deleteTagByNameApi(page.request, child))
+    cleanup.defer('delete the parent tag', () => deleteTagByNameApi(page.request, parent))
+
+    // Seed the child UNDER the parent via the create card's parent Select.
+    await page.getByPlaceholder('Tag name').fill(child)
+    await page.getByText('Parent tag (optional)', { exact: true }).click()
+    await page.getByRole('option', { name: parent, exact: true }).click()
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    // Creation success signal: onSuccess clears the name input (the transient toast
+    // can stack across the two back-to-back creates, so it is not asserted).
+    await expect(page.getByPlaceholder('Tag name')).toHaveValue('')
+
+    // Server-side precondition: the child exists and is nested. The UI assertion
+    // below is that the child is NOT rendered — which a silently failed create
+    // would fake — so its existence is proven against the API first.
+    const listRes = await page.request.get('/api/tag/list')
+    expect(listRes.ok()).toBe(true)
+    const tags = (await listRes.json()).tags as Array<{ id: string; name: string; parent?: string }>
+    const createdChild = tags.find((t) => t.name === child)
+    expect(createdChild?.parent, 'child must be created nested under the parent').toBeTruthy()
+
+    // The parent renders collapsed (nothing expanded it), so the nested child is
+    // not in the tree — the exact pain the filter must solve.
+    await expect(page.locator('.tag-tree').getByText(parent, { exact: true })).toBeVisible()
+    await expect(page.locator('.tag-tree').getByText(child, { exact: true })).toHaveCount(0)
+
+    // Filter by the child's name: the match must become VISIBLE, i.e. the tree
+    // both keeps the ancestor chain and expands it.
+    const filterInput = page.locator('.tag-tree').getByPlaceholder('Filter tags')
+    await filterInput.fill(child)
+    await expect(page.locator('.tag-tree').getByText(child, { exact: true })).toBeVisible()
+    await expect(page.locator('.tag-tree').getByText(parent, { exact: true })).toBeVisible()
+
+    // Clearing the filter restores the pre-filter state: the full tree is back and
+    // the child is hidden inside the re-collapsed parent again.
+    await filterInput.fill('')
+    await expect(page.locator('.tag-tree').getByText(parent, { exact: true })).toBeVisible()
+    await expect(page.locator('.tag-tree').getByText(child, { exact: true })).toHaveCount(0)
+  })
 })
 
 test.describe('tag filter panel', () => {

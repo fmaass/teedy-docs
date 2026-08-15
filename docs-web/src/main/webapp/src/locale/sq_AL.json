@@ -389,6 +389,7 @@
       "subtitle": "Organizoni dokumentet me etiketa. Klikoni një etiketë për të redaktuar emrin, ngjyrën ose prindin e saj.",
       "create_tag": "Krijo etiketë",
       "tag_name_placeholder": "Emri i etiketës",
+      "filter_placeholder": "Filtro etiketat",
       "parent_placeholder": "Etiketa prind (opsional)",
       "none_root": "(asnjë — niveli rrënjë)",
       "tag_created": "Etiketa u krijua",
