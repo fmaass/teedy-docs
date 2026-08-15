@@ -1007,6 +1007,7 @@
       "username_verbatim": "Përdor pretendimin e emrit të përdoruesit fjalë për fjalë",
       "username_verbatim_hint": "Kur aktiv, përdoruesit OIDC të siguruar mbajnë preferred_username-in e tyre siç është (pa prapashtesë hash-i unik). Një llogari e mëvonshme, e ndryshme, që paraqet të njëjtin emër, dallohet automatikisht.",
       "from_property": "Aktualisht i vendosur nga një veti JVM — ruajtja ruan një anashkalim në bazën e të dhënave.",
+      "from_env": "Aktualisht i vendosur nga një variabël mjedisi — ruajtja ruan një anashkalim në bazën e të dhënave.",
       "url_invalid": "Duhet të jetë një URL http(s).",
       "issuer_required": "URL-ja e lëshuesit është e detyrueshme.",
       "client_id_required": "ID-ja e klientit është e detyrueshme.",

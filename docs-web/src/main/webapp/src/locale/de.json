@@ -1007,6 +1007,7 @@
       "username_verbatim": "Benutzernamen-Claim unverändert übernehmen",
       "username_verbatim_hint": "Wenn aktiviert, behalten bereitgestellte OIDC-Benutzer ihren preferred_username unverändert (ohne eindeutigen Hash-Suffix). Ein späteres, anderes Konto mit demselben Namen wird automatisch eindeutig gemacht.",
       "from_property": "Der aktuelle Wert stammt aus einer JVM-Eigenschaft. Beim Speichern wird der Wert in der Datenbank abgelegt. Dieser Datenbankwert hat dann Vorrang vor der JVM-Eigenschaft.",
+      "from_env": "Der aktuelle Wert stammt aus einer Umgebungsvariablen. Beim Speichern wird der Wert in der Datenbank abgelegt. Dieser Datenbankwert hat dann Vorrang vor der Umgebungsvariablen.",
       "url_invalid": "Muss eine http(s)-URL sein.",
       "issuer_required": "Issuer-URL ist erforderlich.",
       "client_id_required": "Client-ID ist erforderlich.",

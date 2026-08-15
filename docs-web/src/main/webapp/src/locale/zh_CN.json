@@ -1007,6 +1007,7 @@
       "username_verbatim": "逐字使用用户名声明",
       "username_verbatim_hint": "启用后，预配的 OIDC 用户会原样保留其 preferred_username（不附加唯一哈希后缀）。之后出现的、使用相同名称的不同帐号会被自动消歧。",
       "from_property": "当前由 JVM 属性设置——保存会存储数据库覆盖值。",
+      "from_env": "当前由环境变量设置——保存会存储数据库覆盖值。",
       "url_invalid": "必须是 http(s) URL。",
       "issuer_required": "颁发者 URL 为必填项。",
       "client_id_required": "客户端 ID 为必填项。",

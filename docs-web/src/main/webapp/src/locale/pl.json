@@ -1007,6 +1007,7 @@
       "username_verbatim": "Użyj oświadczenia nazwy użytkownika dosłownie",
       "username_verbatim_hint": "Gdy włączone, udostępniani użytkownicy OIDC zachowują swoje preferred_username bez zmian (bez unikalnego sufiksu skrótu). Późniejsze, inne konto przedstawiające tę samą nazwę jest ujednoznaczniane automatycznie.",
       "from_property": "Obecnie ustawione z właściwości JVM — zapisanie tworzy nadpisanie w bazie danych.",
+      "from_env": "Obecnie ustawione ze zmiennej środowiskowej — zapisanie tworzy nadpisanie w bazie danych.",
       "url_invalid": "Musi być adresem URL http(s).",
       "issuer_required": "Adres URL wystawcy jest wymagany.",
       "client_id_required": "Identyfikator klienta jest wymagany.",

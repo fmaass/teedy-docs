@@ -1007,6 +1007,7 @@
       "username_verbatim": "Usa il claim del nome utente così com'è",
       "username_verbatim_hint": "Quando attivo, gli utenti OIDC predisposti mantengono il loro preferred_username così com'è (senza suffisso hash univoco). Un account successivo e diverso che presenta lo stesso nome viene disambiguato automaticamente.",
       "from_property": "Attualmente impostato da una proprietà JVM — il salvataggio memorizza una sovrascrittura nel database.",
+      "from_env": "Attualmente impostato da una variabile d'ambiente — il salvataggio memorizza una sovrascrittura nel database.",
       "url_invalid": "Deve essere un URL http(s).",
       "issuer_required": "L'URL dell'issuer è obbligatorio.",
       "client_id_required": "Il Client ID è obbligatorio.",

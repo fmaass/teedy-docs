@@ -44,7 +44,7 @@ const ENABLED_CONFIG: OidcConfig = {
   username_claim: 'preferred_username',
   email_claim: 'email',
   sources: {
-    enabled: 'db', issuer: 'property', client_id: 'db', client_secret: 'db',
+    enabled: 'db', issuer: 'property', client_id: 'env', client_secret: 'db',
     redirect_uri: 'db', scope: 'default', authorization_endpoint: 'default',
     token_endpoint: 'default', jwks_uri: 'default', userinfo_endpoint: 'default',
     username_claim: 'default', email_claim: 'default',
@@ -88,6 +88,26 @@ describe('SettingsOidc', () => {
     await flushPromises()
     // issuer source is 'property' in the fixture -> the property hint renders.
     expect(wrapper.text()).toContain(en.ui.oidc.from_property)
+  })
+
+  it('hints when a field is currently from an environment variable', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    // client_id source is 'env' in the fixture -> the env hint renders, and it is its OWN text
+    // (an operator changes a compose variable, not a -D flag, so the two hints must not be aliased).
+    expect(wrapper.text()).toContain(en.ui.oidc.from_env)
+    expect(en.ui.oidc.from_env).not.toBe(en.ui.oidc.from_property)
+  })
+
+  it('shows no source hint for a field resolved from its built-in default', async () => {
+    apiMock.getOidcConfig.mockResolvedValue({
+      ...ENABLED_CONFIG,
+      sources: { ...ENABLED_CONFIG.sources, issuer: 'default', client_id: 'default' },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(en.ui.oidc.from_property)
+    expect(wrapper.text()).not.toContain(en.ui.oidc.from_env)
   })
 
   it('saves the form as an OidcConfig without a pre-filled secret', async () => {

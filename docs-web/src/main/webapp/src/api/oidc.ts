@@ -3,13 +3,14 @@ import api from './client'
 // GET /api/app/config_oidc returns the non-secret OIDC provider/claim settings. The client
 // secret is write-only (mirrors the LDAP admin password): the GET never returns it, only a
 // boolean `client_secret_set` flag so the UI can show a "leave blank to keep" affordance.
-// Each field also carries its effective SOURCE (db | property | default) via `sources`, so the
-// UI can hint "currently from a JVM property — saving stores a DB override".
+// Each field also carries its effective SOURCE (db | property | env | default) via `sources`, so
+// the UI can hint "currently from a JVM property — saving stores a DB override" (`env` is the same
+// hint for a DOCS_OIDC_* environment variable; a JVM property outranks it, a DB value outranks both).
 //
 // ADR-0015 fence: this covers ONLY provider/claim settings. Identity binding (issuer+sub),
 // username derivation, disabled-account eligibility, and fail-closed rules are non-editable
 // behavior and are NOT part of this contract.
-export type OidcSource = 'db' | 'property' | 'default'
+export type OidcSource = 'db' | 'property' | 'env' | 'default'
 
 export interface OidcConfig {
   enabled: boolean

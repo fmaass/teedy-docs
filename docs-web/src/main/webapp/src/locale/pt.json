@@ -1007,6 +1007,7 @@
       "username_verbatim": "Utilizar a reivindicação de nome de utilizador tal como está",
       "username_verbatim_hint": "Quando ativado, os utilizadores OIDC aprovisionados mantêm o seu preferred_username tal como está (sem sufixo de hash único). Uma conta posterior e diferente que apresente o mesmo nome é desambiguada automaticamente.",
       "from_property": "Atualmente definido a partir de uma propriedade da JVM — ao guardar armazena uma substituição na base de dados.",
+      "from_env": "Atualmente definido a partir de uma variável de ambiente — ao guardar armazena uma substituição na base de dados.",
       "url_invalid": "Deve ser um URL http(s).",
       "issuer_required": "O URL do emissor é obrigatório.",
       "client_id_required": "O ID do cliente é obrigatório.",

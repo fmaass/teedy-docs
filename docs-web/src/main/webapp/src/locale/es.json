@@ -1007,6 +1007,7 @@
       "username_verbatim": "Usar el claim de nombre de usuario literalmente",
       "username_verbatim_hint": "Cuando está activado, los usuarios OIDC aprovisionados conservan su preferred_username tal cual (sin sufijo hash único). Una cuenta posterior distinta que presente el mismo nombre se desambigua automáticamente.",
       "from_property": "Actualmente establecido a partir de una propiedad de la JVM; al guardar se almacena una anulación en la base de datos.",
+      "from_env": "Actualmente establecido a partir de una variable de entorno; al guardar se almacena una anulación en la base de datos.",
       "url_invalid": "Debe ser una URL http(s).",
       "issuer_required": "La URL del emisor es obligatoria.",
       "client_id_required": "El ID de cliente es obligatorio.",

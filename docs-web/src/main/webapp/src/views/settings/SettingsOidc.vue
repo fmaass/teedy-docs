@@ -70,6 +70,12 @@ function isFromProperty(key: string): boolean {
   return sources.value[key] === 'property'
 }
 
+// The same for a DOCS_OIDC_* environment variable. A separate tier (and a separate hint) because
+// the operator edits a different place to change it — the compose environment, not a -D flag.
+function isFromEnv(key: string): boolean {
+  return sources.value[key] === 'env'
+}
+
 const { mutate: save, isPending: saving } = useMutation({
   mutationFn: () => saveOidcConfig({ ...form }),
   onSuccess: () => {
@@ -122,6 +128,7 @@ function resetSecret() {
           <label for="oidc-issuer">{{ t('ui.oidc.issuer') }}</label>
           <InputText id="oidc-issuer" v-model="form.issuer" class="w-full" :invalid="fieldErrors.has('issuer_required') || fieldErrors.has('issuer_url')" />
           <small v-if="isFromProperty('issuer')" class="field-hint source-hint">{{ t('ui.oidc.from_property') }}</small>
+          <small v-else-if="isFromEnv('issuer')" class="field-hint source-hint">{{ t('ui.oidc.from_env') }}</small>
           <small v-if="fieldErrors.has('issuer_required')" class="field-error">{{ t('ui.oidc.issuer_required') }}</small>
           <small v-else-if="fieldErrors.has('issuer_url')" class="field-error">{{ t('ui.oidc.url_invalid') }}</small>
         </div>
@@ -130,6 +137,7 @@ function resetSecret() {
           <label for="oidc-client-id">{{ t('ui.oidc.client_id') }}</label>
           <InputText id="oidc-client-id" v-model="form.client_id" class="w-full" :invalid="fieldErrors.has('client_id_required')" />
           <small v-if="isFromProperty('client_id')" class="field-hint source-hint">{{ t('ui.oidc.from_property') }}</small>
+          <small v-else-if="isFromEnv('client_id')" class="field-hint source-hint">{{ t('ui.oidc.from_env') }}</small>
           <small v-if="fieldErrors.has('client_id_required')" class="field-error">{{ t('ui.oidc.client_id_required') }}</small>
         </div>
 
@@ -141,6 +149,7 @@ function resetSecret() {
             <Button :label="t('ui.oidc.client_secret_clear')" text size="small" class="clear-secret-btn" @click="resetSecret" />
           </small>
           <small v-else-if="isFromProperty('client_secret')" class="field-hint source-hint">{{ t('ui.oidc.from_property') }}</small>
+          <small v-else-if="isFromEnv('client_secret')" class="field-hint source-hint">{{ t('ui.oidc.from_env') }}</small>
           <small v-if="fieldErrors.has('client_secret_required')" class="field-error">{{ t('ui.oidc.client_secret_required') }}</small>
         </div>
 
@@ -149,6 +158,7 @@ function resetSecret() {
           <InputText id="oidc-redirect-uri" v-model="form.redirect_uri" class="w-full" :invalid="fieldErrors.has('redirect_uri_required') || fieldErrors.has('redirect_uri_url')" />
           <small class="field-hint">{{ t('ui.oidc.redirect_uri_hint') }}</small>
           <small v-if="isFromProperty('redirect_uri')" class="field-hint source-hint">{{ t('ui.oidc.from_property') }}</small>
+          <small v-else-if="isFromEnv('redirect_uri')" class="field-hint source-hint">{{ t('ui.oidc.from_env') }}</small>
           <small v-if="fieldErrors.has('redirect_uri_required')" class="field-error">{{ t('ui.oidc.redirect_uri_required') }}</small>
           <small v-else-if="fieldErrors.has('redirect_uri_url')" class="field-error">{{ t('ui.oidc.url_invalid') }}</small>
         </div>

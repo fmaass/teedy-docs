@@ -1007,6 +1007,7 @@
       "username_verbatim": "Utiliser le claim de nom d'utilisateur tel quel",
       "username_verbatim_hint": "Lorsqu'elle est activée, les utilisateurs OIDC provisionnés conservent leur preferred_username tel quel (sans suffixe de hachage unique). Un compte ultérieur et différent présentant le même nom est désambiguïsé automatiquement.",
       "from_property": "Actuellement défini depuis une propriété JVM — l'enregistrement stocke une surcharge en base de données.",
+      "from_env": "Actuellement défini depuis une variable d'environnement — l'enregistrement stocke une surcharge en base de données.",
       "url_invalid": "Doit être une URL http(s).",
       "issuer_required": "L'URL de l'émetteur est requise.",
       "client_id_required": "L'ID client est requis.",

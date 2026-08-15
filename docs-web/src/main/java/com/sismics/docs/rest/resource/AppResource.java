@@ -1818,8 +1818,9 @@ public class AppResource extends BaseResource {
      *
      * <p>The client secret is write-only (mirrors the LDAP admin password, BL-028): it is NEVER
      * echoed back — only a boolean {@code client_secret_set} flag is exposed. Each field also
-     * carries its effective SOURCE ({@code db} | {@code property} | {@code default}) so the UI can
-     * hint "currently from a JVM property — saving overrides it".
+     * carries its effective SOURCE ({@code db} | {@code property} | {@code env} | {@code default})
+     * so the UI can hint "currently from a JVM property — saving overrides it", or the same for a
+     * {@code DOCS_OIDC_*} environment variable.
      *
      * @api {get} /app/config_oidc Get the OIDC authentication configuration
      * @apiName GetAppConfigOidc
@@ -1836,7 +1837,7 @@ public class AppResource extends BaseResource {
      * @apiSuccess {String} userinfo_endpoint UserInfo endpoint (empty when derived from discovery)
      * @apiSuccess {String} username_claim Username claim name
      * @apiSuccess {String} email_claim Email claim name
-     * @apiSuccess {Object} sources Per-field effective source (db | property | default)
+     * @apiSuccess {Object} sources Per-field effective source (db | property | env | default)
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission admin
      * @apiVersion 1.12.0
@@ -1853,7 +1854,8 @@ public class AppResource extends BaseResource {
 
         String secret = OidcResource.oidcConfig(OidcResource.OidcKey.CLIENT_SECRET);
 
-        // Per-field effective source so the UI can flag "currently from JVM property".
+        // Per-field effective source so the UI can flag "currently from JVM property" or
+        // "currently from an environment variable".
         JsonObjectBuilder sources = Json.createObjectBuilder();
         for (OidcResource.OidcKey key : OidcResource.OidcKey.values()) {
             sources.add(key.name().toLowerCase(), OidcResource.oidcConfigSource(key));
@@ -1884,7 +1886,8 @@ public class AppResource extends BaseResource {
      * Configures the OIDC authentication (provider/claim settings only, per the ADR-0015 fence).
      *
      * <p>Writes each of the OIDC config values to T_CONFIG (DB-first precedence: a stored
-     * value overrides the {@code docs.oidc_*} JVM property). The client secret is write-only: an
+     * value overrides the {@code docs.oidc_*} JVM property, which in turn overrides the
+     * {@code DOCS_OIDC_*} environment variable). The client secret is write-only: an
      * EMPTY {@code client_secret} preserves the stored secret; an explicit
      * {@code client_secret_reset=true} clears it (the write-only contract stays intact — the GET
      * never returns it). Endpoint/issuer URLs must be http(s); the claim names must be non-blank.
@@ -1955,7 +1958,8 @@ public class AppResource extends BaseResource {
 
             // The client secret is write-only (BL-028 pattern): the GET never echoes it, so the
             // client sends it blank to KEEP the stored value. On first-time setup (no stored
-            // secret and no override property) a non-empty secret is required.
+            // secret and no override property or environment variable) a non-empty secret is
+            // required — hasPropertySecret asks the accessor, so it covers both override tiers.
             Config storedSecret = configDao.getById(ConfigType.OIDC_CLIENT_SECRET);
             boolean hasStoredSecret = storedSecret != null && !Strings.isNullOrEmpty(storedSecret.getValue());
             boolean hasPropertySecret = !Strings.isNullOrEmpty(OidcResource.oidcConfig(OidcResource.OidcKey.CLIENT_SECRET))

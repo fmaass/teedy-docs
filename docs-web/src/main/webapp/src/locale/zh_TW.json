@@ -1007,6 +1007,7 @@
       "username_verbatim": "逐字使用使用者名稱宣告",
       "username_verbatim_hint": "開啟時，佈建的 OIDC 使用者會原樣保留其 preferred_username（沒有唯一雜湊後綴）。日後出現的不同帳號若使用相同名稱，會自動加以區分。",
       "from_property": "目前由 JVM 屬性設定 — 儲存會存入資料庫覆寫值。",
+      "from_env": "目前由環境變數設定 — 儲存會存入資料庫覆寫值。",
       "url_invalid": "必須是 http(s) URL。",
       "issuer_required": "簽發者 URL 為必填。",
       "client_id_required": "用戶端 ID 為必填。",
