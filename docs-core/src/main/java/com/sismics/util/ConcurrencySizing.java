@@ -94,8 +94,9 @@ public final class ConcurrencySizing {
      * async worker on both buses at once, plus {@value #POOL_HEADROOM} for request threads and the
      * scheduled services, clamped to [{@value #MIN_POOL_SIZE}, {@value #MAX_POOL_SIZE}].
      *
-     * <p>These are maxima, not eager allocations: {@code hibernate.connection.initial_pool_size}
-     * stays 1, so an idle instance still holds a single connection.</p>
+     * <p>This is a maximum, not an eager allocation: the pool opens connections on demand and
+     * closes everything above its idle floor again once a burst is over, so an idle instance holds
+     * a couple of connections regardless of how high this number is.</p>
      *
      * @param availableProcessors Number of processors available to the JVM
      * @return Connection pool size

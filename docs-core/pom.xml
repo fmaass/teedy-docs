@@ -21,6 +21,13 @@
       <artifactId>hibernate-core</artifactId>
     </dependency>
 
+    <!-- HikariCP connection pool: Hibernate's built-in pool never shrinks, throws at its cap and
+         has no borrow timeout or on-checkout validation. -->
+    <dependency>
+      <groupId>org.hibernate.orm</groupId>
+      <artifactId>hibernate-hikaricp</artifactId>
+    </dependency>
+
     <!-- Other external dependencies -->
     <dependency>
       <groupId>com.google.guava</groupId>

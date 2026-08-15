@@ -59,6 +59,9 @@
     <org.bouncycastle.bcprov-jdk18on.version>1.85</org.bouncycastle.bcprov-jdk18on.version>
 
     <org.hibernate.hibernate.version>6.6.54.Final</org.hibernate.hibernate.version>
+    <!-- Pinned ahead of the version hibernate-hikaricp declares transitively (3.2.0, a 2018
+         Java 8 build): the pool this fork runs on should be a maintained release. -->
+    <com.zaxxer.HikariCP.version>7.1.0</com.zaxxer.HikariCP.version>
     <fr.opensagres.xdocreport.version>2.1.0</fr.opensagres.xdocreport.version>
     <com.github.librepdf.openpdf.version>2.0.2</com.github.librepdf.openpdf.version>
     <xerces.xercesImpl.version>2.12.2</xerces.xercesImpl.version>
@@ -504,6 +507,18 @@
         <groupId>org.hibernate.orm</groupId>
         <artifactId>hibernate-core</artifactId>
         <version>${org.hibernate.hibernate.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.hibernate.orm</groupId>
+        <artifactId>hibernate-hikaricp</artifactId>
+        <version>${org.hibernate.hibernate.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>com.zaxxer</groupId>
+        <artifactId>HikariCP</artifactId>
+        <version>${com.zaxxer.HikariCP.version}</version>
       </dependency>
 
       <dependency>

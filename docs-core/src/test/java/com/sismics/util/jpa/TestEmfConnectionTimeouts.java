@@ -148,6 +148,43 @@ public class TestEmfConnectionTimeouts {
     }
 
     /**
+     * The environment (production) path composed with the pool post-step, exactly as
+     * {@code getEntityManagerProperties()} composes them — that method is private, so the
+     * composition is asserted here rather than through it. Two things have to survive the
+     * composition: HikariCP must be the connection provider on this path (the CI PostgreSQL jobs
+     * exercise the hibernate.properties path, so only this assertion covers the wiring production
+     * runs), and the pgjdbc timeouts must reach the driver. Once Hikari owns the connections, the
+     * plain {@code hibernate.connection.connectTimeout} keys asserted above are no longer forwarded
+     * — Hikari maps only url/username/password/driver/isolation/autocommit — so the timeouts have to
+     * be repeated under {@code hibernate.hikari.dataSource.*}. Drop that forwarding and the 2026-08-10
+     * dead-socket protection is silently gone again.
+     */
+    @Test
+    public void environmentPathAppliesHikariWithTheTimeoutsForwardedToTheDriver() {
+        Properties production = EMF.applyConnectionPool(postgresProps(null, null, null));
+
+        Assertions.assertEquals("org.hibernate.hikaricp.internal.HikariCPConnectionProvider",
+                production.getProperty("hibernate.connection.provider_class"));
+        Assertions.assertEquals("10", production.getProperty("hibernate.hikari.dataSource.connectTimeout"));
+        Assertions.assertEquals("30", production.getProperty("hibernate.hikari.dataSource.socketTimeout"));
+        Assertions.assertEquals("10", production.getProperty("hibernate.hikari.dataSource.loginTimeout"));
+
+        // Overrides travel the whole way too, not just the defaults.
+        Properties overridden = EMF.applyConnectionPool(postgresProps("3", "7", "4"));
+        Assertions.assertEquals("3", overridden.getProperty("hibernate.hikari.dataSource.connectTimeout"));
+        Assertions.assertEquals("7", overridden.getProperty("hibernate.hikari.dataSource.socketTimeout"));
+        Assertions.assertEquals("4", overridden.getProperty("hibernate.hikari.dataSource.loginTimeout"));
+
+        // The embedded H2 branch gets the provider but none of the pgjdbc timeouts.
+        Properties h2 = EMF.applyConnectionPool(EMF.buildEnvironmentProperties("", "sa", "", null, null, null));
+        Assertions.assertEquals("org.hibernate.hikaricp.internal.HikariCPConnectionProvider",
+                h2.getProperty("hibernate.connection.provider_class"));
+        Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.connectTimeout"));
+        Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.socketTimeout"));
+        Assertions.assertNull(h2.getProperty("hibernate.hikari.dataSource.loginTimeout"));
+    }
+
+    /**
      * Realistic-red incident reproduction of the 2026-08-10 signature: a socket that accepts the TCP
      * connection but never sends a byte back (TCP up, no data). A pgjdbc connection built with the
      * same timeout properties EMF applies — but short values — must THROW within a bounded wall-clock
@@ -219,15 +256,18 @@ public class TestEmfConnectionTimeouts {
     }
 
     /**
-     * End-to-end proof that the timeout survives the REAL Hibernate -> pgjdbc path the app runs, not
-     * just that the property lands in the map. The properties are built by the production code path
-     * ({@link EMF#buildEnvironmentProperties}) and handed to
-     * {@code Persistence.createEntityManagerFactory("transactions-optional", ...)} exactly as the
-     * static EMF does, then a query is issued against a dead socket. With socketTimeout/loginTimeout
-     * = 2s that query THROWS within a few seconds — which can only happen if Hibernate stripped the
-     * {@code hibernate.connection.} prefix and pgjdbc actually received {@code socketTimeout}. Remove
-     * the timeouts from EMF and this hangs past the bound (red). No Postgres/Docker — only a
-     * black-hole loopback socket, so the connection attempt has nothing to read.
+     * End-to-end proof that the timeout survives the REAL Hibernate -> HikariCP -> pgjdbc path the
+     * app runs, not just that the property lands in the map. The properties are built by the
+     * production code path ({@link EMF#buildEnvironmentProperties} composed with
+     * {@link EMF#applyConnectionPool}, as {@code getEntityManagerProperties()} composes them) and
+     * handed to {@code Persistence.createEntityManagerFactory("transactions-optional", ...)} exactly
+     * as the static EMF does, then a query is issued against a dead socket. With
+     * socketTimeout/loginTimeout = 2s that query THROWS within a few seconds — which can only happen
+     * if the timeouts reached pgjdbc through HikariCP's {@code dataSource} namespace. Drop that
+     * forwarding (or the timeouts themselves) and the pool's very first connection attempt blocks on
+     * the dead socket with nothing to bound it, so this hangs past the bound (red). No
+     * Postgres/Docker — only a black-hole loopback socket, so the connection attempt has nothing to
+     * read.
      */
     @Test
     public void timeoutFiresThroughRealHibernatePersistencePath() throws Exception {
@@ -243,15 +283,15 @@ public class TestEmfConnectionTimeouts {
 
             // Build the EM properties via the SAME production code path the app runs (socket/login = 2s;
             // connect left at its default). NOT a hand-rolled props map.
-            Properties props = EMF.buildEnvironmentProperties(
-                    "jdbc:postgresql://127.0.0.1:" + port + "/docs", "u", "p", null, "2", "2");
+            Properties props = EMF.applyConnectionPool(EMF.buildEnvironmentProperties(
+                    "jdbc:postgresql://127.0.0.1:" + port + "/docs", "u", "p", null, "2", "2"));
 
             Future<Throwable> attempt = executor.submit(() -> {
                 EntityManagerFactory emf = null;
                 EntityManager em = null;
                 try {
                     // The full app chain: real Hibernate EMF from the same PU, then an actual query that
-                    // forces a JDBC connection through Hibernate's built-in connection provider.
+                    // forces a JDBC connection through the configured connection pool.
                     emf = Persistence.createEntityManagerFactory("transactions-optional", props);
                     em = emf.createEntityManager();
                     em.createNativeQuery("select 1").getSingleResult();
@@ -283,8 +323,8 @@ public class TestEmfConnectionTimeouts {
             } catch (TimeoutException te) {
                 attempt.cancel(true);
                 Assertions.fail("the real Hibernate/pgjdbc query did not return within " + boundSeconds
-                        + "s against a dead socket — Hibernate did not forward socketTimeout to pgjdbc "
-                        + "(the client-side timeout was not applied).");
+                        + "s against a dead socket — socketTimeout did not reach pgjdbc through the "
+                        + "pool (the client-side timeout was not applied).");
                 return;
             }
             long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;

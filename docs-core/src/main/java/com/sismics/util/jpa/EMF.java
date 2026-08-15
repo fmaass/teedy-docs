@@ -25,9 +25,49 @@ public final class EMF {
     private static final Logger log = LoggerFactory.getLogger(EMF.class);
 
     /**
-     * Hibernate property holding the maximum size of its internal connection pool.
+     * Hibernate property holding the maximum size of the connection pool. HikariCP reads
+     * {@code hibernate.hikari.maximumPoolSize}, which {@link #applyConnectionPool} copies from this
+     * key; this one stays because the resolution precedence and its tests are written against it.
      */
     static final String POOL_SIZE_PROPERTY = "hibernate.connection.pool_size";
+
+    /**
+     * Hibernate property selecting the JDBC connection provider, and the HikariCP one this
+     * application runs on. Set explicitly rather than relying on Hibernate picking the bridge up
+     * from the classpath, so the pool is never silently configured by someone else's defaults.
+     */
+    static final String PROVIDER_CLASS_PROPERTY = "hibernate.connection.provider_class";
+    static final String HIKARI_PROVIDER_CLASS = "org.hibernate.hikaricp.internal.HikariCPConnectionProvider";
+
+    /**
+     * Prefix Hibernate strips off before handing a property to HikariCP. Everything under
+     * {@code hibernate.hikari.dataSource.} is passed on again by HikariCP to the JDBC driver.
+     */
+    static final String HIKARI_PREFIX = "hibernate.hikari.";
+
+    /**
+     * Fixed pool behaviour (deliberately not configurable — see the DATABASE_POOL_SIZE
+     * documentation). The idle floor keeps a couple of connections warm for the request path while
+     * everything a burst opened above it is released after ten minutes, which is what stops an
+     * instance from sitting on dozens of idle backends of a shared database server. The borrow
+     * timeout bounds the wait a caller can spend queueing for a connection, and the leak threshold
+     * turns a connection nobody gives back into a logged stack trace instead of a slow starvation.
+     * Five minutes for that last one: the legitimate long holders (a mail send, a search index
+     * rebuild) run well under it, so a warning means something worth reading.
+     */
+    static final int HIKARI_MINIMUM_IDLE = 2;
+    static final String HIKARI_IDLE_TIMEOUT_MS = "600000";
+    static final String HIKARI_CONNECTION_TIMEOUT_MS = "30000";
+    static final String HIKARI_POOL_NAME = "teedy";
+    static final String HIKARI_LEAK_DETECTION_THRESHOLD_MS = "300000";
+
+    /**
+     * Driver-level timeouts that have to be repeated in HikariCP's own namespace: HikariCP owns the
+     * connections now, and Hibernate hands it only url/username/password/driver/isolation/autocommit
+     * out of {@code hibernate.connection.*} — any other key of that namespace no longer reaches the
+     * driver on its own.
+     */
+    private static final String[] DRIVER_TIMEOUT_PROPERTIES = {"connectTimeout", "socketTimeout", "loginTimeout"};
 
     /**
      * Environment variable overriding the connection pool size. Wins verbatim over the adaptive
@@ -177,20 +217,20 @@ public final class EMF {
                 // whatever Hibernate defaults to while the async buses size themselves off the CPU
                 // count (#230).
                 applyPoolSize(properties, properties.getProperty(POOL_SIZE_PROPERTY));
-                return properties;
+                return applyConnectionPool(properties);
             }
         } catch (IOException | IllegalArgumentException e) {
             log.error("Error reading hibernate.properties", e);
         }
 
         // Use environment parameters
-        return buildEnvironmentProperties(
+        return applyConnectionPool(buildEnvironmentProperties(
                 System.getenv("DATABASE_URL"),
                 System.getenv("DATABASE_USER"),
                 System.getenv("DATABASE_PASSWORD"),
                 System.getenv(CONNECT_TIMEOUT_ENV),
                 System.getenv(SOCKET_TIMEOUT_ENV),
-                System.getenv(LOGIN_TIMEOUT_ENV));
+                System.getenv(LOGIN_TIMEOUT_ENV)));
     }
 
     /**
@@ -203,12 +243,15 @@ public final class EMF {
      *
      * <p>The Postgres branch carries client-side connect/socket/login timeouts because on
      * 2026-08-10 a transient Postgres network blip left a dead socket that Hibernate's built-in
-     * connection pool never timed out on: it has no borrow timeout and no on-checkout liveness
+     * connection pool never timed out on: it had no borrow timeout and no on-checkout liveness
      * check, so every request thread parked forever acquiring a connection and only a container
-     * restart recovered. Without a client-side socket timeout the JDBC read on that dead socket
-     * blocks indefinitely; these bound the TCP connect, socket read and login handshake so the
-     * blip surfaces as a thrown error the healthcheck recovers from instead of a permanent hang.
-     * They are set only on the Postgres branch — the H2 driver does not understand them.</p>
+     * restart recovered. The pool is HikariCP now ({@link #applyConnectionPool}), which bounds the
+     * borrow wait and validates a connection before handing it out; the driver-level timeouts stay
+     * because they are the layer that bounds the JDBC read itself — without a client-side socket
+     * timeout the read on a dead socket blocks indefinitely and the pool can only fail the borrow,
+     * never the socket. They are set only on the Postgres branch — the H2 driver does not
+     * understand them — and {@link #applyConnectionPool} mirrors them into HikariCP's
+     * {@code dataSource} namespace, which is what actually reaches the driver.</p>
      *
      * @param databaseUrl JDBC URL from the environment (blank/null selects the embedded H2 fallback)
      * @param databaseUsername Database user (Postgres branch only)
@@ -252,9 +295,7 @@ public final class EMF {
         props.put("hibernate.format_sql", "false");
         props.put("hibernate.max_fetch_depth", "5");
         props.put("hibernate.cache.use_second_level_cache", "false");
-        props.put("hibernate.connection.initial_pool_size", "1");
         applyPoolSize(props, null);
-        props.put("hibernate.connection.pool_validation_interval", "5");
         return props;
     }
 
@@ -305,7 +346,9 @@ public final class EMF {
      * {@link ConcurrencySizing#defaultConnectionPoolSize()}. The adaptive default replaces the
      * historical fixed 10, which lost to the application's own async worker count on many-core
      * hosts and produced "The internal connection pool has reached its maximum size" during
-     * processing bursts (#230).</p>
+     * processing bursts (#230). The resolved value is the pool's MAXIMUM — the pool now shrinks
+     * back to its idle floor between bursts, so a generous maximum no longer means a permanently
+     * held set of connections ({@link #applyConnectionPool}).</p>
      *
      * @param props Properties to write the resolved size into
      * @param configuredValue Value already carried by hibernate.properties, or null/blank when absent
@@ -333,6 +376,83 @@ public final class EMF {
         props.put(POOL_SIZE_PROPERTY, String.valueOf(poolSize));
     }
     
+    /**
+     * Configure HikariCP as the connection pool on top of an already-resolved configuration,
+     * whichever source produced it. Run as one post-step after both branches of
+     * {@link #getEntityManagerProperties()} so the pool the CI PostgreSQL jobs exercise is the pool
+     * production runs.
+     *
+     * <p>Hibernate's built-in pool grew one connection at a time, threw
+     * "The internal connection pool has reached its maximum size" the moment it was full (#230),
+     * never handed a connection back to the database once opened, and had neither a borrow timeout
+     * nor an on-checkout liveness check — a dead socket parked every request thread forever
+     * (2026-08-10). HikariCP replaces all four behaviours: a burst waits (bounded) instead of
+     * failing, connections above the idle floor are closed again after ten minutes, a borrowed
+     * connection is validated, and one held longer than the leak threshold logs the stack that took
+     * it as an apparent leak.</p>
+     *
+     * <p>The size resolved by {@link #applyPoolSize} is HikariCP's MAXIMUM; that key stays in the
+     * properties as the single source of the resolved value. The pgjdbc timeouts are mirrored into
+     * {@code hibernate.hikari.dataSource.*}, the only route left to the driver once HikariCP owns
+     * the connections.</p>
+     *
+     * @param props Resolved EntityManager properties, mutated in place
+     * @return The same properties, for use as a return expression
+     */
+    static Properties applyConnectionPool(Properties props) {
+        props.put(PROVIDER_CLASS_PROPERTY, HIKARI_PROVIDER_CLASS);
+        props.put(HIKARI_PREFIX + "idleTimeout", HIKARI_IDLE_TIMEOUT_MS);
+        props.put(HIKARI_PREFIX + "connectionTimeout", HIKARI_CONNECTION_TIMEOUT_MS);
+        props.put(HIKARI_PREFIX + "poolName", HIKARI_POOL_NAME);
+        props.put(HIKARI_PREFIX + "leakDetectionThreshold", HIKARI_LEAK_DETECTION_THRESHOLD_MS);
+
+        Integer maximumPoolSize = readResolvedPoolSize(props);
+        if (maximumPoolSize != null) {
+            props.put(HIKARI_PREFIX + "maximumPoolSize", String.valueOf(maximumPoolSize));
+            // The floor never outgrows the ceiling: an operator pinning a pool size of 1 must get a
+            // configuration HikariCP accepts, not a refusal to boot.
+            props.put(HIKARI_PREFIX + "minimumIdle", String.valueOf(Math.min(HIKARI_MINIMUM_IDLE, maximumPoolSize)));
+        }
+
+        for (String name : DRIVER_TIMEOUT_PROPERTIES) {
+            String value = props.getProperty("hibernate.connection." + name);
+            if (value != null) {
+                props.put(HIKARI_PREFIX + "dataSource." + name, value);
+            }
+        }
+        return props;
+    }
+
+    /**
+     * Read back the pool size {@link #applyPoolSize} resolved. A value that is absent or not a
+     * positive number can only come from a hand-set {@value #POOL_SIZE_ENV}; it is reported and the
+     * sizing is left to HikariCP's own defaults rather than turned into a new boot failure.
+     *
+     * @param props Resolved EntityManager properties
+     * @return The pool size, or null when it cannot be read as a positive number
+     */
+    private static Integer readResolvedPoolSize(Properties props) {
+        String configured = props.getProperty(POOL_SIZE_PROPERTY);
+        if (Strings.isNullOrEmpty(configured)) {
+            log.warn("No {} resolved; leaving the connection pool sizing at the pool's own defaults",
+                    POOL_SIZE_PROPERTY);
+            return null;
+        }
+        try {
+            int parsed = Integer.parseInt(configured.trim());
+            if (parsed < 1) {
+                log.warn("Ignoring non-positive {}={}; leaving the connection pool sizing at the pool's "
+                        + "own defaults", POOL_SIZE_PROPERTY, configured);
+                return null;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            log.warn("Ignoring non-numeric {}={}; leaving the connection pool sizing at the pool's own "
+                    + "defaults", POOL_SIZE_PROPERTY, configured);
+            return null;
+        }
+    }
+
     /**
      * Private constructor.
      */
