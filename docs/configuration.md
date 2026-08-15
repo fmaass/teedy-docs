@@ -44,6 +44,12 @@ external URLs correctly, always set `DOCS_BASE_URL`.
 |----------|-------------|
 | `DOCS_DEFAULT_LANGUAGE` | Default OCR language. Supported: `eng`, `fra`, `ita`, `deu`, `spa`, `por`, `pol`, `rus`, `ukr`, `ara`, `hin`, `chi_sim`, `chi_tra`, `jpn`, `tha`, `kor`, `nld`, `tur`, `heb`, `hun`, `fin`, `swe`, `lav`, `dan`, `nor`, `vie`, `ces`, `sqi` |
 
+### OIDC / SSO
+
+| Variable | Description |
+|----------|-------------|
+| `DOCS_OIDC_*` | One variable per OIDC setting (`DOCS_OIDC_ENABLED`, `DOCS_OIDC_ISSUER`, `DOCS_OIDC_CLIENT_SECRET`, …), each the uppercased form of the matching `docs.oidc_*` system property. Deliver the client secret this way rather than as a `-D` flag: the JVM echoes `JAVA_TOOL_OPTIONS` to stderr at startup. Full table and precedence: [authentication](authentication.md#configuration) |
+
 ### E-mail (SMTP)
 
 | Variable | Description |
@@ -99,7 +105,8 @@ A few settings are read only as JVM system properties, passed via
 | `docs.header_authentication` | `true` to enable [header/proxy auth](authentication.md#3-header--reverse-proxy-authentication) |
 | `docs.header_authentication_trusted_proxies` | Comma-separated allowlist of IPs/CIDRs permitted to assert `X-Authenticated-User`. Empty list = fail-closed (all header auth refused). The `admin` account is never authenticated via this header |
 
-The full set of `docs.oidc_*` properties is documented on the
+The full set of `docs.oidc_*` properties — each with its `DOCS_OIDC_*` environment
+equivalent and the precedence between them — is documented on the
 [authentication page](authentication.md#configuration).
 
 ## Branding assets

@@ -40,28 +40,39 @@ standards-compliant provider.
 
 ### Configuration
 
-OIDC settings are read as JVM **system properties**, passed via `JAVA_TOOL_OPTIONS`
-(for example `-Ddocs.oidc_enabled=true`):
+Each of the 13 OIDC settings can be supplied as a JVM **system property** (via
+`JAVA_TOOL_OPTIONS`, for example `-Ddocs.oidc_enabled=true`) or as an **environment
+variable**. The environment name is the property name uppercased with every
+non-alphanumeric character replaced by an underscore — `docs.oidc_client_secret`
+becomes `DOCS_OIDC_CLIENT_SECRET` — so the mapping is mechanical and needs no lookup.
 
-| Property | Required | Description |
-|----------|----------|-------------|
-| `docs.oidc_enabled` | Yes | Set to `true` to enable OIDC |
-| `docs.oidc_issuer` | Yes | Issuer URL (e.g. `https://auth.example.com`) |
-| `docs.oidc_client_id` | Yes | OIDC client ID |
-| `docs.oidc_client_secret` | Yes | OIDC client secret (plaintext) |
-| `docs.oidc_redirect_uri` | Yes | Callback URL (e.g. `https://teedy.example.com/api/oidc/callback`) |
-| `docs.oidc_scope` | No | Scopes to request (default `openid profile email`) |
-| `docs.oidc_authorization_endpoint` | No | Override the authorization endpoint (see Docker networking below) |
-| `docs.oidc_token_endpoint` | No | Override the token endpoint (see Docker networking below) |
-| `docs.oidc_jwks_uri` | No | Override the JWKS URI (see Docker networking below) |
-| `docs.oidc_userinfo_endpoint` | No | Override the UserInfo endpoint. Consulted only when a configured claim is missing from the ID token. |
-| `docs.oidc_username_claim` | No | Claim used to derive the local username at provisioning (default `preferred_username`) |
-| `docs.oidc_email_claim` | No | Claim used for the user's email at provisioning and profile refresh (default `email`) |
+| Property | Environment variable | Required | Description |
+|----------|----------------------|----------|-------------|
+| `docs.oidc_enabled` | `DOCS_OIDC_ENABLED` | Yes | Set to `true` to enable OIDC |
+| `docs.oidc_issuer` | `DOCS_OIDC_ISSUER` | Yes | Issuer URL (e.g. `https://auth.example.com`) |
+| `docs.oidc_client_id` | `DOCS_OIDC_CLIENT_ID` | Yes | OIDC client ID |
+| `docs.oidc_client_secret` | `DOCS_OIDC_CLIENT_SECRET` | Yes | OIDC client secret (plaintext). **Use the environment variable, not a `-D` flag** — see the warning below |
+| `docs.oidc_redirect_uri` | `DOCS_OIDC_REDIRECT_URI` | Yes | Callback URL (e.g. `https://teedy.example.com/api/oidc/callback`) |
+| `docs.oidc_scope` | `DOCS_OIDC_SCOPE` | No | Scopes to request (default `openid profile email`) |
+| `docs.oidc_authorization_endpoint` | `DOCS_OIDC_AUTHORIZATION_ENDPOINT` | No | Override the authorization endpoint (see Docker networking below) |
+| `docs.oidc_token_endpoint` | `DOCS_OIDC_TOKEN_ENDPOINT` | No | Override the token endpoint (see Docker networking below) |
+| `docs.oidc_jwks_uri` | `DOCS_OIDC_JWKS_URI` | No | Override the JWKS URI (see Docker networking below) |
+| `docs.oidc_userinfo_endpoint` | `DOCS_OIDC_USERINFO_ENDPOINT` | No | Override the UserInfo endpoint. Consulted only when a configured claim is missing from the ID token. |
+| `docs.oidc_username_claim` | `DOCS_OIDC_USERNAME_CLAIM` | No | Claim used to derive the local username at provisioning (default `preferred_username`) |
+| `docs.oidc_email_claim` | `DOCS_OIDC_EMAIL_CLAIM` | No | Claim used for the user's email at provisioning and profile refresh (default `email`) |
+| `docs.oidc_username_verbatim` | `DOCS_OIDC_USERNAME_VERBATIM` | No | Provision the sanitized username claim verbatim, without the deterministic hash suffix (default `false`) |
+
+**Precedence** for every one of these settings: a value saved in the admin UI (the
+database) wins, then the `-D` system property, then the `DOCS_OIDC_*` environment
+variable, then the built-in default. An environment variable set to the empty string
+counts as unset and falls through to the default; a database field cleared in the UI
+also falls through, so clearing a field restores the deployment's own configuration
+rather than blanking it.
 
 The same settings can also be managed from the admin UI at **Settings → OIDC
-authentication** (a DB-backed configuration overrides the system properties without a
-restart). The client secret is entered as a masked field and is write-only — it is
-never returned to the browser.
+authentication** (a DB-backed configuration overrides the system properties and the
+environment without a restart). The client secret is entered as a masked field and is
+write-only — it is never returned to the browser.
 
 ![Settings → OIDC authentication with the config enabled, the provider and claim fields filled, and the client secret shown as a masked field.](images/oidc-settings.png)
 
@@ -113,17 +124,27 @@ browser-facing authorization endpoint from the server-to-server token/JWKS/UserI
 endpoints with explicit overrides:
 
 ```yaml
-JAVA_TOOL_OPTIONS: >-
-  -Ddocs.oidc_enabled=true
-  -Ddocs.oidc_issuer=https://auth.example.com
-  -Ddocs.oidc_client_id=teedy
-  -Ddocs.oidc_client_secret=your-secret-here
-  -Ddocs.oidc_redirect_uri=https://teedy.example.com/api/oidc/callback
-  -Ddocs.oidc_authorization_endpoint=https://auth.example.com/api/oidc/authorization
-  -Ddocs.oidc_token_endpoint=http://authelia:9091/api/oidc/token
-  -Ddocs.oidc_jwks_uri=http://authelia:9091/jwks.json
-  -Ddocs.oidc_userinfo_endpoint=http://authelia:9091/api/oidc/userinfo
+environment:
+  # The client secret goes here, never in JAVA_TOOL_OPTIONS.
+  DOCS_OIDC_CLIENT_SECRET: your-secret-here
+  JAVA_TOOL_OPTIONS: >-
+    -Ddocs.oidc_enabled=true
+    -Ddocs.oidc_issuer=https://auth.example.com
+    -Ddocs.oidc_client_id=teedy
+    -Ddocs.oidc_redirect_uri=https://teedy.example.com/api/oidc/callback
+    -Ddocs.oidc_authorization_endpoint=https://auth.example.com/api/oidc/authorization
+    -Ddocs.oidc_token_endpoint=http://authelia:9091/api/oidc/token
+    -Ddocs.oidc_jwks_uri=http://authelia:9091/jwks.json
+    -Ddocs.oidc_userinfo_endpoint=http://authelia:9091/api/oidc/userinfo
 ```
+
+> **Never put a secret in `JAVA_TOOL_OPTIONS`.** The JVM prints the full value of that
+> variable to stderr at every startup (`Picked up JAVA_TOOL_OPTIONS: …`), so a client
+> secret placed there is copied verbatim into the container logs, into `docker logs`,
+> and into any log shipper reading them. Deliver it as `DOCS_OIDC_CLIENT_SECRET`
+> instead — or save it in the admin UI, where it is stored write-only. The same
+> applies to any other value you consider sensitive: every setting in the table above
+> has a `DOCS_OIDC_*` equivalent.
 
 The authorization endpoint uses the external URL (browser redirect); the token,
 JWKS, and UserInfo endpoints use internal Docker DNS (server-to-server). The

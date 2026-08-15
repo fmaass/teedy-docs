@@ -8,6 +8,9 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+### Added
+- Every OIDC setting can be supplied as a `DOCS_OIDC_*` environment variable (`docs.oidc_client_secret` → `DOCS_OIDC_CLIENT_SECRET`), so the client secret no longer has to travel through `JAVA_TOOL_OPTIONS`, whose full value the JVM prints to stderr at startup. Precedence is unchanged where it existed: a value saved in the admin UI wins, then the `-D` system property, then the environment variable, then the built-in default; an empty environment variable counts as unset. The admin UI labels a field resolved from the environment the same way it already labels one resolved from a JVM property.
+
 ## [3.8.4] - 2026-08-14
 
 There is no database migration; the schema level remains 64.
