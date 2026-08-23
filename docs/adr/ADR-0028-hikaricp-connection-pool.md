@@ -1,4 +1,4 @@
-# ADR-0025 — HikariCP as the JDBC connection pool
+# ADR-0028 — HikariCP as the JDBC connection pool
 
 - **Status:** accepted
 - **Date:** 2026-08-15
