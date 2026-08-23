@@ -579,6 +579,7 @@ async function onEmlSelected(event: Event) {
           :tags="tagFilter.allTags"
           :placeholder="t('document.tags')"
           :filterPlaceholder="t('ui.tag_menu.search')"
+          :clearFilterLabel="t('document.search_clear')"
           class="w-full"
         />
       </div>

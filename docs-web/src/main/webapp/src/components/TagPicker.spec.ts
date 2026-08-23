@@ -17,13 +17,27 @@ const TAGS: Tag[] = [
   { id: 'tag-blue', name: 'Contract', color: '#1565c0', parent: null },
 ]
 
-function mountPicker(props: Record<string, unknown> = {}, attachTo?: HTMLElement) {
+function mountPicker(
+  props: Record<string, unknown> = {},
+  attachTo?: HTMLElement,
+  primeOptions?: Record<string, unknown>,
+) {
   return mount(TagPicker, {
-    props: { modelValue: [], tags: TAGS, placeholder: 'placeholder', ...props },
+    props: {
+      modelValue: [],
+      tags: TAGS,
+      placeholder: 'placeholder',
+      // The i18n mock returns the key, so the rendered clear reads as its locale key.
+      clearFilterLabel: 'document.search_clear',
+      ...props,
+    },
     // transition: false keeps the REAL <Transition> instead of VTU's stub — the
     // overlay's @enter hook is where PrimeVue applies autoFilterFocus, so stubbing
     // it out would silently skip the very behaviour the focus test asserts.
-    global: { plugins: [PrimeVue], stubs: { transition: false } },
+    global: {
+      plugins: [primeOptions ? [PrimeVue, primeOptions] : PrimeVue],
+      stubs: { transition: false },
+    },
     ...(attachTo ? { attachTo } : {}),
   })
 }
@@ -39,9 +53,12 @@ describe('TagPicker — option mapping', () => {
     ])
   })
 
-  it('enables type-to-filter and chip display', () => {
+  it('owns the filter box instead of PrimeVue\'s, and keeps chip display', () => {
+    // #286: PrimeVue's built-in filter keeps its text component-private, so no clear
+    // control can reach it (the #274 wall). The picker therefore disables it and renders
+    // its own search box in the overlay header.
     const multiselect = mountPicker().findComponent({ name: 'MultiSelect' })
-    expect(multiselect.props('filter')).toBe(true)
+    expect(multiselect.props('filter')).toBe(false)
     expect(multiselect.props('display')).toBe('chip')
   })
 
@@ -116,28 +133,27 @@ describe('TagPicker — forwarded identity and limits', () => {
 })
 
 describe('TagPicker — keyboard reachability (#171 acceptance)', () => {
-  it('opens the overlay from the exposed show(), with the filter rendered and autoFilterFocus armed', async () => {
+  it('opens the overlay from the exposed show(), landing the caret in the owned filter box', async () => {
     // The two halves of #171's keyboard path: a container-driven open (no click
-    // anywhere — the bulk popover cannot click its own picker) plus autoFilterFocus,
-    // which is what puts the caret in the filter once that overlay opens.
+    // anywhere — the bulk popover cannot click its own picker) plus the caret landing
+    // in the search box, which is what makes the next keystroke type into it.
     //
-    // The `document.activeElement` half of the acceptance is asserted in e2e
-    // (bulk.spec.ts, desktop and mobile) rather than here: jsdom runs PrimeVue's
-    // overlay `@enter` hook before the teleported node is focusable, so its focus()
-    // call is a no-op in this environment while working in a real browser.
+    // PrimeVue's own `autoFilterFocus` focuses ITS filter input, which no longer
+    // exists (#286 owns the box), so the picker focuses the owned input on `show`.
     const host = document.createElement('div')
     document.body.appendChild(host)
     const wrapper = mountPicker({ filterPlaceholder: 'filter' }, host)
 
     const multiselect = wrapper.findComponent({ name: 'MultiSelect' })
-    expect(multiselect.props('autoFilterFocus')).toBe(true)
     expect((multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(false)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
 
     expect((multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(true)
-    expect(document.querySelector('.p-multiselect-filter')).not.toBeNull()
+    const filter = document.querySelector('input.tp-filter-input')
+    expect(filter).not.toBeNull()
+    expect(document.activeElement).toBe(filter)
 
     // hide() is the other half of the exposed contract (the popover closes on apply).
     ;(wrapper.vm as unknown as { hide: () => void }).hide()
@@ -145,6 +161,226 @@ describe('TagPicker — keyboard reachability (#171 acceptance)', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     await flushPromises()
     expect((multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(false)
+
+    wrapper.unmount()
+    host.remove()
+  })
+})
+
+// #286 — the reporter asked for the (×) the main search bar has on the TAG SEARCH box of
+// the document-edit picker: it clears the TYPED TEXT only. The text deliberately survives
+// adding a tag (that is how several tags get added from one search), so the × is the way
+// out when that persistence is not what you want. PrimeVue keeps its own filter value
+// component-private (the #274 wall), so the picker owns the box.
+describe('TagPicker — owned tag search box and its clear (#286)', () => {
+  async function openPicker(
+    props: Record<string, unknown> = {},
+    primeOptions?: Record<string, unknown>,
+  ) {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const wrapper = mountPicker({ filterPlaceholder: 'filter', ...props }, host, primeOptions)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    return { wrapper, host }
+  }
+
+  // The overlay is teleported to <body>, so it is queried through the document rather
+  // than the wrapper.
+  const filterBox = () => document.querySelector('input.tp-filter-input') as HTMLInputElement | null
+  const clearButton = () => document.querySelector('.tp-filter-clear') as HTMLElement | null
+  const optionLabels = () =>
+    Array.from(document.querySelectorAll('li[role="option"]')).map((li) => li.textContent?.trim())
+
+  async function type(text: string) {
+    const input = filterBox()
+    expect(input, 'the picker renders its own search box').not.toBeNull()
+    input!.value = text
+    input!.dispatchEvent(new Event('input'))
+    await flushPromises()
+  }
+
+  it('winnows the option list as text is typed into the owned search box', async () => {
+    const { wrapper, host } = await openPicker()
+    expect(optionLabels()).toEqual(['Invoice', 'Receipt', 'Contract'])
+
+    // Lower-case fragment against a capitalised name: the match is case-insensitive,
+    // as PrimeVue's built-in contains filter was.
+    await type('rec')
+    expect(optionLabels()).toEqual(['Receipt'])
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('keeps the search box wired to the option list, live result count included', async () => {
+    // Everything PrimeVue attached to the filter input it no longer renders: the
+    // searchbox role, the aria-owns link to the listbox, and the polite live region that
+    // tells a screen-reader user how many options survived the search. Losing the region
+    // would make the winnowing silent for exactly the users who cannot see it.
+    const { wrapper, host } = await openPicker()
+    const input = filterBox()!
+    const list = document.querySelector('ul[role="listbox"]') as HTMLElement
+    expect(input.getAttribute('role')).toBe('searchbox')
+    expect(input.getAttribute('aria-owns')).toBe(list.id)
+
+    const liveRegion = () => document.querySelector('[role="status"][aria-live="polite"]')
+    expect(liveRegion()?.textContent).toContain('3')
+
+    await type('rec')
+    expect(liveRegion()?.textContent).toContain('1')
+
+    await type('zzz')
+    expect(liveRegion()?.textContent?.trim(), 'an empty result still announces').not.toBe('')
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('says nothing MATCHED when a search comes up empty, not that there are no tags', async () => {
+    // PrimeVue chooses between the two messages off ITS filter value, which is now
+    // permanently empty — left alone it would tell a user searching a well-stocked tag
+    // list that no tags exist. Sentinel strings, so the assertion pins the CHOICE rather
+    // than PrimeVue's shipped English.
+    const { wrapper, host } = await openPicker(
+      {},
+      { locale: { emptyMessage: 'NO-TAGS-AT-ALL', emptySearchMessage: 'NOTHING-MATCHED' } },
+    )
+    await type('zzz')
+    expect(optionLabels()).toEqual(['NOTHING-MATCHED'])
+
+    clearButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(optionLabels()).toEqual(['Invoice', 'Receipt', 'Contract'])
+    wrapper.unmount()
+    host.remove()
+
+    // The other arm: a genuinely empty tag list still says so.
+    const empty = await openPicker(
+      { tags: [] },
+      { locale: { emptyMessage: 'NO-TAGS-AT-ALL', emptySearchMessage: 'NOTHING-MATCHED' } },
+    )
+    expect(optionLabels()).toEqual(['NO-TAGS-AT-ALL'])
+    empty.wrapper.unmount()
+    empty.host.remove()
+  })
+
+  it('still commits a tag from the search box by keyboard alone (type, ArrowDown, Enter)', async () => {
+    // The keys PrimeVue's own filter input handled — arrow to a match, Enter to take it —
+    // have to keep working from a box PrimeVue no longer renders, or #171's keyboard path
+    // dies quietly: focus lands in the search box, typing narrows, and nothing commits.
+    const { wrapper, host } = await openPicker()
+    await type('rec')
+    const input = filterBox()!
+    for (const code of ['ArrowDown', 'Enter']) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }))
+      await flushPromises()
+    }
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['tag-green']])
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('drops a stale option highlight when the search narrows under it', async () => {
+    // PrimeVue's native filter resets `focusedOptionIndex` on every keystroke; an owned
+    // box that only feeds the option list leaves the highlight parked on an index the
+    // narrowed list no longer has — aria-activedescendant then names a row that is not
+    // on screen, and Enter commits against that phantom index.
+    const { wrapper, host } = await openPicker()
+    const input = filterBox()!
+    for (const code of ['ArrowDown', 'ArrowDown']) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }))
+      await flushPromises()
+    }
+    expect(optionLabels()).toEqual(['Invoice', 'Receipt', 'Contract'])
+
+    // Narrow to ONE option, which the old highlight (index 1) is past the end of.
+    await type('con')
+    expect(optionLabels()).toEqual(['Contract'])
+
+    const activeId = input.getAttribute('aria-activedescendant')
+    expect(
+      activeId === null || document.getElementById(activeId) !== null,
+      `aria-activedescendant "${activeId}" points at no rendered option`,
+    ).toBe(true)
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    // Enter may commit the visible survivor or nothing at all, but never a tag the
+    // search had already removed from view.
+    const committed = wrapper.emitted('update:modelValue')?.at(-1)
+    expect(committed === undefined || JSON.stringify(committed) === '[["tag-blue"]]').toBe(true)
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('shows a clear control labelled from document.search_clear only once text is typed', async () => {
+    const { wrapper, host } = await openPicker()
+    expect(clearButton(), 'an empty box offers no clear').toBeNull()
+
+    await type('rec')
+    const clear = clearButton()
+    expect(clear, 'a clear appears once the box has text').not.toBeNull()
+    // A REAL button in the accessibility tree with an accessible name — not an icon in
+    // PrimeVue's aria-hidden InputIcon slot, which is where #274 first put it.
+    expect(clear!.tagName).toBe('BUTTON')
+    expect(clear!.textContent?.trim()).toBe('document.search_clear')
+    expect(clear!.closest('[aria-hidden="true"]')).toBeNull()
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('clears the typed text, restores every option and keeps the caret in the box', async () => {
+    const { wrapper, host } = await openPicker()
+    await type('rec')
+    expect(optionLabels()).toEqual(['Receipt'])
+
+    // Pressing the clear is what takes the caret out of the box in a real browser, so
+    // model that: blur first, then click. Without the restore this assertion would pass
+    // on the focus the overlay-open already put there, proving nothing.
+    filterBox()!.blur()
+    expect(document.activeElement).not.toBe(filterBox())
+
+    const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    clearButton()!.dispatchEvent(mousedown)
+    expect(mousedown.defaultPrevented, 'the press itself does not steal the caret').toBe(true)
+    clearButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(filterBox()!.value, 'the clear empties the search box').toBe('')
+    expect(optionLabels(), 'and the full option list is back').toEqual([
+      'Invoice',
+      'Receipt',
+      'Contract',
+    ])
+    expect(document.activeElement, 'the caret stays in the box for the next search').toBe(
+      filterBox(),
+    )
+    expect(clearButton(), 'the clear goes away with the text').toBeNull()
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('keeps the typed text when a tag is selected, so several tags can be added from one search', async () => {
+    const { wrapper, host } = await openPicker()
+    await type('rec')
+    const option = document.querySelector('li[role="option"]') as HTMLElement
+    option.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['tag-green']])
+
+    // The parent owns the model, so mirror the selection back the way a consumer does.
+    await wrapper.setProps({ modelValue: ['tag-green'] })
+    await flushPromises()
+
+    expect(filterBox()!.value, 'the search text survives adding a tag').toBe('rec')
+    expect(optionLabels(), 'and the list stays winnowed to that search').toEqual(['Receipt'])
 
     wrapper.unmount()
     host.remove()

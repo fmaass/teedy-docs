@@ -456,16 +456,31 @@ test.describe('tag pickers (behavior C)', () => {
     // edit form with the quick menu and slide-over, which got this in #171. Until the
     // shared TagPicker the edit form had no autoFilterFocus, so typing after opening
     // went nowhere until you clicked the filter as well.
-    await expect(overlay.locator('.p-multiselect-filter')).toBeFocused()
-
-    // The filter box exists (the #14/#23 addition).
-    const filterInput = overlay.locator('input.p-multiselect-filter, .p-multiselect-filter input, input[role=searchbox]').first()
+    // The search box is the picker's OWN since #286 — PrimeVue's built-in filter keeps
+    // its text component-private, so no clear (×) could ever empty it.
+    const filterInput = overlay.locator('input.tp-filter-input')
+    await expect(filterInput).toBeFocused()
     await expect(filterInput).toBeVisible()
 
     // Type a fragment unique to keepTag: the matching option stays, the other is
     // removed — proving the filter actually filters (not a dead box).
     await filterInput.fill(keepTag)
     await expect(page.getByRole('option', { name: keepTag })).toBeVisible()
+    await expect(page.getByRole('option', { name: dropTag })).toHaveCount(0)
+
+    // #286 — the clear (×) the reporter asked for: it appears only once something is
+    // typed, empties the box in one press, brings the winnowed-away option back and
+    // leaves the caret in the field for the next search.
+    const clear = overlay.locator('.tp-filter-clear')
+    await expect(clear).toBeVisible()
+    await clear.click()
+    await expect(filterInput, 'the clear empties the search box').toHaveValue('')
+    await expect(page.getByRole('option', { name: dropTag })).toBeVisible()
+    await expect(filterInput, 'the caret stays in the field').toBeFocused()
+    await expect(clear, 'and the clear goes away with the text').toHaveCount(0)
+
+    // Re-narrow to the tag this test selects below.
+    await filterInput.fill(keepTag)
     await expect(page.getByRole('option', { name: dropTag })).toHaveCount(0)
 
     // Select the surviving option, then close the overlay.

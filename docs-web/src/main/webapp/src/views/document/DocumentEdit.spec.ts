@@ -172,11 +172,16 @@ describe('DocumentEdit — tag picker (#14 filter, #23 colored chips)', () => {
     expect(wrapper.findComponent(TagPicker).props('selectionLimit')).toBeUndefined()
   })
 
-  it('#14: the document-tag MultiSelect enables type-to-filter', async () => {
+  it('#14/#286: the tag search box is the picker\'s own, with a clear labelled from the shared key', async () => {
+    // PrimeVue's built-in filter is off because its text is unreachable (#286), so the
+    // form must hand the picker the label its clear (×) is announced with — the same
+    // `document.search_clear` the main search bar and the quick menu use. Wired here
+    // rather than inside the picker, which owns no locale keys.
     const wrapper = await mountEdit()
     const multiselect = wrapper.findComponent({ name: 'MultiSelect' })
     expect(multiselect.exists()).toBe(true)
-    expect(multiselect.props('filter')).toBe(true)
+    expect(multiselect.props('filter')).toBe(false)
+    expect(wrapper.findComponent(TagPicker).props('clearFilterLabel')).toBe(en.document.search_clear)
   })
 
   it('#23: the MultiSelect carries the wrap-enabling class (chips wrap, do not clip)', async () => {

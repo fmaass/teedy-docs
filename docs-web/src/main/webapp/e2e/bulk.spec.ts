@@ -241,7 +241,9 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   // Open the tag action. The ONLY click in the keyboard path is the toolbar trigger:
   // the popover opens the picker's overlay itself and autoFilterFocus lands the caret
   // in the filter, so the very next keystroke types into it.
-  const filterInput = page.locator('.p-multiselect-filter')
+  // The picker's OWN search box (#286): PrimeVue's built-in filter is off, because its
+  // text was unreachable for the clear (×) the reporter asked for.
+  const filterInput = page.locator('input.tp-filter-input')
   await expect(async () => {
     if (!(await popover.isVisible().catch(() => false))) {
       await bar.getByRole('button', { name: 'Add tag' }).click({ timeout: 2000 })

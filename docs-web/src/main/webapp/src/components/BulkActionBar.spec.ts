@@ -96,8 +96,13 @@ describe('BulkActionBar — the shared tag picker (#182)', () => {
     ])
   })
 
-  it('offers type-to-filter over the tag list', () => {
-    expect(mountBar().findComponent(TagPicker).findComponent({ name: 'MultiSelect' }).props('filter')).toBe(true)
+  it('offers type-to-filter over the tag list, through the picker\'s own search box (#286)', () => {
+    // PrimeVue's built-in filter is off: its text is component-private, so the clear (×)
+    // could not reach it. The bulk bar supplies that clear's accessible name, since the
+    // shared picker holds no locale keys of its own.
+    const picker = mountBar().findComponent(TagPicker)
+    expect(picker.findComponent({ name: 'MultiSelect' }).props('filter')).toBe(false)
+    expect(picker.props('clearFilterLabel')).toBe('document.search_clear')
   })
 
   it('opens the picker overlay when the popover shows, so the filter is keyboard-reachable', async () => {
@@ -111,7 +116,9 @@ describe('BulkActionBar — the shared tag picker (#182)', () => {
     await flushPromises()
 
     expect((multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(true)
-    expect(multiselect.props('autoFilterFocus')).toBe(true)
+    // And the caret is in the picker's own search box, so the next keystroke searches
+    // (PrimeVue's autoFilterFocus targeted a filter input that no longer exists — #286).
+    expect(document.activeElement).toBe(document.querySelector('input.tp-filter-input'))
   })
 })
 

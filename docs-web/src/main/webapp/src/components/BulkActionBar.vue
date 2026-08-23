@@ -153,6 +153,7 @@ function applyLang() {
           :selectionLimit="1"
           :placeholder="t('ui.bulk.choose_tag')"
           :filterPlaceholder="t('ui.tag_menu.search')"
+          :clearFilterLabel="t('document.search_clear')"
           :ariaLabel="t('ui.bulk.choose_tag')"
           class="bulk-select"
         />
