@@ -26,6 +26,7 @@ const emit = defineEmits<{
   delete: []
   clear: []
   download: []
+  duplicate: []
 }>()
 
 const languages = SUPPORTED_LANGUAGES
@@ -106,6 +107,14 @@ function applyLang() {
         :disabled="!!progress"
         :loading="downloading"
         @click="emit('download')"
+      />
+      <Button
+        size="small"
+        severity="secondary"
+        icon="pi pi-copy"
+        :label="t('ui.bulk.duplicate')"
+        :disabled="!!progress || downloading"
+        @click="emit('duplicate')"
       />
       <Button
         size="small"

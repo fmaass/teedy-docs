@@ -1182,6 +1182,8 @@
       "download": "下載 ZIP",
       "download_empty": "所選文件沒有可下載的檔案",
       "download_failed": "無法下載所選文件",
+      "duplicate": "建立複本",
+      "duplicate_quota": "複本需要 {required}，但您的儲存空間配額僅剩 {available} 可用。請取消選取部分文件或釋出空間後再試一次。",
       "delete": "刪除",
       "clear": "清除選取",
       "choose_tag": "選擇一個標籤",

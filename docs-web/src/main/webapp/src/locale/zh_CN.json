@@ -1182,6 +1182,8 @@
       "download": "下载 ZIP",
       "download_empty": "所选文档没有可下载的文件",
       "download_failed": "无法下载所选文档",
+      "duplicate": "创建副本",
+      "duplicate_quota": "副本需要 {required}，但您的存储配额仅剩 {available} 可用。请取消选择部分文档或释放空间后重试。",
       "delete": "删除",
       "clear": "清除选择",
       "choose_tag": "选择一个标签",

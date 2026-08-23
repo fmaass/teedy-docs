@@ -1182,6 +1182,8 @@
       "download": "Scarica ZIP",
       "download_empty": "I documenti selezionati non hanno file da scaricare",
       "download_failed": "Impossibile scaricare i documenti selezionati",
+      "duplicate": "Duplica",
+      "duplicate_quota": "Le copie richiedono {required}, ma della tua quota di archiviazione sono liberi solo {available}. Deseleziona alcuni documenti oppure libera spazio e riprova.",
       "delete": "Elimina",
       "clear": "Deseleziona",
       "choose_tag": "Scegli un tag",

@@ -15,6 +15,7 @@ import TagQuickMenu from '../../components/TagQuickMenu.vue'
 import type { DataTableSortEvent } from 'primevue/datatable'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { useConfirm } from 'primevue/useconfirm'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 import DocumentSearchBar from '../../components/DocumentSearchBar.vue'
@@ -31,9 +32,11 @@ import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentGallery from '../../components/DocumentGallery.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 import BulkActionBar from '../../components/BulkActionBar.vue'
-import { updateDocument, deleteDocument } from '../../api/document'
+import { updateDocument, deleteDocument, duplicateDocument } from '../../api/document'
 import { getFileList, zipFilesBlob } from '../../api/file'
 import { triggerBlobDownload } from '../../utils/download'
+import { formatBytes } from '../../utils/formatters'
+import { useAuthStore } from '../../stores/auth'
 import {
   runBulk,
   buildAddTagParams,
@@ -52,6 +55,8 @@ const tf = useTagFilterStore()
 const queryClient = useQueryClient()
 const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
+const confirm = useConfirm()
+const auth = useAuthStore()
 const { addTag, removeTag } = useDocumentTags()
 
 // --- Pagination & sort state ---
@@ -554,6 +559,77 @@ function bulkDelete() {
   })
 }
 
+// Bulk duplicate (#294). Same fan-out shape as every other bulk action — the backend has
+// no bulk endpoint — with one pre-flight step in front of it: duplicating charges the
+// requester's storage quota per copy, so a batch that cannot fit is stopped BEFORE the
+// first call rather than half-completed and reported as N failures.
+//
+// The estimate is deliberately BEST-EFFORT and is NOT the quota guard: it reads the
+// caller's own quota snapshot, so a concurrent upload (another tab, the mobile app) can
+// still win the race. DocumentDuplicationService re-checks under a lock on every copy and
+// remains the authority; a copy that loses the race fails per-document exactly like any
+// other bulk failure.
+const bulkDuplicating = ref(false)
+
+/**
+ * Bytes the copies of `docs` will occupy, or null when the estimate cannot be taken.
+ *
+ * DocumentListItem carries no size (only `file_count`), so the sizes come from one
+ * /file/list call per selected document — the same read fan-out bulkDownload does, and the
+ * same DAO call (FileDao.getByDocumentId) the backend sums for its own quota check, so the
+ * two totals agree.
+ */
+async function estimateDuplicateSize(docs: DocumentListItem[]): Promise<number | null> {
+  try {
+    const lists = await Promise.all(docs.map((doc) => getFileList(doc.id)))
+    return lists.flat().reduce((total, file) => total + (file.size ?? 0), 0)
+  } catch {
+    // Fail OPEN: an unreadable file list must not block a duplicate the quota would have
+    // allowed. The server-side check still refuses a genuinely over-quota copy.
+    return null
+  }
+}
+
+async function bulkDuplicate() {
+  const docs = [...selectedDocs.value]
+  // `bulkDuplicating` covers the await window below, during which no progress bar exists
+  // yet to disable the bar — runBulkOp's own guard only starts once the loop does.
+  if (!docs.length || bulkProgress.value || bulkDownloading.value || bulkDuplicating.value) return
+  bulkDuplicating.value = true
+  let required: number | null
+  try {
+    required = await estimateDuplicateSize(docs)
+  } finally {
+    bulkDuplicating.value = false
+  }
+
+  const user = auth.user
+  if (required !== null && user) {
+    // Mirrors the backend predicate exactly (DocumentDuplicationService): a negative quota
+    // or usage is refused outright, and a quota of 0 leaves no headroom at all.
+    const available = user.storage_quota - user.storage_current
+    if (user.storage_quota < 0 || user.storage_current < 0 || required > available) {
+      confirm.require({
+        header: t('ui.bulk.duplicate'),
+        message: t('ui.bulk.duplicate_quota', {
+          required: formatBytes(required),
+          available: formatBytes(Math.max(0, available)),
+        }),
+        icon: 'pi pi-exclamation-triangle',
+        // Acknowledge-only: nothing can be proceeded with, so the second button is
+        // suppressed rather than offered as a no-op choice.
+        acceptProps: { label: t('ok'), severity: 'secondary' },
+        rejectProps: { style: 'display: none' },
+      })
+      return
+    }
+  }
+
+  // Serial by construction: runBulk awaits each copy before starting the next, which is
+  // what keeps a large batch from stampeding the duplication service's global quota lock.
+  runBulkOp((doc) => duplicateDocument(doc.id))
+}
+
 // Bulk ZIP download (#89b). No by-document ZIP endpoint exists, so we CLIENT-SIDE UNION:
 // fetch each selected document's file list (one /file/list call per selected document) and
 // POST the union of every file ID to the existing POST /file/zip. This zips EVERY file of
@@ -662,6 +738,7 @@ async function bulkDownload() {
         @add-tag="bulkAddTag"
         @set-language="bulkSetLanguage"
         @download="bulkDownload"
+        @duplicate="bulkDuplicate"
         @delete="bulkDelete"
         @clear="clearSelection"
       />

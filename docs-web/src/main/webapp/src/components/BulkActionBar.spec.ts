@@ -180,3 +180,32 @@ describe('BulkActionBar — the language action is untouched', () => {
     expect(wrapper.emitted('setLanguage')).toEqual([['fra']])
   })
 })
+
+// #294: bulk duplicate. The bar is the ONLY place this action is reachable from, and
+// the view is its only listener, so the emit's name and the button's presence have to
+// be pinned here — an inert or renamed button would otherwise ship green.
+describe('BulkActionBar — the duplicate action (#294)', () => {
+  function duplicateButton(wrapper: ReturnType<typeof mountBar>) {
+    return wrapper
+      .findAll('.bulk-actions button')
+      .find((b) => b.text().includes('ui.bulk.duplicate'))
+  }
+
+  it('renders a Duplicate action alongside the other bulk actions', () => {
+    expect(duplicateButton(mountBar())).toBeDefined()
+  })
+
+  it('clicking Duplicate emits `duplicate` exactly once, with no payload', async () => {
+    const wrapper = mountBar()
+    await duplicateButton(wrapper)!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('duplicate')).toEqual([[]])
+  })
+
+  it('is disabled while another bulk op is in flight, so a batch cannot be double-started', () => {
+    const inProgress = mountBar({ progress: [1, 2] as [number, number] })
+    expect(duplicateButton(inProgress)!.attributes('disabled')).toBeDefined()
+    const zipping = mountBar({ downloading: true })
+    expect(duplicateButton(zipping)!.attributes('disabled')).toBeDefined()
+  })
+})

@@ -1182,6 +1182,8 @@
       "download": "Descargar ZIP",
       "download_empty": "Los documentos seleccionados no tienen archivos que descargar",
       "download_failed": "No se pudieron descargar los documentos seleccionados",
+      "duplicate": "Duplicar",
+      "duplicate_quota": "Las copias necesitan {required}, pero solo hay {available} libres de su cuota de almacenamiento. Desmarque algunos documentos o libere espacio y vuelva a intentarlo.",
       "delete": "Eliminar",
       "clear": "Borrar selección",
       "choose_tag": "Elija una etiqueta",

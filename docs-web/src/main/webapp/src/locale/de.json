@@ -1182,6 +1182,8 @@
       "download": "ZIP herunterladen",
       "download_empty": "Die ausgewählten Dokumente haben keine Dateien zum Herunterladen",
       "download_failed": "Die ausgewählten Dokumente konnten nicht heruntergeladen werden",
+      "duplicate": "Duplizieren",
+      "duplicate_quota": "Die Kopien benötigen {required}, aber nur {available} deines Speicherkontingents sind frei. Hebe die Auswahl einiger Dokumente auf oder gib Speicherplatz frei und versuche es erneut.",
       "delete": "Löschen",
       "clear": "Auswahl aufheben",
       "choose_tag": "Schlagwort auswählen",

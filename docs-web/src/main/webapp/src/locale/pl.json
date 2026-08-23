@@ -1182,6 +1182,8 @@
       "download": "Pobierz ZIP",
       "download_empty": "Wybrane dokumenty nie mają plików do pobrania",
       "download_failed": "Nie udało się pobrać wybranych dokumentów",
+      "duplicate": "Duplikuj",
+      "duplicate_quota": "Kopie wymagają {required}, ale w Twoim limicie miejsca wolne jest tylko {available}. Odznacz część dokumentów lub zwolnij miejsce i spróbuj ponownie.",
       "delete": "Usuń",
       "clear": "Wyczyść zaznaczenie",
       "choose_tag": "Wybierz etykietę",

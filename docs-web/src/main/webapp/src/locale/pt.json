@@ -1182,6 +1182,8 @@
       "download": "Transferir ZIP",
       "download_empty": "Os documentos selecionados não têm ficheiros para transferir",
       "download_failed": "Não foi possível transferir os documentos selecionados",
+      "duplicate": "Duplicar",
+      "duplicate_quota": "As cópias precisam de {required}, mas apenas {available} da sua quota de armazenamento está livre. Desmarque alguns documentos ou liberte espaço e tente novamente.",
       "delete": "Eliminar",
       "clear": "Limpar seleção",
       "choose_tag": "Escolher uma etiqueta",

@@ -294,3 +294,57 @@ test('the bulk tag picker is filterable, keyboard-operable and applies exactly o
   await expect(headerTags.getByText(tagName, { exact: true })).toBeVisible()
   await expect(headerTags.getByText(otherTag, { exact: true })).toHaveCount(0)
 })
+
+// #294 — bulk duplicate. The single-document duplicate already has its own spec
+// (duplicate.spec.ts); what is new here is the FAN-OUT: one copy per selected row, run
+// serially over the existing POST /document/{id}/duplicate, reported through the shared
+// bulk summary. A pre-flight storage estimate can stop the batch before it starts, so the
+// assertion below is also the proof that a normal-sized selection is NOT stopped.
+test('bulk duplicate copies every selected document', async ({ page, cleanup }) => {
+  const titleA = unique('bulk-dup-a')
+  const titleB = unique('bulk-dup-b')
+  const docA = await createDocument(page, titleA)
+  cleanup.defer('purge the first seeded document', () => deleteDocApi(page.request, docA.id))
+  const docB = await createDocument(page, titleB)
+  cleanup.defer('purge the second seeded document', () => deleteDocApi(page.request, docB.id))
+
+  // The copies get server-generated ids, so teardown cannot know them up front. Collect
+  // them from the duplicate responses themselves — the only place they are ever reported.
+  const copyIds: string[] = []
+  page.on('response', (response) => {
+    if (
+      response.request().method() === 'POST' &&
+      /\/api\/document\/[^/]+\/duplicate$/.test(response.url()) &&
+      response.ok()
+    ) {
+      void response
+        .json()
+        .then((body: { id?: string }) => {
+          if (body?.id) copyIds.push(body.id)
+        })
+        .catch(() => {})
+    }
+  })
+  cleanup.defer('purge the copies', async () => {
+    for (const id of copyIds) await deleteDocApi(page.request, id)
+  })
+
+  await gotoDocumentList(page)
+  const bar = page.locator('.bulk-bar')
+  await page.getByRole('row', { name: new RegExp(titleA) }).getByRole('checkbox').check()
+  await page.getByRole('row', { name: new RegExp(titleB) }).getByRole('checkbox').check()
+  await expect(bar).toBeVisible()
+  await expect(bar.getByText('2 selected')).toBeVisible()
+
+  await bar.getByRole('button', { name: 'Duplicate' }).click()
+
+  // Success surfaces the shared summary toast, then the selection clears (bar hides).
+  await expect(page.getByText('Bulk action complete').first()).toBeVisible()
+  await expect(bar).toBeHidden()
+
+  // PROVE the fan-out: a "<title> (copy)" row for BOTH sources — one copy each, not one
+  // for the first selected document only.
+  await expect(page.getByText(`${titleA} (copy)`, { exact: true })).toHaveCount(1)
+  await expect(page.getByText(`${titleB} (copy)`, { exact: true })).toHaveCount(1)
+  expect(copyIds).toHaveLength(2)
+})

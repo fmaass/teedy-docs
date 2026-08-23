@@ -156,6 +156,13 @@ vi.mock('../../composables/useConfirmDanger', () => ({
 vi.mock('../../composables/useClampedOffset', () => ({ useClampedOffset: vi.fn() }))
 const toastAddSpy = vi.hoisted(() => vi.fn())
 vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAddSpy }) }))
+// #294: the view raises a plain (non-danger) dialog when a bulk duplicate would blow the
+// storage quota. Neither path is exercised here; the mock exists so mounting does not need
+// PrimeVue's ConfirmationService, and the auth store does not need a live Pinia.
+vi.mock('primevue/useconfirm', () => ({ useConfirm: () => ({ require: vi.fn() }) }))
+vi.mock('../../stores/auth', () => ({
+  useAuthStore: () => ({ user: { storage_current: 0, storage_quota: 1_000_000_000 } }),
+}))
 
 const invalidateQueriesSpy = vi.hoisted(() => vi.fn())
 // cancelQueries is awaited in the delete handler, so the spy must resolve.

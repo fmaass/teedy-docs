@@ -1182,6 +1182,8 @@
       "download": "Shkarko ZIP",
       "download_empty": "Dokumentet e zgjedhura nuk kanë skedarë për t'u shkarkuar",
       "download_failed": "Dokumentet e zgjedhura nuk mund të shkarkoheshin",
+      "duplicate": "Dyfisho",
+      "duplicate_quota": "Kopjet kanë nevojë për {required}, por nga kuota juaj e hapësirës është e lirë vetëm {available}. Hiqni zgjedhjen e disa dokumenteve ose lironi hapësirë dhe provoni sërish.",
       "delete": "Fshi",
       "clear": "Pastro zgjedhjen",
       "choose_tag": "Zgjidh një etiketë",
