@@ -11,6 +11,9 @@ import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 
+import java.util.ArrayList;
+import java.util.List;
+
 
 /**
  * Test the metadata resource.
@@ -18,6 +21,14 @@ import jakarta.ws.rs.core.Response.Status;
  * @author bgamard
  */
 public class TestMetadataResource extends BaseJerseyTest {
+    /**
+     * Deliberately non-alphabetical insertion order, deliberately mixed case: #291 asks for
+     * alphabetical "no matter if first char is capitalized or not".
+     */
+    private static final List<String> ORDERING_NAMES = List.of(
+            "Zulu291", "alpha291", "Mike291", "bravo291", "Yankee291",
+            "Charlie291", "delta291", "Echo291", "foxtrot291", "Golf291");
+
     /**
      * Test the metadata resource.
      */
@@ -175,5 +186,56 @@ public class TestMetadataResource extends BaseJerseyTest {
         target().path("/metadata/" + docKindId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete(JsonObject.class);
+    }
+
+    /**
+     * {@code GET /metadata} with no sort_column must list the custom metadata definitions
+     * alphabetically by name, case-insensitively (#291). It used to default to sort column 0 —
+     * the {@code MET_ID_C} alias {@code c0}, a random UUID — so Settings -> Metadata and the
+     * new-document form showed the fields in an order that looked random to the user.
+     */
+    @Test
+    public void testDefaultListingIsAlphabeticalByName() {
+        // Login admin
+        String adminToken = adminToken();
+
+        List<String> createdIds = new ArrayList<>();
+        try {
+            for (String name : ORDERING_NAMES) {
+                JsonObject created = target().path("/metadata").request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                        .put(Entity.form(new Form().param("name", name).param("type", "STRING")), JsonObject.class);
+                createdIds.add(created.getString("id"));
+            }
+
+            // No sort_column / asc: exactly what the SPA's listMetadata() sends.
+            JsonObject json = target().path("/metadata").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .get(JsonObject.class);
+            JsonArray metadata = json.getJsonArray("metadata");
+
+            List<String> actual = new ArrayList<>();
+            for (int i = 0; i < metadata.size(); i++) {
+                actual.add(metadata.getJsonObject(i).getString("name"));
+            }
+
+            // Guard against a vacuous pass: every definition just created must be listed.
+            Assertions.assertTrue(actual.containsAll(ORDERING_NAMES),
+                    "GET /metadata must list every created definition, got " + actual);
+
+            List<String> expected = new ArrayList<>(actual);
+            expected.sort(String.CASE_INSENSITIVE_ORDER);
+
+            Assertions.assertEquals(expected, actual,
+                    "GET /metadata must list definitions alphabetically by name, not in MET_ID_C (UUID) order");
+        } finally {
+            // addMetadata() returns EVERY defined field: a leaked definition would inflate the
+            // metadata-array size other shared-DB tests assert on.
+            for (String id : createdIds) {
+                target().path("/metadata/" + id).request()
+                        .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                        .delete(JsonObject.class);
+            }
+        }
     }
 }

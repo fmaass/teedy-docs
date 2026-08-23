@@ -33,7 +33,7 @@ public class MetadataResource extends BaseResource {
      * @api {get} /metadata Get configured metadata
      * @apiName GetMetadata
      * @apiGroup Metadata
-     * @apiParam {Number} sort_column Column index to sort on
+     * @apiParam {Number} sort_column Column index to sort on (defaults to 1, the name)
      * @apiParam {Boolean} asc If true, sort in ascending order
      * @apiSuccess {Object[]} metadata List of metadata
      * @apiSuccess {String} metadata.id ID
@@ -54,7 +54,9 @@ public class MetadataResource extends BaseResource {
         }
 
         JsonArrayBuilder metadata = Json.createArrayBuilder();
-        SortCriteria sortCriteria = new SortCriteria(sortColumn, asc);
+        // #291: with no sort_column the definitions must be listed by name (column 1). SortCriteria
+        // leaves a null column at 0, which orders by the MET_ID_C alias c0 — a random UUID.
+        SortCriteria sortCriteria = new SortCriteria(sortColumn == null ? 1 : sortColumn, asc);
 
         MetadataDao metadataDao = new MetadataDao();
         List<MetadataDto> metadataDtoList = metadataDao.findByCriteria(new MetadataCriteria(), sortCriteria);

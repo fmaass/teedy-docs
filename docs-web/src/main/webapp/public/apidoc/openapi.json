@@ -2536,6 +2536,7 @@
             "name": "sort_column",
             "in": "query",
             "required": false,
+            "description": "Column index to sort on; defaults to 1 (the name) when omitted, so the definitions come back in alphabetical order",
             "schema": {
               "type": "string"
             }
