@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import Button from 'primevue/button'
 import Popover from 'primevue/popover'
@@ -16,6 +16,12 @@ import {
   deleteSavedFilter,
   type SavedFilterItem,
 } from '../api/savedfilter'
+import {
+  FILTER_KEYS,
+  serialize as serializeFilterQuery,
+  parse as parseFilterQuery,
+  equals as filterQueriesEqual,
+} from '../utils/savedFilterQuery'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -24,11 +30,11 @@ const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
-// The filter dimensions the documents route carries. The "save" affordance is
-// derived from the RAW route.query (NOT the tagFilter store's hasActiveFilters,
-// which excludes `workflow`), so a workflow-only filter is saveable.
-const FILTER_KEYS = ['tags', 'exclude', 'mode', 'search', 'workflow'] as const
-
+// The "save" affordance is derived from the RAW route.query (NOT the tagFilter store's
+// hasActiveFilters, which excludes `workflow`), so a workflow-only filter is saveable.
+// The dimension list itself, and the verbatim-capture / order-insensitive-compare rules,
+// live in utils/savedFilterQuery so capturing a filter and recognising an APPLIED one
+// share one definition.
 const hasSavableFilter = computed(() =>
   FILTER_KEYS.some((k) => {
     const v = route.query[k]
@@ -36,31 +42,8 @@ const hasSavableFilter = computed(() =>
   }),
 )
 
-// Serialize the CURRENT route.query VERBATIM into the saved query string for the
-// filter dimensions: every value the URL actually carries is preserved exactly —
-// including empty values and (were the URL ever malformed) repeated keys, which
-// are appended as-is and left to the backend contract to reject. Only non-filter
-// keys are dropped. The URL is the source of truth; no normalization here.
 function currentQueryString(): string {
-  const params = new URLSearchParams()
-  for (const k of FILTER_KEYS) {
-    const raw = route.query[k]
-    if (raw === undefined) continue
-    for (const v of Array.isArray(raw) ? raw : [raw]) {
-      params.append(k, v ?? '')
-    }
-  }
-  return params.toString()
-}
-
-// Parse a stored query string back into a vue-router LocationQuery. Applying flows
-// through the existing initFromUrl() via router.push — no new hydration path.
-function parseQueryString(query: string): LocationQuery {
-  const out: LocationQuery = {}
-  new URLSearchParams(query).forEach((v, k) => {
-    out[k] = v
-  })
-  return out
+  return serializeFilterQuery(route.query)
 }
 
 const { data: filtersData } = useQuery({
@@ -69,6 +52,38 @@ const { data: filtersData } = useQuery({
 })
 
 const filters = computed<SavedFilterItem[]>(() => filtersData.value ?? [])
+
+// #297: which stored filter is APPLIED right now. Purely DERIVED state — nothing is
+// persisted and no `?filter=<id>` key is added to the URL: the active filter is simply
+// the stored one whose query selects the same documents as the current route. The
+// comparison is order-insensitive, so a filter saved from a differently-ordered URL still
+// matches the canonical one tagFilter.buildFilterQuery rewrites, and `favorites` is not a
+// dimension, so toggling favourites cannot un-highlight the applied filter.
+//
+// Editing any dimension simply drops the match (the filter stops being active); telling
+// "edited" apart from "not applied at all" would require the id to survive the edit and
+// is a separate ticket.
+//
+// An UNFILTERED route never has an active filter: without this guard, a stored filter
+// with an empty query would match the bare document list and leave the toolbar
+// permanently marked.
+const activeFilter = computed<SavedFilterItem | null>(() => {
+  if (!hasSavableFilter.value) return null
+  const current = currentQueryString()
+  return filters.value.find((f) => filterQueriesEqual(current, f.query)) ?? null
+})
+
+const toolbarLabel = computed(() => activeFilter.value?.name ?? t('ui.saved_filters.saved_label'))
+
+// The accessible name keeps the control's PURPOSE and appends the active filter's name.
+// Replacing it with the bare filter name would hide what the button does from a screen
+// reader, and would make the toolbar button collide with the popover row that applies the
+// same filter (both e2e lookups and any by-name automation would then be ambiguous).
+const toolbarAriaLabel = computed(() =>
+  activeFilter.value
+    ? `${t('ui.saved_filters.saved_label')}: ${activeFilter.value.name}`
+    : t('ui.saved_filters.saved_label'),
+)
 
 // --- List presentation: name search + direction toggle ---
 
@@ -104,7 +119,7 @@ function toggleDropdown(event: Event) {
 
 function applyFilter(filter: SavedFilterItem) {
   dropdown.value?.hide()
-  router.push({ name: 'documents', query: parseQueryString(filter.query) })
+  router.push({ name: 'documents', query: parseFilterQuery(filter.query) })
 }
 
 // --- Save dialog ---
@@ -244,11 +259,13 @@ function confirmDelete(filter: SavedFilterItem) {
   <div class="saved-filters">
     <Button
       icon="pi pi-bookmark"
-      :label="t('ui.saved_filters.saved_label')"
+      :label="toolbarLabel"
       text
       size="small"
       severity="secondary"
-      :aria-label="t('ui.saved_filters.saved_label')"
+      :class="activeFilter ? 'saved-filters-active' : undefined"
+      :aria-current="activeFilter ? 'true' : undefined"
+      :aria-label="toolbarAriaLabel"
       @click="toggleDropdown"
     />
     <Button
@@ -291,12 +308,18 @@ function confirmDelete(filter: SavedFilterItem) {
           {{ t('ui.saved_filters.no_matches') }}
         </p>
         <ul v-else class="saved-filters-items">
-          <li v-for="filter in visibleFilters" :key="filter.id" class="saved-filters-item">
+          <li
+            v-for="filter in visibleFilters"
+            :key="filter.id"
+            class="saved-filters-item"
+            :class="{ active: filter.id === activeFilter?.id }"
+          >
             <Button
               :label="filter.name"
               text
               size="small"
               class="saved-filters-apply"
+              :aria-current="filter.id === activeFilter?.id ? 'true' : undefined"
               @click="applyFilter(filter)"
             />
             <Button
@@ -442,6 +465,26 @@ function confirmDelete(filter: SavedFilterItem) {
   flex: 1;
   justify-content: flex-start;
   text-align: left;
+}
+
+/* #297: the APPLIED saved filter — the toolbar button carries its name, and the row that
+   applies it is marked in the list. Same treatment as the admin nav's current link
+   (AdminNavPanel `.admin-nav-link.active`), built from theme tokens so a custom
+   main_color follows it. Nothing here renders while no stored filter matches the route,
+   which is why the captured document-list/gallery surfaces are untouched. */
+.saved-filters-active {
+  color: var(--p-primary-color);
+  font-weight: 600;
+}
+
+.saved-filters-item.active {
+  background: color-mix(in srgb, var(--p-primary-color) 15%, transparent);
+  border-radius: 4px;
+}
+
+.saved-filters-item.active .saved-filters-apply {
+  color: var(--p-primary-color);
+  font-weight: 600;
 }
 
 .save-dialog-body {

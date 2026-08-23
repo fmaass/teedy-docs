@@ -359,3 +359,110 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
     expect(wrapper.text()).toContain('ui.saved_filters.name_required')
   })
 })
+
+describe('SavedFilters — the ACTIVE saved filter is highlighted (#297)', () => {
+  // The stored query deliberately carries the keys in a DIFFERENT order from the one
+  // serialize() emits (FILTER_KEYS order: tags before search) — the reporter saves from
+  // whatever URL he is on, and tagFilter.buildFilterQuery rebuilds the canonical URL in
+  // its own insertion order. Naive string equality would miss this match.
+  const invoices = { id: 'f1', name: 'Invoices', query: 'search=x&tags=a', create_date: 1 }
+  const receipts = { id: 'f2', name: 'Receipts', query: 'search=z', create_date: 2 }
+
+  beforeEach(() => {
+    routerPush.mockReset()
+    createMock.mockClear()
+    updateMock.mockClear()
+    deleteMock.mockClear()
+    confirmDangerMock.mockClear()
+    mockRoute.query = {}
+    savedFiltersHolder.list = []
+  })
+
+  /** The saved-filters toolbar button: the group's first control. */
+  function toggleButton(wrapper: Wrapper) {
+    return wrapper.findAll('button')[0]
+  }
+
+  function expectDefaultToolbarButton(wrapper: Wrapper) {
+    const toggle = toggleButton(wrapper)
+    expect(toggle.text()).toBe('ui.saved_filters.saved_label')
+    expect(toggle.classes()).not.toContain('saved-filters-active')
+    expect(toggle.attributes('aria-current')).toBeUndefined()
+    expect(toggle.attributes('aria-label')).toBe('ui.saved_filters.saved_label')
+    expect(wrapper.findAll('.saved-filters-item.active')).toHaveLength(0)
+  }
+
+  it('swaps the toolbar label to the active filter, matching across KEY ORDER', async () => {
+    savedFiltersHolder.list = [{ ...receipts }, { ...invoices }]
+    // serialize() emits `tags=a&search=x`; the stored string is `search=x&tags=a`.
+    mockRoute.query = { search: 'x', tags: 'a' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const toggle = toggleButton(wrapper)
+    expect(toggle.text()).toBe('Invoices')
+    expect(toggle.classes()).toContain('saved-filters-active')
+    expect(toggle.attributes('aria-current')).toBe('true')
+    // The accessible name keeps the control's PURPOSE and names the active filter —
+    // the e2e suite opens this dropdown by the "Saved filters" substring, and an
+    // accessible name of just the filter name would also collide (strict mode) with
+    // the popover row that applies it.
+    expect(toggle.attributes('aria-label')).toBe('ui.saved_filters.saved_label: Invoices')
+
+    // Exactly one popover row is marked, and it is the matching one.
+    const activeRows = wrapper.findAll('.saved-filters-item.active')
+    expect(activeRows).toHaveLength(1)
+    expect(activeRows[0].text()).toContain('Invoices')
+    const marked = wrapper
+      .findAll('.saved-filters-apply')
+      .filter((b) => b.attributes('aria-current') === 'true')
+      .map((b) => b.text())
+    expect(marked).toEqual(['Invoices'])
+  })
+
+  it('renders the DEFAULT toolbar button when no stored filter matches', async () => {
+    savedFiltersHolder.list = [{ ...invoices }]
+    mockRoute.query = { tags: 'b' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    expectDefaultToolbarButton(wrapper)
+  })
+
+  it('falls back to the default as soon as ONE dimension is edited', async () => {
+    savedFiltersHolder.list = [{ ...invoices }]
+    mockRoute.query = { search: 'x', tags: 'a' }
+    const wrapper = mountView()
+    await flushPromises()
+    expect(toggleButton(wrapper).text()).toBe('Invoices')
+
+    // Editing the filter is NOT a "modified" state in this phase (that is a separate
+    // ticket): the filter simply stops being the active one.
+    mockRoute.query = { search: 'y', tags: 'a' }
+    await flushPromises()
+    expectDefaultToolbarButton(wrapper)
+  })
+
+  it('ignores favorites when deciding which filter is active', async () => {
+    // The reporter's decision (#297, 2026-08-23): favourites are an informal
+    // collection (#209), not a filter dimension — a favourites toggle must not
+    // un-highlight the saved filter that is applied.
+    savedFiltersHolder.list = [{ ...invoices }]
+    mockRoute.query = { search: 'x', tags: 'a', favorites: 'me' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(toggleButton(wrapper).text()).toBe('Invoices')
+  })
+
+  it('never marks a filter active on an UNFILTERED route', async () => {
+    // A stored filter with an empty query would otherwise match the bare document list
+    // and leave the toolbar permanently "active".
+    savedFiltersHolder.list = [{ id: 'f3', name: 'Empty', query: '', create_date: 3 }]
+    mockRoute.query = {}
+    const wrapper = mountView()
+    await flushPromises()
+
+    expectDefaultToolbarButton(wrapper)
+  })
+})
