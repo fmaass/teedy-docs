@@ -8,12 +8,20 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.6] - 2026-08-23
+
+There is no database migration; the schema level remains 64.
+
 ### Changed
 - Database connections are pooled by HikariCP instead of Hibernate's built-in pool. `DATABASE_POOL_SIZE` keeps its meaning and precedence but is now a ceiling rather than a reservation: connections above an idle floor of 2 are closed again after 10 minutes, a burst larger than the pool waits up to 30 s for a connection instead of failing immediately (#230), a connection is validated before it is handed out, and one held for more than 5 minutes logs an apparent-leak warning with the stack that took it. See ADR-0028.
 - Search still forgives a typo anywhere after the second character of a term, in OCR'd file content as much as in titles and metadata, but no longer inside the first two: searching for `helko` finds `hello`, searching for `hallo` no longer does. Requiring the first two characters to be right is what lets the typo-tolerant match seek into each field's term dictionary instead of scanning all of it (#290).
+- A superseded document search is cancelled in the browser, so a slow earlier response can no longer arrive after a newer one and overwrite the list; the cancellation is client-side only, and the server still finishes the search it already started (#290).
 
 ### Fixed
 - A search no longer builds a highlight for every match in the index, only for the rows of the page it returns, and the search suggestions are built once per index change instead of once per request. Both ran on every search — the first over the entire stored text of every matching file — which is why a typo'd term could cost many times what the same term spelled correctly did. This is a candidate fix for the slow searches reported on a large document set and may resolve them (#290).
+- Opening a second tag's documents from the tag edit page replaced nothing — the previous tag stayed selected and the list came back empty — so the tag edit page now starts from a fresh filter, while the tag chip's action keeps adding to the current one (#289).
+- With twenty or more tags the right-click tag menu collapsed its rows to a few pixels — still clickable, so a tag could be assigned unseen — and clipped long names at a fixed width; the rows now keep their height, the list scrolls, the panel widens with the viewport up to 24rem, and each row shows its full name as a tooltip (#284).
+- `GET /metadata` without a `sort_column` listed custom metadata definitions in UUID order, so the Settings table and the new-document form showed the fields in a different order each time; the default is now the name (#291).
 
 ## [3.8.5] - 2026-08-15
 
@@ -630,7 +638,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.5...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.6...HEAD
+[3.8.6]: https://github.com/fmaass/teedy-docs/compare/v3.8.5...v3.8.6
 [3.8.5]: https://github.com/fmaass/teedy-docs/compare/v3.8.4...v3.8.5
 [3.8.4]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...v3.8.4
 [3.8.3]: https://github.com/fmaass/teedy-docs/compare/v3.8.2...v3.8.3
