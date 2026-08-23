@@ -3,7 +3,8 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { listTags, createTag, type Tag } from '../../api/tag'
+import { listTags, createTag, getTagStats, type Tag } from '../../api/tag'
+import { queryKeys } from '../../api/queryKeys'
 import Tree from 'primevue/tree'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -29,6 +30,40 @@ const { data: tags, isLoading, isError, refetch } = useQuery({
 })
 
 const tagList = computed(() => tags.value ?? [])
+
+// #298: tag management is where tags get cleaned up, so every node carries its own
+// document count. ONE query for the whole tree — the endpoint already returns the
+// full tagId -> count map, so a per-node request would be N round-trips for data
+// that arrives in one. Deliberately unlike the sidebar facet panel (TagTreePanel),
+// which rolls counts up the subtree and hides zeroes: here the count is the tag's
+// OWN documents, and a zero is the answer being looked for (an unused tag), not
+// noise. A tag absent from the map carries no documents, hence 0.
+//
+// The key is the app-wide `queryKeys.tagStats()`, NOT TagEdit's private `['tag-stats']`:
+// only the shared one is in `tagCountKeys`, the list a document tag add/remove/bulk edit
+// invalidates, so the counts on this page follow tagging done elsewhere in the session.
+// Sharing TagEdit's key instead would ALSO have made this page's fetch the one that fills
+// that cache entry, freezing TagEdit's own count at whatever was true when the tag list was
+// opened — which is exactly how it broke tags.spec.ts:118 (#281) before this key choice.
+// `refetchOnMount: 'always'` because this is the cleanup screen: opening it must show the
+// counts as they are now, not a value up to the shared staleTime old.
+const { data: tagStats, isSuccess: tagStatsLoaded } = useQuery({
+  queryKey: queryKeys.tagStats(),
+  queryFn: () => getTagStats().then((r) => r.data.stats),
+  staleTime: 60_000,
+  refetchOnMount: 'always',
+})
+
+// A count is only shown once the stats actually arrived. On this screen a 0 is an
+// instruction ("nothing uses this tag, delete it"), so printing the `?? 0` fallback
+// while the request is in flight — or after it FAILED — would invite deleting tags
+// that hold documents. No data, no number. Once loaded, a tag missing from the map
+// genuinely carries no documents and its 0 is real.
+const countsLoaded = computed(() => tagStatsLoaded.value && !!tagStats.value)
+
+function docCount(tagId: string): number {
+  return tagStats.value?.[tagId] ?? 0
+}
 
 interface TagTreeNode {
   key: string
@@ -184,6 +219,7 @@ function selectTag(node: { key: string }) {
             <span class="tag-node">
               <span class="tag-dot" :style="{ background: node.data.color }" />
               <span class="tag-label">{{ node.label }}</span>
+              <span v-if="countsLoaded" class="tag-count">{{ docCount(node.key) }}</span>
             </span>
           </template>
         </Tree>
@@ -264,6 +300,19 @@ function selectTag(node: { key: string }) {
 
 .tag-label {
   font-size: 0.875rem;
+}
+
+/* Mirrors the facet panel's count badge (TagTreePanel .tag-count) so the same
+   number reads the same way in both trees. */
+.tag-count {
+  font-size: 0.6875rem;
+  color: var(--p-text-muted-color);
+  background: var(--p-content-hover-background);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 10px;
+  min-width: 1.25rem;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .empty-state {
