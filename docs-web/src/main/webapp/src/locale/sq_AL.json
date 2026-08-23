@@ -223,7 +223,11 @@
       "swapped": "Drejtimi i lidhjes u përmbys",
       "failed_swap": "Përmbysja e lidhjes dështoi",
       "remove_confirm": "Të hiqet lidhja me \"{title}\"?",
-      "remove_from_source": "E lidhur nga \"{title}\" — hiqeni atë nga ai dokument"
+      "remove_from_source": "E lidhur nga \"{title}\" — hiqeni atë nga ai dokument",
+      "sort_label": "Rendit dokumentet e lidhura",
+      "sort_default": "Renditje e parazgjedhur",
+      "sort_title_asc": "Titulli (A–Z)",
+      "sort_title_desc": "Titulli (Z–A)"
     },
     "file_view": {
       "grid": "Rrjetë",

@@ -223,7 +223,11 @@
       "swapped": "關聯方向已反轉",
       "failed_swap": "反轉關聯失敗",
       "remove_confirm": "移除與「{title}」的連結？",
-      "remove_from_source": "被「{title}」連結 — 請從該文件移除"
+      "remove_from_source": "被「{title}」連結 — 請從該文件移除",
+      "sort_label": "相關文件排序",
+      "sort_default": "預設排序",
+      "sort_title_asc": "標題（A–Z）",
+      "sort_title_desc": "標題（Z–A）"
     },
     "file_view": {
       "grid": "格狀",

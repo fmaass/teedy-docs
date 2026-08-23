@@ -223,7 +223,11 @@
       "swapped": "Richtung der Verknüpfung umgekehrt",
       "failed_swap": "Richtung konnte nicht umgekehrt werden",
       "remove_confirm": "Verknüpfung zu „{title}“ entfernen?",
-      "remove_from_source": "Verwiesen von „{title}“ – dort entfernen"
+      "remove_from_source": "Verwiesen von „{title}“ – dort entfernen",
+      "sort_label": "Verknüpfte Dokumente sortieren",
+      "sort_default": "Standardreihenfolge",
+      "sort_title_asc": "Titel (A–Z)",
+      "sort_title_desc": "Titel (Z–A)"
     },
     "file_view": {
       "grid": "Raster",

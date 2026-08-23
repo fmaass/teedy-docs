@@ -42,8 +42,10 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { usePreviewQueue } from '../../composables/usePreviewQueue'
 import { useAuthStore } from '../../stores/auth'
+import { useRelationSortStore } from '../../stores/relationSort'
 import { formatDate } from '../../utils/formatters'
 import { sortFiles, type FileSortField, type FileSortDirection } from '../../utils/fileSort'
+import { sortRelations, type RelationSortDirection } from '../../utils/relationSort'
 import { injectDocument } from './documentKey'
 
 const doc = injectDocument()
@@ -54,6 +56,7 @@ const toast = useToast()
 const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 const authStore = useAuthStore()
+const relationSortStore = useRelationSortStore()
 
 // Grid⇄list toggle for the file view. Grid is the default; the choice is remembered
 // per user (localStorage) so two accounts sharing a browser keep independent
@@ -97,12 +100,48 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
 // getDocument returns BOTH directions in `relations`: source=true is an outgoing relation
 // this document owns (removable here); source=false is incoming, owned by the OTHER document
 // (shown read-only — it must be removed from its source document's view).
-const outgoingRelations = computed(() =>
-  (doc.value?.relations ?? []).filter((r) => r.source),
+//
+// Both groups are projected through ONE order (#296). The reader picks it once and it follows
+// them from document to document for the session (`useRelationSortStore`).
+//
+// Until they do, the arrays are handed through UNSORTED. The backend already orders by title —
+// `RelationDao.getByDocumentId` ends in `order by d.DOC_TITLE_C` — but in the DATABASE's
+// collation, and re-collating that in the browser on mount would silently overrule the server on
+// exactly the case/accent pairs where the two disagree. A default that quietly reorders is not a
+// default. The collator therefore runs only for an explicit choice.
+function projectRelations(source: boolean) {
+  const list = (doc.value?.relations ?? []).filter((r) => r.source === source)
+  const direction = relationSortStore.direction
+  return direction ? sortRelations(list, direction) : list
+}
+const outgoingRelations = computed(() => projectRelations(true))
+const incomingRelations = computed(() => projectRelations(false))
+
+// The control is offered only where it has something to reorder. The relations block renders
+// for EVERY writable document — including one with no relations at all — so an unconditional
+// control would put a dead affordance on that (screenshot-captured) surface. One relation per
+// direction is the same case: nothing to reorder, whichever way it points.
+const showRelationSort = computed(
+  () => outgoingRelations.value.length > 1 || incomingRelations.value.length > 1,
 )
-const incomingRelations = computed(() =>
-  (doc.value?.relations ?? []).filter((r) => !r.source),
-)
+// The neutral state is a real OPTION, not a placeholder on an empty model value: a placeholder
+// is a one-way door (nothing to click to get back), and PrimeVue's Select renders a null-valued
+// option as no-selection anyway. Same shape as the file grid's `manual` entry next door — hence a
+// string sentinel in the control, mapped to the store's `null` here rather than bound to it.
+const RELATION_SORT_SERVER = 'server'
+type RelationSortKey = typeof RELATION_SORT_SERVER | RelationSortDirection
+
+const relationSortKey = computed<RelationSortKey>({
+  get: () => relationSortStore.direction ?? RELATION_SORT_SERVER,
+  set: (key) => {
+    relationSortStore.direction = key === RELATION_SORT_SERVER ? null : key
+  },
+})
+const relationSortOptions = computed(() => [
+  { value: RELATION_SORT_SERVER as RelationSortKey, label: t('ui.relations.sort_default') },
+  { value: 'asc' as RelationSortKey, label: t('ui.relations.sort_title_asc') },
+  { value: 'desc' as RelationSortKey, label: t('ui.relations.sort_title_desc') },
+])
 
 const relationSearchResults = ref<DocumentListItem[]>([])
 const selectedRelationTarget = ref<DocumentListItem | null>(null)
@@ -1379,7 +1418,22 @@ onUnmounted(() => {
       v-if="outgoingRelations.length || incomingRelations.length || doc.writable"
       class="doc-relations"
     >
-      <h3 class="doc-relations-heading">{{ t('ui.relations.title') }}</h3>
+      <div class="doc-relations-header">
+        <h3 class="doc-relations-heading">{{ t('ui.relations.title') }}</h3>
+        <!-- One control for BOTH groups: the two lists are two halves of one set of linked
+             documents, and offering a sort per direction would be two ways to say one thing. -->
+        <Select
+          v-if="showRelationSort"
+          v-model="relationSortKey"
+          :options="relationSortOptions"
+          optionLabel="label"
+          optionValue="value"
+          size="small"
+          class="relation-sort-select"
+          data-testid="relation-sort"
+          :aria-label="t('ui.relations.sort_label')"
+        />
+      </div>
 
       <!-- Outgoing: this document links to these (removable). -->
       <div v-if="outgoingRelations.length" class="relation-group">
@@ -1955,10 +2009,23 @@ onUnmounted(() => {
 .doc-relations {
   margin: 0 0 1.5rem;
 }
+/* Mirrors .file-panel-header: heading left, compact control right, wrapping onto its own line
+   on a narrow viewport rather than squeezing the title. With no control rendered the row is the
+   heading alone, so its 0.625rem bottom margin is kept HERE and the flex row adds nothing. */
+.doc-relations-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
 .doc-relations-heading {
-  margin: 0 0 0.625rem;
+  margin: 0 auto 0.625rem 0;
   font-size: 1rem;
   font-weight: 600;
+}
+.relation-sort-select {
+  margin-bottom: 0.625rem;
+  max-width: 13rem;
 }
 .relation-group {
   margin-bottom: 0.75rem;

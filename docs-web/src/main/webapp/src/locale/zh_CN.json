@@ -223,7 +223,11 @@
       "swapped": "关联方向已反转",
       "failed_swap": "反转关联失败",
       "remove_confirm": "移除到“{title}”的链接？",
-      "remove_from_source": "被“{title}”链接——请从该文档中移除"
+      "remove_from_source": "被“{title}”链接——请从该文档中移除",
+      "sort_label": "相关文档排序",
+      "sort_default": "默认排序",
+      "sort_title_asc": "标题（A–Z）",
+      "sort_title_desc": "标题（Z–A）"
     },
     "file_view": {
       "grid": "网格",

@@ -223,7 +223,11 @@
       "swapped": "Relation direction reversed",
       "failed_swap": "Failed to reverse the relation",
       "remove_confirm": "Remove the link to \"{title}\"?",
-      "remove_from_source": "Linked from \"{title}\" — remove it from that document"
+      "remove_from_source": "Linked from \"{title}\" — remove it from that document",
+      "sort_label": "Sort linked documents",
+      "sort_default": "Default order",
+      "sort_title_asc": "Title (A–Z)",
+      "sort_title_desc": "Title (Z–A)"
     },
     "file_view": {
       "grid": "Grid",

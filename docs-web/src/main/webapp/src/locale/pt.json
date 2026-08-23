@@ -223,7 +223,11 @@
       "swapped": "Direção da relação invertida",
       "failed_swap": "Falha ao inverter a relação",
       "remove_confirm": "Remover a ligação a \"{title}\"?",
-      "remove_from_source": "Ligado a partir de \"{title}\" — remova-a desse documento"
+      "remove_from_source": "Ligado a partir de \"{title}\" — remova-a desse documento",
+      "sort_label": "Ordenar documentos relacionados",
+      "sort_default": "Ordem predefinida",
+      "sort_title_asc": "Título (A–Z)",
+      "sort_title_desc": "Título (Z–A)"
     },
     "file_view": {
       "grid": "Grelha",
