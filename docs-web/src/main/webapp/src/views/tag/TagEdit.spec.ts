@@ -26,11 +26,16 @@ const tagApiMock = vi.hoisted(() => ({
 }))
 vi.mock('../../api/tag', () => tagApiMock)
 
-// #281: TagEdit navigates through the tag-filter store's canonical selectTag
-// path. The real store drags in the router, more of the tag API surface, and
+// #281/#289: TagEdit navigates through the tag-filter store's REPLACE-semantics
+// action. The real store drags in the router, more of the tag API surface, and
 // Pinia — none of which this component test needs; the contract under test is
-// only "the click hands THIS tag's id to selectTag".
-const tagFilterStoreMock = vi.hoisted(() => ({ selectTag: vi.fn() }))
+// only "the click hands THIS tag's id to showDocumentsForTag, and never to the
+// additive chip action". Both actions are mocked so the negative half of that
+// contract is observable rather than a silent undefined.
+const tagFilterStoreMock = vi.hoisted(() => ({
+  selectTag: vi.fn(),
+  showDocumentsForTag: vi.fn(),
+}))
 vi.mock('../../stores/tagFilter', () => ({ useTagFilterStore: () => tagFilterStoreMock }))
 
 beforeAll(() => {
@@ -105,8 +110,11 @@ describe('TagEdit — parent Select (#14 filter)', () => {
 
 // #281: the per-tag document count was fetched but never displayed, and the only
 // way from the edit page to the tag's documents was rebuilding the filter by hand.
-// The page now shows the count and offers a one-click "view documents" action that
-// must route through tagFilterStore.selectTag (the sidebar chips' canonical path).
+// The page now shows the count and offers a one-click "view documents" action.
+// #289: it must route through showDocumentsForTag (reset, then the sidebar chips'
+// canonical selectTag path) — going through the additive selectTag directly ANDed
+// this tag onto whatever the previous visit had left selected, landing the user on
+// an empty list.
 describe('TagEdit — document count and view documents (#281)', () => {
   beforeEach(() => {
     tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
@@ -115,6 +123,7 @@ describe('TagEdit — document count and view documents (#281)', () => {
     })
     tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: { b: 4 } } })
     tagFilterStoreMock.selectTag.mockReset()
+    tagFilterStoreMock.showDocumentsForTag.mockReset()
   })
 
   it('displays the fetched document count', async () => {
@@ -122,11 +131,13 @@ describe('TagEdit — document count and view documents (#281)', () => {
     expect(wrapper.find('.tag-doc-count').text()).toBe('Documents with this tag: 4')
   })
 
-  it('routes the view-documents click through the canonical selectTag path', async () => {
+  it('routes the view-documents click through the REPLACE-semantics action (#289)', async () => {
     const wrapper = await mountEdit()
     await wrapper.find('button.view-docs-btn').trigger('click')
-    expect(tagFilterStoreMock.selectTag).toHaveBeenCalledTimes(1)
-    expect(tagFilterStoreMock.selectTag).toHaveBeenCalledWith('b')
+    expect(tagFilterStoreMock.showDocumentsForTag).toHaveBeenCalledTimes(1)
+    expect(tagFilterStoreMock.showDocumentsForTag).toHaveBeenCalledWith('b')
+    // The additive chip action must NOT be the one this button reaches.
+    expect(tagFilterStoreMock.selectTag).not.toHaveBeenCalled()
   })
 })
 

@@ -53,12 +53,16 @@ const tagAcls = computed<AclEntry[]>(() => detail.value?.acls ?? [])
 const tagWritable = computed(() => detail.value?.writable ?? false)
 const docCount = computed(() => tagStats.value?.[props.id] ?? 0)
 
-// #281: one click from here to the documents carrying this tag. Routes through the
-// store's selectTag — the same canonical path the sidebar/table/gallery tag chips
-// use — so the landing document list carries the full filter state (URL query,
-// selected panel node, tree-mode ancestors), not a hand-built URL.
+// #281: one click from here to the documents carrying this tag. #289: it must use
+// the REPLACE-semantics action, not the additive chip one — the tag filter survives
+// the trip to /tag/<id> and this page hides the filter panel, so a second visit used
+// to AND the two tags together and land on an empty list with nothing visible to
+// clear. showDocumentsForTag resets the filter and then runs the very same canonical
+// selectTag path the sidebar/table/gallery chips use, so the landing document list
+// still carries the full filter state (URL query, selected panel node, tree-mode
+// ancestors) rather than a hand-built URL.
 function viewDocuments() {
-  tagFilter.selectTag(props.id)
+  tagFilter.showDocumentsForTag(props.id)
 }
 
 // Distinct WRITE holders currently on the tag (by target id). The server refuses to remove

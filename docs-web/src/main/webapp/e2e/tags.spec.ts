@@ -169,6 +169,95 @@ test.describe('tag edit — view documents (#281)', () => {
     // chip click produces (selectTag), not a bare URL that hydrates nothing.
     await expectTagNodeState(page, new RegExp(tagName), { pressed: 'true' })
   })
+
+  // #289: the reporter's sequence — tag A's documents, then BACK to the tag list and
+  // tag B's documents — used to land on `?tags=<A>,<B>`. The filter survives the trip
+  // to /tag/<id> (hydration is scoped to the documents route) and /tag/* renders the
+  // admin nav instead of the filter panel, so the AND was both applied AND invisible:
+  // an empty list with nothing on screen to clear. The second visit must REPLACE the
+  // filter, not extend it.
+  //
+  // The return trip deliberately runs through the in-app "Manage tags" nav link rather
+  // than a fresh page load: a reload drops the Pinia store, which would make this test
+  // pass with or without the fix.
+  test('a second visit from a different tag REPLACES the filter (#289)', async ({ page, cleanup }) => {
+    const tagA = uniqueTag('rep-a')
+    const tagB = uniqueTag('rep-b')
+    for (const name of [tagA, tagB]) {
+      await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+      await page.getByPlaceholder('Tag name').fill(name)
+      await page.getByRole('button', { name: 'Create', exact: true }).click()
+      await expect(page.locator('.tag-tree').getByText(name, { exact: true })).toBeVisible()
+      cleanup.defer(`delete the ${name} tag`, () => deleteTagByNameApi(page.request, name))
+    }
+
+    // One document per tag, and NEITHER carries both — so the AND-ed filter matches
+    // nothing and "B's document is listed" is a real discriminator, not a coincidence.
+    const docA = unique('rep-doc-a')
+    const docB = unique('rep-doc-b')
+    for (const [title, tagName] of [
+      [docA, tagA],
+      [docB, tagB],
+    ] as const) {
+      await gotoRouteReady(page, '/#/document/add', ROUTE_ROOT.documentEdit)
+      await page.locator('#edit-title').fill(title)
+      await page.locator('#edit-tags').click()
+      await page.getByRole('option', { name: tagName }).click()
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Save' }).click()
+      await expect(page).toHaveURL(/#\/document\/view\//)
+      const docId = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+      cleanup.defer(`delete document ${title}`, () => deleteDocApi(page.request, docId))
+    }
+
+    // From the tag LIST page: open <tagName>'s edit page and click through to its
+    // documents. Returns the tag id the landing URL must carry.
+    //
+    // The tree is scoped to the MANAGEMENT view's own root: TagTreePanel (the filter
+    // panel, inside the mobile Drawer) renders its nodes under the same `.tag-tree`
+    // class, and on mobile it stays mounted after the in-app return below — so a bare
+    // `.tag-tree` matches the tag name twice (`.tag-label` here, `.tag-name` there) and
+    // trips strict mode. The first visit alone would not expose that: the filter panel
+    // has not been mounted yet at that point.
+    async function viewDocumentsFor(tagName: string): Promise<string> {
+      await page
+        .locator(`${ROUTE_ROOT.tagList} .tag-tree`)
+        .getByText(tagName, { exact: true })
+        .click()
+      await expect(page).toHaveURL(/#\/tag\//)
+      const tagId = page.url().split('/tag/')[1].split(/[/?#]/)[0]
+      await page.getByRole('button', { name: 'View documents' }).click()
+      await expect(page).toHaveURL(/#\/document\?/)
+      return tagId
+    }
+
+    function urlTags(): string | null {
+      const url = page.url()
+      return new URLSearchParams(url.slice(url.indexOf('?') + 1)).get('tags')
+    }
+
+    // First visit — the state the reporter starts from.
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+    const idA = await viewDocumentsFor(tagA)
+    expect(urlTags(), 'first visit filters to tag A').toBe(idA)
+    await expect(page.getByText(docA, { exact: true })).toBeVisible()
+
+    // Back to the tag list WITHOUT a reload, so the store still holds tag A.
+    const nav = await openNav(page)
+    await nav.getByRole('link', { name: 'Manage tags' }).click()
+    await expect(page).toHaveURL(/#\/tag$/)
+    await expect(page.locator(ROUTE_ROOT.tagList)).toBeVisible()
+
+    // Second visit, a totally different tag.
+    const idB = await viewDocumentsFor(tagB)
+    expect(urlTags(), 'the second visit REPLACES the filter — never `<A>,<B>`').toBe(idB)
+    await expect(page.getByText(docB, { exact: true })).toBeVisible()
+    await expect(page.getByText(docA, { exact: true })).toHaveCount(0)
+
+    // And the filter panel agrees: B selected, A no longer part of the filter.
+    await expectTagNodeState(page, new RegExp(tagB), { pressed: 'true' })
+    await expectTagNodeState(page, new RegExp(tagA), { pressed: 'false' })
+  })
 })
 
 test.describe('tag filter panel', () => {

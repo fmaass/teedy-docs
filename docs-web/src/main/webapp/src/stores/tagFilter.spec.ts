@@ -856,4 +856,115 @@ describe('tagFilter store', () => {
       expect(store.tagMode).toBe('and')
     })
   })
+
+  // #289: the tag EDIT page's "View documents" button is not a chip. A chip means
+  // "add this tag to what I am already looking at"; the edit page means "show me
+  // THIS tag's documents". The store survives the trip to /tag/<id> (hydration is
+  // scoped to the documents route, BL-023), and /tag/* shows AdminNavPanel instead
+  // of the filter panel — so a second visit ANDed the two tags together
+  // (?tags=a,c → `tag:alpha tag:gamma`) and the reporter's list came back empty
+  // with no visible filter to clear. showDocumentsForTag has REPLACE semantics:
+  // it resets the filter first, then runs the very same canonical selectTag path.
+  describe('showDocumentsForTag (#289, replace semantics from the tag edit page)', () => {
+    beforeEach(() => {
+      // Entry point is the tag EDIT page, not the documents list.
+      mockRoute.path = '/tag/a'
+      mockRoute.name = 'tag-edit'
+      mockRoute.query = {}
+      push.mockClear()
+    })
+
+    // Replays the reporter's exact steps: /tag/a -> View documents -> back to
+    // /tag/c -> View documents. Both tags are top-level, so tree-mode ancestor
+    // pull-in plays no part in the result.
+    async function viewDocumentsFor(
+      tagId: string,
+      store: ReturnType<typeof useTagFilterStore>,
+    ) {
+      // TagEdit.vue's viewDocuments(), verbatim.
+      store.showDocumentsForTag(tagId)
+      // The real router then lands on the filtered documents list.
+      const query = (push.mock.calls.at(-1)?.[0] as { query: Record<string, string> }).query
+      mockRoute.path = '/document'
+      mockRoute.name = 'documents'
+      mockRoute.query = query
+      await nextTick()
+    }
+
+    async function backToTagEdit(tagId: string) {
+      mockRoute.path = `/tag/${tagId}`
+      mockRoute.name = 'tag-edit'
+      mockRoute.query = {}
+      await nextTick()
+    }
+
+    it('replaces the previous tag filter instead of ANDing onto it', async () => {
+      const store = useTagFilterStore()
+
+      await viewDocumentsFor('a', store)
+      expect(push).toHaveBeenLastCalledWith({ name: 'documents', query: { tags: 'a' } })
+
+      // Back to the tag edit page, for a TOTALLY DIFFERENT tag.
+      await backToTagEdit('c')
+      push.mockClear()
+
+      await viewDocumentsFor('c', store)
+      expect(push).toHaveBeenLastCalledWith({ name: 'documents', query: { tags: 'c' } })
+      expect([...store.selectedTagIds]).toEqual(['c'])
+    })
+
+    it('sends a single-tag search query, so the list is not empty', async () => {
+      const store = useTagFilterStore()
+
+      await viewDocumentsFor('a', store)
+      await backToTagEdit('c')
+      await viewDocumentsFor('c', store)
+
+      // AND-mode `tag:alpha tag:gamma` is what made the reporter's list empty.
+      expect(store.combinedSearch).toBe('tag:gamma')
+    })
+
+    it('also drops a lingering exclusion, text search and OR mode', async () => {
+      const store = useTagFilterStore()
+      store.excludedTagIds = new Set(['a'])
+      store.searchText = 'invoice'
+      store.debouncedText = 'invoice'
+      store.tagMode = 'or'
+
+      await viewDocumentsFor('c', store)
+
+      expect(push).toHaveBeenLastCalledWith({ name: 'documents', query: { tags: 'c' } })
+      expect(store.excludedTagIds.size).toBe(0)
+      expect(store.debouncedText).toBe('')
+      expect(store.tagMode).toBe('and')
+    })
+
+    it('still pulls in tree-mode ancestors, because it runs the canonical selectTag path', async () => {
+      const store = useTagFilterStore()
+      // b has parent a; tree mode is the default.
+      await viewDocumentsFor('b', store)
+      expect(push).toHaveBeenLastCalledWith({ name: 'documents', query: { tags: 'b,a' } })
+    })
+
+    // The counterpart contract, unchanged: the CHIP path is still additive (#34).
+    // Without this, a regression that made selectTag itself replace would still
+    // leave the tests above green.
+    it('leaves selectTag ADDITIVE — the chip contract (#34) is untouched', async () => {
+      const store = useTagFilterStore()
+
+      store.selectTag('a')
+      const firstQuery = (push.mock.calls.at(-1)?.[0] as { query: Record<string, string> }).query
+      mockRoute.path = '/document'
+      mockRoute.name = 'documents'
+      mockRoute.query = firstQuery
+      await nextTick()
+
+      await backToTagEdit('c')
+      push.mockClear()
+
+      store.selectTag('c')
+      expect(push).toHaveBeenLastCalledWith({ name: 'documents', query: { tags: 'a,c' } })
+      expect(store.combinedSearch).toBe('tag:alpha tag:gamma')
+    })
+  })
 })

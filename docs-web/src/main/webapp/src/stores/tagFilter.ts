@@ -266,6 +266,25 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     }
   }
 
+  // #289: the tag EDIT page's "View documents" button is an ENTRY point, not a
+  // chip. `selectTag` is deliberately ADDITIVE (#34), and the store survives the
+  // trip to /tag/<id> because hydration is scoped to the documents route
+  // (BL-023) — so a second visit ANDed the two tags together (?tags=a,c →
+  // `tag:alpha tag:gamma`) and returned an empty list. Worse, /tag/* renders
+  // AdminNavPanel instead of the filter panel, so the lingering filter was
+  // invisible and the user had nothing to clear.
+  //
+  // Replace semantics, expressed by COMPOSING the two existing actions: reset
+  // every filter dimension, then run the SAME canonical selectTag path — so
+  // tree-mode ancestors, compound-key resolution and navigation stay defined in
+  // exactly one place and the landing state is identical to a chip click on a
+  // freshly cleared filter. Safe to call from /tag/*: syncUrl ignores non-
+  // /document routes, so the reset cannot push a stray route from the edit page.
+  function showDocumentsForTag(tagId: string) {
+    clearFilters()
+    selectTag(tagId)
+  }
+
   function removeTag(tagId: string) {
     const sel = new Set(selectedTagIds.value)
     sel.delete(tagId)
@@ -479,6 +498,7 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     resolveCompoundKey,
     toggleTag,
     selectTag,
+    showDocumentsForTag,
     removeTag,
     clearFilters,
     navigateToDocuments,
