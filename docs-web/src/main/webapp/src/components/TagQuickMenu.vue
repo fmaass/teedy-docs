@@ -299,6 +299,7 @@ defineExpose({ show, hide })
               :key="tag.id"
               type="button"
               class="tqm-option"
+              :title="tag.name"
               :aria-label="t('ui.tag_menu.add_named', { name: tag.name })"
               @click="onSelect(tag.id)"
             >
@@ -350,8 +351,11 @@ defineExpose({ show, hide })
   flex-direction: column;
   gap: 0.75rem;
   /* Bounded so a document/instance with many tags scrolls inside the popover
-     instead of overflowing the viewport (#71). */
-  width: 15rem;
+     instead of overflowing the viewport (#71). The 15rem this used to be clipped a
+     realistic tag name by ~106px with no way to read the rest (#284); 24rem carries one
+     where the room exists, and the viewport clamp keeps the panel inside a phone screen
+     (361px at 393px wide) rather than trading one glitch for another. */
+  width: min(24rem, calc(100vw - 2rem));
   max-height: 60vh;
   overflow-y: auto;
 }
@@ -407,6 +411,13 @@ defineExpose({ show, hide })
   cursor: pointer;
   padding: 0.3rem 0.5rem;
   white-space: nowrap;
+  /* `overflow: hidden` is what ellipsises the name — and it also zeroes this flex item's
+     automatic minimum size (Flexbox 4.5), which let the bounded list above squash every row
+     to its padding (9.6px, text box 0) from ~20 assignable tags on: an empty-looking box
+     whose rows still added a tag on click (#284). Pinning the shrink factor restores the
+     content-based floor without giving up the ellipsis, so the list scrolls instead. Same
+     guard as .tqm-filter-clear below. */
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }

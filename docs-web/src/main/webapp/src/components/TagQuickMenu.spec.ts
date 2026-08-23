@@ -178,6 +178,22 @@ describe('TagQuickMenu', () => {
     expect(names).toEqual(['Receipt']) // only "Receipt" matches "rec"
   })
 
+  // #284 — the row is a single ellipsised line (`white-space: nowrap; overflow: hidden;
+  // text-overflow: ellipsis`) inside a panel of bounded width, so a long tag name is CLIPPED.
+  // The only other place the full name lives on that row is the aria-label, which a sighted
+  // user never sees. The native tooltip is what makes a truncated name recoverable, and it is
+  // the half of the fix that holds for names longer than any width we could pick.
+  it('carries the full tag name as the row tooltip, so a clipped name stays readable (#284)', () => {
+    const wrapper = mountMenu({ document: makeDoc(['t1']) })
+    const rows = wrapper.findAll('.tqm-option')
+    // Guard the loop below against passing vacuously on an empty list.
+    expect(rows).toHaveLength(5)
+    for (const row of rows) {
+      expect(row.attributes('title')).toBe(row.text())
+    }
+    expect(optionByText(wrapper, 'Contract')!.attributes('title')).toBe('Contract')
+  })
+
   it('shows a no-results message and no rows when the search matches no tag', async () => {
     const wrapper = mountMenu({ document: makeDoc(['t1']) })
     await wrapper.find('input.tqm-filter-input').setValue('zzz')
