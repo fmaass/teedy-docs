@@ -444,7 +444,17 @@ function handleMobileTagSelect(tagId: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* #299: the pane's contextual middle scrolls ITSELF when its content does not fit. It used
+     to be `overflow: hidden`, which still clipped the surplus but refused the wheel/trackpad
+     input that would reach it — so in a short window (a laptop with browser chrome, a tiled
+     window) the settings nav's last entry was sliced by the pinned footer with no way to get
+     at it but browser zoom. The tag tree is unaffected: `.panel-tree` is `flex: 1` with its
+     own `overflow-y: auto`, so it absorbs the surplus itself and this container has nothing
+     left to scroll — one scrollbar in the column, never two. The admin nav (AdminNavPanel)
+     has no such inner scroller and is what overflows here.
+     overflow-x stays HIDDEN: nothing in this column may scroll sideways. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* --- Footer nav --- */
