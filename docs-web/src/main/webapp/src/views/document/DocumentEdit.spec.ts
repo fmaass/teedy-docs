@@ -39,6 +39,8 @@ vi.mock('../../api/document', () => ({
   createDocument: vi.fn(),
   updateDocument: vi.fn(),
   importEml: vi.fn(),
+  // #295: the title field's typeahead queries the document list; unmocked it would hit axios.
+  listDocuments: vi.fn(),
 }))
 vi.mock('../../api/metadata', () => ({
   listMetadata: vi.fn().mockResolvedValue({ data: { metadata: [] } }),
@@ -83,7 +85,7 @@ beforeAll(() => {
 })
 
 import DocumentEdit from './DocumentEdit.vue'
-import { getDocument } from '../../api/document'
+import { getDocument, listDocuments } from '../../api/document'
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -270,5 +272,124 @@ describe('DocumentEdit — relations save payload (#36 spurious-reverse fix)', (
     const params = (wrapper.vm as unknown as EditVm).buildDocParams()
     expect(params.getAll('relations')).toEqual([])
     expect(params.get('relations_reset')).toBeNull()
+  })
+})
+
+describe('DocumentEdit — title proposals while typing (#295)', () => {
+  // Restored from the AngularJS app's `getTitleTypeahead` (lost in the Vue rewrite): typing a
+  // title prefix proposes existing document titles so the same document is not filed twice.
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: [] } })
+    tagApiMock.getTagFacets.mockReset().mockResolvedValue({ data: { tags: [] } })
+    tagApiMock.getTagCoOccurrence.mockReset().mockResolvedValue({ data: { pairs: [] } })
+    vi.mocked(getDocument).mockReset()
+    vi.mocked(listDocuments).mockReset()
+  })
+
+  // The typeahead is debounced, so the query is not in flight when setValue() returns. Poll
+  // instead of sleeping a fixed span: the assertion below is what decides pass/fail.
+  async function waitForTypeahead() {
+    for (let i = 0; i < 100 && vi.mocked(listDocuments).mock.calls.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    await flushPromises()
+  }
+
+  function titlePayload(titles: string[]) {
+    return { data: { documents: titles.map((title, i) => ({ id: `doc-${i}`, title })) } }
+  }
+
+  it('queries the old typeahead shape with the typed prefix and offers the DISTINCT titles', async () => {
+    vi.mocked(listDocuments).mockResolvedValue(
+      titlePayload(['Invoice 2024', 'Invoice 2025', 'Invoice 2024']) as never,
+    )
+    const wrapper = await mountEdit()
+    const input = wrapper.find('input#edit-title')
+    expect(input.exists()).toBe(true)
+    await input.trigger('focus')
+    await input.setValue('Inv')
+    await waitForTypeahead()
+
+    // Same request shape the AngularJS controller used: 5 rows, title-sorted ascending.
+    expect(vi.mocked(listDocuments)).toHaveBeenCalledWith({
+      search: 'Inv',
+      limit: 5,
+      sort_column: 1,
+      asc: true,
+    })
+    const auto = wrapper.findComponent({ name: 'AutoComplete' })
+    expect(auto.exists()).toBe(true)
+    // Two documents can share a title; the proposal list must not repeat it.
+    expect(auto.props('suggestions')).toEqual(['Invoice 2024', 'Invoice 2025'])
+    const rendered = Array.from(document.body.querySelectorAll('.p-autocomplete-option')).map(
+      (option) => option.textContent?.trim(),
+    )
+    expect(rendered).toEqual(['Invoice 2024', 'Invoice 2025'])
+  })
+
+  it('keeps the typed value on input#edit-title (inputId, not an id on the root div)', async () => {
+    // `<label for="edit-title">` and ten e2e specs resolve this id; PrimeVue puts a plain
+    // `id` on the AutoComplete's wrapper div, which is not fillable and not labellable.
+    vi.mocked(listDocuments).mockResolvedValue(titlePayload([]) as never)
+    const wrapper = await mountEdit()
+    const byId = wrapper.element.querySelector('#edit-title')
+    expect(byId?.tagName).toBe('INPUT')
+    expect(wrapper.find('label[for="edit-title"]').exists()).toBe(true)
+    // The new-document form has always opened with the caret in the title; the attribute
+    // has to reach the inner input, since the AutoComplete's own wrapper is not focusable.
+    expect(byId?.hasAttribute('autofocus')).toBe(true)
+
+    await wrapper.find('input#edit-title').setValue('Quarterly report')
+    // A freely typed title (no proposal chosen) still reaches the save payload.
+    expect((wrapper.vm as unknown as EditVm).buildDocParams().get('title')).toBe(
+      'Quarterly report',
+    )
+  })
+
+  it('fills the title only when a proposal is chosen — it does not open that document', async () => {
+    vi.mocked(listDocuments).mockResolvedValue(titlePayload(['Invoice 2024']) as never)
+    const wrapper = await mountEdit()
+    const input = wrapper.find('input#edit-title')
+    await input.trigger('focus')
+    await input.setValue('Inv')
+    await waitForTypeahead()
+
+    const option = document.body.querySelector('.p-autocomplete-option') as HTMLElement
+    expect(option).toBeTruthy()
+    option.click()
+    await flushPromises()
+
+    expect((wrapper.vm as unknown as { form: { title: string } }).form.title).toBe('Invoice 2024')
+    expect((wrapper.find('input#edit-title').element as HTMLInputElement).value).toBe(
+      'Invoice 2024',
+    )
+    // The ask was "keep the database clean", not navigation: the form stays put.
+    expect(router.currentRoute.value.path).toBe('/')
+  })
+
+  it('drops a response that lands after the field was left (no dropdown over the next field)', async () => {
+    // The search is debounced, so a user who types a title and moves straight on to the
+    // description has a request still in flight. PrimeVue opens the overlay whenever the
+    // suggestions change — focused or not — so a late response would drop a dropdown on top
+    // of the field being typed into.
+    let deliver: (payload: unknown) => void = () => {}
+    vi.mocked(listDocuments).mockReturnValue(
+      new Promise((resolve) => {
+        deliver = resolve
+      }) as never,
+    )
+    const wrapper = await mountEdit()
+    const input = wrapper.find('input#edit-title')
+    await input.trigger('focus')
+    await input.setValue('Inv')
+    await waitForTypeahead()
+
+    await input.trigger('blur')
+    deliver(titlePayload(['Invoice 2024']))
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'AutoComplete' }).props('suggestions')).toEqual([])
+    expect(document.body.querySelectorAll('.p-autocomplete-option').length).toBe(0)
   })
 })

@@ -3,7 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { getDocument, createDocument, updateDocument, importEml } from '../../api/document'
+import { getDocument, createDocument, updateDocument, importEml, listDocuments } from '../../api/document'
 import { uploadFile, deleteFile } from '../../api/file'
 import { listMetadata, type MetadataDefinition } from '../../api/metadata'
 import { getVocabulary } from '../../api/vocabulary'
@@ -16,6 +16,7 @@ import { queryKeys } from '../../api/queryKeys'
 import { formatFileSize } from '../../utils/formatters'
 import { displayName } from '../../utils/fileName'
 import InputText from 'primevue/inputtext'
+import AutoComplete from 'primevue/autocomplete'
 import Select from 'primevue/select'
 import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
@@ -59,6 +60,39 @@ function defaultForm() {
 }
 
 const form = ref(defaultForm())
+
+// #295: propose existing document titles while one is typed — restored from the AngularJS
+// app's `getTitleTypeahead`, which the Vue rewrite dropped. Same request shape as before (the
+// five best matches, title-sorted ascending), so a document already filed is proposed before
+// its title is typed a second time. Choosing a proposal fills the title and nothing else.
+const titleSuggestions = ref<string[]>([])
+// Generation counter over the searches, plus the field's own focus state. Both guard the same
+// hazard the "move to document" picker documents: the AutoComplete opens its overlay whenever
+// its suggestions change, focused or not — so a response for an abandoned prefix would re-show
+// a stale dropdown, and one arriving after the user moved on to the description would drop a
+// dropdown on top of the field being typed into. Only the newest search, on a still-focused
+// field, may publish.
+let titleSearchSeq = 0
+const titleFieldFocused = ref(false)
+
+async function completeTitleSearch(event: { query: string }) {
+  const seq = ++titleSearchSeq
+  const query = event.query.trim()
+  if (!query) {
+    titleSuggestions.value = []
+    return
+  }
+  try {
+    const { data } = await listDocuments({ search: query, limit: 5, sort_column: 1, asc: true })
+    if (seq !== titleSearchSeq || !titleFieldFocused.value) return
+    // Distinct titles only: several documents may legitimately share a title, and the
+    // proposal is the title itself — a repeated row would just be noise (the old
+    // controller deduped identically).
+    titleSuggestions.value = [...new Set(data.documents.map((d) => d.title).filter(Boolean))]
+  } catch {
+    if (seq === titleSearchSeq) titleSuggestions.value = []
+  }
+}
 
 interface AttachedFile {
   id: string
@@ -500,7 +534,18 @@ async function onEmlSelected(event: Event) {
       <!-- Primary fields -->
       <div class="form-field">
         <label for="edit-title">{{ t('ui.title') }} *</label>
-        <InputText id="edit-title" v-model="form.title" class="w-full" autofocus />
+        <AutoComplete
+          v-model="form.title"
+          inputId="edit-title"
+          :suggestions="titleSuggestions"
+          :showEmptyMessage="false"
+          fluid
+          class="w-full"
+          :pt="{ pcInputText: { root: { autofocus: true } } }"
+          @complete="completeTitleSearch"
+          @focus="titleFieldFocused = true"
+          @blur="titleFieldFocused = false"
+        />
       </div>
 
       <div class="form-field">
