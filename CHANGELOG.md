@@ -8,6 +8,21 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.7] - 2026-08-23
+
+There is no database migration; the schema level remains 64.
+
+### Added
+- The selected documents can be duplicated from the list's action bar. Before any copy is made, the estimated size of the batch is checked against the owner's remaining quota, so a run that would not fit is refused up front instead of failing partway through (#294).
+- Typing a document title proposes up to five similar existing titles, so an accidental duplicate is visible before the document is created (#295).
+- The tag management tree shows each tag's document count; the counts are re-read every time the page is opened, so they no longer go stale after documents are added or removed elsewhere (#298).
+- The tag pickers have their own search box with a labelled clear button, and after narrowing the list the arrow keys start again from the first visible match instead of a remembered position (#286).
+- The document list's filter button shows which saved filter is active — its name and colour while the current filters match a stored definition, compared as filters rather than as text, and its plain state the moment one dimension is edited (#297).
+- The linked-documents lists can be sorted by title in either direction from one control covering both lists; the default keeps the order the server sent, and the choice lasts for the session (#296).
+
+### Fixed
+- The left pane scrolls when its content exceeds the window height, so the lower navigation entries stay reachable on small screens and long tag trees (#299).
+
 ## [3.8.6] - 2026-08-23
 
 There is no database migration; the schema level remains 64.
