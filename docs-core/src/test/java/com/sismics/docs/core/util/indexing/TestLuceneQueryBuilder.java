@@ -198,10 +198,16 @@ public class TestLuceneQueryBuilder {
 
     @Test
     public void mediumTermFuzzyOneEdit() throws Exception {
-        // A 4-7 char term tolerates 1 edit.
+        // A 4-7 char term tolerates 1 edit AFTER the first two characters. The fuzzy arm carries a
+        // prefixLength of 2 (#290): the automaton no longer scans the whole term dictionary, at the
+        // cost of typos inside the first two characters. "helko" keeps the "he" prefix and is 1 edit
+        // from "hello"; "hallo" differs in the SECOND character, so it is out of the fuzzy arm's
+        // reach - the negative twin that pins the new boundary.
         index("hello", "");
-        Assertions.assertTrue(hits(forgivingQuery("hallo")) >= 1,
-                "medium term must fuzzy-match within 1 edit");
+        Assertions.assertTrue(hits(forgivingQuery("helko")) >= 1,
+                "medium term must fuzzy-match within 1 edit after the first two characters");
+        Assertions.assertEquals(0, hits(forgivingQuery("hallo")),
+                "a typo INSIDE the first two characters must no longer match (fuzzy prefixLength 2)");
     }
 
     @Test
@@ -353,6 +359,54 @@ public class TestLuceneQueryBuilder {
             }
         }
         return false;
+    }
+
+    /**
+     * Every FuzzyQuery in the tree, in traversal order (unwrapping Boost/ConstantScore/Boolean).
+     */
+    private List<org.apache.lucene.search.FuzzyQuery> collectFuzzyClauses(Query q) {
+        List<org.apache.lucene.search.FuzzyQuery> found = new java.util.ArrayList<>();
+        collectFuzzyClauses(q, found);
+        return found;
+    }
+
+    private void collectFuzzyClauses(Query q, List<org.apache.lucene.search.FuzzyQuery> found) {
+        if (q instanceof org.apache.lucene.search.FuzzyQuery fq) {
+            found.add(fq);
+        } else if (q instanceof org.apache.lucene.search.BoostQuery bq) {
+            collectFuzzyClauses(bq.getQuery(), found);
+        } else if (q instanceof org.apache.lucene.search.ConstantScoreQuery cq) {
+            collectFuzzyClauses(cq.getQuery(), found);
+        } else if (q instanceof BooleanQuery bool) {
+            for (BooleanClause clause : bool.clauses()) {
+                collectFuzzyClauses(clause.query(), found);
+            }
+        }
+    }
+
+    /**
+     * QUERY SHAPE (#290): the fuzzy arm of every field carries prefixLength 2.
+     *
+     * <p>A prefixLength of 0 makes the Levenshtein automaton enumerate the ENTIRE term dictionary of
+     * each of the twelve fields - including the full OCR {@code content} dictionary - which is what
+     * made a typo'd search cost twenty seconds on a real corpus. Requiring the first two characters
+     * to match seeks straight into the dictionary instead. This asserts the shape rather than a
+     * timing, so it cannot flake: every field still HAS a fuzzy arm (no field loses forgiveness) and
+     * every one of them is bounded.
+     */
+    @Test
+    public void everyFieldFuzzyArmCarriesPrefixLengthTwo() {
+        List<org.apache.lucene.search.FuzzyQuery> fuzzyClauses = collectFuzzyClauses(forgivingQuery("vertrag"));
+
+        Assertions.assertEquals(FIELDS.length, fuzzyClauses.size(),
+                "every field must still carry exactly one fuzzy arm: " + fuzzyClauses);
+        Assertions.assertEquals(new java.util.HashSet<>(List.of(FIELDS)),
+                fuzzyClauses.stream().map(fq -> fq.getTerm().field()).collect(java.util.stream.Collectors.toSet()),
+                "the fuzzy arms must cover exactly the searched fields");
+        for (org.apache.lucene.search.FuzzyQuery fq : fuzzyClauses) {
+            Assertions.assertEquals(2, fq.getPrefixLength(),
+                    "the fuzzy arm on field '" + fq.getTerm().field() + "' must require a 2-character prefix");
+        }
     }
 
     // ----------------------------------------------------------------------------------------

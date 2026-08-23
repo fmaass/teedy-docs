@@ -36,7 +36,8 @@ import java.util.List;
  *       small typos, WITHOUT any index-time analyzer change or reindex.</li>
  * </ul>
  *
- * <p>The fuzzy edit budget is length-gated per term: 0 edits below 4 chars, 1 for 4-7, 2 for 8+.
+ * <p>The fuzzy edit budget is length-gated per term: 0 edits below 4 chars, 1 for 4-7, 2 for 8+, and
+ * every fuzzy arm requires the first two characters to match exactly (see {@link #FUZZY_PREFIX_LENGTH}).
  * Only the LAST term gets a prefix clause (matches "search-as-you-type" on the trailing word while
  * keeping earlier terms strict).
  */
@@ -57,6 +58,20 @@ public final class LuceneSearchQueryBuilder {
 
     /** Minimum trailing-term length (code points) before an implicit prefix arm is added. */
     private static final int MIN_PREFIX_LENGTH = 2;
+
+    /**
+     * Number of leading characters a fuzzy match must reproduce exactly.
+     *
+     * <p>A {@link FuzzyQuery} with prefixLength 0 runs its Levenshtein automaton over the WHOLE term
+     * dictionary of every searched field - including the full OCR {@code content} dictionary - so a
+     * single typo'd term costs a complete dictionary scan twelve times over (#290: 20 s for one
+     * search on a real corpus, against 123 ms for the same term spelled correctly at an identical
+     * payload). Requiring the first two characters seeks straight to the matching slice instead.
+     *
+     * <p>The cost is a semantics change, deliberately taken: a typo INSIDE the first two characters
+     * is no longer forgiven. A typo anywhere after position 2 still is, on OCR content too.
+     */
+    private static final int FUZZY_PREFIX_LENGTH = 2;
 
     private LuceneSearchQueryBuilder() {
     }
@@ -164,7 +179,7 @@ public final class LuceneSearchQueryBuilder {
         if (maxEdits > 0) {
             // Constant-score the fuzzy arm so it contributes a FLAT FUZZY_BOOST regardless of the
             // matched term's IDF — this is what guarantees prefix (1.0) strictly > fuzzy (0.5).
-            Query fuzzy = new ConstantScoreQuery(new FuzzyQuery(t, maxEdits));
+            Query fuzzy = new ConstantScoreQuery(new FuzzyQuery(t, maxEdits, FUZZY_PREFIX_LENGTH));
             builder.add(new BoostQuery(fuzzy, FUZZY_BOOST), BooleanClause.Occur.SHOULD);
         }
 

@@ -25,6 +25,7 @@ import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.util.ClasspathScanner;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.DocumentStoredFieldVisitor;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
@@ -33,11 +34,14 @@ import org.apache.lucene.index.ConcurrentMergeScheduler;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.highlight.Highlighter;
 import org.apache.lucene.search.highlight.QueryScorer;
@@ -58,11 +62,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -90,9 +97,62 @@ public class LuceneIndexingHandler implements IndexingHandler {
     private DirectoryReader directoryReader;
 
     /**
+     * The suggester built over {@link #suggesterReader}'s title dictionary, or null when none is
+     * cached. Published and invalidated under this instance's monitor, together with the reader
+     * replacement that decides its validity; never mutated once published.
+     */
+    private FuzzySuggester suggester;
+
+    /**
+     * The reader generation {@link #suggester} was built from. Identity, not
+     * {@link DirectoryReader#getVersion()}: it is exactly the replacement event this class performs,
+     * and it assumes nothing about version reuse after a directory is re-created.
+     */
+    private DirectoryReader suggesterReader;
+
+    /**
      * Index writer.
      */
     private IndexWriter indexWriter;
+
+    /**
+     * The stored fields a search pass may deserialize.
+     *
+     * <p>{@link #IDENTIFIER_FIELDS} is what the all-hits pass needs: the document id a hit belongs to.
+     * {@link #CONTENT_FIELDS} is the OCR text, deserialized only for the rows of the page actually
+     * returned.
+     */
+    private static final Set<String> IDENTIFIER_FIELDS = Set.of("doctype", "id", "document_id");
+
+    private static final Set<String> CONTENT_FIELDS = Set.of("content");
+
+    /**
+     * How many of a document's best-matching files the page-bounded highlight pass may look at before
+     * giving up on finding a fragment.
+     *
+     * <p>The top-scoring file of a document is not necessarily one that can produce a highlight: a
+     * file matches on any of its indexed fields, and a short {@code filename} match outranks the term
+     * buried in another file's long OCR text — which is the only one of the two that has a fragment to
+     * give. So the pass walks the ranked candidates until one yields a fragment. The cap is what keeps
+     * the work bounded: a page costs at most rows x this many stored-content reads, and in the common
+     * case (the first candidate has the fragment) exactly one per row.
+     */
+    static final int HIGHLIGHT_CANDIDATE_FILES = 8;
+
+    /**
+     * Builds the stored-field visitors the search passes read through.
+     *
+     * <p>Package-private and replaceable (test support, like {@link #countIndexedDocuments(String)}):
+     * a test substitutes a visitor that counts - or blocks on - the deserialization of a given field,
+     * which is the only way to observe that the expensive stored {@code content} is read once per
+     * PAGE ROW rather than once per hit.
+     */
+    StoredFieldVisitorFactory storedFieldVisitorFactory = DocumentStoredFieldVisitor::new;
+
+    @FunctionalInterface
+    interface StoredFieldVisitorFactory {
+        DocumentStoredFieldVisitor create(Set<String> fields);
+    }
 
     @Override
     public boolean accept() {
@@ -174,7 +234,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
             }
 
             // A near-real-time reader opened ON THE WRITER. The cached directory-backed reader
-            // (getDirectoryReader) cannot be used here: a brand-new index has no committed segment yet, so
+            // (acquireDirectoryReader) cannot be used here: a brand-new index has no committed segment yet, so
             // it would return null and leave "empty" indistinguishable from "unreadable".
             int indexedCount;
             try (DirectoryReader reader = DirectoryReader.open(indexWriter)) {
@@ -330,14 +390,20 @@ public class LuceneIndexingHandler implements IndexingHandler {
      * @return the number of index entries with that id
      */
     int countIndexedDocuments(String id) {
-        DirectoryReader reader = getDirectoryReader();
+        DirectoryReader reader = acquireDirectoryReader();
         if (reader == null) {
             return 0;
         }
         try {
-            return new IndexSearcher(reader).count(new org.apache.lucene.search.TermQuery(new Term("id", id)));
+            return new IndexSearcher(reader).count(new TermQuery(new Term("id", id)));
         } catch (IOException e) {
             throw new IllegalStateException("Unable to count indexed documents for id " + id, e);
+        } finally {
+            try {
+                reader.decRef();
+            } catch (IOException e) {
+                log.error("Error releasing the directory reader", e);
+            }
         }
     }
 
@@ -355,7 +421,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
     public void findByCriteria(PaginatedList<DocumentDto> paginatedList, List<String> suggestionList, DocumentCriteria criteria, SortCriteria sortCriteria) throws Exception {
         Map<String, Object> parameterMap = new HashMap<>();
         List<String> criteriaList = new ArrayList<>();
-        Map<String, String> documentSearchMap = Maps.newHashMap();
+        SearchResult searchResult = null;
 
         boolean trashQuery = Boolean.TRUE.equals(criteria.getDeleted());
 
@@ -407,13 +473,13 @@ public class LuceneIndexingHandler implements IndexingHandler {
             parameterMap.put("targetIdList", criteria.getTargetIdList());
         }
         if (!Strings.isNullOrEmpty(criteria.getSimpleSearch()) || !Strings.isNullOrEmpty(criteria.getFullSearch())) {
-            documentSearchMap = search(criteria.getSimpleSearch(), criteria.getFullSearch());
-            if (documentSearchMap.isEmpty()) {
+            searchResult = search(criteria.getSimpleSearch(), criteria.getFullSearch());
+            if (searchResult.getDocumentIds().isEmpty()) {
                 // If the search doesn't find any document, the request should return nothing
-                documentSearchMap.put(UUID.randomUUID().toString(), null);
+                searchResult.getDocumentIds().add(UUID.randomUUID().toString());
             }
             criteriaList.add("d.DOC_ID_C in :documentIdList");
-            parameterMap.put("documentIdList", documentSearchMap.keySet());
+            parameterMap.put("documentIdList", searchResult.getDocumentIds());
 
             String suggestionQuery = !Strings.isNullOrEmpty(criteria.getFullSearch())
                     ? criteria.getFullSearch() : criteria.getSimpleSearch();
@@ -516,6 +582,21 @@ public class LuceneIndexingHandler implements IndexingHandler {
         QueryParam queryParam = new QueryParam(sb.toString(), parameterMap);
         List<Object[]> l = PaginatedLists.executePaginatedQuery(paginatedList, queryParam, sortCriteria);
 
+        // Highlight the rows of THIS page, and only them. Pass 1 above had to visit every hit, because
+        // the complete id set is what the ACL filter and the pagination in SQL work on — but a
+        // highlight can only ever be shown for a row that is actually returned, and producing one
+        // deserializes a file's entire stored OCR text and runs the highlighter over it. The reader is
+        // acquired again here: nothing belonging to pass 1's reader — least of all a Lucene doc
+        // number, which means a different document after a merge — may survive the SQL phase between.
+        Map<String, String> highlightMap = Map.of();
+        if (searchResult != null) {
+            List<String> pageDocumentIds = new ArrayList<>(l.size());
+            for (Object[] o : l) {
+                pageDocumentIds.add((String) o[0]);
+            }
+            highlightMap = highlightPage(searchResult.getQuery(), pageDocumentIds);
+        }
+
         // Assemble results
         List<DocumentDto> documentDtoList = new ArrayList<>();
         for (Object[] o : l) {
@@ -538,7 +619,7 @@ public class LuceneIndexingHandler implements IndexingHandler {
             if (deleteTs != null) {
                 documentDto.setDeleteTimestamp(deleteTs.getTime());
             }
-            documentDto.setHighlight(documentSearchMap.get(documentDto.getId()));
+            documentDto.setHighlight(highlightMap.get(documentDto.getId()));
             documentDtoList.add(documentDto);
         }
 
@@ -556,31 +637,85 @@ public class LuceneIndexingHandler implements IndexingHandler {
         if (Strings.isNullOrEmpty(search)) {
             return;
         }
-        DirectoryReader directoryReader = getDirectoryReader();
+        DirectoryReader directoryReader = acquireDirectoryReader();
         if (directoryReader == null) {
             return;
         }
-
-        FuzzySuggester suggester = new FuzzySuggester(directory, "", new StandardAnalyzer());
-        LuceneDictionary dictionary = new LuceneDictionary(directoryReader, "title");
-        suggester.build(dictionary);
-        int lastIndex = search.lastIndexOf(' ');
-        String suggestQuery = search.substring(Math.max(lastIndex, 0));
-        List<Lookup.LookupResult> lookupResultList = suggester.lookup(suggestQuery, false, 10);
-        for (Lookup.LookupResult lookupResult : lookupResultList) {
-            suggestionList.add(lookupResult.key.toString());
+        try {
+            FuzzySuggester currentSuggester = acquireSuggester(directoryReader);
+            int lastIndex = search.lastIndexOf(' ');
+            String suggestQuery = search.substring(Math.max(lastIndex, 0));
+            List<Lookup.LookupResult> lookupResultList = currentSuggester.lookup(suggestQuery, false, 10);
+            for (Lookup.LookupResult lookupResult : lookupResultList) {
+                suggestionList.add(lookupResult.key.toString());
+            }
+        } finally {
+            directoryReader.decRef();
         }
     }
 
     /**
-     * Fulltext search in files and documents.
+     * The suggester over the given reader's title dictionary, from the cache when that reader is
+     * still the current generation.
+     *
+     * <p>Building a {@link FuzzySuggester} walks the WHOLE title dictionary and compiles a finite
+     * state transducer. Doing it per request was repeated work by construction, since the result can
+     * only change when the index does (#290). The build itself runs OUTSIDE the monitor — it is the
+     * expensive part and must not stall writers or other searches — and only the check-and-publish
+     * runs under it, the SAME monitor that replaces the reader. That is what stops a suggester built
+     * over a superseded generation from being published after the replacement invalidated the cache:
+     * the loser of that race returns its own instance, which is correct for its own lookup, rather
+     * than poisoning the cache.
+     *
+     * <p>Only a fully built instance is ever published, and it is never mutated afterwards, so the
+     * lookups themselves need no lock: each one allocates its own scratch state over the shared,
+     * safely published transducer.
+     *
+     * @param directoryReader The leased reader to build from
+     * @return the suggester to look up in
+     * @throws IOException e
+     */
+    private FuzzySuggester acquireSuggester(DirectoryReader directoryReader) throws IOException {
+        synchronized (this) {
+            if (suggester != null && suggesterReader == directoryReader) {
+                return suggester;
+            }
+        }
+
+        FuzzySuggester built = new FuzzySuggester(directory, "", new StandardAnalyzer());
+        built.build(new LuceneDictionary(directoryReader, "title"));
+
+        synchronized (this) {
+            if (suggester != null && suggesterReader == directoryReader) {
+                // Another thread built this same generation first: keep a single instance.
+                return suggester;
+            }
+            if (this.directoryReader == directoryReader) {
+                suggester = built;
+                suggesterReader = directoryReader;
+            }
+        }
+        return built;
+    }
+
+    /**
+     * Pass 1 of a fulltext search: EVERY matching application document id, and the query that found
+     * them.
+     *
+     * <p>The id set has to be complete — the ACL filter, every other search criterion and the
+     * pagination live in SQL, so an id dropped here is a row the user can never reach. What this pass
+     * must NOT do is the expensive per-hit work: it reads only the stored identifier fields through a
+     * restricted visitor, never the stored OCR {@code content}, and it highlights nothing. Both are
+     * bounded to the returned page by {@link #highlightPage(Query, Collection)} afterwards.
+     *
+     * <p>Package-private so a test can drive the pass on its own and observe what it reads.
      *
      * @param simpleSearchQuery Search query on metadatas
      * @param fullSearchQuery Search query on all fields
-     * @return Map of document IDs as key and highlight as value
+     * @return the query and the complete set of matching document IDs
      * @throws Exception e
      */
-    private Map<String, String> search(String simpleSearchQuery, String fullSearchQuery) throws Exception {
+    SearchResult search(String simpleSearchQuery, String fullSearchQuery) throws Exception {
         // The fulltext query searches in all fields
         String searchQuery = Strings.nullToEmpty(simpleSearchQuery)
                 + " " + Strings.nullToEmpty(fullSearchQuery);
@@ -611,42 +746,144 @@ public class LuceneIndexingHandler implements IndexingHandler {
                 .build();
 
         // Search
-        DirectoryReader directoryReader = getDirectoryReader();
-        Map<String, String> documentMap = Maps.newHashMap();
+        Set<String> documentIds = new LinkedHashSet<>();
+        DirectoryReader directoryReader = acquireDirectoryReader();
         if (directoryReader == null) {
             // The directory reader is not yet initialized (probably because there is nothing indexed)
-            return documentMap;
+            return new SearchResult(query, documentIds);
         }
-        IndexSearcher searcher = new IndexSearcher(directoryReader);
-        TopDocs topDocs = searcher.search(query, Integer.MAX_VALUE);
-        ScoreDoc[] docs = topDocs.scoreDocs;
+        try {
+            IndexSearcher searcher = new IndexSearcher(directoryReader);
+            TopDocs topDocs = searcher.search(query, Integer.MAX_VALUE);
+            StoredFields storedFields = searcher.storedFields();
 
-        SimpleHTMLFormatter simpleHTMLFormatter = new SimpleHTMLFormatter("<strong>", "</strong>");
-        SimpleHTMLEncoder simpleHTMLEncoder = new SimpleHTMLEncoder();
-        Highlighter highlighter = new Highlighter(simpleHTMLFormatter, simpleHTMLEncoder, new QueryScorer(query));
+            // Extract document IDs. The ids are only recoverable from the stored fields, so the hit's
+            // stored document still has to be read — but through a visitor restricted to the three
+            // identifier fields, which is what keeps the stored OCR content out of this loop.
+            for (ScoreDoc doc : topDocs.scoreDocs) {
+                DocumentStoredFieldVisitor visitor = storedFieldVisitorFactory.create(IDENTIFIER_FIELDS);
+                storedFields.document(doc.doc, visitor);
+                org.apache.lucene.document.Document document = visitor.getDocument();
+                String type = document.get("doctype");
+                String documentId = null;
+                if ("document".equals(type)) {
+                    documentId = document.get("id");
+                } else if ("file".equals(type)) {
+                    documentId = document.get("document_id");
+                }
 
-        // Extract document IDs and highlights
-        for (ScoreDoc doc : docs) {
-            org.apache.lucene.document.Document document = searcher.storedFields().document(doc.doc);
-            String type = document.get("doctype");
-            String documentId = null;
-            String highlight = null;
-            if (type.equals("document")) {
-                documentId = document.get("id");
-            } else if (type.equals("file")) {
-                documentId = document.get("document_id");
-                String content = document.get("content");
-                if (content != null) {
-                    highlight = highlighter.getBestFragment(analyzer, "content", content);
+                if (documentId != null) {
+                    documentIds.add(documentId);
                 }
             }
-
-            if (documentId != null) {
-                documentMap.put(documentId, highlight);
-            }
+        } finally {
+            directoryReader.decRef();
         }
 
-        return documentMap;
+        return new SearchResult(query, documentIds);
+    }
+
+    /**
+     * Pass 2 of a fulltext search: the highlight of each document on the RETURNED PAGE.
+     *
+     * <p>Per document one bounded question — the best-matching FILES of that document under the same
+     * query, capped at {@link #HIGHLIGHT_CANDIDATE_FILES} — of which the first that yields a fragment
+     * wins, so a page row costs one stored OCR read in the common case and never more than the cap,
+     * instead of one per hit in the whole corpus. Filtering by {@code document_id} alone would answer
+     * a different question and return an arbitrary file of the document; it is the original query that
+     * decides which files the user's search actually matched. A document whose match was metadata only
+     * has no matching file and therefore no highlight, exactly as before.
+     *
+     * <p>The reader is acquired fresh: this runs after the SQL phase, so pass 1's reader may already
+     * have been replaced, and a Lucene doc number from it would by then denote a different document.
+     *
+     * <p>Package-private so a test can drive the pass on its own.
+     *
+     * @param originalQuery The query pass 1 ran
+     * @param documentIds The application document ids of the returned page
+     * @return document id to highlight fragment, absent where there is no fragment
+     * @throws Exception e
+     */
+    Map<String, String> highlightPage(Query originalQuery, Collection<String> documentIds) throws Exception {
+        Map<String, String> highlightMap = Maps.newHashMap();
+        if (documentIds.isEmpty()) {
+            return highlightMap;
+        }
+        DirectoryReader directoryReader = acquireDirectoryReader();
+        if (directoryReader == null) {
+            return highlightMap;
+        }
+        try {
+            Analyzer analyzer = new StandardAnalyzer();
+            IndexSearcher searcher = new IndexSearcher(directoryReader);
+            // Rewrite ONCE for this reader and reuse it for every row: the prefix and fuzzy arms
+            // expand against the term dictionary, and that expansion must not be repeated per row.
+            Query rewrittenQuery = searcher.rewrite(originalQuery);
+            // The highlighter scores against the ORIGINAL query: its term extractor understands the
+            // shape the query builder produced, and handing it a rewritten form would quietly change
+            // which terms end up marked.
+            SimpleHTMLFormatter simpleHTMLFormatter = new SimpleHTMLFormatter("<strong>", "</strong>");
+            SimpleHTMLEncoder simpleHTMLEncoder = new SimpleHTMLEncoder();
+            Highlighter highlighter = new Highlighter(simpleHTMLFormatter, simpleHTMLEncoder,
+                    new QueryScorer(originalQuery));
+            StoredFields storedFields = searcher.storedFields();
+
+            for (String documentId : documentIds) {
+                Query fileQuery = new BooleanQuery.Builder()
+                        .add(rewrittenQuery, BooleanClause.Occur.MUST)
+                        .add(new TermQuery(new Term("document_id", documentId)), BooleanClause.Occur.FILTER)
+                        .build();
+                // The document's best files in score order, capped. Not just the top one: it may have
+                // matched on its filename and have nothing to highlight, while a lower-ranked file of
+                // the same document carries the term in its OCR text.
+                TopDocs topDocs = searcher.search(fileQuery, HIGHLIGHT_CANDIDATE_FILES);
+                for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                    DocumentStoredFieldVisitor visitor = storedFieldVisitorFactory.create(CONTENT_FIELDS);
+                    storedFields.document(scoreDoc.doc, visitor);
+                    String content = visitor.getDocument().get("content");
+                    if (content == null) {
+                        continue;
+                    }
+                    String highlight = highlighter.getBestFragment(analyzer, "content", content);
+                    if (highlight != null) {
+                        // The best-ranked file that actually has a fragment wins, and the walk stops:
+                        // the common case reads exactly one stored content per page row.
+                        highlightMap.put(documentId, highlight);
+                        break;
+                    }
+                }
+            }
+        } finally {
+            directoryReader.decRef();
+        }
+
+        return highlightMap;
+    }
+
+    /**
+     * What pass 1 hands across the SQL phase: the complete set of matching application document ids,
+     * and the query that matched them, so pass 2 can ask the same question of one document.
+     *
+     * <p>Deliberately carries neither a reader nor a Lucene doc number: both belong to a single
+     * reader generation, and an arbitrary amount of SQL work runs between the passes.
+     */
+    static final class SearchResult {
+        private final Query query;
+
+        private final Set<String> documentIds;
+
+        SearchResult(Query query, Set<String> documentIds) {
+            this.query = query;
+            this.documentIds = documentIds;
+        }
+
+        Query getQuery() {
+            return query;
+        }
+
+        Set<String> getDocumentIds() {
+            return documentIds;
+        }
     }
 
     /**
@@ -719,13 +956,18 @@ public class LuceneIndexingHandler implements IndexingHandler {
     }
 
     /**
-     * Returns a valid directory reader.
-     * Take care of reopening the reader if the index has changed
-     * and closing the previous one.
+     * Acquires a LEASE on the current directory reader, reopening it if the index has changed.
      *
-     * @return the directoryReader
+     * <p>Every caller must release it — {@code try { ... } finally { reader.decRef(); }}. The lease is
+     * what lets a search read from a reader for as long as it needs without blocking a writer: when
+     * the index changes, the replacement below drops only the CACHE's reference, so a reader a pass
+     * is still reading from stays alive until that pass releases it and is closed for real only then.
+     * Closing it outright instead would end a concurrent search in an AlreadyClosedException in the
+     * middle of a user's request.
+     *
+     * @return a leased directory reader, or null if there is nothing indexed yet
      */
-    private synchronized DirectoryReader getDirectoryReader() {
+    synchronized DirectoryReader acquireDirectoryReader() {
         if (directoryReader == null) {
             try {
                 if (!DirectoryReader.indexExists(directory)) {
@@ -739,13 +981,22 @@ public class LuceneIndexingHandler implements IndexingHandler {
             try {
                 DirectoryReader newReader = DirectoryReader.openIfChanged(directoryReader);
                 if (newReader != null) {
+                    // Drops the cache's reference only; a pass that leased this reader keeps it alive.
                     directoryReader.close();
                     directoryReader = newReader;
+                    // Release the superseded generation's suggester eagerly. Its validity is decided
+                    // by reader IDENTITY, so this frees the transducer rather than invalidating it.
+                    suggester = null;
+                    suggesterReader = null;
                 }
             } catch (IOException e) {
                 log.error("Error while reopening the directory reader", e);
             }
         }
+        if (directoryReader == null) {
+            return null;
+        }
+        directoryReader.incRef();
         return directoryReader;
     }
 

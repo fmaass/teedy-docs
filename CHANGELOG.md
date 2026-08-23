@@ -10,6 +10,10 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ### Changed
 - Database connections are pooled by HikariCP instead of Hibernate's built-in pool. `DATABASE_POOL_SIZE` keeps its meaning and precedence but is now a ceiling rather than a reservation: connections above an idle floor of 2 are closed again after 10 minutes, a burst larger than the pool waits up to 30 s for a connection instead of failing immediately (#230), a connection is validated before it is handed out, and one held for more than 5 minutes logs an apparent-leak warning with the stack that took it. See ADR-0028.
+- Search still forgives a typo anywhere after the second character of a term, in OCR'd file content as much as in titles and metadata, but no longer inside the first two: searching for `helko` finds `hello`, searching for `hallo` no longer does. Requiring the first two characters to be right is what lets the typo-tolerant match seek into each field's term dictionary instead of scanning all of it (#290).
+
+### Fixed
+- A search no longer builds a highlight for every match in the index, only for the rows of the page it returns, and the search suggestions are built once per index change instead of once per request. Both ran on every search — the first over the entire stored text of every matching file — which is why a typo'd term could cost many times what the same term spelled correctly did. This is a candidate fix for the slow searches reported on a large document set and may resolve them (#290).
 
 ## [3.8.5] - 2026-08-15
 
