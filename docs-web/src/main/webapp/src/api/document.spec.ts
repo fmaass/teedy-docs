@@ -11,7 +11,7 @@ const mock = vi.hoisted(() => ({
 
 vi.mock('./client', () => ({ default: mock }))
 
-import { importEml, buildRelationsParams, getDocument } from './document'
+import { importEml, buildRelationsParams, getDocument, listDocuments } from './document'
 import type { DocumentDetail } from './document'
 
 describe('importEml', () => {
@@ -96,5 +96,35 @@ describe('buildRelationsParams', () => {
     const keys: string[] = []
     params.forEach((_value, key) => keys.push(key))
     expect([...new Set(keys)].sort()).toEqual(['language', 'relations', 'title'])
+  })
+})
+
+// #290: a search the user has already superseded (another keystroke, a new page) must not
+// keep an XHR alive in the browser. TanStack Query hands the queryFn an AbortSignal for the
+// in-flight request; `listDocuments` is the boundary that must hand that SAME signal to
+// axios, whose XHR adapter aborts the request when it fires. Client-side cleanup only — the
+// server-side search is not interrupted.
+describe('listDocuments cancellation signal (#290)', () => {
+  beforeEach(() => mock.get.mockClear())
+
+  it('forwards the caller\'s AbortSignal to the axios client alongside the params', async () => {
+    const { signal } = new AbortController()
+    await listDocuments({ search: 'invoice', limit: 20 }, { signal })
+
+    expect(mock.get).toHaveBeenCalledTimes(1)
+    expect(mock.get).toHaveBeenCalledWith(
+      '/document/list',
+      // The SAME signal object, not a copy: axios must observe the caller's abort().
+      expect.objectContaining({ params: { search: 'invoice', limit: 20 }, signal }),
+    )
+  })
+
+  it('attaches no signal when the caller passes none (uncancelled callers unchanged)', async () => {
+    await listDocuments({ search: 'invoice' })
+
+    const [url, config] = mock.get.mock.calls[0] as [string, Record<string, unknown>]
+    expect(url).toBe('/document/list')
+    expect(config.params).toEqual({ search: 'invoice' })
+    expect(config.signal).toBeUndefined()
   })
 })

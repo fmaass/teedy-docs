@@ -3,7 +3,12 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/vue-query'
-import { listDocuments, getDocument, type DocumentListItem } from '../../api/document'
+import {
+  listDocuments,
+  getDocument,
+  type DocumentListItem,
+  type DocumentListResponse,
+} from '../../api/document'
 import { useTagFilterStore } from '../../stores/tagFilter'
 import { useDocumentTags } from '../../composables/useDocumentTags'
 import TagQuickMenu from '../../components/TagQuickMenu.vue'
@@ -180,7 +185,7 @@ watch([() => tf.combinedSearch, () => tf.tagMode, workflowMe, favoritesMe], () =
   pageOffset.value = 0
 })
 
-const { data: documentsData, isLoading, isError, refetch } = useQuery({
+const { data: documentsData, isLoading, isError, refetch } = useQuery<DocumentListResponse>({
   queryKey: computed(() => [...queryKeys.documents(), {
     search: tf.combinedSearch,
     tagMode: tf.tagMode,
@@ -191,17 +196,23 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery({
     sortField: sortField.value,
     sortOrder: sortOrder.value,
   }]),
-  queryFn: () =>
-    listDocuments({
-      limit: pageSize.value,
-      offset: pageOffset.value,
-      sort_column: SORT_FIELD_MAP[sortField.value] ?? 3,
-      asc: sortOrder.value === 1,
-      search: tf.combinedSearch || undefined,
-      'search[tagMode]': tf.selectedTagIds.size > 1 ? tf.tagMode : undefined,
-      'search[searchworkflow]': workflowMe.value ? 'me' : undefined,
-      favorites: favoritesMe.value ? 'me' : undefined,
-    }).then((r) => r.data),
+  // The signal TanStack Query hands the queryFn is forwarded to axios (#290): when the key
+  // changes the superseded request is aborted in the browser, so no stale response can
+  // overtake a newer one. Client-side only — the server-side search is not interrupted.
+  queryFn: ({ signal }) =>
+    listDocuments(
+      {
+        limit: pageSize.value,
+        offset: pageOffset.value,
+        sort_column: SORT_FIELD_MAP[sortField.value] ?? 3,
+        asc: sortOrder.value === 1,
+        search: tf.combinedSearch || undefined,
+        'search[tagMode]': tf.selectedTagIds.size > 1 ? tf.tagMode : undefined,
+        'search[searchworkflow]': workflowMe.value ? 'me' : undefined,
+        favorites: favoritesMe.value ? 'me' : undefined,
+      },
+      { signal },
+    ).then((r) => r.data),
   placeholderData: keepPreviousData,
 })
 

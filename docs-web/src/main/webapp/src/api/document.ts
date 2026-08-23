@@ -114,8 +114,15 @@ export interface DocumentListParams {
   favorites?: 'me'
 }
 
-export function listDocuments(params: DocumentListParams) {
-  return api.get<DocumentListResponse>('/document/list', { params })
+/**
+ * List documents. `options.signal` is the caller's cancellation handle (#290): TanStack Query
+ * hands its queryFn an AbortSignal and aborts it once the query is superseded, and axios' XHR
+ * adapter calls `request.abort()` when that signal fires — so a search the user has already
+ * moved on from stops occupying a browser connection and can no longer overtake a newer
+ * response. Browser-side only: the server-side search itself runs to completion.
+ */
+export function listDocuments(params: DocumentListParams, options?: { signal?: AbortSignal }) {
+  return api.get<DocumentListResponse>('/document/list', { params, signal: options?.signal })
 }
 
 export function getDocument(id: string, files = true, shareId?: string) {

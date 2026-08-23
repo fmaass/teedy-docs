@@ -168,7 +168,7 @@ vi.mock('@tanstack/vue-query', () => ({
   useQuery: (opts: {
     queryKey?: { value: unknown }
     enabled?: { value: boolean }
-    queryFn?: () => unknown
+    queryFn?: (context: { signal: AbortSignal }) => unknown
   }) => {
     // The slide-over query carries an `enabled` ref; its queryKey is
     // ['document', id]. Reactively derive the currently-open doc from the key so
@@ -197,9 +197,12 @@ vi.mock('@tanstack/vue-query', () => ({
     // Re-run on every reactive queryKey change to mirror TanStack Query's
     // refetch-on-key-change — this is what makes a Back-nav (which flips
     // workflowMe, a queryKey member) re-issue listDocuments with the new params.
-    opts.queryFn?.()
+    // TanStack hands the queryFn a context carrying the request's AbortSignal, which the
+    // view forwards to listDocuments (#290) — so the mock must supply a real one per call.
+    const runQueryFn = () => opts.queryFn?.({ signal: new AbortController().signal })
+    runQueryFn()
     if (opts.queryKey && 'value' in opts.queryKey) {
-      vueWatch(() => opts.queryKey!.value, () => opts.queryFn?.())
+      vueWatch(() => opts.queryKey!.value, runQueryFn)
     }
     return {
       // total is read from the holder so the #52 tests can raise it to render the
