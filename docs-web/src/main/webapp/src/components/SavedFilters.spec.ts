@@ -6,12 +6,13 @@ import { defineComponent, h } from 'vue'
 // reactive holder (as in DocumentList.spec) so a test can flip route.query and see
 // the "Save filter" affordance appear.
 const routerPush = vi.hoisted(() => vi.fn())
+const routerReplace = vi.hoisted(() => vi.fn())
 const routeHolder = vi.hoisted(() => ({ route: { query: {} as Record<string, unknown> } }))
 vi.mock('vue-router', async () => {
   const { reactive } = await vi.importActual<typeof import('vue')>('vue')
   routeHolder.route = reactive({ query: {} as Record<string, unknown> })
   return {
-    useRouter: () => ({ push: routerPush }),
+    useRouter: () => ({ push: routerPush, replace: routerReplace }),
     useRoute: () => routeHolder.route,
   }
 })
@@ -20,7 +21,17 @@ const mockRoute = {
   set query(v: Record<string, unknown>) { routeHolder.route.query = v },
 }
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (k: string) => k }) }))
+// The key-echo mock RENDERS its named params: the real $t interpolates them into the
+// message, so a label that CARRIES the filter name must not look identical to one that
+// dropped it (the whole point of the modified label is that it keeps the name).
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (k: string, params?: Record<string, unknown>) =>
+      params
+        ? `${k}(${Object.entries(params).map(([n, v]) => `${n}=${v}`).join(',')})`
+        : k,
+  }),
+}))
 vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: vi.fn() }) }))
 
 const confirmDangerMock = vi.hoisted(() => vi.fn())
@@ -123,6 +134,7 @@ function renderedNames(wrapper: Wrapper) {
 describe('SavedFilters — save affordance derives from route.query (#42)', () => {
   beforeEach(() => {
     routerPush.mockReset()
+    routerReplace.mockReset()
     createMock.mockClear()
     updateMock.mockClear()
     deleteMock.mockClear()
@@ -193,9 +205,11 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     await applyBtn!.trigger('click')
 
     expect(routerPush).toHaveBeenCalledTimes(1)
+    // #297 part 2: the pushed query also carries the applied filter's IDENTITY, which is
+    // what survives a later criteria edit and drives the modified state.
     expect(routerPush).toHaveBeenCalledWith({
       name: 'documents',
-      query: { tags: 'a', search: 'x', workflow: 'me' },
+      query: { tags: 'a', search: 'x', workflow: 'me', filter: 'f1' },
     })
   })
 
@@ -230,7 +244,9 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     const wrapper = mountView()
     await flushPromises()
 
-    const deleteBtn = wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'ui.saved_filters.delete_button')
+    const deleteBtn = wrapper
+      .findAll('button')
+      .find((b) => b.attributes('aria-label') === 'ui.saved_filters.delete_button(name=Invoices)')
     expect(deleteBtn).toBeTruthy()
     await deleteBtn!.trigger('click')
 
@@ -255,6 +271,7 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
 
   beforeEach(() => {
     routerPush.mockReset()
+    routerReplace.mockReset()
     createMock.mockClear()
     updateMock.mockClear()
     deleteMock.mockClear()
@@ -312,7 +329,7 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button(name=apple)').trigger('click')
     // The dialog is seeded with the current name.
     expect((wrapper.get('#saved-filter-rename-name').element as HTMLInputElement).value).toBe('apple')
 
@@ -331,7 +348,7 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
     await flushPromises()
 
     // The first rename control belongs to the first rendered row ("apple").
-    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button(name=apple)').trigger('click')
     await wrapper.get('#saved-filter-rename-name').setValue('mango')
     await buttonByText(wrapper, 'rename').trigger('click')
 
@@ -351,7 +368,7 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await buttonByAria(wrapper, 'ui.saved_filters.rename_button').trigger('click')
+    await buttonByAria(wrapper, 'ui.saved_filters.rename_button(name=apple)').trigger('click')
     await wrapper.get('#saved-filter-rename-name').setValue('   ')
     await buttonByText(wrapper, 'rename').trigger('click')
 
@@ -370,6 +387,7 @@ describe('SavedFilters — the ACTIVE saved filter is highlighted (#297)', () =>
 
   beforeEach(() => {
     routerPush.mockReset()
+    routerReplace.mockReset()
     createMock.mockClear()
     updateMock.mockClear()
     deleteMock.mockClear()
@@ -436,8 +454,9 @@ describe('SavedFilters — the ACTIVE saved filter is highlighted (#297)', () =>
     await flushPromises()
     expect(toggleButton(wrapper).text()).toBe('Invoices')
 
-    // Editing the filter is NOT a "modified" state in this phase (that is a separate
-    // ticket): the filter simply stops being the active one.
+    // With NO `filter=<id>` in the URL there is no identity to carry: the edited filter
+    // simply stops being the active one. Carrying the identity — and with it the
+    // MODIFIED state — is what the applied-filter id below adds.
     mockRoute.query = { search: 'y', tags: 'a' }
     await flushPromises()
     expectDefaultToolbarButton(wrapper)
@@ -464,5 +483,129 @@ describe('SavedFilters — the ACTIVE saved filter is highlighted (#297)', () =>
     await flushPromises()
 
     expectDefaultToolbarButton(wrapper)
+  })
+})
+
+describe('SavedFilters — an EDITED saved filter reads as MODIFIED (#297 part 2)', () => {
+  // The identity is URL-persisted: applying a filter puts `filter=<id>` into the query
+  // (tagFilter.buildFilterQuery preserves it across every later criteria edit), so an
+  // edited filter can say WHICH filter it was edited from — and survive a reload.
+  const invoices = { id: 'f1', name: 'Invoices', query: 'search=x&tags=a', create_date: 1 }
+  const receipts = { id: 'f2', name: 'Receipts', query: 'search=z', create_date: 2 }
+
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    createMock.mockClear()
+    updateMock.mockClear()
+    deleteMock.mockClear()
+    confirmDangerMock.mockClear()
+    mockRoute.query = {}
+    savedFiltersHolder.list = []
+  })
+
+  function toggleButton(wrapper: Wrapper) {
+    return wrapper.findAll('button')[0]
+  }
+
+  it('names the filter and marks it MODIFIED once a criterion is edited', async () => {
+    savedFiltersHolder.list = [{ ...invoices }, { ...receipts }]
+    mockRoute.query = { search: 'x', tags: 'a', filter: 'f1' }
+    const wrapper = mountView()
+    await flushPromises()
+    // Exactly applied: the part-1 ACTIVE state.
+    expect(toggleButton(wrapper).text()).toBe('Invoices')
+
+    // One criterion edited — the identity survives in the URL, so this is MODIFIED.
+    mockRoute.query = { search: 'y', tags: 'a', filter: 'f1' }
+    await flushPromises()
+
+    const toggle = toggleButton(wrapper)
+    expect(toggle.text()).toBe('ui.saved_filters.modified_label(name=Invoices)')
+    expect(toggle.classes()).toContain('saved-filters-modified')
+    expect(toggle.classes()).not.toContain('saved-filters-active')
+    // The modified filter is no longer the CURRENT one, so aria-current is dropped —
+    // the accessible name is what distinguishes it from both other states.
+    expect(toggle.attributes('aria-current')).toBeUndefined()
+    expect(toggle.attributes('aria-label')).toBe(
+      'ui.saved_filters.saved_label: ui.saved_filters.modified_label(name=Invoices)',
+    )
+
+    // The popover row gets the modified treatment, NOT the active one.
+    const modifiedRows = wrapper.findAll('.saved-filters-item.modified')
+    expect(modifiedRows).toHaveLength(1)
+    expect(modifiedRows[0].text()).toContain('Invoices')
+    expect(wrapper.findAll('.saved-filters-item.active')).toHaveLength(0)
+    const rowButton = wrapper
+      .findAll('.saved-filters-apply')
+      .find((b) => b.text() === 'Invoices')
+    expect(rowButton!.attributes('aria-label')).toBe('ui.saved_filters.modified_label(name=Invoices)')
+    expect(rowButton!.attributes('aria-current')).toBeUndefined()
+  })
+
+  it('ignores favorites when deciding a filter is modified', async () => {
+    savedFiltersHolder.list = [{ ...invoices }]
+    mockRoute.query = { search: 'y', tags: 'a', filter: 'f1', favorites: 'me' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(toggleButton(wrapper).text()).toBe('ui.saved_filters.modified_label(name=Invoices)')
+  })
+
+  it('falls back to PLAIN once the criteria are cleared, id or not', async () => {
+    savedFiltersHolder.list = [{ ...invoices }]
+    mockRoute.query = { filter: 'f1' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const toggle = toggleButton(wrapper)
+    expect(toggle.text()).toBe('ui.saved_filters.saved_label')
+    expect(toggle.classes()).not.toContain('saved-filters-modified')
+    expect(wrapper.findAll('.saved-filters-item.modified')).toHaveLength(0)
+  })
+
+  it('falls back to PLAIN when the id names a filter that no longer exists', async () => {
+    // Deleted under the user (another tab, another session): a dangling id names
+    // nothing, so there is no modified filter to report.
+    savedFiltersHolder.list = [{ ...receipts }]
+    mockRoute.query = { search: 'y', tags: 'a', filter: 'f1' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const toggle = toggleButton(wrapper)
+    expect(toggle.text()).toBe('ui.saved_filters.saved_label')
+    expect(toggle.classes()).not.toContain('saved-filters-modified')
+    expect(wrapper.findAll('.saved-filters-item.modified')).toHaveLength(0)
+  })
+
+  it('lets the DERIVED match win over a stale id, and rewrites the id to it', async () => {
+    // Edited from "Invoices" until the criteria exactly describe "Receipts": the
+    // comparison is the truth, so Receipts is ACTIVE (not Invoices modified) and the
+    // URL identity is corrected to follow it.
+    savedFiltersHolder.list = [{ ...invoices }, { ...receipts }]
+    mockRoute.query = { search: 'z', filter: 'f1' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(toggleButton(wrapper).text()).toBe('Receipts')
+    expect(wrapper.findAll('.saved-filters-item.modified')).toHaveLength(0)
+    expect(routerReplace).toHaveBeenCalledTimes(1)
+    expect(routerReplace).toHaveBeenCalledWith({
+      name: 'documents',
+      query: { search: 'z', filter: 'f2' },
+    })
+  })
+
+  it('does NOT stamp an id onto a filter the user never applied', async () => {
+    // An ad-hoc filter that happens to match a stored one is ACTIVE (part 1) but was
+    // never LOADED — writing an identity into the URL here would make a later edit
+    // claim the user had opened a saved filter.
+    savedFiltersHolder.list = [{ ...invoices }, { ...receipts }]
+    mockRoute.query = { search: 'z' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(toggleButton(wrapper).text()).toBe('Receipts')
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 })

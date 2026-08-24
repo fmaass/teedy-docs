@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { listTags, getTagStats, getTagFacets, getTagCoOccurrence, isMetaTag, type Tag, type CoOccurrencePair } from '../api/tag'
 import { useCoOccurrenceTree } from '../composables/useCoOccurrenceTree'
 import { queryKeys } from '../api/queryKeys'
+import { FILTER_KEYS } from '../utils/savedFilterQuery'
 
 export const useTagFilterStore = defineStore('tagFilter', () => {
   const router = useRouter()
@@ -332,6 +333,23 @@ export const useTagFilterStore = defineStore('tagFilter', () => {
     // as workflow: only the scalar string "me" survives; everything else is
     // canonicalized away.
     if (route.query.favorites === 'me') query.favorites = 'me'
+    // `filter=<id>` (#297) is the APPLIED saved filter's IDENTITY — owned by
+    // SavedFilters.vue, and not a filter dimension: it constrains nothing. It is what
+    // lets an EDITED saved filter still name the filter it was loaded from ("modified")
+    // instead of silently reading as an ad-hoc filter. Since this serializer owns the
+    // WHOLE query syncUrl replaces the URL with, without preserving it here the first
+    // criteria edit — precisely the edit that creates the modified state — would wipe
+    // the identity. Same validated contract as workflow/favorites: only a non-empty
+    // scalar survives; arrays and empty values are canonicalized away.
+    //
+    // An identity with no criteria left describes nothing, so the id rides along only
+    // while at least one real dimension remains: clearing the filter takes it out of the
+    // URL with it. `favorites` is deliberately not such a dimension (#209) — it cannot
+    // keep a dangling id alive.
+    const filterId = route.query.filter
+    if (typeof filterId === 'string' && filterId !== '' && FILTER_KEYS.some((k) => k in query)) {
+      query.filter = filterId
+    }
     return query
   }
 

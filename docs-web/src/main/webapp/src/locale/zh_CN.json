@@ -1203,6 +1203,7 @@
     },
     "saved_filters": {
       "saved_label": "已保存的筛选器",
+      "modified_label": "{name}（已修改）",
       "save_current": "保存筛选器",
       "empty": "暂无已保存的筛选器",
       "name_label": "筛选器名称",

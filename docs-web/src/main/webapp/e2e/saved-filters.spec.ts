@@ -121,6 +121,26 @@ test('save a tag+text filter, clear, re-apply from the dropdown, delete (#42, #8
   await expect(otherRow).toBeHidden()
   await expect(matchRow).toBeVisible()
 
+  // #297 part 2: applying stamped the filter's IDENTITY into the URL, and editing one
+  // criterion keeps it there — so the toolbar still NAMES the filter and says it has been
+  // modified, instead of silently dropping to the plain "Saved filters" label.
+  await expect(page).toHaveURL(/[?&]filter=/)
+  await page.getByPlaceholder('Search', { exact: true }).fill(`${term}-edited`)
+  await expect(page).toHaveURL(new RegExp(`[?&]search=${term}-edited`))
+  await expect(page).toHaveURL(/[?&]filter=/)
+  const modifiedToolbarButton = page.getByRole('button', {
+    name: `Saved filters: ${filterName} (modified)`,
+    exact: true,
+  })
+  await expect(modifiedToolbarButton).toBeVisible()
+  await expect(modifiedToolbarButton).toContainText(`${filterName} (modified)`)
+
+  // Clearing the criteria takes the identity out of the URL with them: an identity
+  // without criteria describes nothing, and the toolbar is plain again.
+  await page.getByRole('button', { name: 'Clear' }).click()
+  await expect(page).not.toHaveURL(/[?&]filter=/)
+  await expect(page.getByRole('button', { name: 'Saved filters', exact: true })).toBeVisible()
+
   // Delete the saved filter from the dropdown via the danger confirm. The delete
   // control's accessible name identifies its filter, so this targets THIS test's
   // filter even when other saved filters (residue from a prior run) coexist.

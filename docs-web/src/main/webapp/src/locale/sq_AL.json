@@ -1203,6 +1203,7 @@
     },
     "saved_filters": {
       "saved_label": "Filtrat e ruajtur",
+      "modified_label": "{name} (i ndryshuar)",
       "save_current": "Ruaj filtrin",
       "empty": "Ende nuk ka filtra të ruajtur",
       "name_label": "Emri i filtrit",

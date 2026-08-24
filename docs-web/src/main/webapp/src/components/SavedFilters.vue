@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
@@ -53,16 +53,11 @@ const { data: filtersData } = useQuery({
 
 const filters = computed<SavedFilterItem[]>(() => filtersData.value ?? [])
 
-// #297: which stored filter is APPLIED right now. Purely DERIVED state — nothing is
-// persisted and no `?filter=<id>` key is added to the URL: the active filter is simply
+// #297: which stored filter is APPLIED right now. DERIVED state — the active filter is
 // the stored one whose query selects the same documents as the current route. The
 // comparison is order-insensitive, so a filter saved from a differently-ordered URL still
 // matches the canonical one tagFilter.buildFilterQuery rewrites, and `favorites` is not a
 // dimension, so toggling favourites cannot un-highlight the applied filter.
-//
-// Editing any dimension simply drops the match (the filter stops being active); telling
-// "edited" apart from "not applied at all" would require the id to survive the edit and
-// is a separate ticket.
 //
 // An UNFILTERED route never has an active filter: without this guard, a stored filter
 // with an empty query would match the bare document list and leave the toolbar
@@ -73,17 +68,74 @@ const activeFilter = computed<SavedFilterItem | null>(() => {
   return filters.value.find((f) => filterQueriesEqual(current, f.query)) ?? null
 })
 
-const toolbarLabel = computed(() => activeFilter.value?.name ?? t('ui.saved_filters.saved_label'))
+// #297 part 2: the applied filter's IDENTITY, persisted in the URL as `filter=<id>` by
+// applyFilter and carried through every later criteria edit by the store's serializer
+// (tagFilter.buildFilterQuery). Only a non-empty scalar counts — a hand-edited or
+// duplicated key is no identity.
+const routeFilterId = computed<string | null>(() => {
+  const raw = route.query.filter
+  return typeof raw === 'string' && raw !== '' ? raw : null
+})
 
-// The accessible name keeps the control's PURPOSE and appends the active filter's name.
-// Replacing it with the bare filter name would hide what the button does from a screen
-// reader, and would make the toolbar button collide with the popover row that applies the
-// same filter (both e2e lookups and any by-name automation would then be ambiguous).
-const toolbarAriaLabel = computed(() =>
-  activeFilter.value
-    ? `${t('ui.saved_filters.saved_label')}: ${activeFilter.value.name}`
-    : t('ui.saved_filters.saved_label'),
+// The MODIFIED state: a filter was LOADED and its criteria have since been edited, so
+// nothing matches exactly any more but the URL still says which filter this started as.
+// Ranked strictly BELOW an exact match — comparison is the truth, an id is only memory —
+// and gated on the same unfiltered guard, so clearing the criteria reads as plain even in
+// the instant before the serializer drops the now-meaningless id. An id naming a filter
+// that no longer exists (deleted in another tab) names nothing: also plain.
+const modifiedFilter = computed<SavedFilterItem | null>(() => {
+  if (activeFilter.value || !hasSavableFilter.value) return null
+  const id = routeFilterId.value
+  if (!id) return null
+  return filters.value.find((f) => f.id === id) ?? null
+})
+
+// The URL identity must never CONTRADICT the derived truth: once the criteria exactly
+// describe a stored filter, THAT filter is the active one, and a stale id left over from
+// the filter it was edited away from is corrected to name it. Surgical (the current query
+// with one key replaced), and only ever while an id is already present — an ad-hoc filter
+// that merely happens to match a stored one was never loaded, and stamping an identity
+// onto it would make a later edit claim the user had opened a saved filter.
+watch(
+  [activeFilter, () => route.query.filter],
+  ([active, id]) => {
+    if (!active || typeof id !== 'string' || id === '' || id === active.id) return
+    router.replace({ name: 'documents', query: { ...route.query, filter: active.id } })
+  },
+  { immediate: true },
 )
+
+// The toolbar keeps the filter's NAME in both states; the modified one wraps it in a
+// label that says so, so the state survives a greyscale screenshot and reaches a screen
+// reader — it is never carried by colour alone.
+const toolbarLabel = computed(() => {
+  if (activeFilter.value) return activeFilter.value.name
+  if (modifiedFilter.value) {
+    return t('ui.saved_filters.modified_label', { name: modifiedFilter.value.name })
+  }
+  return t('ui.saved_filters.saved_label')
+})
+
+// The accessible name keeps the control's PURPOSE and appends the active (or modified)
+// filter's name. Replacing it with the bare filter name would hide what the button does
+// from a screen reader, and would make the toolbar button collide with the popover row
+// that applies the same filter (both e2e lookups and any by-name automation would then be
+// ambiguous).
+const toolbarAriaLabel = computed(() => {
+  if (activeFilter.value) return `${t('ui.saved_filters.saved_label')}: ${activeFilter.value.name}`
+  if (modifiedFilter.value) {
+    return `${t('ui.saved_filters.saved_label')}: ${t('ui.saved_filters.modified_label', {
+      name: modifiedFilter.value.name,
+    })}`
+  }
+  return t('ui.saved_filters.saved_label')
+})
+
+const toolbarStateClass = computed(() => {
+  if (activeFilter.value) return 'saved-filters-active'
+  if (modifiedFilter.value) return 'saved-filters-modified'
+  return undefined
+})
 
 // --- List presentation: name search + direction toggle ---
 
@@ -119,7 +171,15 @@ function toggleDropdown(event: Event) {
 
 function applyFilter(filter: SavedFilterItem) {
   dropdown.value?.hide()
-  router.push({ name: 'documents', query: parseFilterQuery(filter.query) })
+  // The applied filter's identity rides in the URL alongside its criteria, so it survives
+  // a reload and the back button, and the store's serializer carries it through every
+  // later criteria edit — which is what turns an edit into the MODIFIED state instead of
+  // a silent drop to plain. Applying another filter replaces the id; clearing the
+  // criteria drops it (the serializer emits it only alongside a real dimension).
+  router.push({
+    name: 'documents',
+    query: { ...parseFilterQuery(filter.query), filter: filter.id },
+  })
 }
 
 // --- Save dialog ---
@@ -263,7 +323,7 @@ function confirmDelete(filter: SavedFilterItem) {
       text
       size="small"
       severity="secondary"
-      :class="activeFilter ? 'saved-filters-active' : undefined"
+      :class="toolbarStateClass"
       :aria-current="activeFilter ? 'true' : undefined"
       :aria-label="toolbarAriaLabel"
       @click="toggleDropdown"
@@ -312,7 +372,10 @@ function confirmDelete(filter: SavedFilterItem) {
             v-for="filter in visibleFilters"
             :key="filter.id"
             class="saved-filters-item"
-            :class="{ active: filter.id === activeFilter?.id }"
+            :class="{
+              active: filter.id === activeFilter?.id,
+              modified: filter.id === modifiedFilter?.id,
+            }"
           >
             <Button
               :label="filter.name"
@@ -320,6 +383,11 @@ function confirmDelete(filter: SavedFilterItem) {
               size="small"
               class="saved-filters-apply"
               :aria-current="filter.id === activeFilter?.id ? 'true' : undefined"
+              :aria-label="
+                filter.id === modifiedFilter?.id
+                  ? t('ui.saved_filters.modified_label', { name: filter.name })
+                  : undefined
+              "
               @click="applyFilter(filter)"
             />
             <Button
@@ -485,6 +553,31 @@ function confirmDelete(filter: SavedFilterItem) {
 .saved-filters-item.active .saved-filters-apply {
   color: var(--p-primary-color);
   font-weight: 600;
+}
+
+/* #297 part 2: the LOADED-then-EDITED filter. Deliberately not the active treatment — it
+   must read as "this started as Invoices, but what you are looking at is no longer
+   Invoices": a muted, italic label against the active state's full primary colour, and a
+   faded inset marker instead of the solid fill. The marker is an inset shadow rather than
+   a border so the row's contents do not shift relative to its unmarked siblings. Neither
+   state is carried by colour alone — the label itself says "(modified)". */
+.saved-filters-modified {
+  /* A FADED primary: unmistakably about the same saved filter as the active state, but
+     visibly not it — against the plain button's secondary grey it still reads as "a
+     filter is loaded". Mixed toward the muted text colour rather than toward the
+     background so it keeps its contrast in both themes. */
+  color: color-mix(in srgb, var(--p-primary-color) 70%, var(--p-text-muted-color));
+  font-style: italic;
+}
+
+.saved-filters-item.modified {
+  background: color-mix(in srgb, var(--p-primary-color) 7%, transparent);
+  border-radius: 4px;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--p-primary-color) 55%, transparent);
+}
+
+.saved-filters-item.modified .saved-filters-apply {
+  font-style: italic;
 }
 
 .save-dialog-body {

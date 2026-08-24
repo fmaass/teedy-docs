@@ -1203,6 +1203,7 @@
     },
     "saved_filters": {
       "saved_label": "Сохранённые фильтры",
+      "modified_label": "{name} (изменён)",
       "save_current": "Сохранить фильтр",
       "empty": "Пока нет сохранённых фильтров",
       "name_label": "Название фильтра",

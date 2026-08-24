@@ -579,6 +579,86 @@ describe('tagFilter store', () => {
     })
   })
 
+  // --- #297: `filter=<id>` — the APPLIED saved filter's identity, owned by
+  //     SavedFilters.vue, not by this store. It is what tells an EDITED saved filter
+  //     ("modified") apart from an ad-hoc filter that never came from one. Like
+  //     workflow/favorites it is component-owned but MUST survive the canonical URL
+  //     rewrite, or the very first criteria edit — the edit that CREATES the modified
+  //     state — would wipe the identity it needs. ---
+  describe('filter=<id> preservation (component-owned saved-filter identity, #297)', () => {
+    it('buildFilterQuery preserves a saved-filter id from the route query', () => {
+      mockRoute.query = { filter: 'sf1' }
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      store.debouncedText = 'invoice'
+      const query = store.buildFilterQuery()
+      expect(query.filter).toBe('sf1')
+      // ...alongside the normal dimensions, not instead of them.
+      expect(query.tags).toBe('a')
+      expect(query.search).toBe('invoice')
+    })
+
+    it('buildFilterQuery canonicalizes away an array / empty filter value', () => {
+      mockRoute.query = { filter: ['sf1', 'sf2'] } as unknown as Record<string, string>
+      const store = useTagFilterStore()
+      store.selectedTagIds = new Set(['a'])
+      expect(store.buildFilterQuery().filter).toBeUndefined()
+
+      mockRoute.query = { filter: '' } as unknown as Record<string, string>
+      const store2 = useTagFilterStore()
+      store2.selectedTagIds = new Set(['a'])
+      expect(store2.buildFilterQuery().filter).toBeUndefined()
+    })
+
+    it('buildFilterQuery drops the id once NO filter dimension is left (clearing filters)', () => {
+      // An identity without criteria describes nothing: clearing the filter must take
+      // the saved-filter id out of the URL with it, not leave a dangling one behind.
+      mockRoute.query = { filter: 'sf1' }
+      const store = useTagFilterStore()
+      expect(store.buildFilterQuery().filter).toBeUndefined()
+      // `favorites` is not a filter dimension (#209) — it cannot keep an id alive.
+      mockRoute.query = { filter: 'sf1', favorites: 'me' }
+      const store2 = useTagFilterStore()
+      const query = store2.buildFilterQuery()
+      expect(query.favorites).toBe('me')
+      expect(query.filter).toBeUndefined()
+    })
+
+    it('a user-driven tag change does NOT strip filter=<id> from the canonical URL rewrite', async () => {
+      // The RED this ticket turns green: syncUrl's router.replace(buildFilterQuery())
+      // owns the FULL query, so the first criteria edit after applying a saved filter
+      // wiped `filter=<id>` — and with it every chance to show the modified state.
+      mockRoute.query = { tags: 'a', filter: 'sf1' }
+      const store = useTagFilterStore()
+      await nextTick()
+      replace.mockClear()
+
+      store.selectedTagIds = new Set(['a', 'c'])
+      await nextTick()
+
+      expect(replace).toHaveBeenCalled()
+      const lastQuery = replace.mock.calls.at(-1)![0].query
+      expect(lastQuery.tags).toBe('a,c')
+      expect(lastQuery.filter).toBe('sf1')
+    })
+
+    it('filter=<id>, favorites=me and workflow=me all survive a tag change together', async () => {
+      mockRoute.query = { filter: 'sf1', favorites: 'me', workflow: 'me' }
+      const store = useTagFilterStore()
+      await nextTick()
+      replace.mockClear()
+
+      store.selectedTagIds = new Set(['a'])
+      await nextTick()
+
+      const lastQuery = replace.mock.calls.at(-1)![0].query
+      expect(lastQuery.filter).toBe('sf1')
+      expect(lastQuery.favorites).toBe('me')
+      expect(lastQuery.workflow).toBe('me')
+      expect(lastQuery.tags).toBe('a')
+    })
+  })
+
   describe('route-driven hydration (data re-emit must not clobber; route change must re-hydrate)', () => {
     it('a tagsData re-emit with an UNCHANGED route query does NOT reset the user selection', async () => {
       mockRoute.query = { tags: 'a' }

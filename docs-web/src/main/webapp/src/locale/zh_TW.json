@@ -1203,6 +1203,7 @@
     },
     "saved_filters": {
       "saved_label": "已儲存的篩選條件",
+      "modified_label": "{name}（已修改）",
       "save_current": "儲存篩選條件",
       "empty": "尚無已儲存的篩選條件",
       "name_label": "篩選條件名稱",

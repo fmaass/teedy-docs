@@ -1203,6 +1203,7 @@
     },
     "saved_filters": {
       "saved_label": "Filtres enregistrés",
+      "modified_label": "{name} (modifié)",
       "save_current": "Enregistrer le filtre",
       "empty": "Aucun filtre enregistré pour le moment",
       "name_label": "Nom du filtre",
