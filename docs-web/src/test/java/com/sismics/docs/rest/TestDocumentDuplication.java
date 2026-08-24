@@ -23,8 +23,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -40,9 +44,9 @@ import java.util.stream.Stream;
 /**
  * Tests the duplicate-document endpoint ({@code POST /document/{id}/duplicate}, #184): a READ-holder
  * copies a document into a fresh copy they own — content and the eight Dublin-Core fields, custom
- * metadata, readable tags (with inherited visibility), files (re-encrypted under the copier's key with
- * rotation and cover preserved) — while storage is charged exactly once and a failure leaves nothing
- * partial (no rows, no orphan blobs).
+ * metadata, readable tags (with inherited visibility), outgoing relations to targets they can read,
+ * files (re-encrypted under the copier's key with rotation and cover preserved) — while storage is
+ * charged exactly once and a failure leaves nothing partial (no rows, no orphan blobs).
  */
 public class TestDocumentDuplication extends BaseJerseyTest {
 
@@ -51,7 +55,8 @@ public class TestDocumentDuplication extends BaseJerseyTest {
     /**
      * A READ-only requester duplicates a rich document: the copy carries the eight metadata fields, the
      * description, language, a reset create date, both files in order (with rotation and the remapped
-     * cover), no relations — charged to the requester exactly once, with the source left byte-identical.
+     * cover), and no link to the related document the requester cannot read — charged to the requester
+     * exactly once, with the source left byte-identical.
      */
     @Test
     public void testDuplicateCopiesFieldsFilesCoverRotation() throws Exception {
@@ -60,7 +65,7 @@ public class TestDocumentDuplication extends BaseJerseyTest {
         clientUtil.createUser("dup_reader");
         String readerToken = clientUtil.login("dup_reader");
 
-        // A throwaway document to relate to — the relation must NOT be copied.
+        // A related document the requester holds no ACL on: its outgoing link must NOT be copied.
         String relatedId = clientUtil.createDocument(ownerToken);
 
         long pastCreateDate = 1000000000000L; // 2001, safely before "now"
@@ -124,7 +129,10 @@ public class TestDocumentDuplication extends BaseJerseyTest {
         Assertions.assertEquals("Cov", copy.getString("coverage"));
         Assertions.assertEquals("Rgt", copy.getString("rights"));
         Assertions.assertEquals("dup_reader", copy.getString("creator"));
-        Assertions.assertEquals(0, copy.getJsonArray("relations").size(), "relations are not copied");
+        // Counted in the database, not through the document view: the view filters relations by the
+        // caller's own READ ACL, so a wrongly copied link to an unreadable target would be invisible there.
+        Assertions.assertEquals(0L, countActiveOutgoingRelations(copyId),
+                "an outgoing relation whose target the requester cannot read is not copied");
 
         // create_date reset to now, not carried from the 2001 source date.
         long copyCreateDate = copy.getJsonNumber("create_date").longValue();
@@ -246,6 +254,68 @@ public class TestDocumentDuplication extends BaseJerseyTest {
         } finally {
             target().path("/metadata/" + metadataId).request().cookie(COOKIE, adminToken).delete(JsonObject.class);
         }
+    }
+
+    /**
+     * Outgoing relations are carried to the copy (#292), incoming ones are not: the copy links to every
+     * target the requester can READ — once per target, even where the source carries duplicate rows for
+     * one — a target they cannot read is dropped, and no other document's relation list is rewritten.
+     */
+    @Test
+    public void testDuplicateCopiesReadableOutgoingRelations() throws Exception {
+        clientUtil.createUser("dup_rel_owner");
+        String ownerToken = clientUtil.login("dup_rel_owner");
+        clientUtil.createUser("dup_rel_reader");
+        String readerToken = clientUtil.login("dup_rel_reader");
+        // Admin skips the ACL check, so its view of a relation list is the unfiltered one: the document
+        // view shows each caller only the related documents they may READ.
+        String adminToken = adminToken();
+
+        String visibleTargetId = clientUtil.createDocument(ownerToken);
+        String hiddenTargetId = clientUtil.createDocument(ownerToken);
+        String sourceId = target().path("/document").request()
+                .cookie(COOKIE, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Linked original")
+                        .param("language", "eng")
+                        .param("relations", visibleTargetId)
+                        .param("relations", hiddenTargetId)), JsonObject.class)
+                .getString("id");
+        String incomingId = target().path("/document").request()
+                .cookie(COOKIE, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Points at the original")
+                        .param("language", "eng")
+                        .param("relations", sourceId)), JsonObject.class)
+                .getString("id");
+
+        // The schema carries no unique constraint on (from, to), so several active rows for one ordered
+        // pair are representable; give the source that wart and the copy must still end up with one row.
+        insertRelationRow(sourceId, visibleTargetId);
+
+        shareRead(sourceId, ownerToken, "dup_rel_reader");
+        shareRead(visibleTargetId, ownerToken, "dup_rel_reader");
+
+        String copyId = target().path("/document/" + sourceId + "/duplicate").request()
+                .cookie(COOKIE, readerToken)
+                .post(null, JsonObject.class)
+                .getString("id");
+
+        Assertions.assertEquals(signatures(visibleTargetId + "|out"), relationSignatures(copyId, adminToken),
+                "the copy links out to the readable target once, and carries no incoming relation");
+
+        Assertions.assertEquals(
+                signatures(visibleTargetId + "|out", visibleTargetId + "|out", hiddenTargetId + "|out",
+                        incomingId + "|in"),
+                relationSignatures(sourceId, adminToken),
+                "the source keeps its own relations, duplicate row included, and gains none from the copy");
+        Assertions.assertEquals(signatures(sourceId + "|in", sourceId + "|in", copyId + "|in"),
+                relationSignatures(visibleTargetId, adminToken),
+                "the readable target gains exactly one incoming relation, from the copy");
+        Assertions.assertEquals(signatures(sourceId + "|in"), relationSignatures(hiddenTargetId, adminToken),
+                "the unreadable target is left untouched");
+        Assertions.assertEquals(signatures(sourceId + "|out"), relationSignatures(incomingId, adminToken),
+                "a document pointing AT the source is left untouched");
     }
 
     /**
@@ -540,6 +610,55 @@ public class TestDocumentDuplication extends BaseJerseyTest {
             sb.append(String.format("%02x", b));
         }
         return sb.toString();
+    }
+
+    /**
+     * The relation list of a document as sorted {@code <id>|out} (this document is the source) and
+     * {@code <id>|in} signatures, one per relation row.
+     */
+    private List<String> relationSignatures(String documentId, String token) {
+        JsonArray relations = getDocument(documentId, token).getJsonArray("relations");
+        List<String> signatureList = new ArrayList<>();
+        for (int i = 0; i < relations.size(); i++) {
+            JsonObject relation = relations.getJsonObject(i);
+            signatureList.add(relation.getString("id") + (relation.getBoolean("source") ? "|out" : "|in"));
+        }
+        Collections.sort(signatureList);
+        return signatureList;
+    }
+
+    private List<String> signatures(String... signatureList) {
+        List<String> expected = new ArrayList<>(List.of(signatureList));
+        Collections.sort(expected);
+        return expected;
+    }
+
+    /**
+     * Insert one active relation row directly: the REST layer collapses a submitted list onto a set, so a
+     * duplicated ordered pair can only be built underneath it.
+     */
+    private void insertRelationRow(String fromDocumentId, String toDocumentId) {
+        TransactionUtil.handle(() -> {
+            EntityManager em = ThreadLocalContext.get().getEntityManager();
+            em.createNativeQuery("insert into T_RELATION (REL_ID_C, REL_IDDOCFROM_C, REL_IDDOCTO_C)"
+                            + " values (:id, :from, :to)")
+                    .setParameter("id", UUID.randomUUID().toString())
+                    .setParameter("from", fromDocumentId)
+                    .setParameter("to", toDocumentId)
+                    .executeUpdate();
+        });
+    }
+
+    private long countActiveOutgoingRelations(String fromDocumentId) {
+        AtomicLong count = new AtomicLong();
+        TransactionUtil.handle(() -> {
+            EntityManager em = ThreadLocalContext.get().getEntityManager();
+            Number n = (Number) em.createNativeQuery(
+                    "select count(*) from T_RELATION where REL_IDDOCFROM_C = :f and REL_DELETEDATE_D is null")
+                    .setParameter("f", fromDocumentId).getSingleResult();
+            count.set(n.longValue());
+        });
+        return count.get();
     }
 
     private long countDocumentsByTitle(String title) {

@@ -1,14 +1,18 @@
 package com.sismics.docs.core.service;
 
 import com.sismics.docs.core.constant.ConfigType;
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.ConfigDao;
 import com.sismics.docs.core.dao.DocumentDao;
 import com.sismics.docs.core.dao.DocumentMetadataDao;
 import com.sismics.docs.core.dao.FileDao;
+import com.sismics.docs.core.dao.RelationDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.DocumentMetadataDto;
+import com.sismics.docs.core.dao.dto.RelationDto;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.event.DocumentCreatedAsyncEvent;
 import com.sismics.docs.core.model.context.AppContext;
@@ -75,7 +79,8 @@ public class DocumentDuplicationService {
      *
      * @param sourceDocumentId Document to duplicate
      * @param requesterUserId User that will own the copy and whose key re-encrypts the copied blobs
-     * @param requesterTargetIdList Requester's ACL target ids, used to copy only the tags they can read
+     * @param requesterTargetIdList Requester's ACL target ids, used to copy only the tags and the
+     *        outgoing-relation targets they can read
      * @return the new document id
      * @throws IOException {@code "QuotaReached"} over quota, {@code "SourceNotFound"} if the source is gone,
      *         {@code "FileError"} if a source blob cannot be read (all fail the whole duplicate closed)
@@ -115,6 +120,7 @@ public class DocumentDuplicationService {
         List<TagDto> visibleTags = new TagDao().findByCriteria(
                 new TagCriteria().setDocumentId(sourceDocumentId).setTargetIdList(requesterTargetIdList), null);
         List<DocumentMetadataDto> sourceMetadata = new DocumentMetadataDao().getByDocumentId(sourceDocumentId);
+        Set<String> visibleRelationTargetIdSet = readVisibleOutgoingRelationTargets(sourceDocumentId, requesterTargetIdList);
 
         // A file whose bytes cannot be measured fails the whole duplicate closed — never silently excluded.
         Map<String, User> ownerById = new HashMap<>();
@@ -182,6 +188,13 @@ public class DocumentDuplicationService {
         }
         MetadataUtil.updateMetadata(copyId, metadataIdList, metadataValueList);
 
+        // The relation writer takes the copy's document row FOR UPDATE before reconciling. That row was
+        // inserted by this very transaction moments ago and is not yet visible to any other, so the
+        // acquisition is uncontended and adds no new position to the canonical lock order above.
+        if (!visibleRelationTargetIdSet.isEmpty()) {
+            new RelationDao().updateRelationList(copyId, visibleRelationTargetIdSet);
+        }
+
         Map<String, String> newFileIdBySourceId = copyFiles(
                 sourceFiles, resolvedSizeById, ownerById, requesterUserId, copyId, copy.getLanguage());
 
@@ -197,6 +210,34 @@ public class DocumentDuplicationService {
         ThreadLocalContext.get().addAsyncEvent(createdEvent);
 
         return copyId;
+    }
+
+    /**
+     * The distinct documents the source points AT and the requester may read (#292).
+     *
+     * <p>Only the outgoing direction is copied: an incoming relation is a link another document makes,
+     * owned and edited there, and duplicating one would rewrite a document the requester never asked to
+     * touch. Targets are filtered by the requester's READ permission the same way the copied tags are,
+     * so duplicating cannot mint a link they could not have made by hand.</p>
+     *
+     * <p>The result is a SET because the schema carries no unique constraint on the ordered pair
+     * (dbupdate-007-0.sql), so a source may legitimately hold several active rows for one target
+     * ({@link RelationDao#getActiveBetween}); that wart belongs to the source's history and is not
+     * replicated onto a fresh copy.</p>
+     *
+     * @param sourceDocumentId Document being duplicated
+     * @param requesterTargetIdList Requester's ACL target ids
+     * @return the target document ids to link the copy to
+     */
+    private static Set<String> readVisibleOutgoingRelationTargets(String sourceDocumentId, List<String> requesterTargetIdList) {
+        AclDao aclDao = new AclDao();
+        Set<String> targetIdSet = new HashSet<>();
+        for (RelationDto relation : new RelationDao().getByDocumentId(sourceDocumentId)) {
+            if (relation.isSource() && aclDao.checkPermission(relation.getId(), PermType.READ, requesterTargetIdList)) {
+                targetIdSet.add(relation.getId());
+            }
+        }
+        return targetIdSet;
     }
 
     /**
