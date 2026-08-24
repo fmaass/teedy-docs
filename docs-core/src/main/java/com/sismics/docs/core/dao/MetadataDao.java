@@ -112,7 +112,8 @@ public class MetadataDao {
      * Returns the list of all metadata.
      *
      * @param criteria Search criteria
-     * @param sortCriteria Sort criteria
+     * @param sortCriteria Sort criteria, or null for the default listing order: by name, ascending,
+     *                     case-insensitively
      * @return List of metadata
      */
     public List<MetadataDto> findByCriteria(MetadataCriteria criteria, SortCriteria sortCriteria) {
@@ -128,7 +129,19 @@ public class MetadataDao {
         sb.append(Joiner.on(" and ").join(criteriaList));
 
         // Perform the search
-        QueryParam queryParam = QueryUtil.getSortedQueryParam(new QueryParam(sb.toString(), parameterMap), sortCriteria);
+        QueryParam queryParam = new QueryParam(sb.toString(), parameterMap);
+        if (sortCriteria == null) {
+            // #291: the default listing order is the name folded to lower case. Ordering on the raw
+            // column is collation-dependent — PostgreSQL with a C/POSIX collation compares byte by
+            // byte, so every upper-case name sorts before every lower-case one and a set of alpha,
+            // Beta, zulu is listed as Beta, alpha, zulu. The fold names the table column rather
+            // than the c1 alias because PostgreSQL resolves an output alias in ORDER BY only when
+            // it stands alone, never inside an expression.
+            queryParam = new QueryParam(queryParam.getQueryString() + " order by lower(m.MET_NAME_C) asc",
+                    parameterMap);
+        } else {
+            queryParam = QueryUtil.getSortedQueryParam(queryParam, sortCriteria);
+        }
         @SuppressWarnings("unchecked")
         List<Object[]> l = QueryUtil.getNativeQuery(queryParam).getResultList();
 

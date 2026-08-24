@@ -33,8 +33,8 @@ public class MetadataResource extends BaseResource {
      * @api {get} /metadata Get configured metadata
      * @apiName GetMetadata
      * @apiGroup Metadata
-     * @apiParam {Number} sort_column Column index to sort on (defaults to 1, the name)
-     * @apiParam {Boolean} asc If true, sort in ascending order
+     * @apiParam {Number} sort_column Column index to sort on (omitted: by name, case-insensitively, ascending)
+     * @apiParam {Boolean} asc If true, sort in ascending order (only honoured together with sort_column)
      * @apiSuccess {Object[]} metadata List of metadata
      * @apiSuccess {String} metadata.id ID
      * @apiSuccess {String} metadata.name Name
@@ -54,9 +54,12 @@ public class MetadataResource extends BaseResource {
         }
 
         JsonArrayBuilder metadata = Json.createArrayBuilder();
-        // #291: with no sort_column the definitions must be listed by name (column 1). SortCriteria
-        // leaves a null column at 0, which orders by the MET_ID_C alias c0 — a random UUID.
-        SortCriteria sortCriteria = new SortCriteria(sortColumn == null ? 1 : sortColumn, asc);
+        // #291: with no sort_column the definitions must be listed by name, and a SortCriteria on
+        // the name column orders on the raw text — which is collation-dependent, so a case-sensitive
+        // database lists Beta before alpha. A null hands the ordering to the DAO's default, which
+        // folds the name to lower case. (SortCriteria itself leaves a null column at 0, which would
+        // order by the MET_ID_C alias c0 — a random UUID.)
+        SortCriteria sortCriteria = sortColumn == null ? null : new SortCriteria(sortColumn, asc);
 
         MetadataDao metadataDao = new MetadataDao();
         List<MetadataDto> metadataDtoList = metadataDao.findByCriteria(new MetadataCriteria(), sortCriteria);

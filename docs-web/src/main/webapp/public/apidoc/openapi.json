@@ -2536,7 +2536,7 @@
             "name": "sort_column",
             "in": "query",
             "required": false,
-            "description": "Column index to sort on; defaults to 1 (the name) when omitted, so the definitions come back in alphabetical order",
+            "description": "Column index to sort on. Omitted, the definitions come back in alphabetical order by name, compared case-insensitively so the order does not depend on the database collation; asc is then not applied",
             "schema": {
               "type": "string"
             }
