@@ -399,14 +399,26 @@ function confirmRevokeShare(share: { id: string; name: string | null }) {
   font-weight: 600;
 }
 
+/*
+ * #301 (same class, this view's own add-permission row): the row never wrapped, so at a 393px
+ * phone viewport the fixed-width perm Select and the Add button squeezed the search field down
+ * to 103px — 49px of usable box for a placeholder that renders 206px wide in German and 146px
+ * in English. Wrapping the row plus asking for 20rem (the longest shipped placeholder, fr at
+ * 256px, plus the small input's padding, border and dropdown button) drops the Select and the
+ * button to their own line when they no longer fit; `min-width: 0` lets the field shrink to a
+ * narrow container instead of overflowing it. Desktop is unchanged — at 912px the whole row
+ * still fits on one line.
+ */
 .add-acl-row {
   display: flex;
   gap: 0.5rem;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .add-acl-autocomplete {
-  flex: 1;
+  flex: 1 1 20rem;
+  min-width: 0;
 }
 
 .search-result {

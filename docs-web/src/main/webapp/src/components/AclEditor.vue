@@ -224,9 +224,30 @@ function confirmRemove(acl: DirectAcl) {
   margin-top: 0.5rem;
   flex-wrap: wrap;
 }
+/*
+ * #301: the search field has to be able to DISPLAY its own placeholder, which is a different
+ * width in every locale — 182px in English, 239px in German, 325px in French (measured in the
+ * app's own font). Two things make that true here.
+ *
+ * 1. `flex-basis` is the width the field ASKS for, and the row wraps (`.acl-add` sets
+ *    flex-wrap), so when the perm Select and the Add button no longer fit beside it they drop
+ *    to the next line and the field takes the whole row — instead of being squeezed onto one
+ *    line at a floor that suits English only. 22rem = the longest shipped placeholder (fr,
+ *    325px) plus the input's padding and border; `min-width: 0` lets it shrink below that in a
+ *    container narrower than the ask (a phone), where taking the full row is all there is.
+ * 2. The input inside must actually FILL that wrapper. PrimeVue stretches
+ *    `.p-autocomplete-input` only for an AutoComplete that renders a dropdown BUTTON
+ *    (`:has(.p-autocomplete-dropdown)`, @primeuix/styles/autocomplete); this one has none, so
+ *    the input kept the intrinsic width of a bare `<input>` — a constant 233px however wide
+ *    the wrapper grew, which is what cut the German prompt off at "Benutzer oder Gruppen suc".
+ */
 .acl-add-target {
-  flex: 1;
-  min-width: 12rem;
+  flex: 1 1 22rem;
+  min-width: 0;
+}
+.acl-add-target :deep(.p-autocomplete-input) {
+  flex: 1 1 auto;
+  width: 1%;
 }
 .acl-option {
   display: flex;
