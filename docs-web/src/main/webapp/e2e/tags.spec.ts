@@ -143,9 +143,12 @@ test.describe('tag edit — view documents (#281)', () => {
     const { id: untaggedId } = await createDocument(page, untagged)
     cleanup.defer('delete the untagged document', () => deleteDocApi(page.request, untaggedId))
 
-    // Open the tag's edit page. gotoRouteReady is a full page load, so the
-    // tag-stats query refetches AFTER the documents above were created — the
-    // displayed count cannot be a stale pre-seed cache hit.
+    // Open the tag's edit page. Nothing here reloads the app — these navigations only
+    // change the hash — so the freshness comes from the query layer: the tag list
+    // refetches the shared tag-stats key on every mount (`refetchOnMount: 'always'`),
+    // which re-reads the counts AFTER the documents above were created, and the edit
+    // page renders that same cache entry. The displayed count therefore cannot be the
+    // pre-seed value this test's FIRST tag-list visit put in the cache.
     await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
     await page.locator('.tag-tree').getByText(tagName, { exact: true }).click()
     await expect(page).toHaveURL(/#\/tag\//)

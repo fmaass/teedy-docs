@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { listTags, getTag, getTagStats, updateTag, deleteTag } from '../../api/tag'
+import { queryKeys } from '../../api/queryKeys'
 import type { AclEntry } from '../../api/acl'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -42,9 +43,14 @@ const { data: detail, refetch: refetchDetail } = useQuery({
   queryFn: () => getTag(props.id).then((r) => r.data),
 })
 
-// Per-tag document counts — the source for the READ grant-disclosure count.
+// Per-tag document counts — the source for the READ grant-disclosure count, which
+// states how many documents a READ grant hands over. On the app-wide
+// `queryKeys.tagStats()` key rather than a page-private one: only the shared key is in
+// `tagCountKeys`, so a document tag add/remove/bulk edit made elsewhere in the session
+// stales this count too. Under its own key the disclosure kept quoting the count as it
+// stood when this page was first opened.
 const { data: tagStats } = useQuery({
-  queryKey: ['tag-stats'],
+  queryKey: queryKeys.tagStats(),
   queryFn: () => getTagStats().then((r) => r.data.stats),
   staleTime: 60_000,
 })

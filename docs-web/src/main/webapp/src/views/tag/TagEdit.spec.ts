@@ -7,6 +7,7 @@ import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
+import { tagCountKeys } from '../../api/queryKeys'
 import type { Tag } from '../../api/tag'
 
 // #14: the tag-PARENT Select must support type-to-filter (critical at ~350 tags).
@@ -73,9 +74,12 @@ const router = createRouter({
   ],
 })
 
-async function mountEdit() {
+function freshQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
+async function mountEdit(queryClient: QueryClient = freshQueryClient()) {
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } })
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   router.push('/')
   await router.isReady()
   const wrapper = mount(TagEdit, {
@@ -217,5 +221,35 @@ describe('TagEdit — permissions editor (#88)', () => {
     // The same user's READ row is still removable (only the last WRITE is protected).
     expect(readRow.find('button[aria-label="Remove permission"]').exists()).toBe(true)
     expect(readRow.find('.acl-immutable').exists()).toBe(false)
+  })
+})
+
+// The count on this page is not a page-local reading: it is the app-wide tag-stats
+// entry, the one every document tag add/remove/bulk edit stales through `tagCountKeys`.
+// Held under a page-private key it kept reporting whatever was true when the edit page
+// was first opened, so a tag the user had just emptied from the document list still
+// disclosed documents in the READ-grant confirmation.
+describe('TagEdit — the document count follows a tag-count invalidation', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTag.mockReset().mockResolvedValue({
+      data: { id: 'b', name: 'Bravo', creator: 'admin', color: '#222222', parent: null, writable: false, acls: [] },
+    })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: { b: 4 } } })
+  })
+
+  it('re-reads the count when a document tag change invalidates tagCountKeys', async () => {
+    const queryClient = freshQueryClient()
+    const wrapper = await mountEdit(queryClient)
+    expect(wrapper.find('.tag-doc-count').text()).toBe('Documents with this tag: 4')
+
+    // A document elsewhere in the session gains this tag: the server now answers 5, and
+    // the mutation stales every key in tagCountKeys — the real list, so this test follows
+    // the production invalidation set rather than a copy of it.
+    tagApiMock.getTagStats.mockResolvedValue({ data: { stats: { b: 5 } } })
+    for (const key of tagCountKeys) await queryClient.invalidateQueries({ queryKey: key })
+    await flushPromises()
+
+    expect(wrapper.find('.tag-doc-count').text()).toBe('Documents with this tag: 5')
   })
 })

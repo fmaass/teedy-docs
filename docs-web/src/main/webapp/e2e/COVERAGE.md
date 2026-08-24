@@ -55,9 +55,10 @@ headings.
   desktop.
 - **`ui-bundle.spec.ts` #50 (gallery right-click adds a tag)** — `test.skip` on mobile
   only. A right-click / `contextmenu` has **no touch equivalent** on a mobile device
-  (verified: neither a right-button click nor a dispatched `contextmenu` opens the
-  quick-tag menu on Pixel 5). This is a UX affordance gap by design, not a layout bug;
-  the desktop project covers it.
+  (verified on Pixel 5: neither a real right-button click nor a plain
+  `dispatchEvent('contextmenu')` opens the quick-tag menu — only a hand-built
+  `MouseEvent` does, and no touch interaction produces one). This is a UX affordance
+  gap by design, not a layout bug; the desktop project covers it.
 
 ## Mobile responsive coverage — `responsive.spec.ts`
 

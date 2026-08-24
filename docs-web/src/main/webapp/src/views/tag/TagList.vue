@@ -39,14 +39,14 @@ const tagList = computed(() => tags.value ?? [])
 // OWN documents, and a zero is the answer being looked for (an unused tag), not
 // noise. A tag absent from the map carries no documents, hence 0.
 //
-// The key is the app-wide `queryKeys.tagStats()`, NOT TagEdit's private `['tag-stats']`:
-// only the shared one is in `tagCountKeys`, the list a document tag add/remove/bulk edit
-// invalidates, so the counts on this page follow tagging done elsewhere in the session.
-// Sharing TagEdit's key instead would ALSO have made this page's fetch the one that fills
-// that cache entry, freezing TagEdit's own count at whatever was true when the tag list was
-// opened — which is exactly how it broke tags.spec.ts:118 (#281) before this key choice.
-// `refetchOnMount: 'always'` because this is the cleanup screen: opening it must show the
-// counts as they are now, not a value up to the shared staleTime old.
+// The key is the app-wide `queryKeys.tagStats()`: only the shared one is in
+// `tagCountKeys`, the list a document tag add/remove/bulk edit invalidates, so the counts
+// on this page follow tagging done elsewhere in the session. The tag EDIT page reads that
+// same entry, which makes this page's fetch the one that fills it — so
+// `refetchOnMount: 'always'` is load-bearing, not a nicety: this is the cleanup screen,
+// opening it must show the counts as they are now, and a shared entry left to go
+// staleTime-old is exactly what showed a freshly-tagged tag as empty on the edit page
+// (tags.spec.ts, #281).
 const { data: tagStats, isSuccess: tagStatsLoaded } = useQuery({
   queryKey: queryKeys.tagStats(),
   queryFn: () => getTagStats().then((r) => r.data.stats),
