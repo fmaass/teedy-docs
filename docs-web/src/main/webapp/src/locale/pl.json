@@ -227,7 +227,9 @@
       "sort_label": "Sortuj powiązane dokumenty",
       "sort_default": "Kolejność domyślna",
       "sort_title_asc": "Tytuł (A–Z)",
-      "sort_title_desc": "Tytuł (Z–A)"
+      "sort_title_desc": "Tytuł (Z–A)",
+      "sort_created_asc": "Utworzono (najstarsze najpierw)",
+      "sort_created_desc": "Utworzono (najnowsze najpierw)"
     },
     "file_view": {
       "grid": "Siatka",

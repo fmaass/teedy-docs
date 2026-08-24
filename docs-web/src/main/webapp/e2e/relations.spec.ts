@@ -159,3 +159,43 @@ test('swap a relation direction from both groups — the groups exchange members
   await expect(incomingB).toBeVisible()
   await expect(incomingB.getByRole('button', { name: 'Remove relation' })).toHaveCount(0)
 })
+
+// #296 (part 2) — ordering both linked-documents lists by the LINKED document's own creation date.
+// That date travels ON the relation payload (RelationDao joins the other document's
+// DOC_CREATEDATE_D), so the control re-orders without one request per link. The fixture makes the
+// two candidate orders DISAGREE: the document created FIRST is titled to sort LAST alphabetically,
+// and the server returns relations ordered by title — so the asserted order can come only from the
+// dates, never from the title comparator or from leaving the server order alone.
+test('order the linked documents by the linked document’s own creation date', async ({ page, cleanup }) => {
+  const titleOlder = unique('zz-relsort-older')
+  const titleNewer = unique('aa-relsort-newer')
+  const idOlder = (await createDocument(page, titleOlder)).id
+  cleanup.defer('purge the older linked document', () => deleteDocApi(page.request, idOlder))
+  const idNewer = (await createDocument(page, titleNewer)).id
+  cleanup.defer('purge the newer linked document', () => deleteDocApi(page.request, idNewer))
+  const idSource = (await createDocument(page, unique('relsort-source'))).id
+  cleanup.defer('purge the source document', () => deleteDocApi(page.request, idSource))
+
+  // --- Link the source document to both, oldest first ---
+  await gotoRouteReady(page, `/#/document/view/${idSource}/content`, ROUTE_ROOT.documentContent)
+  await expect(page.getByRole('heading', { name: 'Related documents' })).toBeVisible()
+  const addRow = page.locator('.relation-add')
+  const relationsToast = page.getByRole('alert').filter({ hasText: 'Relations updated' })
+  for (const title of [titleOlder, titleNewer]) {
+    await addRow.locator('input').first().fill(title)
+    await page.getByRole('option', { name: new RegExp(title) }).click()
+    await addRow.getByRole('button', { name: 'Add', exact: true }).click()
+    // Let each toast expire before the next add so the two identical toasts never stack.
+    await expect(relationsToast).toBeVisible()
+    await expect(relationsToast).toBeHidden({ timeout: 3_000 })
+  }
+
+  const linkTitles = page.locator('.relation-group', { hasText: 'Links to' }).locator('a.relation-link')
+  // Untouched server order: by title, so the NEWER document (titled "aa-…") is first.
+  await expect(linkTitles).toHaveText([new RegExp(titleNewer), new RegExp(titleOlder)])
+
+  // Creation date, oldest first: the exact reverse.
+  await page.locator('.relation-sort-select').click()
+  await page.getByRole('option', { name: 'Created (oldest first)' }).click()
+  await expect(linkTitles).toHaveText([new RegExp(titleOlder), new RegExp(titleNewer)])
+})

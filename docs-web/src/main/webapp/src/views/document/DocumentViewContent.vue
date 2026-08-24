@@ -45,7 +45,11 @@ import { useAuthStore } from '../../stores/auth'
 import { useRelationSortStore } from '../../stores/relationSort'
 import { formatDate } from '../../utils/formatters'
 import { sortFiles, type FileSortField, type FileSortDirection } from '../../utils/fileSort'
-import { sortRelations, type RelationSortDirection } from '../../utils/relationSort'
+import {
+  sortRelations,
+  type RelationSortDirection,
+  type RelationSortField,
+} from '../../utils/relationSort'
 import { injectDocument } from './documentKey'
 
 const doc = injectDocument()
@@ -111,8 +115,8 @@ function formatMetadataValue(field: { type: string; value?: unknown }) {
 // default. The collator therefore runs only for an explicit choice.
 function projectRelations(source: boolean) {
   const list = (doc.value?.relations ?? []).filter((r) => r.source === source)
-  const direction = relationSortStore.direction
-  return direction ? sortRelations(list, direction) : list
+  const sort = relationSortStore.sort
+  return sort ? sortRelations(list, sort.field, sort.direction) : list
 }
 const outgoingRelations = computed(() => projectRelations(true))
 const incomingRelations = computed(() => projectRelations(false))
@@ -129,18 +133,36 @@ const showRelationSort = computed(
 // option as no-selection anyway. Same shape as the file grid's `manual` entry next door — hence a
 // string sentinel in the control, mapped to the store's `null` here rather than bound to it.
 const RELATION_SORT_SERVER = 'server'
-type RelationSortKey = typeof RELATION_SORT_SERVER | RelationSortDirection
+// `field:direction`, the same key shape the file grid's sort uses — one option per criterion and
+// way round, so the neutral entry and the orderings live in ONE flat list the Select can render.
+type RelationSortKey = typeof RELATION_SORT_SERVER | `${RelationSortField}:${RelationSortDirection}`
 
 const relationSortKey = computed<RelationSortKey>({
-  get: () => relationSortStore.direction ?? RELATION_SORT_SERVER,
-  set: (key) => {
-    relationSortStore.direction = key === RELATION_SORT_SERVER ? null : key
+  get: () => {
+    const sort = relationSortStore.sort
+    // The assertion is the same one the grid's key does on the way back (`split(':') as [...]`):
+    // TypeScript widens an interpolated string to `string`, and this is the single place the two
+    // halves are joined.
+    return sort ? (`${sort.field}:${sort.direction}` as RelationSortKey) : RELATION_SORT_SERVER
+  },
+  set: (key: RelationSortKey) => {
+    if (key === RELATION_SORT_SERVER) {
+      relationSortStore.sort = null
+      return
+    }
+    const [field, direction] = key.split(':') as [RelationSortField, RelationSortDirection]
+    relationSortStore.sort = { field, direction }
   },
 })
+// Creation date is the LINKED document's own (`relations[].create_date`, joined server-side), not
+// the date this document was linked to it: the reporter reads these lists to find the oldest or
+// newest of the documents on the other end.
 const relationSortOptions = computed(() => [
   { value: RELATION_SORT_SERVER as RelationSortKey, label: t('ui.relations.sort_default') },
-  { value: 'asc' as RelationSortKey, label: t('ui.relations.sort_title_asc') },
-  { value: 'desc' as RelationSortKey, label: t('ui.relations.sort_title_desc') },
+  { value: 'title:asc' as RelationSortKey, label: t('ui.relations.sort_title_asc') },
+  { value: 'title:desc' as RelationSortKey, label: t('ui.relations.sort_title_desc') },
+  { value: 'create_date:asc' as RelationSortKey, label: t('ui.relations.sort_created_asc') },
+  { value: 'create_date:desc' as RelationSortKey, label: t('ui.relations.sort_created_desc') },
 ])
 
 const relationSearchResults = ref<DocumentListItem[]>([])

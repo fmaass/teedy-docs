@@ -145,7 +145,8 @@ public class JpaDocumentRepository implements DocumentRepository {
         List<RelationView> relations = new ArrayList<>();
         for (RelationDto relationDto : new RelationDao().getByDocumentId(documentId)) {
             if (aclDao.checkPermission(relationDto.getId(), PermType.READ, query.readTargetIds())) {
-                relations.add(new RelationView(relationDto.getId(), relationDto.getTitle(), relationDto.isSource()));
+                relations.add(new RelationView(relationDto.getId(), relationDto.getTitle(), relationDto.isSource(),
+                        relationDto.getCreateTimestamp()));
             }
         }
 

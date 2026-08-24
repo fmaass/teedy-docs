@@ -1049,7 +1049,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Success. Each entry of the `relations` array carries the LINKED document's own `create_date` (epoch milliseconds) next to `id`, `title` and `source` — the other end's date in both directions — so a client can order the related documents by age without one request per link."
           }
         }
       },

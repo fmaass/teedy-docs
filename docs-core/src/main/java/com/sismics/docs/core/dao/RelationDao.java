@@ -6,6 +6,7 @@ import com.sismics.util.context.ThreadLocalContext;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
+import java.sql.Timestamp;
 import java.util.*;
 
 /**
@@ -16,14 +17,19 @@ import java.util.*;
 public class RelationDao {
     /**
      * Get all relations from/to a document.
-     * 
+     *
+     * <p>The joined document {@code d} is always the OTHER end of the relation — the ON clause matches the
+     * from-side only when it is not the queried document and the to-side only when it is not the queried
+     * document — so every column selected from it (title, creation date) describes the linked document in
+     * BOTH directions, and a self-relation joins nothing at all.</p>
+     *
      * @param documentId Document ID
      * @return List of relations
      */
     @SuppressWarnings("unchecked")
     public List<RelationDto> getByDocumentId(String documentId) {
         EntityManager em = ThreadLocalContext.get().getEntityManager();
-        StringBuilder sb = new StringBuilder("select d.DOC_ID_C, d.DOC_TITLE_C, r.REL_IDDOCFROM_C ");
+        StringBuilder sb = new StringBuilder("select d.DOC_ID_C, d.DOC_TITLE_C, d.DOC_CREATEDATE_D, r.REL_IDDOCFROM_C ");
         sb.append(" from T_RELATION r ");
         sb.append(" join T_DOCUMENT d on d.DOC_ID_C = r.REL_IDDOCFROM_C and r.REL_IDDOCFROM_C != :documentId or d.DOC_ID_C = r.REL_IDDOCTO_C and r.REL_IDDOCTO_C != :documentId ");
         sb.append(" where (r.REL_IDDOCFROM_C = :documentId or r.REL_IDDOCTO_C = :documentId) ");
@@ -42,6 +48,11 @@ public class RelationDao {
             RelationDto relationDto = new RelationDto();
             relationDto.setId((String) o[i++]);
             relationDto.setTitle((String) o[i++]);
+            // Nullable in the schema (dbupdate-000-0.sql declares DOC_CREATEDATE_D without `not null`),
+            // so a legacy row with no creation date must travel as a null rather than throw here and
+            // take the whole document request down.
+            Timestamp createDate = (Timestamp) o[i++];
+            relationDto.setCreateTimestamp(createDate == null ? null : createDate.getTime());
             String fromDocId = (String) o[i];
             relationDto.setSource(documentId.equals(fromDocId));
             relationDtoList.add(relationDto);

@@ -72,7 +72,12 @@ export interface DocumentDetail extends DocumentListItem {
   file_id_cover: string | null
   file_count: number
   contributors: Array<{ username: string; email: string }>
-  relations: Array<{ id: string; title: string; source: boolean }>
+  // `create_date` is the LINKED document's own creation date (epoch millis), joined onto the
+  // relation row server-side (RelationDao) so the related-documents lists can be ordered by age
+  // without a fetch per link. It is the OTHER document's date in both directions, and NULL for a
+  // legacy document row that carries none (the column is nullable): serialized via the mapper's
+  // nullable helper, so the key is always present and an absent date arrives as an explicit null.
+  relations: Array<{ id: string; title: string; source: boolean; create_date: number | null }>
   metadata: Array<{ id: string; name: string; type: string; value?: unknown; vocabulary?: string }>
   // `version` (zero-based), `create_date` (timestamp) and `creator` (current-version uploader's
   // username) are served additively by /document/:id and /file/list; the enriched file view uses them.

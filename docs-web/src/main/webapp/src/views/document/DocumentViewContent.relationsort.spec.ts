@@ -58,10 +58,13 @@ vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:test', revokeObjectU
 import Select from 'primevue/select'
 import DocumentViewContent from './DocumentViewContent.vue'
 
-type Relation = { id: string; title: string; source: boolean }
+type Relation = { id: string; title: string; source: boolean; create_date: number }
 
-function rel(title: string, source: boolean): Relation {
-  return { id: `${source ? 'out' : 'in'}-${title}`, title, source }
+// `create_date` is the LINKED document's own creation date, which the relation payload carries.
+// The title fixtures leave it at a shared value so a title assertion can never be answered by a
+// date order; the date fixtures pass it explicitly.
+function rel(title: string, source: boolean, create_date = 0): Relation {
+  return { id: `${source ? 'out' : 'in'}-${title}`, title, source, create_date }
 }
 
 function makeDoc(relations: Relation[], id = 'doc-1'): DocumentDetail {
@@ -160,7 +163,7 @@ describe('DocumentViewContent — related-document sort (#296)', () => {
 
   it('applies ascending to BOTH groups only once the reader chooses it', async () => {
     const wrapper = mountView(makeDoc([...OUT, ...IN]))
-    await chooseSort(wrapper, 'asc')
+    await chooseSort(wrapper, 'title:asc')
     expect(outgoing(wrapper)).toEqual(['Alpha', 'Invoice 2', 'Invoice 10'])
     expect(incoming(wrapper)).toEqual(['Bravo', 'Mike', 'Zulu'])
   })
@@ -169,7 +172,7 @@ describe('DocumentViewContent — related-document sort (#296)', () => {
     // A placeholder-only neutral state would be a one-way door: this is why the neutral state is a
     // real option, exactly as the file grid's "manual order" is.
     const wrapper = mountView(makeDoc([...OUT, ...IN]))
-    await chooseSort(wrapper, 'desc')
+    await chooseSort(wrapper, 'title:desc')
     expect(outgoing(wrapper)).not.toEqual(['Invoice 10', 'Alpha', 'Invoice 2'])
     await chooseSort(wrapper, 'server')
     expect(outgoing(wrapper)).toEqual(['Invoice 10', 'Alpha', 'Invoice 2'])
@@ -178,19 +181,21 @@ describe('DocumentViewContent — related-document sort (#296)', () => {
 
   it('reorders BOTH direction groups from the single control', () => {
     const wrapper = mountView(makeDoc([...OUT, ...IN]))
-    return chooseSort(wrapper, 'desc').then(() => {
+    return chooseSort(wrapper, 'title:desc').then(() => {
       expect(outgoing(wrapper)).toEqual(['Invoice 10', 'Invoice 2', 'Alpha'])
       expect(incoming(wrapper)).toEqual(['Zulu', 'Mike', 'Bravo'])
     })
   })
 
-  it('offers the neutral option plus the two title options, and names the control for screen readers', () => {
+  it('offers the neutral option plus both criteria in both directions, and names the control for screen readers', () => {
     const wrapper = mountView(makeDoc([...OUT, ...IN]))
     const select = sortSelect(wrapper)!
     expect(select.props('options')).toEqual([
       { value: 'server', label: 'ui.relations.sort_default' },
-      { value: 'asc', label: 'ui.relations.sort_title_asc' },
-      { value: 'desc', label: 'ui.relations.sort_title_desc' },
+      { value: 'title:asc', label: 'ui.relations.sort_title_asc' },
+      { value: 'title:desc', label: 'ui.relations.sort_title_desc' },
+      { value: 'create_date:asc', label: 'ui.relations.sort_created_asc' },
+      { value: 'create_date:desc', label: 'ui.relations.sort_created_desc' },
     ])
     // PrimeVue puts the aria-label on the focusable combobox, not on the Select's root wrapper —
     // asserting it there is what proves a screen-reader user actually hears the control named.
@@ -199,15 +204,32 @@ describe('DocumentViewContent — related-document sort (#296)', () => {
     )
   })
 
+  it('orders BOTH groups by the LINKED document’s creation date when that criterion is chosen', async () => {
+    // #296 part 2. Every date below DISAGREES with its title order, so neither assertion can be
+    // satisfied by the title comparator — nor by the untouched server order, which arrives by
+    // title. The dates are the other document's own, carried on the relation payload.
+    const out = [rel('Alpha', true, 300), rel('Bravo', true, 100), rel('Charlie', true, 200)]
+    const inc = [rel('Mike', false, 30), rel('Zulu', false, 10), rel('Kilo', false, 20)]
+    const wrapper = mountView(makeDoc([...out, ...inc]))
+
+    await chooseSort(wrapper, 'create_date:asc')
+    expect(outgoing(wrapper)).toEqual(['Bravo', 'Charlie', 'Alpha'])
+    expect(incoming(wrapper)).toEqual(['Zulu', 'Kilo', 'Mike'])
+
+    await chooseSort(wrapper, 'create_date:desc')
+    expect(outgoing(wrapper)).toEqual(['Alpha', 'Charlie', 'Bravo'])
+    expect(incoming(wrapper)).toEqual(['Mike', 'Kilo', 'Zulu'])
+  })
+
   it('carries the choice to the NEXT document in the same session (a remount keeps it)', async () => {
     // The reporter asked for one setting, not a per-document one: having to re-pick the order
     // on every document is the complaint, not the feature.
     const first = mountView(makeDoc([...OUT, ...IN]))
-    await chooseSort(first, 'desc')
+    await chooseSort(first, 'title:desc')
     first.unmount()
 
     const second = mountView(makeDoc([rel('Anna', true), rel('Zoe', true)], 'doc-2'))
-    expect(sortSelect(second)!.props('modelValue')).toBe('desc')
+    expect(sortSelect(second)!.props('modelValue')).toBe('title:desc')
     expect(outgoing(second)).toEqual(['Zoe', 'Anna'])
   })
 })

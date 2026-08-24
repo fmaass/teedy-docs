@@ -4,7 +4,12 @@ import { describe, it, expect } from 'vitest'
 // as an ORACLE only: the shipped helper does not depend on it, so the parity claim below is
 // checked against the real primitive rather than against a paraphrase of it in a comment.
 import { localeComparator } from '@primeuix/utils/object'
-import { sortRelations, compareRelationTitles, type SortableRelation } from './relationSort'
+import {
+  sortRelations,
+  compareRelationTitles,
+  compareRelationCreateDates,
+  type SortableRelation,
+} from './relationSort'
 
 function r(title: string): SortableRelation & { id: string; source: boolean } {
   return { id: `id-${title}`, title, source: true }
@@ -16,20 +21,20 @@ describe('relationSort — comparator semantics', () => {
     // before "a2" and a hard split between the cases. Both are exactly what a user notices
     // on a list of numbered documents.
     const relations = [r('b'), r('A'), r('a10'), r('a2')]
-    expect(sortRelations(relations, 'asc').map((x) => x.title)).toEqual(['A', 'a2', 'a10', 'b'])
+    expect(sortRelations(relations, 'title', 'asc').map((x) => x.title)).toEqual(['A', 'a2', 'a10', 'b'])
     expect([...relations.map((x) => x.title)].sort()).toEqual(['A', 'a10', 'a2', 'b'])
   })
 
   it('reverses exactly on desc', () => {
     const relations = [r('b'), r('A'), r('a10'), r('a2')]
-    expect(sortRelations(relations, 'desc').map((x) => x.title)).toEqual(['b', 'a10', 'a2', 'A'])
+    expect(sortRelations(relations, 'title', 'desc').map((x) => x.title)).toEqual(['b', 'a10', 'a2', 'A'])
   })
 
   it('collates accents by the locale, not by byte value', () => {
     // "Ärger" belongs among the A's; a code-point sort parks it after "Zeta" (U+00C4 > Z),
     // which is the German reporter's own alphabet coming out wrong.
     const relations = [r('Zeta'), r('Ärger'), r('Alpha')]
-    expect(sortRelations(relations, 'asc').map((x) => x.title)).toEqual([
+    expect(sortRelations(relations, 'title', 'asc').map((x) => x.title)).toEqual([
       'Alpha',
       'Ärger',
       'Zeta',
@@ -45,14 +50,14 @@ describe('relationSort — comparator semantics', () => {
       { id: 'second', title: 'same', source: true },
       { id: 'third', title: 'same', source: true },
     ]
-    expect(sortRelations(relations, 'asc').map((x) => x.id)).toEqual(['first', 'second', 'third'])
-    expect(sortRelations(relations, 'desc').map((x) => x.id)).toEqual(['first', 'second', 'third'])
+    expect(sortRelations(relations, 'title', 'asc').map((x) => x.id)).toEqual(['first', 'second', 'third'])
+    expect(sortRelations(relations, 'title', 'desc').map((x) => x.id)).toEqual(['first', 'second', 'third'])
   })
 
   it('returns a CLONE — the caller’s array is never mutated', () => {
     const relations = [r('c'), r('a'), r('b')]
     const before = [...relations]
-    const sorted = sortRelations(relations, 'asc')
+    const sorted = sortRelations(relations, 'title', 'asc')
     expect(relations).toEqual(before)
     expect(sorted).not.toBe(relations)
   })
@@ -99,4 +104,94 @@ describe('relationSort — parity with the app’s shared collator', () => {
       }
     })
   }
+})
+
+describe('relationSort — creation-date semantics (#296, part 2)', () => {
+  // The reporter asked for the LINKED document's own creation date, which the relation payload now
+  // carries (RelationDao joins the other document's DOC_CREATEDATE_D). Every fixture below is
+  // authored so the date order DISAGREES with the title order — otherwise a date assertion could
+  // pass on a title sort by coincidence.
+  function d(title: string, create_date: number | null): SortableRelation & { id: string } {
+    return { id: `id-${title}`, title, create_date }
+  }
+
+  const dated = [d('Alpha', 300), d('Bravo', 100), d('Charlie', 200)]
+
+  it('orders OLDEST first on asc — by the date, not the title', () => {
+    expect(sortRelations(dated, 'create_date', 'asc').map((x) => x.title)).toEqual([
+      'Bravo',
+      'Charlie',
+      'Alpha',
+    ])
+  })
+
+  it('orders NEWEST first on desc', () => {
+    expect(sortRelations(dated, 'create_date', 'desc').map((x) => x.title)).toEqual([
+      'Alpha',
+      'Charlie',
+      'Bravo',
+    ])
+  })
+
+  it('is STABLE across equal dates in BOTH directions', () => {
+    // Two documents created in the same millisecond (a bulk import, a duplication) must keep the
+    // server order rather than shuffle on every re-render.
+    const sameInstant = [
+      { id: 'first', title: 'z', create_date: 42 },
+      { id: 'second', title: 'y', create_date: 42 },
+      { id: 'third', title: 'x', create_date: 42 },
+    ]
+    expect(sortRelations(sameInstant, 'create_date', 'asc').map((x) => x.id)).toEqual([
+      'first',
+      'second',
+      'third',
+    ])
+    expect(sortRelations(sameInstant, 'create_date', 'desc').map((x) => x.id)).toEqual([
+      'first',
+      'second',
+      'third',
+    ])
+  })
+
+  it('parks a MISSING date last in BOTH directions, without throwing', () => {
+    // The wire field is non-null (DOC_CREATEDATE_D is NOT NULL), so this is the total-comparator
+    // contract rather than an observed payload: an undated entry must never sort ABOVE a dated one
+    // just because the list ran descending, and must never throw.
+    const withGaps = [d('Alpha', 300), d('NoDate', null), d('Bravo', 100)]
+    expect(sortRelations(withGaps, 'create_date', 'asc').map((x) => x.title)).toEqual([
+      'Bravo',
+      'Alpha',
+      'NoDate',
+    ])
+    expect(sortRelations(withGaps, 'create_date', 'desc').map((x) => x.title)).toEqual([
+      'Alpha',
+      'Bravo',
+      'NoDate',
+    ])
+
+    // `undefined` — the shape an older payload would produce — is the same case as null.
+    const undated = [{ id: 'u', title: 'Undefined' }, d('Bravo', 100)]
+    expect(sortRelations(undated, 'create_date', 'asc').map((x) => x.title)).toEqual([
+      'Bravo',
+      'Undefined',
+    ])
+    expect(sortRelations(undated, 'create_date', 'desc').map((x) => x.title)).toEqual([
+      'Bravo',
+      'Undefined',
+    ])
+  })
+
+  it('compareRelationCreateDates reports the sign, not just an ordering', () => {
+    expect(compareRelationCreateDates(1, 2, 'asc')).toBeLessThan(0)
+    expect(compareRelationCreateDates(2, 1, 'asc')).toBeGreaterThan(0)
+    expect(compareRelationCreateDates(1, 1, 'asc')).toBe(0)
+    expect(compareRelationCreateDates(1, 2, 'desc')).toBeGreaterThan(0)
+    expect(compareRelationCreateDates(2, 1, 'desc')).toBeLessThan(0)
+    // Missing sorts last whichever way the list runs: the sign does NOT flip with the direction.
+    expect(compareRelationCreateDates(null, 1, 'asc')).toBeGreaterThan(0)
+    expect(compareRelationCreateDates(null, 1, 'desc')).toBeGreaterThan(0)
+    expect(compareRelationCreateDates(1, undefined, 'asc')).toBeLessThan(0)
+    expect(compareRelationCreateDates(1, undefined, 'desc')).toBeLessThan(0)
+    expect(compareRelationCreateDates(null, undefined, 'asc')).toBe(0)
+  })
 })

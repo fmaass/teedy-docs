@@ -227,7 +227,9 @@
       "sort_label": "Сортировать связанные документы",
       "sort_default": "Порядок по умолчанию",
       "sort_title_asc": "Название (А–Я)",
-      "sort_title_desc": "Название (Я–А)"
+      "sort_title_desc": "Название (Я–А)",
+      "sort_created_asc": "Создано (сначала старые)",
+      "sort_created_desc": "Создано (сначала новые)"
     },
     "file_view": {
       "grid": "Сетка",

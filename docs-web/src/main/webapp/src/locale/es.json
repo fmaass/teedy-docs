@@ -227,7 +227,9 @@
       "sort_label": "Ordenar documentos relacionados",
       "sort_default": "Orden predeterminado",
       "sort_title_asc": "Título (A–Z)",
-      "sort_title_desc": "Título (Z–A)"
+      "sort_title_desc": "Título (Z–A)",
+      "sort_created_asc": "Creado (más antiguos primero)",
+      "sort_created_desc": "Creado (más recientes primero)"
     },
     "file_view": {
       "grid": "Cuadrícula",

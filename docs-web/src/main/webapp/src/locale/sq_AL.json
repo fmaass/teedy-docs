@@ -227,7 +227,9 @@
       "sort_label": "Rendit dokumentet e lidhura",
       "sort_default": "Renditje e parazgjedhur",
       "sort_title_asc": "Titulli (A–Z)",
-      "sort_title_desc": "Titulli (Z–A)"
+      "sort_title_desc": "Titulli (Z–A)",
+      "sort_created_asc": "Krijuar (më të vjetrat në fillim)",
+      "sort_created_desc": "Krijuar (më të rejat në fillim)"
     },
     "file_view": {
       "grid": "Rrjetë",

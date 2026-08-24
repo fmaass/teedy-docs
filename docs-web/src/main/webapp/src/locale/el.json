@@ -227,7 +227,9 @@
       "sort_label": "Ταξινόμηση σχετικών εγγράφων",
       "sort_default": "Προεπιλεγμένη σειρά",
       "sort_title_asc": "Τίτλος (Α–Ω)",
-      "sort_title_desc": "Τίτλος (Ω–Α)"
+      "sort_title_desc": "Τίτλος (Ω–Α)",
+      "sort_created_asc": "Δημιουργήθηκε (παλαιότερα πρώτα)",
+      "sort_created_desc": "Δημιουργήθηκε (νεότερα πρώτα)"
     },
     "file_view": {
       "grid": "Πλέγμα",

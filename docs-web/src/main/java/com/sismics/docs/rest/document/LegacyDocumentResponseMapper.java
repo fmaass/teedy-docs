@@ -106,10 +106,12 @@ public final class LegacyDocumentResponseMapper {
 
         JsonArrayBuilder relations = Json.createArrayBuilder();
         for (RelationView relation : view.relations()) {
-            relations.add(Json.createObjectBuilder()
+            JsonObjectBuilder relationBuilder = Json.createObjectBuilder()
                     .add("id", relation.id())
                     .add("title", relation.title())
-                    .add("source", relation.source()));
+                    .add("source", relation.source());
+            nullableLong(relationBuilder, "create_date", relation.createTimestamp());
+            relations.add(relationBuilder);
         }
         document.add("relations", relations);
 

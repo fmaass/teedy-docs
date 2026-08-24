@@ -227,7 +227,9 @@
       "sort_label": "相关文档排序",
       "sort_default": "默认排序",
       "sort_title_asc": "标题（A–Z）",
-      "sort_title_desc": "标题（Z–A）"
+      "sort_title_desc": "标题（Z–A）",
+      "sort_created_asc": "创建时间（从旧到新）",
+      "sort_created_desc": "创建时间（从新到旧）"
     },
     "file_view": {
       "grid": "网格",

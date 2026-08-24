@@ -227,7 +227,9 @@
       "sort_label": "Verknüpfte Dokumente sortieren",
       "sort_default": "Standardreihenfolge",
       "sort_title_asc": "Titel (A–Z)",
-      "sort_title_desc": "Titel (Z–A)"
+      "sort_title_desc": "Titel (Z–A)",
+      "sort_created_asc": "Erstellt (älteste zuerst)",
+      "sort_created_desc": "Erstellt (neueste zuerst)"
     },
     "file_view": {
       "grid": "Raster",

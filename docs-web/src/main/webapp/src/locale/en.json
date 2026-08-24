@@ -227,7 +227,9 @@
       "sort_label": "Sort linked documents",
       "sort_default": "Default order",
       "sort_title_asc": "Title (A–Z)",
-      "sort_title_desc": "Title (Z–A)"
+      "sort_title_desc": "Title (Z–A)",
+      "sort_created_asc": "Created (oldest first)",
+      "sort_created_desc": "Created (newest first)"
     },
     "file_view": {
       "grid": "Grid",

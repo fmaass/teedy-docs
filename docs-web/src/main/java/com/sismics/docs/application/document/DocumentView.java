@@ -75,8 +75,11 @@ public record DocumentView(
 
     /**
      * A relation to another document. {@code source} is true when this document is the relation's source.
+     * {@code createTimestamp} is the LINKED document's own creation date (epoch millis), never this
+     * document's — it is what lets the reader order the related-documents lists by age (#296). It is
+     * NULLABLE (the column is), and rendered as JSON {@code null}.
      */
-    public record RelationView(String id, String title, boolean source) {
+    public record RelationView(String id, String title, boolean source, Long createTimestamp) {
     }
 
     /**

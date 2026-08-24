@@ -227,7 +227,9 @@
       "sort_label": "Ordenar documentos relacionados",
       "sort_default": "Ordem predefinida",
       "sort_title_asc": "Título (A–Z)",
-      "sort_title_desc": "Título (Z–A)"
+      "sort_title_desc": "Título (Z–A)",
+      "sort_created_asc": "Criado (mais antigos primeiro)",
+      "sort_created_desc": "Criado (mais recentes primeiro)"
     },
     "file_view": {
       "grid": "Grelha",
