@@ -148,6 +148,92 @@ function hide() {
   popover.value?.hide()
 }
 
+// Keeping the placed panel on screen (#284 follow-up). PrimeVue positions a Popover RELATIVE
+// TO ITS ANCHOR, and this menu's anchor is the whole right-clicked `<tr>` — not a compact
+// control like the button every other Popover in the app hangs off. On a phone-width screen
+// the document table is wider than the viewport and scrolls horizontally inside
+// `.p-datatable-table-container`, so that row ends off screen; `absolutePosition` then takes
+// its collision branch and right-aligns the panel to the ROW's right edge
+// (`left = max(0, targetLeft + scrollX + targetWidth - panelWidth)`), which put ~317px of a
+// 385px panel past the right edge of a 393px screen (measured). The panel's own width is not
+// in that expression, so bounding the width — as `.tqm-body` does — cannot reach it.
+//
+// WHY A CORRECTION AND NOT A DIFFERENT ANCHOR: handing `Popover.show` a narrow proxy anchor
+// (a virtual element at the pointer) would make the collision math come out right on its own,
+// but the anchor is load-bearing twice over. PrimeVue builds its dismiss-on-scroll handler
+// from the anchor's scrollable ancestors (#213 — and it captures that element once, on the
+// first open, then reuses it for the life of the component), and the anchor is what the
+// popover treats as "clicked itself". Both contracts are asserted in `tag-add-focus.spec.ts`.
+// Correcting the RESULT leaves the anchor, and therefore all of that, exactly as it was: this
+// only ever moves the finished panel horizontally, and only when it hangs off an edge.
+const PANEL_EDGE_GUTTER = 4
+
+function clampPanelIntoViewport() {
+  const container = popover.value?.container as HTMLElement | undefined
+  if (!container) return
+
+  // Read back the value the popover placed the panel with, and correct it by a DELTA. Both of
+  // `absolutePosition`'s branches write a physical left edge in PAGE coordinates — in RTL it
+  // writes `inset-inline-end`, which maps to `left` there — so one arithmetic serves both
+  // directions, and staying in its own units means no assumption about the scroll offset.
+  const style = container.style
+  const prop = style.insetInlineEnd !== '' ? 'insetInlineEnd' : 'insetInlineStart'
+  const placed = Number.parseFloat(style[prop])
+  // Not positioned (yet): nothing placed is nothing to correct.
+  if (Number.isNaN(placed)) return
+
+  // LAYOUT metrics, never `getBoundingClientRect()`. The popover plays a 300ms
+  // `scale(0.93)` enter animation, so for the first frames the panel's client rect is ~27px
+  // narrower than the panel and sits ~13px right of where it settles (the animation scales
+  // about the horizontally-centred `transform-origin` the popover sets). Clamping that
+  // transient box left the settled panel 3px over the edge — measured 396.2px of panel on a
+  // 393px screen, a green-looking near-miss. `offsetWidth` is the untransformed border box,
+  // which is also what PrimeVue measures the panel with when it places it.
+  const width = container.offsetWidth
+  if (!width) return
+
+  const scrollLeft = window.scrollX
+  const left = placed - scrollLeft
+  const slack = document.documentElement.clientWidth - width
+  // The gutter is a preference, not a promise — it collapses rather than pushing a panel that
+  // barely fits (`.tqm-body` is `100vw - 2rem`, most of which the popover's own padding eats)
+  // back off the other edge. With a panel WIDER than the screen the range degenerates and the
+  // START edge wins, because a menu cut off on the right is still usable and one cut off on
+  // the left is not.
+  const gutter = Math.max(0, Math.min(PANEL_EDGE_GUTTER, slack / 2))
+  const wanted = Math.max(gutter, Math.min(left, slack - gutter))
+  // Also the re-entrancy guard: the write below is itself a style mutation the observer sees.
+  if (Math.abs(wanted - left) < 0.5) return
+
+  style[prop] = `${wanted + scrollLeft}px`
+  // The arrow (`--p-popover-arrow-left`) is deliberately left where `alignOverlay` put it: it
+  // is an offset INSIDE the panel, and in the case this clamp fires it is already 0, i.e. the
+  // panel's own leading corner — the anchor row it would otherwise point at is off screen.
+}
+
+// `alignOverlay()` is not a one-shot: the popover re-runs it from its own content
+// ResizeObserver, whose very first delivery lands a frame after the menu opens, and again
+// whenever the panel's content changes size (typing in the search box shrinks the tag list).
+// A clamp applied only on `show` is therefore overwritten before the user ever sees it. Watch
+// the panel's inline style instead of trying to run last: whoever repositions it, the
+// correction goes back on in the same rendering update, before paint. Watching the style is
+// also the loosest available coupling — it assumes only that the position is expressed as an
+// inline style on the popover's container, which is what `absolutePosition` documents itself
+// as doing, rather than any particular internal call order.
+let panelStyleObserver: MutationObserver | null = null
+
+function watchPanelPlacement() {
+  const container = popover.value?.container as HTMLElement | undefined
+  if (!container || panelStyleObserver) return
+  panelStyleObserver = new MutationObserver(clampPanelIntoViewport)
+  panelStyleObserver.observe(container, { attributeFilter: ['style'] })
+}
+
+function unwatchPanelPlacement() {
+  panelStyleObserver?.disconnect()
+  panelStyleObserver = null
+}
+
 // Dismissal on an outside RIGHT-click (#234). PrimeVue dismisses a Popover on an outside
 // `click`, and a right-click fires no click — so this menu stayed up while the browser drew
 // its own menu next to it: two context menus on screen at once, the reported symptom. The
@@ -175,9 +261,12 @@ function onOutsideContextMenu(event: MouseEvent) {
 
 // Bound only while the menu is up: PrimeVue emits `show` as the popover enters and `hide` as
 // it leaves. Re-registering the same listener is a no-op, so a `show` without an intervening
-// `hide` cannot stack a second one.
-function bindOutsideContextMenu() {
+// `hide` cannot stack a second one. `show` is emitted at the END of the popover's enter hook,
+// after it has positioned itself, so the panel measured here is the placed one.
+function onPopoverShow() {
   document.addEventListener('contextmenu', onOutsideContextMenu, true)
+  clampPanelIntoViewport()
+  watchPanelPlacement()
 }
 
 function unbindOutsideContextMenu() {
@@ -185,12 +274,17 @@ function unbindOutsideContextMenu() {
 }
 
 // A menu unmounted while open plays no leave transition, so `hide` never arrives.
-onBeforeUnmount(unbindOutsideContextMenu)
+onBeforeUnmount(() => {
+  unbindOutsideContextMenu()
+  unwatchPanelPlacement()
+})
 
-// On leave: drop the dismissal listener and reset the owned filter, so a reopened menu starts
-// on the full list with no stale search text (and no clear × over an empty box).
+// On leave: drop the dismissal listener and the placement watch, and reset the owned filter,
+// so a reopened menu starts on the full list with no stale search text (and no clear × over
+// an empty box).
 function onPopoverHide() {
   unbindOutsideContextMenu()
+  unwatchPanelPlacement()
   filterText.value = ''
 }
 
@@ -238,7 +332,7 @@ defineExpose({ show, hide })
   <Popover
     ref="popover"
     class="tag-quick-menu"
-    @show="bindOutsideContextMenu"
+    @show="onPopoverShow"
     @hide="onPopoverHide"
   >
     <div class="tqm-body">
@@ -354,8 +448,13 @@ defineExpose({ show, hide })
      instead of overflowing the viewport (#71). The 15rem this used to be clipped a
      realistic tag name by ~106px with no way to read the rest (#284); 24rem carries one
      where the room exists, and the viewport clamp keeps the panel inside a phone screen
-     (361px at 393px wide) rather than trading one glitch for another. */
-  width: min(24rem, calc(100vw - 2rem));
+     rather than trading one glitch for another.
+     The subtrahend is the popover's own chrome plus a gutter, not the gutter alone: this
+     body sits inside 1rem of popover content padding and a 1px border on EACH side, so the
+     PANEL measures 34px more than the number below. `100vw - 2rem` (#284) therefore still
+     rendered 395px of panel onto a 393px screen — a 2px overflow that the geometry spec
+     missed only because it measured during the popover's `scale(0.93)` enter animation. */
+  width: min(24rem, calc(100vw - 3.5rem));
   max-height: 60vh;
   overflow-y: auto;
 }

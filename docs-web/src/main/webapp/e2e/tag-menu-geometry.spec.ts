@@ -145,6 +145,15 @@ interface PanelGeometry {
 }
 
 async function measure(page: Page): Promise<PanelGeometry> {
+  // SETTLED geometry only. The popover plays a 300ms `scale(0.93)` enter animation and
+  // `getBoundingClientRect()` reports the TRANSFORMED box, so a measurement taken while it is
+  // still running reads a panel ~7% narrower than the one the user ends up looking at — which
+  // would let an off-screen panel measure as fitting. Waiting for the transform to clear is
+  // what makes every number below the geometry the user actually gets.
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.p-popover')
+    return !!el && getComputedStyle(el).transform === 'none'
+  })
   return page.evaluate(() => {
     const rows = Array.from(document.querySelectorAll<HTMLElement>('.p-popover .tqm-option'))
     const list = document.querySelector<HTMLElement>('.p-popover .tqm-tag-list')!
@@ -197,12 +206,15 @@ function expectPanelInsideViewport(g: PanelGeometry, where: string): void {
   ).toBeLessThanOrEqual(g.viewport.height + EDGE_TOLERANCE)
 }
 
-// The right-click that raises this menu has no touch equivalent: on the mobile project
-// (Pixel 5) neither a right-button click nor a dispatched `contextmenu` opens it — verified
-// and documented in e2e/COVERAGE.md, and the reason every quick-menu spec is desktop-only.
-// The narrow-viewport half of the fix is therefore measured in the SECOND test below, which
-// drives the same desktop pointer at a 393px viewport. The mobile INTERACTION path stays
-// unasserted here, exactly as it is in the rest of the suite.
+// The right-click that raises this menu has no touch equivalent, so the mobile project cannot
+// reach it the way a user would: on Pixel 5 neither a right-button click nor Playwright's
+// `dispatchEvent('contextmenu')` opens the menu (re-measured for the placement work below;
+// the same finding is recorded in e2e/COVERAGE.md). A `MouseEvent` hand-built in page context
+// DOES open it — so the app's handler is not what refuses — but no touch user can produce
+// that event, and asserting geometry through an input the device cannot generate would be
+// measuring the test harness rather than the product. The narrow-viewport geometry is
+// therefore measured in the SECOND test below, which drives the desktop project's pointer at
+// the mobile project's own 393px viewport, over the same horizontally-scrolling table.
 const NO_TOUCH_CONTEXTMENU =
   'right-click/contextmenu is a desktop-only pointer affordance with no touch equivalent; ' +
   'the 393px geometry is measured in the narrow-viewport test instead'
@@ -285,7 +297,7 @@ test('at a 393px-wide viewport the quick menu still fits on screen (#284)', asyn
   test.skip(isMobileViewport(page), NO_TOUCH_CONTEXTMENU)
   test.setTimeout(60_000)
 
-  const { docTitle } = await seed(request, cleanup)
+  const { docTitle, shortName } = await seed(request, cleanup)
 
   // Set BEFORE the navigation so the app lays out for this width from the start.
   await page.setViewportSize({ width: 393, height: 851 })
@@ -312,16 +324,38 @@ test('at a 393px-wide viewport the quick menu still fits on screen (#284)', asyn
       `(document client width ${g.viewport.documentClientWidth}px)`,
   ).toBeLessThanOrEqual(g.viewport.width)
 
-  // Its PLACEMENT is deliberately NOT asserted here, and that is a finding rather than a gap.
-  // MEASURED in the first e2e run of this spec (trace inline style `inset-inline-start: 325px`,
-  // panel width 385.1px, panel right 710.1px, click point 204.5/390.5 — inside the viewport):
-  // at 393px the document table is ~694px wide and scrolls horizontally inside its own
-  // container, so the right-clicked `<tr>` — which IS the popover's anchor — ends at ~710px,
-  // well off screen. PrimeVue's absolutePosition then right-aligns the panel to that anchor
-  // edge (`N = max(0, targetLeft + scrollX + targetWidth - panelWidth)`), which puts the panel
-  // off screen too. The panel's own width drops out of that expression, so the SAME right edge
-  // (710.1px) comes out of the old 15rem panel: the behaviour predates this fix and is not
-  // changed by it — the fix only moves the panel's LEFT edge from ~446px to ~325px, i.e. more
-  // of it on screen, not less. Clamping it is popover-collision work on a shared overlay, well
-  // outside a CSS fix to the tag rows; it is reported for its own ticket.
+  // PLACEMENT (#284 follow-up, TEEDY-117). MEASURED on 791d258b in the first e2e run of this
+  // spec: inline `inset-inline-start: 325px`, panel width 385.1px, panel RIGHT EDGE 710.1px —
+  // 317px off a 393px screen, while the click that opened it was at 204.5px, well inside.
+  //
+  // The panel's own width is not what puts it there, which is why the `min()` clamp asserted
+  // just above cannot fix it: `@primeuix/utils`' `absolutePosition` aligns the panel to its
+  // ANCHOR, and this menu's anchor is the right-clicked `<tr>` (TagQuickMenu.show hands
+  // `event.currentTarget` to `Popover.show`). At a phone width the document table is ~694px
+  // wide and scrolls horizontally inside `.p-datatable-table-container`, so the row itself
+  // ends off screen; the collision branch then right-aligns the panel to the ROW's right edge
+  // (`left = max(0, targetLeft + scrollX + targetWidth - panelWidth)`) and follows it off the
+  // screen. The same 710.1px right edge came out of the old 15rem panel, so this predates
+  // #284 and is fixed separately, by clamping the placed panel back into the viewport.
+  expect(
+    g.anchorRowRight,
+    'PREMISE: the table really is wider than the viewport, so the anchor row the panel is ' +
+      'aligned to runs off screen — without that, the placement assertion below is vacuous',
+  ).toBeGreaterThan(g.viewport.width)
+  expectPanelInsideViewport(g, `${g.viewport.width}px viewport, anchor row off screen`)
+
+  // …and it STAYS inside when the popover re-aligns itself. `Popover.alignOverlay()` runs
+  // again on every delivery of the popover's own content ResizeObserver, so a correction
+  // applied once at open time is overwritten as soon as the panel's content changes size.
+  // Typing in the search box shrinks the bounded tag list — an ordinary thing to do with this
+  // menu open, and a real content resize — so this second measurement is what distinguishes a
+  // clamp that holds from one that is undone a frame later.
+  await page.locator('.p-popover input.tqm-filter-input').fill(shortName)
+  await expect(
+    page.locator('.p-popover .tqm-option'),
+    'the search narrowed the list to the one seeded match, so the panel really did resize',
+  ).toHaveCount(1)
+  const afterResize = await measure(page)
+  expect(afterResize.rowCount, 'the list really shrank').toBeLessThan(g.rowCount)
+  expectPanelInsideViewport(afterResize, 'after a content resize re-aligned the panel')
 })
