@@ -20,6 +20,8 @@ export const queryKeys = {
   tags: () => ['tags'] as const,
   /** Per-tag document counts (sidebar tree counts). */
   tagStats: () => ['tagStats'] as const,
+  /** Per-tag "may this subtree be deleted" verdict (tag management screen, #298). */
+  tagMaintenance: () => ['tagMaintenance'] as const,
   /** Facet counts for the current selection/exclusion. */
   tagFacets: () => ['tagFacets'] as const,
   /** Tag co-occurrence pairs (facets-mode tree). */
@@ -47,4 +49,8 @@ export const tagCountKeys = [
   queryKeys.tagStats(),
   queryKeys.tagFacets(),
   queryKeys.tagCoOccurrence(),
+  // The maintenance verdict is "does anything in this subtree carry a document" — the same
+  // question, so the same staling. A tag that gained its first document elsewhere in the session
+  // must stop reading as deletable on the management screen.
+  queryKeys.tagMaintenance(),
 ] as const

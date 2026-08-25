@@ -8,6 +8,10 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+### Added
+- Tags can be deleted from the tag management tree, from a right-click menu or the row's own button. Only a fully unused branch may go: the tag itself carries no document and neither does anything below it, and deleting it removes the whole branch. A tag that is still on a document — or that has a sub-tag which is — offers no delete and says why, so an unused chain of parents above a used sub-tag keeps its structure; nothing is ever un-assigned from a document to make a tag deletable (#298).
+- A "Clean up unused tags" action on the same page finds every fully unused branch at once. It lists them first and deletes nothing until the deletion is confirmed, then reports exactly which tags were removed. A tag an auto-tagging rule points at counts as in use even with no documents on it, so a cleanup cannot quietly break a rule (#298).
+
 ## [3.8.8] - 2026-08-25
 
 There is no database migration; the schema level remains 64.

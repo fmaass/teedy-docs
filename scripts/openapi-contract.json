@@ -14,6 +14,14 @@
       "responses": ["200", "400", "403"],
       "requestBodyRequired": false
     },
+    "DELETE /tag/{id}/subtree": {
+      "responses": ["200", "400", "403", "404"],
+      "requestBodyRequired": false
+    },
+    "DELETE /tag/maintenance": {
+      "responses": ["200", "403"],
+      "requestBodyRequired": false
+    },
     "POST /savedfilter/{id}": {
       "responses": ["200", "400", "403", "404"],
       "requestBodyRequired": true,

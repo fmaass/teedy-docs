@@ -68,6 +68,10 @@ public class TestCsrfGetInventory {
             "/tag/co-occurrence",
             "/tag/facets",
             "/tag/list",
+            // #298: reports whether each tag's subtree may be deleted. Read-only — the DELETE
+            // siblings on the same paths are the ones that remove anything, and a GET is not one
+            // of them.
+            "/tag/maintenance",
             "/tag/stats",
             "/tagmatchrule",
             "/theme",

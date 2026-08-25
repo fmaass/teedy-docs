@@ -59,6 +59,11 @@ headings.
   `dispatchEvent('contextmenu')` opens the quick-tag menu — only a hand-built
   `MouseEvent` does, and no touch interaction produces one). This is a UX affordance
   gap by design, not a layout bug; the desktop project covers it.
+- **`tag-maintenance.spec.ts` #298 (right-click menu on a tag node)** — `test.skip` on
+  mobile only, for the same no-touch-equivalent reason. The affordance it covers is
+  duplicated by the row's own delete button, which is asserted at BOTH viewports by the
+  other two tests in that file, so the mobile project loses no coverage of the action —
+  only of the pointer gesture that has no mobile equivalent.
 
 ## Mobile responsive coverage — `responsive.spec.ts`
 

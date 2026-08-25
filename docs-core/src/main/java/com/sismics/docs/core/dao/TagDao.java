@@ -147,6 +147,74 @@ public class TagDao {
     }
 
     /**
+     * Links that a document would still bring back to a tag. Correlates the document-tag row
+     * against its document, and matches EITHER of the two states a link can survive in:
+     *
+     * <ul>
+     *   <li>an ACTIVE document with a live link, and</li>
+     *   <li>a TRASHED document whose link was soft-deleted BY that same trash — the delete dates
+     *       are equal, which is exactly the predicate {@link DocumentDao#restore} matches on when
+     *       it revives the links. A link the user removed by hand before trashing carries a
+     *       different date and is correctly NOT matched: restoring will not bring it back.</li>
+     * </ul>
+     *
+     * <p>A permanently deleted document takes its {@code T_DOCUMENT_TAG} rows and its own row with
+     * it, so the join excludes it without a further condition.</p>
+     */
+    private static final String RESTORABLE_LINK_PREDICATE =
+            " and ((d.DOC_DELETEDATE_D is null and dt.DOT_DELETEDATE_D is null)" +
+            " or (d.DOC_DELETEDATE_D is not null and dt.DOT_DELETEDATE_D = d.DOC_DELETEDATE_D))";
+
+    /**
+     * Of the given tags, those a surviving document would still be attached to — the document may
+     * be ACTIVE or sitting in the TRASH.
+     *
+     * <p>Deleting a tag only detaches its LIVE links ({@link #delete} updates the rows whose
+     * deleteDate is null), so a tag deleted while a trashed document still references it leaves
+     * that row behind pointing at a tag that no longer exists; restoring the document then
+     * re-attaches it. This is the authoritative usage set for tag maintenance (#298), and it is
+     * deliberately UNSCOPED by ACL — the question is whether anything at all still holds the tag,
+     * not whether the caller can see what does.</p>
+     *
+     * @param tagIds Tag IDs to test
+     * @return the subset still referenced by an active or restorable document (never null)
+     */
+    @SuppressWarnings("unchecked")
+    public Set<String> findTagIdsWithDocumentReference(Collection<String> tagIds) {
+        if (tagIds == null || tagIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select distinct dt.DOT_IDTAG_C from T_DOCUMENT_TAG dt" +
+                " join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C" +
+                " where dt.DOT_IDTAG_C in (:tagIds)" + RESTORABLE_LINK_PREDICATE);
+        q.setParameter("tagIds", tagIds);
+        Set<String> used = new HashSet<>();
+        for (Object row : q.getResultList()) {
+            used.add((String) row);
+        }
+        return used;
+    }
+
+    /**
+     * Whether ONE tag is still referenced by an active or restorable document. The single-tag form
+     * of {@link #findTagIdsWithDocumentReference}, for the re-check a maintenance delete runs
+     * immediately before it removes that tag — the batch form answers a question that may already
+     * be stale by the time the loop reaches this row.
+     *
+     * @param tagId Tag ID
+     * @return true if a surviving document still holds it
+     */
+    public boolean hasDocumentReference(String tagId) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select count(*) from T_DOCUMENT_TAG dt" +
+                " join T_DOCUMENT d on d.DOC_ID_C = dt.DOT_IDDOCUMENT_C" +
+                " where dt.DOT_IDTAG_C = :tagId" + RESTORABLE_LINK_PREDICATE);
+        q.setParameter("tagId", tagId);
+        return ((Number) q.getSingleResult()).longValue() > 0;
+    }
+
+    /**
      * Gets a tag by its ID.
      *
      * @param id Tag ID

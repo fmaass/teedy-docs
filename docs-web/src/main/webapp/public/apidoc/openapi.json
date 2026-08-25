@@ -3505,6 +3505,74 @@
         }
       }
     },
+    "/tag/maintenance": {
+      "get": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Get tag maintenance status",
+        "description": "Returns, for every visible tag, whether its whole subtree is unused and can be deleted, and when it cannot, why. Nothing is modified.",
+        "operationId": "get_tag_maintenance",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "403": {
+            "description": "ForbiddenError - Access denied"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Delete all unused tags",
+        "description": "Deletes every tag whose entire subtree carries no document, and reports exactly which tags were deleted. Tags still carrying documents are never touched.",
+        "operationId": "delete_tag_maintenance",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "403": {
+            "description": "ForbiddenError - Access denied"
+          }
+        }
+      }
+    },
+    "/tag/{id}/subtree": {
+      "delete": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Delete an unused tag subtree",
+        "description": "Deletes a tag and all its descendants, but only when none of them carries a document. Unlike DELETE /tag/{id} this never un-assigns a tag from a document.",
+        "operationId": "delete_tag_id_subtree",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "TagSubtreeInUse - The subtree still carries documents (active or in the trash); TagSubtreeInRule - The subtree holds a tag an auto-tagging rule points at; TagNotDeletable - Refused without a reason the caller is told"
+          },
+          "403": {
+            "description": "ForbiddenError - Access denied"
+          },
+          "404": {
+            "description": "NotFound - Tag not found"
+          }
+        }
+      }
+    },
     "/tag/facets": {
       "get": {
         "tags": [

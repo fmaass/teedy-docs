@@ -5,6 +5,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
+import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
 import type { Tag } from '../../api/tag'
 
@@ -27,6 +28,12 @@ const tagApiMock = vi.hoisted(() => ({
   listTags: vi.fn(),
   createTag: vi.fn(),
   getTagStats: vi.fn(),
+  // #298 parts 1+2 added the maintenance reads to this page. They are stubbed here rather than
+  // asserted on — the delete affordances have their own spec (TagList.maintenance.spec.ts); this
+  // one stays about the counts.
+  getTagMaintenance: vi.fn(),
+  deleteTagSubtree: vi.fn(),
+  deleteUnusedTags: vi.fn(),
 }))
 vi.mock('../../api/tag', () => tagApiMock)
 
@@ -48,7 +55,7 @@ async function mountList() {
   await router.isReady()
   const wrapper = mount(TagList, {
     global: {
-      plugins: [i18n, router, PrimeVue, ToastService, [VueQueryPlugin, { queryClient }]],
+      plugins: [i18n, router, PrimeVue, ToastService, ConfirmationService, [VueQueryPlugin, { queryClient }]],
     },
   })
   await flushPromises()
@@ -72,6 +79,9 @@ describe('TagList — per-tag document count in the management tree (#298)', () 
     tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
     tagApiMock.createTag.mockReset().mockResolvedValue({ data: { id: 'new' } })
     tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: STATS } })
+    tagApiMock.getTagMaintenance.mockReset().mockResolvedValue({ data: { tags: [] } })
+    tagApiMock.deleteTagSubtree.mockReset()
+    tagApiMock.deleteUnusedTags.mockReset()
   })
 
   it("renders a tag node's own document count", async () => {

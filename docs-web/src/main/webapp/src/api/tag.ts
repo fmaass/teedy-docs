@@ -66,6 +66,74 @@ export function getTagStats() {
   return api.get<{ stats: Record<string, number> }>('/tag/stats')
 }
 
+/**
+ * Why a tag's subtree may not be removed by tag maintenance.
+ *
+ * `trash` means no ACTIVE document carries it but a restorable one in the trash still does —
+ * a distinct answer from `documents`, because the count shown in the tree is active-only and
+ * would read 0. `other` is deliberately unexplained: it is what a branch holding a tag this
+ * account cannot reach reports, and naming that reason would confirm such a tag exists.
+ */
+export type TagBlockReason = 'documents' | 'trash' | 'rule' | 'other'
+
+/**
+ * The server's verdict on one tag (#298 parts 1 and 2): may its whole subtree be removed, and
+ * if not, why. `deletable` is the ONLY authority the UI has — a tag is deletable when neither it
+ * nor any descendant carries a document, which is a question about tags the caller may not even
+ * see, so the screen never recomputes it from the tag list.
+ */
+export interface TagMaintenanceItem {
+  id: string
+  name: string
+  /** Slash-joined chain of visible ancestor names, this tag last. */
+  path: string
+  deletable: boolean
+  /** True when this tag is the topmost deletable tag of its branch — a cleanup root. */
+  root: boolean
+  /** Documents on this tag and its readable descendants. */
+  subtreeDocuments: number
+  /** Absent when the tag is deletable. */
+  reason?: TagBlockReason
+}
+
+/** A tag a destructive maintenance action removed. */
+export interface DeletedTag {
+  id: string
+  name: string
+  path: string
+}
+
+export interface TagDeletionReport {
+  status: string
+  count: number
+  tags: DeletedTag[]
+  /**
+   * Tags the server re-checked immediately before deleting them and then KEPT, because they had
+   * become used since the preview was rendered. Empty in the ordinary case; never absent, so the
+   * screen can always report the difference between "removed" and "left standing".
+   */
+  blocked: DeletedTag[]
+}
+
+/** Reads the maintenance verdict for every visible tag. Modifies nothing. */
+export function getTagMaintenance() {
+  return api.get<{ tags: TagMaintenanceItem[] }>('/tag/maintenance')
+}
+
+/**
+ * Deletes a tag and its whole subtree — refused by the server unless nothing in it carries a
+ * document. NOT the same call as {@link deleteTag}, which removes one tag, un-assigns it from
+ * every document and re-parents its children.
+ */
+export function deleteTagSubtree(id: string) {
+  return api.delete<TagDeletionReport>(`/tag/${id}/subtree`)
+}
+
+/** Deletes every fully-unused tag subtree and reports what went. */
+export function deleteUnusedTags() {
+  return api.delete<TagDeletionReport>('/tag/maintenance')
+}
+
 export interface CoOccurrencePair {
   tagA: string
   tagB: string

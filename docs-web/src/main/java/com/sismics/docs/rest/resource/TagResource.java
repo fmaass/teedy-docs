@@ -11,6 +11,7 @@ import com.sismics.docs.core.exception.InactiveOwnerException;
 import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.util.TagCreationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
+import com.sismics.docs.rest.util.TagMaintenanceUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.AclUtil;
@@ -32,6 +33,7 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Response;
 import java.text.MessageFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -417,6 +419,168 @@ public class TagResource extends BaseResource {
     }
 
     /**
+     * Returns the maintenance status of every visible tag: whether its whole subtree is unused and
+     * may therefore be removed, and when it may not, why.
+     *
+     * <p>This is the PREVIEW half of the unused-tag cleanup as well as the source the management
+     * tree reads to enable or disable its per-node delete action — one request answers both, and a
+     * divergence between what the cleanup previews and what it deletes is not representable
+     * because both are read off this same verdict.</p>
+     *
+     * @return Response with the status of every visible tag
+     */
+    @GET
+    @Path("/maintenance")
+    @Operation(
+            summary = "Get tag maintenance status",
+            description = "Returns, for every visible tag, whether its whole subtree is unused and can "
+                    + "be deleted, and when it cannot, why. Nothing is modified.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagMaintenanceResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
+    public Response maintenance() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        JsonArrayBuilder items = Json.createArrayBuilder();
+        for (TagMaintenanceUtil.TagStatus status : TagMaintenanceUtil.status(getTargetIdList(null))) {
+            JsonObjectBuilder item = tagMaintenanceItem(status)
+                    .add("deletable", status.deletable())
+                    .add("root", status.root())
+                    .add("subtreeDocuments", status.subtreeDocumentCount());
+            if (status.reason() != null) {
+                item.add("reason", status.reason().name().toLowerCase(Locale.ROOT));
+            }
+            items.add(item);
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder().add("tags", items).build()).build();
+    }
+
+    /**
+     * Deletes every fully-unused tag subtree the caller may remove, and reports what went.
+     *
+     * <p>The CONFIRM half of the cleanup previewed by {@code GET /tag/maintenance}. The set is
+     * recomputed here rather than taken from the client, so a tag that gained a document since the
+     * preview was rendered survives the confirm. Nothing still attached to a document is ever
+     * deleted, and nothing is un-assigned to make a tag deletable.</p>
+     *
+     * @return Response with the deleted tags and their count
+     */
+    @DELETE
+    @Path("/maintenance")
+    @Operation(
+            summary = "Delete all unused tags",
+            description = "Deletes every tag whose entire subtree carries no document, and reports "
+                    + "exactly which tags were deleted. Tags still carrying documents are never touched.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagDeletionResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
+    public Response deleteUnused() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagMaintenanceUtil.Sweep sweep = TagMaintenanceUtil.deleteUnused(getTargetIdList(null), principal.getId());
+        return tagDeletionResponse(sweep.deleted(), sweep.blocked());
+    }
+
+    /**
+     * Deletes a tag and its whole subtree, provided nothing in that subtree is in use.
+     *
+     * <p>The maintenance delete offered by the tag management tree (#298 part 1). It is NOT the
+     * same operation as {@code DELETE /tag/:id}, which removes a single tag, un-assigns it from
+     * every document and re-parents its children; this one refuses outright unless the tag and
+     * every descendant carry no document at all, and then removes the branch whole.</p>
+     *
+     * @param id Tag ID at the root of the subtree
+     * @return Response with the deleted tags and their count
+     */
+    @DELETE
+    @Path("{id: [a-z0-9\\-]+}/subtree")
+    @Operation(
+            summary = "Delete an unused tag subtree",
+            description = "Deletes a tag and all its descendants, but only when none of them carries a "
+                    + "document. Unlike DELETE /tag/{id} this never un-assigns a tag from a document.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Tag ID", schema = @Schema(type = "string"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagDeletionResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Tag not found"),
+                    @ApiResponse(responseCode = "400", description = "TagSubtreeInUse - The subtree still carries documents; "
+                            + "TagSubtreeInRule - The subtree holds a tag an auto-tagging rule points at; "
+                            + "TagNotDeletable - Refused without a reason the caller is told")
+            }
+    )
+    public Response deleteSubtree(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagMaintenanceUtil.DeleteResult result =
+                TagMaintenanceUtil.deleteSubtree(id, getTargetIdList(null), principal.getId());
+        switch (result.outcome()) {
+            case NOT_FOUND -> throw new NotFoundException();
+            case IN_USE -> throw new ClientException("TagSubtreeInUse",
+                    "This tag or one of its sub-tags is still on a document, or on one in the trash");
+            case IN_RULE -> throw new ClientException("TagSubtreeInRule",
+                    "This tag or one of its sub-tags is used by an auto-tagging rule");
+            // Deliberately unexplained: this is the branch a subtree holding a tag the caller
+            // cannot read or write ends up in, and naming that reason would confirm to them that a
+            // tag they cannot see exists under a tag they own.
+            case NOT_DELETABLE -> throw new ClientException("TagNotDeletable",
+                    "This tag cannot be deleted");
+            case DELETED -> { }
+        }
+
+        return tagDeletionResponse(result.deleted(), List.of());
+    }
+
+    /** The identity half of a maintenance item, shared by the status and deletion responses. */
+    private static JsonObjectBuilder tagMaintenanceItem(TagMaintenanceUtil.TagStatus status) {
+        return Json.createObjectBuilder()
+                .add("id", status.id())
+                .add("name", status.name())
+                .add("path", status.path());
+    }
+
+    /**
+     * Reports exactly which tags a destructive maintenance action removed, and which ones it kept.
+     *
+     * <p>{@code blocked} is the sweep's honest half: every tag is re-checked against freshly read
+     * state immediately before it is removed, and one that became used in the meantime is kept
+     * rather than deleted — reporting only the successes would make that indistinguishable from a
+     * tag that was never in the run. It is always present, empty when nothing was kept.</p>
+     */
+    private static Response tagDeletionResponse(List<TagMaintenanceUtil.TagStatus> deleted,
+                                                List<TagMaintenanceUtil.TagStatus> blocked) {
+        JsonArrayBuilder items = Json.createArrayBuilder();
+        for (TagMaintenanceUtil.TagStatus status : deleted) {
+            items.add(tagMaintenanceItem(status));
+        }
+        JsonArrayBuilder keptItems = Json.createArrayBuilder();
+        for (TagMaintenanceUtil.TagStatus status : blocked) {
+            keptItems.add(tagMaintenanceItem(status));
+        }
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok")
+                .add("count", deleted.size())
+                .add("tags", items)
+                .add("blocked", keptItems).build()).build();
+    }
+
+    /**
      * Returns document counts per tag.
      *
      * @return Response with tag ID to document count mapping
@@ -683,5 +847,52 @@ public class TagResource extends BaseResource {
     private static class TagCoOccurrenceResult {
         @Schema(description = "List of co-occurring tag pairs")
         public List<TagCoOccurrencePair> pairs;
+    }
+
+    @Schema(name = "TagMaintenanceItem", description = "A tag's maintenance verdict")
+    private static class TagMaintenanceItem {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Slash-joined chain of visible ancestor names, this tag last")
+        public String path;
+        @Schema(description = "True if this tag and all its descendants carry no document and can be deleted")
+        public Boolean deletable;
+        @Schema(description = "True if this tag is the topmost deletable tag of its branch")
+        public Boolean root;
+        @Schema(description = "Documents on this tag and its readable descendants")
+        public Long subtreeDocuments;
+        @Schema(description = "Why the tag is not deletable; absent when it is",
+                allowableValues = {"documents", "trash", "rule", "other"})
+        public String reason;
+    }
+
+    @Schema(name = "TagMaintenanceResult", description = "Maintenance status of every visible tag")
+    private static class TagMaintenanceResult {
+        @Schema(description = "Maintenance status of every visible tag")
+        public List<TagMaintenanceItem> tags;
+    }
+
+    @Schema(name = "TagDeletedItem", description = "A deleted tag")
+    private static class TagDeletedItem {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Slash-joined chain of visible ancestor names, this tag last")
+        public String path;
+    }
+
+    @Schema(name = "TagDeletionResult", description = "What a destructive tag maintenance action deleted")
+    private static class TagDeletionResult {
+        @Schema(description = "Status OK")
+        public String status;
+        @Schema(description = "Number of tags deleted")
+        public Integer count;
+        @Schema(description = "The tags that were deleted")
+        public List<TagDeletedItem> tags;
+        @Schema(description = "Tags the pre-delete re-check kept because they became used; empty when none")
+        public List<TagDeletedItem> blocked;
     }
 }

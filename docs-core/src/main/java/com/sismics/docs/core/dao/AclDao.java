@@ -15,8 +15,11 @@ import com.sismics.util.context.ThreadLocalContext;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -255,6 +258,49 @@ public class AclDao {
 
         // We have a matching permission
         return q.getResultList().size() > 0;
+    }
+
+    /**
+     * Of the given source IDs, those the target list holds the given permission on, answered with
+     * ONE query.
+     *
+     * <p>Only the DIRECT-ACL branch of {@link #checkPermission} is mirrored, deliberately: the
+     * second branch there resolves a DOCUMENT's permission through the tags carried by it, and this
+     * method exists for tags, which hold their permissions directly. Feeding it document IDs would
+     * therefore under-report and must not be done.</p>
+     *
+     * <p>An admin target list short-circuits to the whole input (the same bypass
+     * {@code checkPermission} applies), and an empty target list to nothing.</p>
+     *
+     * @param sourceIds ACL source entity IDs to test
+     * @param perm Necessary permission
+     * @param targetIdList List of targets
+     * @return The subset of sourceIds the targets hold perm on (never null)
+     */
+    @SuppressWarnings("unchecked")
+    public Set<String> filterPermitted(Collection<String> sourceIds, PermType perm, List<String> targetIdList) {
+        if (sourceIds == null || sourceIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        if (SecurityUtil.skipAclCheck(targetIdList)) {
+            return new HashSet<>(sourceIds);
+        }
+        if (targetIdList.isEmpty()) {
+            return new HashSet<>();
+        }
+
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select distinct a.ACL_SOURCEID_C from T_ACL a"
+                + " where a.ACL_SOURCEID_C in (:sourceIds) and a.ACL_TARGETID_C in (:targetIdList)"
+                + " and a.ACL_PERM_C = :perm and a.ACL_DELETEDATE_D is null");
+        q.setParameter("sourceIds", sourceIds);
+        q.setParameter("targetIdList", targetIdList);
+        q.setParameter("perm", perm.name());
+        Set<String> permitted = new HashSet<>();
+        for (Object row : q.getResultList()) {
+            permitted.add((String) row);
+        }
+        return permitted;
     }
 
     /**
