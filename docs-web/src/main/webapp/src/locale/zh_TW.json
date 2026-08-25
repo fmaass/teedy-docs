@@ -1229,6 +1229,7 @@
       "toolbar": "批次動作",
       "selected_count": "已選取 {count} 項",
       "add_tag": "新增標籤",
+      "reduce_tags": "精簡標籤",
       "set_language": "設定語言",
       "download": "下載 ZIP",
       "download_empty": "所選文件沒有可下載的檔案",
@@ -1245,6 +1246,18 @@
       "summary_ok": "已更新 {count} 份文件",
       "summary_partial": "{ok} 成功，{failed} 失敗",
       "delete_confirm": "刪除 {count} 份文件？它們將被移至垃圾桶。"
+    },
+    "tag_reduction": {
+      "header": "精簡標籤",
+      "intro": "只有當同一文件上還有它下層的標籤（任意深度）時，該標籤才會從文件上移除。一份同時帶有 保險 / 汽車 / 2026 的文件只保留 2026。在你確認之前不會有任何變動。",
+      "loading": "正在檢查所選文件…",
+      "summary": "待移除標籤數：{tags}，來自 {documents} 份文件。",
+      "none": "無需精簡 — 所選文件中沒有已被其自身其他標籤涵蓋的標籤。",
+      "confirm": "移除（{count}）",
+      "result": "已移除標籤數：{tags}，來自 {documents} 份文件。",
+      "result_none": "沒有移除任何內容 — 文件在預覽之後已變更。",
+      "skipped": "維持不變：{count} 份文件。",
+      "failed": "無法執行標籤精簡。"
     },
     "saved_filters": {
       "saved_label": "已儲存的篩選條件",

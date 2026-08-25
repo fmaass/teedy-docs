@@ -1229,6 +1229,7 @@
       "toolbar": "Acciones en lote",
       "selected_count": "{count} seleccionados",
       "add_tag": "Añadir etiqueta",
+      "reduce_tags": "Reducir etiquetas",
       "set_language": "Establecer idioma",
       "download": "Descargar ZIP",
       "download_empty": "Los documentos seleccionados no tienen archivos que descargar",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} documento(s) actualizado(s)",
       "summary_partial": "{ok} con éxito, {failed} con error",
       "delete_confirm": "¿Eliminar {count} documento(s)? Se moverán a la papelera."
+    },
+    "tag_reduction": {
+      "header": "Reducir etiquetas",
+      "intro": "Una etiqueta se quita de un documento solo cuando una etiqueta situada por debajo — a cualquier profundidad — está en ese mismo documento. Un documento etiquetado con Seguro / Coche / 2026 al completo conserva solo 2026. Nada cambia hasta que confirme.",
+      "loading": "Comprobando los documentos seleccionados…",
+      "summary": "Etiquetas por quitar: {tags}, de {documents} documento(s).",
+      "none": "Nada que reducir — ningún documento seleccionado lleva una etiqueta que otra de sus etiquetas ya cubra.",
+      "confirm": "Quitar ({count})",
+      "result": "Etiquetas quitadas: {tags}, de {documents} documento(s).",
+      "result_none": "No se quitó nada — los documentos han cambiado desde la vista previa.",
+      "skipped": "Sin cambios: {count} documento(s).",
+      "failed": "No se ha podido ejecutar la reducción de etiquetas."
     },
     "saved_filters": {
       "saved_label": "Filtros guardados",

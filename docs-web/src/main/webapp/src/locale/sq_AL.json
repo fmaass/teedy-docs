@@ -1229,6 +1229,7 @@
       "toolbar": "Veprime masive",
       "selected_count": "{count} të zgjedhura",
       "add_tag": "Shto etiketë",
+      "reduce_tags": "Redukto etiketat",
       "set_language": "Vendos gjuhën",
       "download": "Shkarko ZIP",
       "download_empty": "Dokumentet e zgjedhura nuk kanë skedarë për t'u shkarkuar",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} dokument(e) u përditësuan",
       "summary_partial": "{ok} u realizuan, {failed} dështuan",
       "delete_confirm": "Të fshihen {count} dokument(e)? Ato do të çohen në kosh."
+    },
+    "tag_reduction": {
+      "header": "Redukto etiketat",
+      "intro": "Një etiketë hiqet nga një dokument vetëm kur një etiketë poshtë saj — në çfarëdo thellësie — ndodhet në të njëjtin dokument. Një dokument me Sigurimi / Makina / 2026 të plotë mban vetëm 2026. Asgjë nuk ndryshon para se ta konfirmoni.",
+      "loading": "Po kontrollohen dokumentet e zgjedhura…",
+      "summary": "Etiketa për t’u hequr: {tags}, nga {documents} dokument(e).",
+      "none": "Asgjë për të reduktuar — asnjë dokument i zgjedhur nuk mban etiketë që një etiketë tjetër e tij e mbulon tashmë.",
+      "confirm": "Hiq ({count})",
+      "result": "Etiketa të hequra: {tags}, nga {documents} dokument(e).",
+      "result_none": "Nuk u hoq asgjë — dokumentet kanë ndryshuar që nga paraparja.",
+      "skipped": "Mbetën të paprekura: {count} dokument(e).",
+      "failed": "Reduktimi i etiketave nuk mund të ekzekutohej."
     },
     "saved_filters": {
       "saved_label": "Filtrat e ruajtur",

@@ -1229,6 +1229,7 @@
       "toolbar": "Azioni multiple",
       "selected_count": "{count} selezionati",
       "add_tag": "Aggiungi tag",
+      "reduce_tags": "Riduci i tag",
       "set_language": "Imposta lingua",
       "download": "Scarica ZIP",
       "download_empty": "I documenti selezionati non hanno file da scaricare",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} documento/i aggiornati",
       "summary_partial": "{ok} riusciti, {failed} falliti",
       "delete_confirm": "Eliminare {count} documento/i? Verranno spostati nel cestino."
+    },
+    "tag_reduction": {
+      "header": "Riduci i tag",
+      "intro": "Un tag viene tolto da un documento solo quando un tag sottostante — a qualsiasi profondità — è sullo stesso documento. Un documento con Assicurazione / Auto / 2026 per intero conserva solo 2026. Nulla cambia prima della conferma.",
+      "loading": "Controllo dei documenti selezionati…",
+      "summary": "Tag da togliere: {tags}, da {documents} documento/i.",
+      "none": "Niente da ridurre — nessun documento selezionato porta un tag già coperto da un altro dei suoi tag.",
+      "confirm": "Togli ({count})",
+      "result": "Tag tolti: {tags}, da {documents} documento/i.",
+      "result_none": "Non è stato tolto nulla — i documenti sono cambiati dopo l’anteprima.",
+      "skipped": "Rimasti invariati: {count} documento/i.",
+      "failed": "Non è stato possibile eseguire la riduzione dei tag."
     },
     "saved_filters": {
       "saved_label": "Filtri salvati",

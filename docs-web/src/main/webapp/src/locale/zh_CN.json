@@ -1229,6 +1229,7 @@
       "toolbar": "批量操作",
       "selected_count": "已选择 {count} 个",
       "add_tag": "添加标签",
+      "reduce_tags": "精简标签",
       "set_language": "设置语言",
       "download": "下载 ZIP",
       "download_empty": "所选文档没有可下载的文件",
@@ -1245,6 +1246,18 @@
       "summary_ok": "已更新 {count} 个文档",
       "summary_partial": "{ok} 个成功，{failed} 个失败",
       "delete_confirm": "删除 {count} 个文档？它们将被移入回收站。"
+    },
+    "tag_reduction": {
+      "header": "精简标签",
+      "intro": "只有当同一文档上还有它下层的标签（任意深度）时，该标签才会从文档上移除。一个同时带有 保险 / 汽车 / 2026 的文档只保留 2026。在你确认之前不会有任何改动。",
+      "loading": "正在检查所选文档…",
+      "summary": "待移除标签数：{tags}，来自 {documents} 个文档。",
+      "none": "无需精简 — 所选文档中没有已被其自身其他标签覆盖的标签。",
+      "confirm": "移除（{count}）",
+      "result": "已移除标签数：{tags}，来自 {documents} 个文档。",
+      "result_none": "没有移除任何内容 — 文档在预览之后已发生变化。",
+      "skipped": "保持不变：{count} 个文档。",
+      "failed": "无法执行标签精简。"
     },
     "saved_filters": {
       "saved_label": "已保存的筛选器",

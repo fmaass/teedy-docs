@@ -1229,6 +1229,7 @@
       "toolbar": "Bulk actions",
       "selected_count": "{count} selected",
       "add_tag": "Add tag",
+      "reduce_tags": "Reduce tags",
       "set_language": "Set language",
       "download": "Download ZIP",
       "download_empty": "The selected documents have no files to download",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} document(s) updated",
       "summary_partial": "{ok} succeeded, {failed} failed",
       "delete_confirm": "Delete {count} document(s)? They will be moved to the trash."
+    },
+    "tag_reduction": {
+      "header": "Reduce tags",
+      "intro": "A tag comes off a document only when a tag below it — at any depth — is on that same document. A document tagged Insurance / Car / 2026 in full keeps only 2026. Nothing changes until you confirm.",
+      "loading": "Checking the selected documents…",
+      "summary": "Tags to be removed: {tags}, from {documents} document(s).",
+      "none": "Nothing to reduce — no selected document carries a tag that another tag on it already covers.",
+      "confirm": "Remove ({count})",
+      "result": "Tags removed: {tags}, from {documents} document(s).",
+      "result_none": "Nothing was removed — the documents changed since the preview.",
+      "skipped": "Left untouched: {count} document(s).",
+      "failed": "The tag reduction could not be run."
     },
     "saved_filters": {
       "saved_label": "Saved filters",

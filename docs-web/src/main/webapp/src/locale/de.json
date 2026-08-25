@@ -1229,6 +1229,7 @@
       "toolbar": "Sammelaktionen",
       "selected_count": "{count} ausgewählt",
       "add_tag": "Schlagwort hinzufügen",
+      "reduce_tags": "Schlagwörter reduzieren",
       "set_language": "Sprache festlegen",
       "download": "ZIP herunterladen",
       "download_empty": "Die ausgewählten Dokumente haben keine Dateien zum Herunterladen",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} Dokument(e) aktualisiert",
       "summary_partial": "{ok} erfolgreich, {failed} fehlgeschlagen",
       "delete_confirm": "{count} Dokument(e) löschen? Sie werden in den Papierkorb verschoben."
+    },
+    "tag_reduction": {
+      "header": "Schlagwörter reduzieren",
+      "intro": "Ein Schlagwort wird nur dann von einem Dokument entfernt, wenn ein Schlagwort darunter — in beliebiger Tiefe — am selben Dokument hängt. Ein Dokument mit Versicherung / Auto / 2026 behält nur 2026. Es ändert sich nichts, bevor du bestätigst.",
+      "loading": "Die ausgewählten Dokumente werden geprüft…",
+      "summary": "Zu entfernende Schlagwörter: {tags}, aus {documents} Dokument(en).",
+      "none": "Nichts zu reduzieren — kein ausgewähltes Dokument trägt ein Schlagwort, das ein anderes Schlagwort daran schon abdeckt.",
+      "confirm": "Entfernen ({count})",
+      "result": "Entfernte Schlagwörter: {tags}, aus {documents} Dokument(en).",
+      "result_none": "Es wurde nichts entfernt — die Dokumente haben sich seit der Vorschau geändert.",
+      "skipped": "Unverändert geblieben: {count} Dokument(e).",
+      "failed": "Die Reduktion konnte nicht ausgeführt werden."
     },
     "saved_filters": {
       "saved_label": "Gespeicherte Filter",

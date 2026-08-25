@@ -441,9 +441,20 @@ function mountView() {
         // the stub used to be an inert div, which let any change to the emit's
         // name/payload ship green (#182).
         BulkActionBar: {
-          emits: ['addTag'],
+          emits: ['addTag', 'reduceTags'],
           template:
-            '<div class="bulk-bar-stub"><button class="bulk-add-tag" @click="$emit(\'addTag\', \'tag-bulk\')">t</button></div>',
+            '<div class="bulk-bar-stub"><button class="bulk-add-tag" @click="$emit(\'addTag\', \'tag-bulk\')">t</button>'
+            + '<button class="bulk-reduce" @click="$emit(\'reduceTags\')">r</button></div>',
+        },
+        // Surfaces the selection the dialog was opened with, so a test can assert the
+        // run is scoped to it — and re-emits both of its contracts.
+        TagReductionDialog: {
+          props: ['documents'],
+          emits: ['close', 'reduced'],
+          template:
+            '<div class="reduction-dialog-stub" :data-ids="documents.map(d => d.id).join(\',\')">'
+            + '<button class="reduction-done" @click="$emit(\'reduced\', { status: \'ok\', dryRun: false, count: 2, documents: [], skipped: [] })">go</button>'
+            + '<button class="reduction-close" @click="$emit(\'close\')">x</button></div>',
         },
         EmptyState: passthrough,
         ErrorState: passthrough,
@@ -1324,5 +1335,81 @@ describe('DocumentList — single-document delete from slide-over (#172)', () =>
     slideOverErrorHolder.ref!.value = new Error('Request failed with status code 404')
     await flushPromises()
     expect(toastAddSpy).not.toHaveBeenCalled()
+  })
+})
+
+// #293 — the tag-reduction run over the current selection.
+//
+// The affordance lives in the bulk toolbar, which renders SOLELY from a non-empty selection.
+// That is a baseline-safety property as much as a UX one: the document list is a captured visual
+// surface (document-list-{en,de}.png × desktop/mobile) and every one of those baselines is taken
+// with nothing selected, so this feature may add no default-state DOM whatsoever. The first test
+// pins exactly that; the rest pin that the run is scoped to the selection and that a completed run
+// refreshes what it changed.
+describe('DocumentList — tag reduction over the selection (#293)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    invalidateQueriesSpy.mockReset()
+  })
+
+  it('adds NO default-state DOM: with nothing selected there is no toolbar and no dialog', () => {
+    const wrapper = mountView()
+
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(false)
+    expect(wrapper.find('.reduction-dialog-stub').exists()).toBe(false)
+    // Nothing of the feature at all — the visual baselines capture this exact state. Comments
+    // are stripped first: Vue keeps template comments in a dev build (production drops them),
+    // and a comment node paints nothing, so only rendered markup is the subject here.
+    const rendered = wrapper.html().replace(/<!--[\s\S]*?-->/g, '')
+    expect(rendered.toLowerCase()).not.toContain('reduc')
+  })
+
+  it('opens the dialog on the toolbar action, scoped to the selected documents', async () => {
+    const wrapper = mountView()
+    await wrapper.find('button.select-one').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.bulk-bar-stub').exists()).toBe(true)
+    // Still nothing until it is asked for.
+    expect(wrapper.find('.reduction-dialog-stub').exists()).toBe(false)
+
+    await wrapper.find('.bulk-reduce').trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.find('.reduction-dialog-stub')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes('data-ids')).toBe('doc-42')
+  })
+
+  it('closing the dialog removes it again', async () => {
+    const wrapper = mountView()
+    await wrapper.find('button.select-one').trigger('click')
+    await wrapper.find('.bulk-reduce').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.reduction-close').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.reduction-dialog-stub').exists()).toBe(false)
+  })
+
+  it('refreshes the list and the tag counts once a run has actually removed something', async () => {
+    const wrapper = mountView()
+    await wrapper.find('button.select-one').trigger('click')
+    await wrapper.find('.bulk-reduce').trigger('click')
+    await flushPromises()
+    invalidateQueriesSpy.mockClear()
+
+    await wrapper.find('.reduction-done').trigger('click')
+    await flushPromises()
+
+    const invalidated = invalidateQueriesSpy.mock.calls.map((call) => JSON.stringify(call[0].queryKey))
+    expect(invalidated).toContain(JSON.stringify(['documents']))
+    // Tags moved off documents, so the sidebar/facet counts are stale too.
+    expect(invalidated).toContain(JSON.stringify(['tagStats']))
   })
 })

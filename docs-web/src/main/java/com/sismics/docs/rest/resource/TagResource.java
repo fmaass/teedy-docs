@@ -12,6 +12,7 @@ import com.sismics.docs.core.model.jpa.Tag;
 import com.sismics.docs.core.util.TagCreationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.util.TagMaintenanceUtil;
+import com.sismics.docs.rest.util.TagReductionUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.AclUtil;
@@ -547,6 +548,102 @@ public class TagResource extends BaseResource {
         return tagDeletionResponse(result.deleted(), List.of());
     }
 
+    /**
+     * Removes from each selected document every tag that a tag BELOW it on the same document
+     * already implies (#293).
+     *
+     * <p>Both halves of the reporter's contract live in this one operation. It defaults to a
+     * PREVIEW — {@code dryRun} absent means nothing is modified — so the destructive pass is only
+     * ever reached by an explicit {@code dryRun=false}, and the two passes derive their removal set
+     * through exactly the same code on the same freshly read state. The client sends document IDs
+     * and nothing else: a preview that has gone stale, or a tampered one, cannot name a tag for
+     * removal that the rule does not call redundant at execute time.</p>
+     *
+     * <p>It is deliberately NOT instance-wide. The selection is the current one in the document
+     * list, which is how the reporter asked to control the batch ("apply a filter, select the
+     * documents, run it on them, without hitting too much at once" — #293).</p>
+     *
+     * @param documentIdList Selected document IDs
+     * @param dryRun False to actually remove; absent or true previews
+     * @return Response with what was (or would be) removed per document, and what was skipped
+     */
+    @POST
+    @Path("/reduce")
+    @Operation(
+            summary = "Reduce redundant tags on documents",
+            description = "Removes from each of the given documents every tag that has a descendant tag on "
+                    + "that same document, so a document tagged Insurance / Car / 2026 in full keeps only "
+                    + "2026. Defaults to a dry run: nothing is modified unless dryRun is false. The removal "
+                    + "set is always derived server-side from the current state — the client sends document "
+                    + "IDs only. Tags the caller cannot read never cause a removal, and documents the caller "
+                    + "cannot write are reported as skipped rather than modified.",
+            requestBody = @RequestBody(content = @Content(
+                    schema = @Schema(implementation = TagReductionForm.class))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagReductionResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "400", description = "ValidationError - Too many documents "
+                            + "in one run")
+            }
+    )
+    public Response reduce(
+            @Parameter(name = "documents", description = "Document IDs to reduce")
+            @FormParam("documents") List<String> documentIdList,
+            @Parameter(name = "dryRun", description = "False to remove; absent or true previews")
+            @FormParam("dryRun") String dryRun) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        List<String> documentIdParams = documentIdList == null ? List.of() : documentIdList;
+        // The list is client-supplied and feeds batched `in (…)` reads: unbounded, it is both a
+        // database parameter-limit hazard and unbounded work on one request thread. A run is one
+        // page of the document list, which no UI can push past this.
+        if (documentIdParams.size() > TagReductionUtil.MAX_DOCUMENTS) {
+            throw new ClientException("ValidationError", MessageFormat.format(
+                    "Too many documents in one tag reduction run: at most {0}",
+                    String.valueOf(TagReductionUtil.MAX_DOCUMENTS)));
+        }
+
+        // Fail SAFE on anything but the documented word, and read the flag as a STRING to be able
+        // to. Taken as a Boolean, JAX-RS would hand it to Boolean.valueOf, which answers false to
+        // everything that is not "true" — so a typo'd or truncated flag would silently become a
+        // real removal. The comparison is EXACT rather than lenient for the same reason: "FALSE" or
+        // a padded " false " is not the request this endpoint documents, and the safe reading of an
+        // unclear request on a destructive operation is the one that changes nothing.
+        boolean dryRunEffective = !"false".equals(dryRun);
+        TagReductionUtil.Reduction reduction = TagReductionUtil.reduce(documentIdParams,
+                getTargetIdList(null), principal.getId(), dryRunEffective);
+
+        int count = 0;
+        JsonArrayBuilder documents = Json.createArrayBuilder();
+        for (TagReductionUtil.DocumentReduction document : reduction.documents()) {
+            JsonArrayBuilder tags = Json.createArrayBuilder();
+            for (TagReductionUtil.RemovedTag tag : document.tags()) {
+                tags.add(Json.createObjectBuilder()
+                        .add("id", tag.id())
+                        .add("name", tag.name())
+                        .add("path", tag.path()));
+                count++;
+            }
+            documents.add(Json.createObjectBuilder()
+                    .add("id", document.documentId())
+                    .add("tags", tags));
+        }
+        JsonArrayBuilder skipped = Json.createArrayBuilder();
+        for (String documentId : reduction.skipped()) {
+            skipped.add(documentId);
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok")
+                .add("dryRun", dryRunEffective)
+                .add("count", count)
+                .add("documents", documents)
+                .add("skipped", skipped).build()).build();
+    }
+
     /** The identity half of a maintenance item, shared by the status and deletion responses. */
     private static JsonObjectBuilder tagMaintenanceItem(TagMaintenanceUtil.TagStatus status) {
         return Json.createObjectBuilder()
@@ -882,6 +979,37 @@ public class TagResource extends BaseResource {
         public String name;
         @Schema(description = "Slash-joined chain of visible ancestor names, this tag last")
         public String path;
+    }
+
+    @Schema(name = "TagReductionForm", description = "The documents to reduce, and whether to preview")
+    private static class TagReductionForm {
+        @Schema(name = "documents", description = "Document IDs to reduce")
+        public List<String> documents;
+        @Schema(name = "dryRun", description = "False to remove; absent or true previews")
+        public Boolean dryRun;
+    }
+
+    @Schema(name = "TagReductionDocument", description = "One document's redundant tags")
+    private static class TagReductionDocument {
+        @Schema(description = "Document ID")
+        public String id;
+        @Schema(description = "The tags removed from it, or that would be, shallowest first")
+        public List<TagDeletedItem> tags;
+    }
+
+    @Schema(name = "TagReductionResult", description = "What a tag reduction run removed, or would remove")
+    private static class TagReductionResult {
+        @Schema(description = "Status OK")
+        public String status;
+        @Schema(description = "True when nothing was modified")
+        public Boolean dryRun;
+        @Schema(description = "Total number of tags removed, or that would be")
+        public Integer count;
+        @Schema(description = "The documents with something to remove; documents with nothing are absent")
+        public List<TagReductionDocument> documents;
+        @Schema(description = "IDs of selected documents left untouched because the caller cannot write "
+                + "them, or they no longer exist")
+        public List<String> skipped;
     }
 
     @Schema(name = "TagDeletionResult", description = "What a destructive tag maintenance action deleted")

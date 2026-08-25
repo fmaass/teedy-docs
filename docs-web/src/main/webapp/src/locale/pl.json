@@ -1229,6 +1229,7 @@
       "toolbar": "Akcje zbiorcze",
       "selected_count": "{count} zaznaczono",
       "add_tag": "Dodaj etykietę",
+      "reduce_tags": "Zredukuj etykiety",
       "set_language": "Ustaw język",
       "download": "Pobierz ZIP",
       "download_empty": "Wybrane dokumenty nie mają plików do pobrania",
@@ -1245,6 +1246,18 @@
       "summary_ok": "Zaktualizowano {count} dokument(ów)",
       "summary_partial": "{ok} powiodło się, {failed} nie powiodło się",
       "delete_confirm": "Usunąć {count} dokument(ów)? Zostaną przeniesione do kosza."
+    },
+    "tag_reduction": {
+      "header": "Zredukuj etykiety",
+      "intro": "Etykieta znika z dokumentu tylko wtedy, gdy etykieta znajdująca się pod nią — na dowolnej głębokości — jest na tym samym dokumencie. Dokument z pełnym zestawem Ubezpieczenie / Samochód / 2026 zachowa tylko 2026. Nic się nie zmieni przed potwierdzeniem.",
+      "loading": "Sprawdzanie wybranych dokumentów…",
+      "summary": "Etykiety do usunięcia: {tags}, z {documents} dokument(ów).",
+      "none": "Nie ma czego redukować — żaden wybrany dokument nie ma etykiety, którą pokrywa już inna jego etykieta.",
+      "confirm": "Usuń ({count})",
+      "result": "Usunięte etykiety: {tags}, z {documents} dokument(ów).",
+      "result_none": "Nic nie zostało usunięte — dokumenty zmieniły się od czasu podglądu.",
+      "skipped": "Bez zmian: {count} dokument(ów).",
+      "failed": "Nie udało się wykonać redukcji etykiet."
     },
     "saved_filters": {
       "saved_label": "Zapisane filtry",

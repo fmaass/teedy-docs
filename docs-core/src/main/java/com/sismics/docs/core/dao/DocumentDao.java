@@ -115,6 +115,35 @@ public class DocumentDao {
     }
 
     /**
+     * Of the given document IDs, those that are ALIVE — one query for a whole selection.
+     *
+     * <p>The tag-reduction run (#293) operates on a list of document IDs the client selected, and
+     * has to answer "is this still a document I may work on" for every one of them before it plans
+     * anything. A trashed document must not be reduced: its tag links are soft-deleted with it and
+     * a restore revives exactly the set that was there, so touching them would corrupt what the
+     * restore brings back. An ID that is not returned here is not distinguishable from one the
+     * caller may not reach, which is deliberate — the reduction reports both the same way.</p>
+     *
+     * @param documentIds Document IDs to test
+     * @return the subset with an active (non-trashed) row (never null)
+     */
+    @SuppressWarnings("unchecked")
+    public Set<String> findAliveIds(Collection<String> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return new HashSet<>();
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select d.DOC_ID_C from T_DOCUMENT d"
+                + " where d.DOC_ID_C in (:documentIds) and d.DOC_DELETEDATE_D is null");
+        q.setParameter("documentIds", documentIds);
+        Set<String> alive = new HashSet<>();
+        for (Object row : q.getResultList()) {
+            alive.add((String) row);
+        }
+        return alive;
+    }
+
+    /**
      * #111 grant-path serialization: acquires a {@code SELECT ... FOR UPDATE} lock (eligibility-scoped) on
      * the CURRENT owner's user row for an active document and returns that owner id — the same owner-row
      * lock a self-delete of that owner takes, so a direct share/ACL grant and a self-delete on the owner's

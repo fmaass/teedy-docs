@@ -215,6 +215,42 @@ public class TagDao {
     }
 
     /**
+     * The live tags of several documents at once, grouped per document.
+     *
+     * <p>One query for a whole selection: the tag-reduction run (#293) decides what is redundant
+     * from the tags each selected document carries, and a per-document read would make a
+     * hundred-document run a hundred queries. Both aliveness conditions are part of the answer —
+     * a link the user already removed, and a link left pointing at a deleted tag, are not on the
+     * document any more, and a run that still saw them would report removing a tag that is not
+     * there.</p>
+     *
+     * <p>Deliberately UNSCOPED by ACL. The caller intersects with the tags it may read; keeping
+     * the invisible ones in the answer is what lets the reduction hand
+     * {@link #updateTagList(String, Set, Set)} a deletable set that PRESERVES them.</p>
+     *
+     * @param documentIds Document IDs to read
+     * @return document ID to its live tag IDs; documents with no tags are absent (never null)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Set<String>> findTagIdsByDocumentIds(Collection<String> documentIds) {
+        Map<String, Set<String>> byDocument = new HashMap<>();
+        if (documentIds == null || documentIds.isEmpty()) {
+            return byDocument;
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createNativeQuery("select dt.DOT_IDDOCUMENT_C, dt.DOT_IDTAG_C from T_DOCUMENT_TAG dt"
+                + " join T_TAG t on t.TAG_ID_C = dt.DOT_IDTAG_C"
+                + " where dt.DOT_IDDOCUMENT_C in (:documentIds) and dt.DOT_DELETEDATE_D is null"
+                + " and t.TAG_DELETEDATE_D is null");
+        q.setParameter("documentIds", documentIds);
+        for (Object row : q.getResultList()) {
+            Object[] columns = (Object[]) row;
+            byDocument.computeIfAbsent((String) columns[0], key -> new HashSet<>()).add((String) columns[1]);
+        }
+        return byDocument;
+    }
+
+    /**
      * Gets a tag by its ID.
      *
      * @param id Tag ID
@@ -343,8 +379,41 @@ public class TagDao {
     }
     
     /**
+     * REMOVE-ONLY: soft-deletes exactly the given live links between one document and the given
+     * tags, and does nothing else.
+     *
+     * <p>The counterpart of {@link #updateTagList(String, Set, Set)}, and deliberately not a
+     * variant of it. That method SYNCHRONIZES a document's links to a target set, which means it
+     * can also INSERT — feed it a set assembled a moment earlier and it will both delete a link
+     * somebody else added since and re-create one that has gone away in the meantime, including on
+     * a document the trash has soft-deleted (whose links carry the document's own delete date, so
+     * they read as absent). A caller that only ever wants to take tags OFF a document has no use
+     * for either behaviour, and the tag-reduction run (#293) must never add a link.</p>
+     *
+     * <p>A link that is already gone — removed concurrently, or soft-deleted with its document —
+     * is simply not matched, so this is a no-op rather than a resurrection. The returned count is
+     * what was ACTUALLY removed, which is what lets a caller report only real changes.</p>
+     *
+     * @param documentId Document ID
+     * @param tagIds Tags to unlink from it
+     * @return the number of links removed (0 when none of them was still there)
+     */
+    public int removeTagLinks(String documentId, Collection<String> tagIds) {
+        if (documentId == null || tagIds == null || tagIds.isEmpty()) {
+            return 0;
+        }
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery("update DocumentTag dt set dt.deleteDate = :dateNow"
+                + " where dt.documentId = :documentId and dt.tagId in :tagIds and dt.deleteDate is null");
+        q.setParameter("dateNow", new Date());
+        q.setParameter("documentId", documentId);
+        q.setParameter("tagIds", tagIds);
+        return q.executeUpdate();
+    }
+
+    /**
      * Creates a new tag.
-     * 
+     *
      * @param tag Tag
      * @param userId User ID
      * @return New ID

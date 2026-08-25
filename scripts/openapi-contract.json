@@ -30,6 +30,10 @@
       "responses": ["200", "403"],
       "requestBodyRequired": false
     },
+    "POST /tag/reduce": {
+      "responses": ["200", "400", "403"],
+      "requestBodyRequired": false
+    },
     "POST /savedfilter/{id}": {
       "responses": ["200", "400", "403", "404"],
       "requestBodyRequired": true,

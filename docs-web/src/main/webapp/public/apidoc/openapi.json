@@ -3665,6 +3665,47 @@
         }
       }
     },
+    "/tag/reduce": {
+      "post": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Reduce redundant tags on documents",
+        "description": "Removes from each of the given documents every tag that has a descendant tag on that same document, so a document tagged Insurance / Car / 2026 in full keeps only 2026. Defaults to a dry run: nothing is modified unless dryRun is false. The removal set is always derived server-side from the current state — the client sends document IDs only. Tags the caller cannot read never cause a removal, and documents the caller cannot write are reported as skipped rather than modified.",
+        "operationId": "post_tag_reduce",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "documents": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "dryRun": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ValidationError - Too many documents in one run"
+          },
+          "403": {
+            "description": "ForbiddenError - Access denied"
+          }
+        }
+      }
+    },
     "/tag/{id}/subtree": {
       "delete": {
         "tags": [

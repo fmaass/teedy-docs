@@ -32,6 +32,8 @@ import DocumentTable from '../../components/DocumentTable.vue'
 import DocumentGallery from '../../components/DocumentGallery.vue'
 import DocumentSlideOver from '../../components/DocumentSlideOver.vue'
 import BulkActionBar from '../../components/BulkActionBar.vue'
+import TagReductionDialog from '../../components/TagReductionDialog.vue'
+import type { TagReductionReport } from '../../api/tag'
 import { updateDocument, deleteDocument, duplicateDocument } from '../../api/document'
 import { getFileList, zipFilesBlob } from '../../api/file'
 import { triggerBlobDownload } from '../../utils/download'
@@ -545,6 +547,35 @@ function bulkAddTag(tagId: string) {
   runBulkOp((doc) => updateDocument(doc.id, buildAddTagParams(doc, tagId)))
 }
 
+// --- Tag reduction (#293) ---
+//
+// Unlike every other bulk action this is ONE server call, not a fan-out: the rule ("a tag goes
+// only when a tag below it is on the same document") is a question about the tag tree, which the
+// server owns, and answering it per document from here would mean shipping a removal list back for
+// the server to trust. The dialog previews first and removes only on its own confirm.
+//
+// It is mounted on demand rather than kept hidden, so the toolbar-less default list — the state
+// every document-list visual baseline captures — carries none of its DOM.
+const reduceVisible = ref(false)
+/**
+ * A SNAPSHOT of the selection taken when the dialog opens. The live selection is reconciled
+ * against each refetched page, so a reduced document dropping out of an active tag filter would
+ * otherwise pull its own title out of the report the user is reading.
+ */
+const reduceDocs = ref<{ id: string; title: string }[]>([])
+
+function openTagReduction() {
+  reduceDocs.value = selectedDocs.value.map((doc) => ({ id: doc.id, title: doc.title }))
+  reduceVisible.value = true
+}
+
+function onTagsReduced(report: TagReductionReport) {
+  if (!report.count) return
+  queryClient.invalidateQueries({ queryKey: queryKeys.documents() })
+  // Tags moved off documents: the sidebar counts and facets are stale too.
+  for (const key of tagCountKeys) queryClient.invalidateQueries({ queryKey: key })
+}
+
 function bulkSetLanguage(language: string) {
   runBulkOp((doc) => updateDocument(doc.id, buildLanguageParams(doc, language)))
 }
@@ -736,6 +767,7 @@ async function bulkDownload() {
         :progress="bulkProgress"
         :downloading="bulkDownloading"
         @add-tag="bulkAddTag"
+        @reduce-tags="openTagReduction"
         @set-language="bulkSetLanguage"
         @download="bulkDownload"
         @duplicate="bulkDuplicate"
@@ -743,6 +775,15 @@ async function bulkDownload() {
         @clear="clearSelection"
       />
     </div>
+
+    <!-- Tag reduction (#293), mounted only while it is open: the default list state — the one
+         every document-list visual baseline captures — carries none of this. -->
+    <TagReductionDialog
+      v-if="reduceVisible"
+      :documents="reduceDocs"
+      @close="reduceVisible = false"
+      @reduced="onTagsReduced"
+    />
 
     <!-- Document list / gallery — both render the SAME paginated result set. -->
     <div class="doc-area">

@@ -1229,6 +1229,7 @@
       "toolbar": "Actions groupées",
       "selected_count": "{count} sélectionné(s)",
       "add_tag": "Ajouter un tag",
+      "reduce_tags": "Réduire les tags",
       "set_language": "Définir la langue",
       "download": "Télécharger le ZIP",
       "download_empty": "Les documents sélectionnés n'ont aucun fichier à télécharger",
@@ -1245,6 +1246,18 @@
       "summary_ok": "{count} document(s) mis à jour",
       "summary_partial": "{ok} réussi(s), {failed} échoué(s)",
       "delete_confirm": "Supprimer {count} document(s) ? Ils seront déplacés vers la corbeille."
+    },
+    "tag_reduction": {
+      "header": "Réduire les tags",
+      "intro": "Un tag n’est retiré d’un document que si un tag situé en dessous — à n’importe quelle profondeur — se trouve sur ce même document. Un document tagué Assurance / Voiture / 2026 en entier ne garde que 2026. Rien ne change avant votre confirmation.",
+      "loading": "Vérification des documents sélectionnés…",
+      "summary": "Tags à retirer : {tags}, de {documents} document(s).",
+      "none": "Rien à réduire — aucun document sélectionné ne porte un tag déjà couvert par un autre de ses tags.",
+      "confirm": "Retirer ({count})",
+      "result": "Tags retirés : {tags}, de {documents} document(s).",
+      "result_none": "Rien n’a été retiré — les documents ont changé depuis l’aperçu.",
+      "skipped": "Laissés intacts : {count} document(s).",
+      "failed": "La réduction des tags n’a pas pu être exécutée."
     },
     "saved_filters": {
       "saved_label": "Filtres enregistrés",

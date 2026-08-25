@@ -216,3 +216,30 @@ describe('BulkActionBar — the duplicate action (#294)', () => {
     expect(duplicateButton(zipping)!.attributes('disabled')).toBeDefined()
   })
 })
+
+// #293 — the tag-reduction run. The bar is where the reporter asked for it ("add a button to the
+// document overview top bar … select the documents … run the tag-cleanup on them"), and it renders
+// only while something is selected, so the action costs the default list view no DOM at all.
+describe('BulkActionBar — the tag reduction action (#293)', () => {
+  function reduceButton(wrapper: ReturnType<typeof mountBar>) {
+    return wrapper
+      .findAll('.bulk-actions button')
+      .find((button) => button.text().includes('ui.bulk.reduce_tags'))
+  }
+
+  it('offers the reduction and asks for it exactly once per click', async () => {
+    const wrapper = mountBar()
+    const button = reduceButton(wrapper)
+    expect(button, 'the bar carries a reduce-tags action').toBeDefined()
+
+    await button!.trigger('click')
+
+    // No payload: the selection is the view's, and the dialog reads it from there.
+    expect(wrapper.emitted('reduceTags')).toEqual([[]])
+  })
+
+  it('is unavailable while another bulk operation is in flight', () => {
+    const wrapper = mountBar({ progress: [1, 4] as [number, number] })
+    expect((reduceButton(wrapper)!.element as HTMLButtonElement).disabled).toBe(true)
+  })
+})

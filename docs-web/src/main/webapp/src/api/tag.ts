@@ -134,6 +134,50 @@ export function deleteUnusedTags() {
   return api.delete<TagDeletionReport>('/tag/maintenance')
 }
 
+/** A tag a reduction run took off a document, or would. */
+export interface ReducedTag {
+  id: string
+  name: string
+  /** Slash-joined chain of visible ancestor names, this tag last. */
+  path: string
+}
+
+/** One document's redundant tags. */
+export interface DocumentTagReduction {
+  id: string
+  tags: ReducedTag[]
+}
+
+/**
+ * What a tag-reduction run removed, or would remove (#293). A document with nothing redundant on
+ * it appears in NEITHER list: `documents` carries only real changes, and `skipped` only documents
+ * the run could not touch at all — the caller cannot write them, or they are gone. The server does
+ * not say which of the two, and the screen must not guess: the distinction would be an existence
+ * oracle for other people's documents.
+ */
+export interface TagReductionReport {
+  status: string
+  /** True when nothing was modified. */
+  dryRun: boolean
+  /** Total tags removed, or that would be, across every document. */
+  count: number
+  documents: DocumentTagReduction[]
+  skipped: string[]
+}
+
+/**
+ * Previews or runs a tag reduction over the given documents.
+ *
+ * The request carries document IDs and nothing else — the server derives what is redundant itself,
+ * on both passes, so a preview this screen holds can never be replayed as a removal list.
+ */
+export function reduceDocumentTags(documentIds: string[], dryRun: boolean) {
+  const params = new URLSearchParams()
+  for (const id of documentIds) params.append('documents', id)
+  params.set('dryRun', String(dryRun))
+  return api.post<TagReductionReport>('/tag/reduce', params)
+}
+
 export interface CoOccurrencePair {
   tagA: string
   tagB: string

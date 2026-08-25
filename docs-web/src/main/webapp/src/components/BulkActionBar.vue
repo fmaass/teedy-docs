@@ -22,6 +22,11 @@ defineProps<{
 
 const emit = defineEmits<{
   addTag: [tagId: string]
+  /**
+   * Ask for the tag-reduction run over the current selection (#293). No payload: the selection
+   * belongs to the list, and the run reads it there — this bar never carries a removal list.
+   */
+  reduceTags: []
   setLanguage: [language: string]
   delete: []
   clear: []
@@ -90,6 +95,16 @@ function applyLang() {
         :label="t('ui.bulk.add_tag')"
         :disabled="!!progress || downloading"
         @click="openTagPopover"
+      />
+      <!-- Same eraser the tag-management screen's cleanup carries: both remove tags nobody
+           needs, one from the tree, this one from the selected documents. -->
+      <Button
+        size="small"
+        severity="secondary"
+        icon="pi pi-eraser"
+        :label="t('ui.bulk.reduce_tags')"
+        :disabled="!!progress || downloading"
+        @click="emit('reduceTags')"
       />
       <Button
         size="small"
