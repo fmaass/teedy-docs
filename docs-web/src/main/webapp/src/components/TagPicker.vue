@@ -55,10 +55,22 @@ const props = defineProps<{
    * Omitted (undefined) means unlimited, which is what the edit form wants.
    */
   selectionLimit?: number
+  /**
+   * Opt in to the create-tag row (#288): when the typed search matches no existing tag, the
+   * overlay offers to create one under that name, beneath the empty result list.
+   *
+   * A LABEL BUILDER rather than a boolean, because the row's text quotes the typed name and
+   * this component adds no locale keys of its own (see the contract note above) — the caller
+   * owns the wording. Omitted means no create affordance at all, which is what the bulk action
+   * bar wants: a bulk apply picks one EXISTING tag for many documents.
+   */
+  createTagLabel?: (name: string) => string
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [ids: string[]]
+  /** The create row was chosen; the trimmed text the user typed. */
+  create: [name: string]
 }>()
 
 /**
@@ -252,6 +264,31 @@ const activeDescendant = computed(() => picker.value?.focusedOptionId ?? undefin
  * A mount-time auto-open cannot work there: the picker does not exist yet when the
  * Popover has not rendered.
  */
+/**
+ * The create-tag row (#288). It appears only when the search box holds text AND that text
+ * matched NO tag — "matches no existing tag" in the reporter-approved mockup, which shows the
+ * row directly under an empty result list. A search that still has matches is a selection, so
+ * the row would only be in the way of it.
+ */
+const createName = computed(() => filterText.value.trim())
+const showCreateRow = computed(
+  () => !!props.createTagLabel && createName.value !== '' && options.value.length === 0,
+)
+
+/**
+ * Hand the typed name to the caller and get the overlay out of the way of whatever it opens.
+ *
+ * The typed text is deliberately KEPT in the search box. Clearing it here would throw away
+ * the user's typing the moment they cancel; left alone, a cancelled create finds the search
+ * exactly as it was, and a completed one finds a search that now matches the new tag.
+ */
+function chooseCreate() {
+  const name = createName.value
+  if (!name) return
+  hide()
+  emit('create', name)
+}
+
 function show() {
   picker.value?.show()
 }
@@ -334,6 +371,15 @@ defineExpose({ show, hide })
 
     <template #empty>{{ emptyListMessage }}</template>
 
+    <!-- Beneath the results, in PrimeVue's footer slot — which renders with no wrapper element
+         of its own, so a picker without the row (the bulk bar) gets no stray markup. -->
+    <template #footer>
+      <button v-if="showCreateRow" type="button" class="tp-create-row" @click="chooseCreate">
+        <i class="pi pi-plus" aria-hidden="true" />
+        <span>{{ createTagLabel!(createName) }}</span>
+      </button>
+    </template>
+
     <!-- Colour the selected chips from the tag map (the slot's `value` is the tag
          id, since optionValue is the id). An id missing from the map still gets a
          visible, removable fallback chip. Chips wrap instead of clipping. -->
@@ -381,5 +427,34 @@ defineExpose({ show, hide })
   outline: none;
   border-radius: 2px;
   box-shadow: 0 0 0 2px var(--p-primary-color);
+}
+
+/* The create-tag row (#288). A full-width option-shaped row, separated from the list above it
+   so it reads as an action rather than one more tag to pick. */
+.tp-create-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-top: 1px solid var(--p-content-border-color);
+  background: transparent;
+  color: var(--p-primary-color);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: start;
+  cursor: pointer;
+}
+.tp-create-row:hover {
+  background: var(--p-content-hover-background);
+}
+.tp-create-row:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--p-primary-color);
+}
+.tp-create-row .pi-plus {
+  font-size: 0.75rem;
+  flex-shrink: 0;
 }
 </style>

@@ -40,9 +40,26 @@ const props = defineProps<{
    * confirmation. Omitted by consumers that need no confirmation.
    */
   beforeAdd?: (perm: 'READ' | 'WRITE', target: AclTarget) => boolean | Promise<boolean>
+  /**
+   * The ACL source does not exist yet (#288: a tag being created in the document editor's
+   * side panel). There is no id to send a grant to, so the editor stops being a writer and
+   * becomes an input: every add and remove is EMITTED for the caller to hold and apply once
+   * the source has been created. Nothing reaches /acl, `sourceId` is never read, and
+   * `changed` — which means "re-read the source from the server" — is never emitted.
+   *
+   * A removal here takes a row off an unsaved list, so it skips the destructive confirmation
+   * the persisted path shows: there is nothing yet to lose.
+   */
+  deferred?: boolean
 }>()
 
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{
+  changed: []
+  /** Deferred mode only: a grant the caller must apply after creating the source. */
+  add: [acl: DirectAcl]
+  /** Deferred mode only: a collected grant the caller must drop again. */
+  remove: [acl: DirectAcl]
+}>()
 
 const { t } = useI18n()
 const toast = useToast()
@@ -90,19 +107,34 @@ async function completeSearch(event: { query: string }) {
   }
 }
 
+// Empty the add row back to its resting state, shared by the persisted and deferred paths.
+function resetAddRow() {
+  selectedTarget.value = null
+  searchResults.value = []
+  selectedPerm.value = 'READ'
+}
+
 async function handleAdd() {
   if (!selectedTarget.value) return
   if (props.beforeAdd) {
     const proceed = await props.beforeAdd(selectedPerm.value, selectedTarget.value)
     if (!proceed) return
   }
+  if (props.deferred) {
+    emit('add', {
+      perm: selectedPerm.value,
+      id: selectedTarget.value.id,
+      name: selectedTarget.value.name,
+      type: selectedTarget.value.type,
+    })
+    resetAddRow()
+    return
+  }
   adding.value = true
   try {
     await addAcl(props.sourceId, selectedPerm.value, selectedTarget.value.name, selectedTarget.value.type)
     toast.add({ severity: 'success', summary: t('ui.acl_editor.added'), life: 2000 })
-    selectedTarget.value = null
-    searchResults.value = []
-    selectedPerm.value = 'READ'
+    resetAddRow()
     emit('changed')
   } catch {
     toast.add({ severity: 'error', summary: t('ui.acl_editor.failed_add'), life: 3000 })
@@ -112,6 +144,10 @@ async function handleAdd() {
 }
 
 function confirmRemove(acl: DirectAcl) {
+  if (props.deferred) {
+    emit('remove', acl)
+    return
+  }
   confirmDanger({
     message: t('ui.acl_editor.remove_confirm', { perm: permLabel(acl.perm), name: acl.name ?? '' }),
     header: t('ui.acl_editor.remove'),

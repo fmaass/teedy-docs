@@ -146,3 +146,67 @@ describe('AclEditor', () => {
     expect(aclApi.addAcl).toHaveBeenCalledWith('src1', 'READ', 'newuser', 'USER')
   })
 })
+
+// #288 — the document editor's create-tag panel edits permissions for a tag that does not
+// exist yet, so there is no source id to send a grant to. In DEFERRED mode the editor stops
+// being a writer and becomes an input: every add/remove is emitted for the caller to hold and
+// apply once the tag has been created. Nothing may reach /acl.
+describe('AclEditor — deferred mode (#288)', () => {
+  const pending = [{ perm: 'WRITE' as const, id: 'admin', name: 'admin', type: 'USER' as const }]
+
+  beforeEach(() => {
+    aclApi.addAcl.mockReset().mockResolvedValue({})
+    aclApi.deleteAcl.mockReset().mockResolvedValue({})
+    aclApi.searchAclTargets.mockReset().mockResolvedValue({ data: { users: [], groups: [] } })
+    toastAdd.mockReset()
+    confirmDanger.mockClear()
+  })
+
+  it('emits the grant instead of PUTting it, and never touches /acl', async () => {
+    const wrapper = mountEditor({ sourceId: '', acls: pending, writable: true, deferred: true })
+    const target = { id: 'u9', name: 'bob', type: 'USER' as const }
+    wrapper.findComponent('.autocomplete').vm.$emit('update:modelValue', target)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.acl-add button').trigger('click')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(aclApi.addAcl, 'a tag with no id cannot be granted anything yet').not.toHaveBeenCalled()
+    expect(wrapper.emitted('add')).toEqual([
+      [{ perm: 'READ', id: 'u9', name: 'bob', type: 'USER' }],
+    ])
+    // `changed` means "re-read the source from the server" — there is nothing to re-read.
+    expect(wrapper.emitted('changed')).toBeUndefined()
+  })
+
+  it('emits the removal instead of DELETEing it, with no destructive confirmation', async () => {
+    // Nothing is persisted, so taking a row back off an unsaved list is not a destructive act.
+    const wrapper = mountEditor({
+      sourceId: '',
+      acls: [...pending, { perm: 'READ' as const, id: 'u9', name: 'bob', type: 'USER' as const }],
+      writable: true,
+      deferred: true,
+    })
+    const bobRow = wrapper.findAll('.acl-row').find((r) => r.text().includes('bob'))!
+    await bobRow.find('button[aria-label="ui.acl_editor.remove"]').trigger('click')
+
+    expect(aclApi.deleteAcl).not.toHaveBeenCalled()
+    expect(confirmDanger).not.toHaveBeenCalled()
+    expect(wrapper.emitted('remove')).toEqual([
+      [{ perm: 'READ', id: 'u9', name: 'bob', type: 'USER' }],
+    ])
+  })
+
+  it('still honours the immutability predicate, so the owner row cannot be taken off', async () => {
+    const wrapper = mountEditor({
+      sourceId: '',
+      acls: pending,
+      writable: true,
+      deferred: true,
+      immutable: (acl: { id: string }) => acl.id === 'admin',
+    })
+    const row = wrapper.find('.acl-row')
+    expect(row.find('button[aria-label="ui.acl_editor.remove"]').exists()).toBe(false)
+    expect(row.find('.acl-immutable').exists()).toBe(true)
+  })
+})

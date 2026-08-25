@@ -164,6 +164,14 @@
       "all_assigned": "Tous les tags sont déjà ajoutés",
       "add_named": "Ajouter le tag {name}"
     },
+    "tag_picker": {
+      "create_named": "Créer le tag « {name} »…"
+    },
+    "tag_panel": {
+      "lead": "Le tag est créé et ajouté à {title} lors de l'enregistrement.",
+      "lead_untitled": "Le tag est créé et ajouté à ce document lors de l'enregistrement.",
+      "no_permissions_hint": "Ce tag n'a encore aucune permission : vous seul le verrez. Définissez les permissions maintenant ou plus tard dans la gestion des tags."
+    },
     "quick_filter": {
       "placeholder": "Filtrer les résultats chargés…",
       "aria_label": "Filtrer les résultats chargés par titre",

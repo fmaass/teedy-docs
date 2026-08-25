@@ -164,6 +164,14 @@
       "all_assigned": "所有标签均已添加",
       "add_named": "添加标签 {name}"
     },
+    "tag_picker": {
+      "create_named": "创建标签“{name}”…"
+    },
+    "tag_panel": {
+      "lead": "保存时将创建该标签并添加到{title}。",
+      "lead_untitled": "保存时将创建该标签并添加到此文档。",
+      "no_permissions_hint": "此标签尚无权限 — 只有您能看到它。现在设置权限，或稍后在标签管理中设置。"
+    },
     "quick_filter": {
       "placeholder": "筛选已加载的结果…",
       "aria_label": "按标题筛选已加载的结果",

@@ -65,6 +65,7 @@ beforeAll(() => {
 })
 
 import TagEdit from './TagEdit.vue'
+import TagForm from '../../components/TagForm.vue'
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -251,5 +252,38 @@ describe('TagEdit — the document count follows a tag-count invalidation', () =
     await flushPromises()
 
     expect(wrapper.find('.tag-doc-count').text()).toBe('Documents with this tag: 5')
+  })
+})
+
+// #288 — the form on this page became a SHARED component so the document editor's create-tag
+// panel could host the very same one. Everything above this block is the regression proof that
+// the page itself did not change; these two assertions pin that the sharing is real (one
+// implementation, two hosts) rather than a copy, and that the panel's autofocus did not come
+// along with it — this page must not grab the caret on load.
+describe('TagEdit — hosts the shared tag form (#288)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTag.mockReset().mockResolvedValue({
+      data: { id: 'b', name: 'Bravo', creator: 'admin', color: '#222222', parent: null, writable: true, acls: [] },
+    })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: {} } })
+  })
+
+  it('renders the fields and permissions through TagForm, keeping its own field ids', async () => {
+    const wrapper = await mountEdit()
+    const form = wrapper.findComponent(TagForm)
+    expect(form.exists()).toBe(true)
+    expect(form.props('idPrefix')).toBe('tag')
+    expect(form.props('flat')).toBeFalsy()
+    expect(wrapper.find('input#tag-name').exists()).toBe(true)
+    expect(wrapper.find('#tag-parent').exists()).toBe(true)
+    // The permissions here are the LIVE ones on an existing tag, never the panel's deferred ones.
+    expect(form.props('acl')).toMatchObject({ sourceId: 'b' })
+    expect(form.props('acl').deferred).toBeFalsy()
+  })
+
+  it('does not steal the caret into the name field on load', async () => {
+    const wrapper = await mountEdit()
+    expect(wrapper.find('input#tag-name').attributes('autofocus')).toBeUndefined()
   })
 })

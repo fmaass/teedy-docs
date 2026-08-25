@@ -6,16 +6,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { listTags, getTag, getTagStats, updateTag, deleteTag } from '../../api/tag'
 import { queryKeys } from '../../api/queryKeys'
 import type { AclEntry } from '../../api/acl'
-import InputText from 'primevue/inputtext'
-import Select from 'primevue/select'
-import ColorPicker from 'primevue/colorpicker'
 import Button from 'primevue/button'
-import Card from 'primevue/card'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { useTagFilterStore } from '../../stores/tagFilter'
-import AclEditor from '../../components/AclEditor.vue'
+import TagForm, { type TagFormAcl } from '../../components/TagForm.vue'
 
 const props = defineProps<{ id: string }>()
 const { t } = useI18n()
@@ -135,6 +131,17 @@ const parentOptions = computed(() => {
   ]
 })
 
+// #288: everything the shared TagForm needs to render this page's permissions section. The
+// data and its lifecycle stay here — the tag detail query above owns the ACL list, and
+// `@acl-changed` is what re-reads it after a grant lands on the server.
+const aclState = computed<TagFormAcl>(() => ({
+  sourceId: props.id,
+  entries: tagAcls.value,
+  writable: tagWritable.value,
+  immutable: isOwnerBaseAcl,
+  beforeAdd: confirmGrant,
+}))
+
 function loadFromCache() {
   const tag = tags.value?.find((item) => item.id === props.id)
   if (tag) {
@@ -195,54 +202,27 @@ function handleDelete() {
       />
     </div>
 
-    <Card style="max-width: 480px">
-      <template #content>
-        <div class="form-field">
-          <label for="tag-name">{{ t('ui.tag_edit.name') }}</label>
-          <InputText id="tag-name" v-model="name" class="w-full" />
-        </div>
-        <div class="form-field">
-          <label id="tag-color-label">{{ t('ui.tag_edit.color') }}</label>
-          <div class="color-row">
-            <ColorPicker v-model="color" aria-labelledby="tag-color-label" />
-            <span class="color-preview" :style="{ background: '#' + color }">{{ name || t('ui.tag_edit.preview') }}</span>
-          </div>
-        </div>
-        <div class="form-field">
-          <label for="tag-parent">{{ t('ui.tag_edit.parent') }}</label>
-          <Select
-            v-model="parent"
-            inputId="tag-parent"
-            :options="parentOptions"
-            optionLabel="label"
-            optionValue="value"
-            class="w-full"
-            showClear
-            filter
-            :placeholder="t('ui.tag_edit.no_parent')"
-          />
-        </div>
+    <!-- #288: the form itself is shared with the document editor's create-tag side panel.
+         This page keeps its own chrome (the two cards, the field ids its e2e specs address,
+         the Save/Delete row) and supplies the data; the fields and the permissions section
+         are one implementation used by both. -->
+    <TagForm
+      v-model:name="name"
+      v-model:color="color"
+      v-model:parent="parent"
+      :parent-options="parentOptions"
+      id-prefix="tag"
+      :acl="aclState"
+      max-width="480px"
+      @acl-changed="refetchDetail"
+    >
+      <template #actions>
         <div class="flex gap-2 mt-4">
           <Button :label="t('save')" icon="pi pi-check" :loading="loading" @click="save()" />
           <Button :label="t('delete')" icon="pi pi-trash" severity="danger" outlined @click="handleDelete" />
         </div>
       </template>
-    </Card>
-
-    <Card style="max-width: 480px" class="acl-card">
-      <template #content>
-        <h2 class="acl-heading">{{ t('ui.tag_acl.title') }}</h2>
-        <p class="acl-desc">{{ t('ui.tag_acl.description') }}</p>
-        <AclEditor
-          :source-id="props.id"
-          :acls="tagAcls"
-          :writable="tagWritable"
-          :immutable="isOwnerBaseAcl"
-          :before-add="confirmGrant"
-          @changed="refetchDetail"
-        />
-      </template>
-    </Card>
+    </TagForm>
   </div>
 </template>
 
@@ -295,44 +275,7 @@ function handleDelete() {
   padding-inline: 0;
 }
 
-.form-field {
-  margin-bottom: 1rem;
-}
-.form-field label {
-  display: block;
-  margin-bottom: 0.375rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--p-text-color);
-}
-
-.color-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.color-preview {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.2rem 0.75rem;
-  border-radius: 4px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--teedy-tag-text);
-}
-
-.acl-card {
-  margin-top: 1.25rem;
-}
-.acl-heading {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-.acl-desc {
-  margin: 0.25rem 0 1rem;
-  font-size: 0.8125rem;
-  color: var(--p-text-muted-color);
-}
+/* The form's own styles (fields, colour row, permissions section, card spacing) moved to
+   components/TagForm.vue with the markup they belong to — a scoped rule only reaches the
+   template it is written in. */
 </style>

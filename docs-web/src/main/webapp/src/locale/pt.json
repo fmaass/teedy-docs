@@ -164,6 +164,14 @@
       "all_assigned": "Todas as etiquetas já foram adicionadas",
       "add_named": "Adicionar etiqueta {name}"
     },
+    "tag_picker": {
+      "create_named": "Criar etiqueta «{name}»…"
+    },
+    "tag_panel": {
+      "lead": "A etiqueta é criada e adicionada a {title} ao guardar.",
+      "lead_untitled": "A etiqueta é criada e adicionada a este documento ao guardar.",
+      "no_permissions_hint": "Esta etiqueta ainda não tem permissões: só o utilizador a verá. Defina as permissões agora ou mais tarde na gestão de etiquetas."
+    },
     "quick_filter": {
       "placeholder": "Filtrar resultados carregados…",
       "aria_label": "Filtrar os resultados carregados por título",

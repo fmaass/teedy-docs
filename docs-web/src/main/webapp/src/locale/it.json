@@ -164,6 +164,14 @@
       "all_assigned": "Tutti i tag sono già stati aggiunti",
       "add_named": "Aggiungi il tag {name}"
     },
+    "tag_picker": {
+      "create_named": "Crea il tag «{name}»…"
+    },
+    "tag_panel": {
+      "lead": "Il tag viene creato e aggiunto a {title} al salvataggio.",
+      "lead_untitled": "Il tag viene creato e aggiunto a questo documento al salvataggio.",
+      "no_permissions_hint": "Questo tag non ha ancora permessi: solo tu lo vedrai. Imposta i permessi ora o più tardi nella gestione dei tag."
+    },
     "quick_filter": {
       "placeholder": "Filtra i risultati caricati…",
       "aria_label": "Filtra i risultati caricati per titolo",

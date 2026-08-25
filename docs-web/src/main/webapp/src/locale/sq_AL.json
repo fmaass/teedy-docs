@@ -164,6 +164,14 @@
       "all_assigned": "Të gjitha etiketat janë shtuar tashmë",
       "add_named": "Shto etiketën {name}"
     },
+    "tag_picker": {
+      "create_named": "Krijo etiketën «{name}»…"
+    },
+    "tag_panel": {
+      "lead": "Etiketa krijohet dhe i shtohet {title} kur ruani.",
+      "lead_untitled": "Etiketa krijohet dhe i shtohet këtij dokumenti kur ruani.",
+      "no_permissions_hint": "Kjo etiketë ende nuk ka leje — vetëm ju do ta shihni. Vendosni lejet tani ose më vonë te menaxhimi i etiketave."
+    },
     "quick_filter": {
       "placeholder": "Filtro rezultatet e ngarkuara…",
       "aria_label": "Filtro rezultatet e ngarkuara sipas titullit",

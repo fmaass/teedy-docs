@@ -386,3 +386,111 @@ describe('TagPicker — owned tag search box and its clear (#286)', () => {
     host.remove()
   })
 })
+
+// #288 — creating a tag without leaving the document edit view starts HERE: when the typed
+// search matches no existing tag, the overlay offers a create row beneath the (empty) result
+// list. The row is opt-in per caller: the bulk action bar applies ONE existing tag and must
+// not grow a create affordance, so it appears only when a caller supplies the label builder.
+describe('TagPicker — create-tag row (#288)', () => {
+  async function openPicker(props: Record<string, unknown> = {}) {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const wrapper = mountPicker({ filterPlaceholder: 'filter', ...props }, host)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    return { wrapper, host }
+  }
+
+  const filterBox = () => document.querySelector('input.tp-filter-input') as HTMLInputElement | null
+  const createRow = () => document.querySelector('.tp-create-row') as HTMLElement | null
+
+  async function type(text: string) {
+    const input = filterBox()!
+    input.value = text
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+  }
+
+  // The label is built by the caller (TagPicker adds no locale keys of its own — its own
+  // contract note), so the spec passes a sentinel builder and asserts the typed text reaches it.
+  const label = (name: string) => `CREATE:${name}`
+
+  it('offers no create row until something that matches nothing is typed', async () => {
+    const { wrapper, host } = await openPicker({ createTagLabel: label })
+    expect(createRow(), 'an empty search box offers no create row').toBeNull()
+
+    // A search that still MATCHES an existing tag is a selection, not a creation.
+    await type('rec')
+    expect(createRow(), 'a search with results offers no create row').toBeNull()
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('offers the create row, labelled with the typed text, once nothing matches', async () => {
+    const { wrapper, host } = await openPicker({ createTagLabel: label })
+    await type('Insurance 2026')
+
+    const row = createRow()
+    expect(row, 'a search that matches no tag offers to create it').not.toBeNull()
+    expect(row!.tagName, 'a real button, not a decorated div').toBe('BUTTON')
+    expect(row!.textContent).toContain('CREATE:Insurance 2026')
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('trims the typed text before it becomes a tag name', async () => {
+    const { wrapper, host } = await openPicker({ createTagLabel: label })
+    await type('  Insurance 2026  ')
+    expect(createRow()!.textContent).toContain('CREATE:Insurance 2026')
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('never offers the create row to a caller that did not ask for it (the bulk bar)', async () => {
+    const { wrapper, host } = await openPicker()
+    await type('Insurance 2026')
+    expect(createRow(), 'no label builder, no create affordance').toBeNull()
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('emits the trimmed name and closes the overlay when the row is chosen', async () => {
+    const { wrapper, host } = await openPicker({ createTagLabel: label })
+    await type('  Insurance 2026  ')
+    createRow()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    // PrimeVue defers the overlay close by a macrotask.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushPromises()
+
+    expect(wrapper.emitted('create')).toEqual([['Insurance 2026']])
+    expect(wrapper.emitted('update:modelValue'), 'creating is not selecting').toBeUndefined()
+    const multiselect = wrapper.findComponent({ name: 'MultiSelect' })
+    expect(
+      (multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible,
+      'the overlay gets out of the way of the panel it opens',
+    ).toBe(false)
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('keeps the typed text in the search box after the create row is chosen', async () => {
+    // Deliberate: the text is what the panel pre-fills its Name with, cancelling the panel
+    // must not throw the user's typing away, and after a successful create the very same
+    // search now matches the new tag — so re-opening the picker shows it.
+    const { wrapper, host } = await openPicker({ createTagLabel: label })
+    await type('Insurance 2026')
+    createRow()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushPromises()
+
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    expect(filterBox()!.value).toBe('Insurance 2026')
+
+    wrapper.unmount()
+    host.remove()
+  })
+})

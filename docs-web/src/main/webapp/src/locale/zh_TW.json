@@ -164,6 +164,14 @@
       "all_assigned": "所有標籤皆已加入",
       "add_named": "新增標籤 {name}"
     },
+    "tag_picker": {
+      "create_named": "建立標籤「{name}」…"
+    },
+    "tag_panel": {
+      "lead": "儲存時將建立此標籤並新增到{title}。",
+      "lead_untitled": "儲存時將建立此標籤並新增到此文件。",
+      "no_permissions_hint": "此標籤尚無權限 — 只有您能看到它。現在設定權限，或稍後在標籤管理中設定。"
+    },
     "quick_filter": {
       "placeholder": "篩選已載入的結果…",
       "aria_label": "依標題篩選已載入的結果",

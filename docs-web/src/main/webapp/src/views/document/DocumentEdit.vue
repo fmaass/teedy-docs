@@ -27,6 +27,8 @@ import Card from 'primevue/card'
 import CameraCaptureButton from '../../components/CameraCaptureButton.vue'
 import UploadProgressList from '../../components/UploadProgressList.vue'
 import TagPicker from '../../components/TagPicker.vue'
+import TagCreatePanel from '../../components/TagCreatePanel.vue'
+import type { Tag } from '../../api/tag'
 import RichDescriptionEditor from '../../components/RichDescriptionEditor.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import { useToast } from 'primevue/usetoast'
@@ -486,6 +488,25 @@ async function handleSubmit() {
   }
 }
 
+// --- Create a tag from the tags field (#288) ---
+// The picker offers a create row when what was typed matches no tag; choosing it opens the
+// side panel, which creates the tag and hands it back HERE. The tag then joins the selection
+// this form is already holding — the document itself is written by the user's own Save, never
+// by a silent PUT from the panel, which would commit half-finished edits.
+const tagPanelVisible = ref(false)
+const tagPanelName = ref('')
+
+function openTagPanel(name: string) {
+  tagPanelName.value = name
+  tagPanelVisible.value = true
+}
+
+function onTagCreated(tag: Tag) {
+  if (!form.value.tags.includes(tag.id)) {
+    form.value.tags = [...form.value.tags, tag.id]
+  }
+}
+
 // --- .eml import (create mode only) ---
 // The EML endpoint creates a whole document from the email itself (title, body, and
 // attachments), so it is a one-shot import rather than a file added to THIS form's
@@ -580,7 +601,9 @@ async function onEmlSelected(event: Event) {
           :placeholder="t('document.tags')"
           :filterPlaceholder="t('ui.tag_menu.search')"
           :clearFilterLabel="t('document.search_clear')"
+          :createTagLabel="(name: string) => t('ui.tag_picker.create_named', { name })"
           class="w-full"
+          @create="openTagPanel"
         />
       </div>
 
@@ -800,6 +823,16 @@ async function onEmlSelected(event: Event) {
 
     <!-- Safe in-app file preview (#144). -->
     <FilePreviewDialog v-model:visible="previewVisible" :file="previewFile" />
+
+    <!-- #288: the create-tag side panel. Renders nothing at all while closed, so this view's
+         default state — the one the rich-description visual baseline captures — is unchanged. -->
+    <TagCreatePanel
+      v-model:visible="tagPanelVisible"
+      :initial-name="tagPanelName"
+      :document-title="form.title"
+      :tags="tagFilter.allTags"
+      @created="onTagCreated"
+    />
   </div>
 </template>
 

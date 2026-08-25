@@ -85,7 +85,7 @@ beforeAll(() => {
 })
 
 import DocumentEdit from './DocumentEdit.vue'
-import { getDocument, listDocuments } from '../../api/document'
+import { getDocument, listDocuments, createDocument, updateDocument } from '../../api/document'
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -396,5 +396,115 @@ describe('DocumentEdit — title proposals while typing (#295)', () => {
 
     expect(wrapper.findComponent({ name: 'AutoComplete' }).props('suggestions')).toEqual([])
     expect(document.body.querySelectorAll('.p-autocomplete-option').length).toBe(0)
+  })
+})
+
+// #288 — create a tag without leaving this form. The edit view is the HOST: it lends the
+// picker a create affordance, opens the side panel with what was typed, and folds the created
+// tag into the SELECTION it is already holding. It must not save the document to do it, and —
+// the #234 lesson — it must not re-open the tag overlay behind the panel.
+describe('DocumentEdit — create a tag from the tags field (#288)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: [] } })
+    tagApiMock.getTagFacets.mockReset().mockResolvedValue({ data: { tags: [] } })
+    tagApiMock.getTagCoOccurrence.mockReset().mockResolvedValue({ data: { pairs: [] } })
+    vi.mocked(getDocument).mockReset()
+  })
+
+  const panel = () => document.querySelector('.tag-create-panel')
+
+  it('adds NO markup to the form until the panel is asked for', async () => {
+    // The rich-description baseline screenshots this very view. A panel that rendered
+    // anything in its default state would move it.
+    const wrapper = await mountEdit()
+    expect(panel()).toBeNull()
+    expect(wrapper.find('.p-drawer').exists()).toBe(false)
+  })
+
+  it('lends the picker a create label built from the typed text', async () => {
+    const wrapper = await mountEdit()
+    const build = wrapper.findComponent(TagPicker).props('createTagLabel') as (n: string) => string
+    expect(typeof build).toBe('function')
+    expect(build('Insurance 2026')).toBe('Create tag “Insurance 2026”…')
+  })
+
+  it('opens the panel on the picker\'s create, seeded with the typed text and the title', async () => {
+    const wrapper = await mountEdit()
+    await wrapper.find('input#edit-title').setValue('Building insurance policy 2026')
+    wrapper.findComponent(TagPicker).vm.$emit('create', 'Insurance 2026')
+    await flushPromises()
+
+    const created = wrapper.findComponent({ name: 'TagCreatePanel' })
+    expect(created.props('visible')).toBe(true)
+    expect(created.props('initialName')).toBe('Insurance 2026')
+    expect(created.props('documentTitle')).toBe('Building insurance policy 2026')
+  })
+
+  it('selects the created tag on the form and leaves the document unsaved', async () => {
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagPicker).vm.$emit('create', 'Insurance 2026')
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'TagCreatePanel' }).vm.$emit('created', {
+      id: 'tag-new',
+      name: 'Insurance 2026',
+      color: '#2aabd2',
+      parent: null,
+    })
+    await flushPromises()
+
+    expect(wrapper.findComponent(TagPicker).props('modelValue')).toEqual(['tag-new'])
+    // The tag lands in the SELECTION; the document is written only when the user saves it.
+    expect(vi.mocked(updateDocument)).not.toHaveBeenCalled()
+    expect(vi.mocked(createDocument)).not.toHaveBeenCalled()
+    // The new tag is on the save payload the form would submit.
+    expect((wrapper.vm as unknown as EditVm).buildDocParams().getAll('tags')).toEqual(['tag-new'])
+  })
+
+  it('keeps a tag already on the document when a second one is created', async () => {
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagPicker).vm.$emit('update:modelValue', ['tag-red'])
+    await flushPromises()
+    wrapper.findComponent(TagPicker).vm.$emit('create', 'Insurance 2026')
+    await flushPromises()
+    wrapper.findComponent({ name: 'TagCreatePanel' }).vm.$emit('created', {
+      id: 'tag-new',
+      name: 'Insurance 2026',
+      color: '#2aabd2',
+      parent: null,
+    })
+    await flushPromises()
+    expect(wrapper.findComponent(TagPicker).props('modelValue')).toEqual(['tag-red', 'tag-new'])
+  })
+
+  it('never re-opens the tag overlay behind or after the panel (#234)', async () => {
+    // #234: an overlay the user did not ask for, opening itself, is the exact regression this
+    // project has already paid for once. Choosing "create" closes the overlay, and nothing in
+    // the create round trip may put it back.
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagPicker).vm.$emit('create', 'Insurance 2026')
+    await flushPromises()
+    expect(document.querySelector('.p-multiselect-overlay')).toBeNull()
+
+    wrapper.findComponent({ name: 'TagCreatePanel' }).vm.$emit('created', {
+      id: 'tag-new',
+      name: 'Insurance 2026',
+      color: '#2aabd2',
+      parent: null,
+    })
+    await flushPromises()
+    expect(document.querySelector('.p-multiselect-overlay')).toBeNull()
+    const multiselect = wrapper.findComponent(TagPicker).findComponent({ name: 'MultiSelect' })
+    expect((multiselect.vm as unknown as { overlayVisible: boolean }).overlayVisible).toBe(false)
+  })
+
+  it('closes the panel again when it reports itself closed', async () => {
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagPicker).vm.$emit('create', 'Insurance 2026')
+    await flushPromises()
+    wrapper.findComponent({ name: 'TagCreatePanel' }).vm.$emit('update:visible', false)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'TagCreatePanel' }).props('visible')).toBe(false)
   })
 })

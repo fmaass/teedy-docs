@@ -164,6 +164,14 @@
       "all_assigned": "Alle Tags bereits hinzugefügt",
       "add_named": "Tag {name} hinzufügen"
     },
+    "tag_picker": {
+      "create_named": "Tag „{name}“ erstellen…"
+    },
+    "tag_panel": {
+      "lead": "Der Tag wird erstellt und beim Speichern zu {title} hinzugefügt.",
+      "lead_untitled": "Der Tag wird erstellt und beim Speichern zu diesem Dokument hinzugefügt.",
+      "no_permissions_hint": "Dieser Tag hat noch keine Berechtigungen — nur du siehst ihn. Lege die Berechtigungen jetzt fest oder später in der Tag-Verwaltung."
+    },
     "quick_filter": {
       "placeholder": "Geladene Ergebnisse filtern…",
       "aria_label": "Geladene Ergebnisse nach Titel filtern",

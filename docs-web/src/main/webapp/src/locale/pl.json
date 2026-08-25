@@ -164,6 +164,14 @@
       "all_assigned": "Wszystkie etykiety już dodane",
       "add_named": "Dodaj etykietę {name}"
     },
+    "tag_picker": {
+      "create_named": "Utwórz etykietę „{name}”…"
+    },
+    "tag_panel": {
+      "lead": "Etykieta zostanie utworzona i dodana do {title} po zapisaniu.",
+      "lead_untitled": "Etykieta zostanie utworzona i dodana do tego dokumentu po zapisaniu.",
+      "no_permissions_hint": "Ta etykieta nie ma jeszcze uprawnień — zobaczysz ją tylko ty. Ustaw uprawnienia teraz lub później w zarządzaniu etykietami."
+    },
     "quick_filter": {
       "placeholder": "Filtruj załadowane wyniki…",
       "aria_label": "Filtruj załadowane wyniki według tytułu",
