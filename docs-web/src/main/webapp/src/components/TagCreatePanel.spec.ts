@@ -171,6 +171,18 @@ describe('TagCreatePanel — what the panel shows when it opens', () => {
     wrapper.unmount()
   })
 
+  it('offers the hex code field the shared form gained in #303, under its own prefix', async () => {
+    // Nothing here wires it up: the panel hosts TagForm, so the field arrives with the rest of
+    // the form and takes the panel's `tag-create` prefix rather than the management page's.
+    const wrapper = mountPanel()
+    await flushPromises()
+    const hex = document.querySelector('input#tag-create-color-hex') as HTMLInputElement | null
+    expect(hex).not.toBeNull()
+    expect(hex!.value).toBe('#2aabd2')
+    expect(document.querySelector('input#tag-color-hex')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('offers every existing tag as a possible parent, defaulting to root level', async () => {
     // Approved with the mockup: a new tag starts at ROOT level. Nothing is inferred from the
     // document's existing tags — the parent is an explicit choice or none.

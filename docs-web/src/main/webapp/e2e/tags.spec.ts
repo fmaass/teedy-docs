@@ -52,6 +52,54 @@ test.describe('tag management', () => {
     await expect(page.locator('.tag-tree').getByText(renamed, { exact: true })).toHaveCount(0)
   })
 
+  test('takes a colour typed as a hex code, and refuses one that is not a colour', async ({
+    page,
+    cleanup,
+  }) => {
+    // #303: the swatch picker can only be POINTED AT, so a hex code in hand could not be
+    // entered. The premise is built here rather than assumed — this tag is created by this
+    // test, so its colour before the edit is the seed colour and nothing else could have set
+    // the one asserted afterwards.
+    const name = uniqueTag('e2e-hex')
+    const typed = '#7A3E9D'
+    const stored = '#7a3e9d'
+
+    await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+    await page.getByPlaceholder('Tag name').fill(name)
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.getByText('Tag created')).toBeVisible()
+    cleanup.defer('delete the hex-colour tag', () => deleteTagByNameApi(page.request, name))
+
+    await page.locator('.tag-tree').getByText(name, { exact: true }).click()
+    await expect(page).toHaveURL(/#\/tag\//)
+
+    const hex = page.locator('#tag-color-hex')
+    const swatch = page.locator('.p-colorpicker-preview')
+    await expect(hex).toHaveValue('#2aabd2')
+
+    // A code that cannot be a colour is refused in place: the message appears, and the picker
+    // is still showing the colour the tag actually has.
+    await hex.fill('#12345')
+    await hex.press('Tab')
+    await expect(page.getByText('Enter a hex color code, for example #336699.')).toBeVisible()
+    await expect(swatch).toHaveCSS('background-color', 'rgb(42, 171, 210)')
+
+    // A real one is taken, and the PICKER follows it — the two controls are one value.
+    await hex.fill(typed)
+    await expect(page.getByText('Enter a hex color code, for example #336699.')).toHaveCount(0)
+    await expect(swatch).toHaveCSS('background-color', 'rgb(122, 62, 157)')
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText('Tag updated')).toBeVisible()
+
+    // The acceptance is the stored tag, not the form: read it back from the API, in the
+    // canonical lowercase form the picker itself emits.
+    const listRes = await page.request.get('/api/tag/list')
+    expect(listRes.ok(), 'reading the tag back after saving a typed colour').toBeTruthy()
+    const tags = (await listRes.json()).tags as Array<{ name: string; color: string }>
+    expect(tags.find((tag) => tag.name === name)?.color).toBe(stored)
+  })
+
   test('tree filter reveals a tag nested inside a collapsed parent', async ({ page, cleanup }) => {
     // #279: with many hierarchical tags, finding an existing one meant expanding
     // collapsed parents one by one. The tree filter must surface a nested match

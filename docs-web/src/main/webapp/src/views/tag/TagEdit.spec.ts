@@ -277,6 +277,9 @@ describe('TagEdit — hosts the shared tag form (#288)', () => {
     expect(form.props('flat')).toBeFalsy()
     expect(wrapper.find('input#tag-name').exists()).toBe(true)
     expect(wrapper.find('#tag-parent').exists()).toBe(true)
+    // #303 — the hex field is part of the shared form, so it reaches this page through the
+    // same `idPrefix` its other fields do, with no host-side wiring of its own.
+    expect(wrapper.find('input#tag-color-hex').exists()).toBe(true)
     // The permissions here are the LIVE ones on an existing tag, never the panel's deferred ones.
     expect(form.props('acl')).toMatchObject({ sourceId: 'b' })
     expect(form.props('acl').deferred).toBeFalsy()

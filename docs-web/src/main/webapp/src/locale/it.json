@@ -437,6 +437,8 @@
       "title": "Modifica tag",
       "name": "Nome",
       "color": "Colore",
+      "color_hex": "Codice colore esadecimale",
+      "color_hex_invalid": "Inserisci un codice colore esadecimale, ad esempio #336699.",
       "parent": "Tag genitore",
       "no_parent": "Nessun genitore (livello radice)",
       "preview": "Anteprima",

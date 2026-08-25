@@ -437,6 +437,8 @@
       "title": "Tag bearbeiten",
       "name": "Name",
       "color": "Farbe",
+      "color_hex": "Hex-Farbcode",
+      "color_hex_invalid": "Gib einen Hex-Farbcode ein, zum Beispiel #336699.",
       "parent": "Übergeordnetes Tag",
       "no_parent": "Kein übergeordnetes Tag (oberste Ebene)",
       "preview": "Vorschau",

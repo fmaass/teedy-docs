@@ -111,6 +111,160 @@ describe('TagForm — the fields both hosts share', () => {
   })
 })
 
+// #303 — the colour could only be POINTED AT: the swatch picker has no text entry, so a user
+// holding a brand's hex code had no way to enter it. These assertions pin the field that takes
+// one, and the two properties that make it trustworthy — an invalid code never reaches the tag,
+// and whatever does reach it is in the picker's own canonical form (six LOWERCASE hex digits,
+// no '#', which is what `Number.prototype.toString(16)` inside PrimeVue's RGBtoHEX produces and
+// what both hosts have always stored).
+describe('TagForm — the manual hex code field (#303)', () => {
+  const hexField = (wrapper: ReturnType<typeof mountForm>) => wrapper.find('input#tag-color-hex')
+  const errorText = (wrapper: ReturnType<typeof mountForm>) => wrapper.find('.field-error')
+
+  it('shows the tag\'s current colour as an editable #rrggbb code, named for a screen reader', () => {
+    const wrapper = mountForm()
+    const field = hexField(wrapper)
+    expect(field.exists()).toBe(true)
+    expect((field.element as HTMLInputElement).value).toBe('#222222')
+    // The group label (`#tag-color-label`) names the PICKER; the text field needs a name of
+    // its own or a screen reader announces two controls with one label between them.
+    expect(field.attributes('aria-label')).toBe('Hex color code')
+    expect(field.attributes('id')).toBe('tag-color-hex')
+    expect(mountForm({ idPrefix: 'tag-create' }).find('input#tag-create-color-hex').exists()).toBe(true)
+  })
+
+  it('reports a typed #RRGGBB in the picker\'s canonical form — lowercase, no leading #', async () => {
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('#FF00AA')
+    expect(wrapper.emitted('update:color')?.at(-1)).toEqual(['ff00aa'])
+    expect(errorText(wrapper).exists()).toBe(false)
+  })
+
+  it('takes a bare RRGGBB, once it is complete', async () => {
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('336699')
+    expect(wrapper.emitted('update:color')?.at(-1)).toEqual(['336699'])
+  })
+
+  it('never mistakes a half-typed code for a 3-digit shorthand', async () => {
+    // The trap: '336' on the way to '336699' is ITSELF a valid CSS shorthand. Reading shorthand
+    // while the user is still typing therefore propagated #333366 three characters in — and a
+    // pause, a tab away or a Save at that instant persisted it, silently and wrongly. So a
+    // KEYSTROKE propagates a COMPLETE six-digit code and nothing else.
+    for (const prefix of ['', '#']) {
+      const wrapper = mountForm()
+      const field = hexField(wrapper)
+      for (const partial of ['3', '33', '336', '3366', '33669']) {
+        await field.setValue(prefix + partial)
+        expect(
+          wrapper.emitted('update:color'),
+          `"${prefix}${partial}" is a code being typed, not a colour the user has chosen`,
+        ).toBeUndefined()
+        expect(errorText(wrapper).exists()).toBe(false)
+      }
+      await field.setValue(prefix + '336699')
+      expect(wrapper.emitted('update:color')).toEqual([['336699']])
+    }
+  })
+
+  it('expands a #RGB shorthand when the field is left, never while it is being typed', async () => {
+    const wrapper = mountForm()
+    const field = hexField(wrapper)
+    await field.setValue('#f0a')
+    expect(wrapper.emitted('update:color'), 'this may still be the start of #f0a123').toBeUndefined()
+
+    await field.trigger('blur')
+    expect(wrapper.emitted('update:color')).toEqual([['ff00aa']])
+    expect((field.element as HTMLInputElement).value).toBe('#ff00aa')
+    expect(errorText(wrapper).exists()).toBe(false)
+  })
+
+  it('refuses a bare 3-digit code — not one of the three forms it offers', async () => {
+    // '#RGB' is the CSS shorthand; 'F0A' on its own is an unfinished six-digit code. Guessing
+    // between them is exactly how '336' turned into #333366, so it is not guessed at.
+    const wrapper = mountForm()
+    const field = hexField(wrapper)
+    await field.setValue('F0A')
+    expect(errorText(wrapper).exists()).toBe(false)
+
+    await field.trigger('blur')
+    expect(wrapper.emitted('update:color')).toBeUndefined()
+    expect(errorText(wrapper).exists()).toBe(true)
+    expect((field.element as HTMLInputElement).value).toBe('F0A')
+    expect(wrapper.findComponent({ name: 'ColorPicker' }).props('modelValue')).toBe('222222')
+  })
+
+  it('refuses a code that is not a colour, leaving the tag on its last valid one', async () => {
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('#12345')
+    await hexField(wrapper).trigger('blur')
+
+    expect(wrapper.emitted('update:color'), 'an invalid code must never reach the host').toBeUndefined()
+    expect(wrapper.findComponent({ name: 'ColorPicker' }).props('modelValue')).toBe('222222')
+    expect(errorText(wrapper).text()).toContain('#336699')
+    // The message has to be reachable from the field it is about, not just visible near it.
+    expect(hexField(wrapper).attributes('aria-invalid')).toBe('true')
+    expect(hexField(wrapper).attributes('aria-describedby')).toBe('tag-color-hex-error')
+    expect(wrapper.find('#tag-color-hex-error').exists()).toBe(true)
+  })
+
+  it('holds its judgement while the code is still half-typed, and gives it on blur', async () => {
+    // Six keystrokes make a colour; scolding after the first four is noise, not feedback.
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('#33')
+    expect(errorText(wrapper).exists()).toBe(false)
+    expect(wrapper.emitted('update:color')).toBeUndefined()
+
+    // Leaving the field is the point at which a half-typed code IS wrong — otherwise a Save
+    // click would quietly keep the old colour with nothing on screen to explain it.
+    await hexField(wrapper).trigger('blur')
+    expect(errorText(wrapper).exists()).toBe(true)
+
+    // A character that can never be part of a colour is wrong immediately.
+    const bad = mountForm()
+    await hexField(bad).setValue('#33zz')
+    expect(errorText(bad).exists()).toBe(true)
+  })
+
+  it('follows the picker: a colour chosen there rewrites the code shown here', async () => {
+    const wrapper = mountForm()
+    wrapper.findComponent({ name: 'ColorPicker' }).vm.$emit('update:modelValue', '00ff00')
+    expect(wrapper.emitted('update:color')?.at(-1)).toEqual(['00ff00'])
+
+    // The host owns the value, so the round trip back through the prop is what the field
+    // actually reacts to — the same path a host-side reset or a freshly loaded tag takes.
+    await wrapper.setProps({ color: '00ff00' })
+    expect((hexField(wrapper).element as HTMLInputElement).value).toBe('#00ff00')
+  })
+
+  it('does not fight the typist: the prop echoing back a code does not rewrite it mid-edit', async () => {
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('#FF00AA')
+    // What a host does with the emit: writes it back as the prop.
+    await wrapper.setProps({ color: 'ff00aa' })
+    expect((hexField(wrapper).element as HTMLInputElement).value).toBe('#FF00AA')
+  })
+
+  it('settles a complete code into canonical form once the field is left', async () => {
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('FF00AA')
+    await hexField(wrapper).trigger('blur')
+    expect((hexField(wrapper).element as HTMLInputElement).value).toBe('#ff00aa')
+    expect(errorText(wrapper).exists()).toBe(false)
+  })
+
+  it('puts the current colour back when the field is left empty', async () => {
+    // Clearing the box is not "the tag has no colour" — it has one, and it is still on screen
+    // in the picker and the preview chip.
+    const wrapper = mountForm()
+    await hexField(wrapper).setValue('')
+    await hexField(wrapper).trigger('blur')
+    expect((hexField(wrapper).element as HTMLInputElement).value).toBe('#222222')
+    expect(errorText(wrapper).exists()).toBe(false)
+    expect(wrapper.emitted('update:color')).toBeUndefined()
+  })
+})
+
 describe('TagForm — the permissions section', () => {
   it('hands the host-owned ACL state straight to the shared AclEditor', () => {
     const immutable = () => true

@@ -437,6 +437,8 @@
       "title": "Redakto etiketën",
       "name": "Emri",
       "color": "Ngjyra",
+      "color_hex": "Kodi heksadecimal i ngjyrës",
+      "color_hex_invalid": "Shkruani një kod heksadecimal ngjyre, për shembull #336699.",
       "parent": "Etiketa prind",
       "no_parent": "Pa prind (niveli rrënjë)",
       "preview": "Pamje paraprake",

@@ -437,6 +437,8 @@
       "title": "Modifier le tag",
       "name": "Nom",
       "color": "Couleur",
+      "color_hex": "Code couleur hexadécimal",
+      "color_hex_invalid": "Saisissez un code couleur hexadécimal, par exemple #336699.",
       "parent": "Tag parent",
       "no_parent": "Aucun parent (niveau racine)",
       "preview": "Aperçu",

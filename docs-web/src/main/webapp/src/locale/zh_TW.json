@@ -437,6 +437,8 @@
       "title": "編輯標籤",
       "name": "名稱",
       "color": "顏色",
+      "color_hex": "十六進位色彩代碼",
+      "color_hex_invalid": "請輸入十六進位色彩代碼，例如 #336699。",
       "parent": "上層標籤",
       "no_parent": "無上層標籤（根層級）",
       "preview": "預覽",

@@ -437,6 +437,8 @@
       "title": "Edit tag",
       "name": "Name",
       "color": "Color",
+      "color_hex": "Hex color code",
+      "color_hex_invalid": "Enter a hex color code, for example #336699.",
       "parent": "Parent tag",
       "no_parent": "No parent (root level)",
       "preview": "Preview",

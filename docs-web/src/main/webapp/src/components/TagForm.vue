@@ -23,6 +23,7 @@
  * - `parentOptions` is the host's to build: the management page must exclude the tag itself
  *   and its descendants (a cycle), while a tag that does not exist yet has neither.
  */
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -85,6 +86,112 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// --- The manual hex code beside the picker (#303) ---
+//
+// The swatch picker can only be POINTED AT, so a user holding a brand's hex code had no way to
+// enter it. This field takes one and reports it in the picker's OWN canonical form: six
+// LOWERCASE hex digits with no '#'. That form is not a preference — it is what PrimeVue's
+// ColorPicker emits (`RGBtoHEX` joins `Number.prototype.toString(16)`, which is lowercase) and
+// therefore what both hosts have stored since before this field existed. Emitting anything else
+// would make a typed colour differ byte-for-byte from a picked one.
+//
+// A value the host already holds is left exactly as it is: an uppercase colour loaded from a tag
+// written by an older client stays uppercase until someone actually edits it.
+
+const HEX_SIX = /^[0-9a-fA-F]{6}$/
+const HEX_THREE = /^[0-9a-fA-F]{3}$/
+/** Hex digits, optionally behind a '#', but not yet enough of them to be a colour. */
+const HEX_UNFINISHED = /^#?[0-9a-fA-F]{0,5}$/
+
+/**
+ * The colour a FINISHED code names — six hex digits, with or without the '#'. This is the only
+ * form a keystroke is allowed to propagate, and the reason is '336'.
+ *
+ * '336' is a valid CSS shorthand AND the first three characters of '336699'. A rule that read
+ * shorthand as the user typed could not tell those apart, so it propagated #333366 three
+ * characters into typing a completely different colour — and a pause, a tab away or a Save at
+ * that instant persisted it, with nothing on screen to say so.
+ */
+function completeHex(raw: string): string | null {
+  const value = raw.trim().replace(/^#/, '')
+  return HEX_SIX.test(value) ? value.toLowerCase() : null
+}
+
+/**
+ * The colour a code names once the user has FINISHED with the field: a complete code, or the
+ * three-digit CSS shorthand — which counts only WITH its '#', because '#f0a' is a code someone
+ * wrote deliberately while 'F0A' is indistinguishable from a six-digit code left half-typed.
+ */
+function settledHex(raw: string): string | null {
+  const complete = completeHex(raw)
+  if (complete !== null) return complete
+  const value = raw.trim()
+  if (!value.startsWith('#')) return null
+  const digits = value.slice(1)
+  if (!HEX_THREE.test(digits)) return null
+  return digits
+    .split('')
+    .map((digit) => digit + digit)
+    .join('')
+    .toLowerCase()
+}
+
+const hexText = ref('#' + props.color)
+const hexInvalid = ref(false)
+
+watch(
+  () => props.color,
+  (color) => {
+    // The host answering our own emit is not a colour change — rewriting the box then would
+    // retype '#FF00AA' as '#ff00aa' under the caret, mid-word. Anything else (the picker, a
+    // host-side reset, a tag finishing loading) IS one, and the box follows it. Every emit
+    // leaves a COMPLETE code in the box (blur settles a shorthand before emitting it), so this
+    // is the whole of the echo test.
+    if (completeHex(hexText.value) === color.toLowerCase()) return
+    hexText.value = '#' + color
+    hexInvalid.value = false
+  },
+)
+
+function onHexInput(raw: string) {
+  hexText.value = raw
+  const complete = completeHex(raw)
+  if (complete !== null) {
+    hexInvalid.value = false
+    emit('update:color', complete)
+    return
+  }
+  // Six keystrokes make a colour, so a code that is merely UNFINISHED is not yet wrong —
+  // complaining after the second character is noise rather than feedback. A character that can
+  // never belong to a colour is wrong straight away.
+  hexInvalid.value = !HEX_UNFINISHED.test(raw.trim())
+}
+
+function onHexBlur() {
+  // Leaving the field is the moment an unfinished code IS wrong: without this, clicking Save
+  // on a half-typed code would keep the old colour with nothing on screen to explain it. It is
+  // also the only moment a '#RGB' shorthand can be read, since mid-typing it cannot be told
+  // from the first half of a six-digit code.
+  if (!hexText.value.trim()) {
+    // An empty box is not "no colour" — the tag has one, and it is still on screen in the
+    // picker and the preview chip. Put it back rather than inventing an error about it.
+    hexText.value = '#' + props.color
+    hexInvalid.value = false
+    return
+  }
+  const settled = settledHex(hexText.value)
+  hexInvalid.value = settled === null
+  if (settled === null) return
+
+  // Settle the code into the stored form FIRST — it is also the only feedback that shows a
+  // shorthand was expanded ('#f0a' becoming '#ff00aa') — so the watch above recognises the
+  // host's answer as our own echo rather than a colour change.
+  hexText.value = '#' + settled
+  // Only a code that actually differs is reported. A colour stored uppercase by an older
+  // client must survive being focused and tabbed through untouched.
+  if (settled !== props.color.toLowerCase()) emit('update:color', settled)
+}
 </script>
 
 <template>
@@ -110,10 +217,31 @@ const { t } = useI18n()
             :aria-labelledby="`${idPrefix}-color-label`"
             @update:modelValue="emit('update:color', String($event ?? ''))"
           />
+          <!-- #303. The group label above names the PICKER (it is its `aria-labelledby`), so
+               this control carries a name of its own — otherwise a screen reader announces two
+               controls sharing one label. -->
+          <InputText
+            :id="`${idPrefix}-color-hex`"
+            class="color-hex"
+            :modelValue="hexText"
+            :aria-label="t('ui.tag_edit.color_hex')"
+            :aria-invalid="hexInvalid ? 'true' : undefined"
+            :aria-describedby="hexInvalid ? `${idPrefix}-color-hex-error` : undefined"
+            :invalid="hexInvalid"
+            placeholder="#336699"
+            maxlength="7"
+            autocomplete="off"
+            spellcheck="false"
+            @update:modelValue="onHexInput($event ?? '')"
+            @blur="onHexBlur"
+          />
           <span class="color-preview" :style="{ background: '#' + props.color }">{{
             props.name || t('ui.tag_edit.preview')
           }}</span>
         </div>
+        <small v-if="hexInvalid" :id="`${idPrefix}-color-hex-error`" class="field-error" role="alert">
+          {{ t('ui.tag_edit.color_hex_invalid') }}
+        </small>
       </div>
       <div class="form-field">
         <label :for="`${idPrefix}-parent`">{{ t('ui.tag_edit.parent') }}</label>
@@ -179,6 +307,25 @@ const { t } = useI18n()
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  /* The hex field (#303) takes 120px of a row that also has to fit the preview chip inside a
+     drawer as narrow as 360px, so the chip is allowed onto a second line rather than out of
+     the panel. */
+  flex-wrap: wrap;
+}
+
+/* #303. A fixed, monospaced box: '#RRGGBB' is always seven characters, so the field neither
+   grows with the value nor lets the preview chip shift as one is typed. */
+.color-hex {
+  flex: 0 0 auto;
+  width: 7.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.field-error {
+  display: block;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--p-red-500);
 }
 
 .color-preview {

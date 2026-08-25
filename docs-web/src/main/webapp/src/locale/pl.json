@@ -437,6 +437,8 @@
       "title": "Edytuj etykietę",
       "name": "Nazwa",
       "color": "Kolor",
+      "color_hex": "Szesnastkowy kod koloru",
+      "color_hex_invalid": "Wpisz szesnastkowy kod koloru, na przykład #336699.",
       "parent": "Etykieta nadrzędna",
       "no_parent": "Brak nadrzędnej (poziom główny)",
       "preview": "Podgląd",

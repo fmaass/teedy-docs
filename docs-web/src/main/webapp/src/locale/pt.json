@@ -437,6 +437,8 @@
       "title": "Editar etiqueta",
       "name": "Nome",
       "color": "Cor",
+      "color_hex": "Código de cor hexadecimal",
+      "color_hex_invalid": "Introduza um código de cor hexadecimal, por exemplo #336699.",
       "parent": "Etiqueta-pai",
       "no_parent": "Sem pai (nível de raiz)",
       "preview": "Pré-visualização",

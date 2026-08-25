@@ -437,6 +437,8 @@
       "title": "编辑标签",
       "name": "名称",
       "color": "颜色",
+      "color_hex": "十六进制颜色代码",
+      "color_hex_invalid": "请输入十六进制颜色代码，例如 #336699。",
       "parent": "父标签",
       "no_parent": "无父级（根级别）",
       "preview": "预览",
