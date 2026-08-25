@@ -752,7 +752,7 @@
       "none": "Aucune permission accordée",
       "can_view": "Peut consulter",
       "can_edit": "Peut modifier",
-      "search_placeholder": "Rechercher des utilisateurs ou des groupes…",
+      "search_placeholder": "Utilisateurs ou groupes…",
       "add": "Ajouter",
       "added": "Permission ajoutée",
       "removed": "Permission supprimée",
