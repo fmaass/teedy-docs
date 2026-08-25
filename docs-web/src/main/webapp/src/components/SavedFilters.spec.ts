@@ -47,18 +47,36 @@ const updateMock = vi.hoisted(() =>
   vi.fn((_id: string, name: string, query: string) => Promise.resolve({ data: { id: 'f1', name, query } })),
 )
 const deleteMock = vi.hoisted(() => vi.fn((_id: string) => Promise.resolve({ data: {} })))
-const listMock = vi.hoisted(() => vi.fn(() => Promise.resolve({ data: { saved_filters: [] as unknown[] } })))
+const publishMock = vi.hoisted(() =>
+  vi.fn((_id: string) => Promise.resolve({ data: { status: 'ok', publish_date: 42 } })),
+)
+const unpublishMock = vi.hoisted(() => vi.fn((_id: string) => Promise.resolve({ data: {} })))
+const listMock = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve({ data: { saved_filters: [] as unknown[], shared_filters: [] as unknown[] } })),
+)
 vi.mock('../api/savedfilter', () => ({
   listSavedFilters: () => listMock(),
   createSavedFilter: (name: string, query: string) => createMock(name, query),
   updateSavedFilter: (id: string, name: string, query: string) => updateMock(id, name, query),
   deleteSavedFilter: (id: string) => deleteMock(id),
+  publishSavedFilter: (id: string) => publishMock(id),
+  unpublishSavedFilter: (id: string) => unpublishMock(id),
 }))
 
+// #51: the admin-only withdraw control reads the auth store.
+const authHolder = vi.hoisted(() => ({ isAdmin: false }))
+vi.mock('../stores/auth', () => ({ useAuthStore: () => authHolder }))
+
 // --- vue-query mock: expose the loaded filter list + record mutation invocations ---
-const savedFiltersHolder = vi.hoisted(() => ({ list: [] as unknown[] }))
+const savedFiltersHolder = vi.hoisted(() => ({ list: [] as unknown[], shared: [] as unknown[] }))
 vi.mock('@tanstack/vue-query', () => ({
-  useQuery: () => ({ data: { get value() { return savedFiltersHolder.list } } }),
+  useQuery: () => ({
+    data: {
+      get value() {
+        return { saved_filters: savedFiltersHolder.list, shared_filters: savedFiltersHolder.shared }
+      },
+    },
+  }),
   useMutation: (opts: { mutationFn: (v?: unknown) => Promise<unknown>; onSuccess?: () => void; onError?: () => void }) => ({
     isPending: { value: false },
     mutate: (v?: unknown) => {
@@ -81,27 +99,45 @@ const footerPassthrough = defineComponent({
   setup: (_p, { slots }) => () => h('div', [slots.default?.(), slots.footer?.()]),
 })
 
+// A CLOSED overlay: it renders nothing at all. `mountClosed` puts one in place of BOTH the
+// popover and the dialogs, so the mounted DOM is the document-list toolbar's DEFAULT state —
+// the one four visual baselines capture. The whole of #51's UI has to live behind these.
+const closedOverlayStub = defineComponent({
+  setup(_p, { expose }) {
+    expose({ toggle: () => {}, hide: () => {} })
+    return () => null
+  },
+})
+
 import SavedFilters from './SavedFilters.vue'
+
+const controlStubs = {
+  Dialog: footerPassthrough,
+  Button: {
+    props: ['label', 'icon', 'ariaLabel'],
+    emits: ['click'],
+    template: '<button :aria-label="ariaLabel" @click="$emit(\'click\', $event)">{{ label }}</button>',
+  },
+  InputText: {
+    // `size` is a PrimeVue prop; declaring it here stops it falling through to
+    // the bare <input>, where "small" is not a valid HTML size attribute.
+    props: ['modelValue', 'size'],
+    emits: ['update:modelValue'],
+    template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+  },
+}
 
 function mountView() {
   return mount(SavedFilters, {
+    global: { stubs: { Popover: popoverStub, ...controlStubs } },
+  })
+}
+
+/** The same component with every overlay CLOSED — the state the visual baselines capture. */
+function mountClosed() {
+  return mount(SavedFilters, {
     global: {
-      stubs: {
-        Popover: popoverStub,
-        Dialog: footerPassthrough,
-        Button: {
-          props: ['label', 'icon', 'ariaLabel'],
-          emits: ['click'],
-          template: '<button :aria-label="ariaLabel" @click="$emit(\'click\', $event)">{{ label }}</button>',
-        },
-        InputText: {
-          // `size` is a PrimeVue prop; declaring it here stops it falling through to
-          // the bare <input>, where "small" is not a valid HTML size attribute.
-          props: ['modelValue', 'size'],
-          emits: ['update:modelValue'],
-          template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
-        },
-      },
+      stubs: { ...controlStubs, Popover: closedOverlayStub, Dialog: closedOverlayStub },
     },
   })
 }
@@ -141,6 +177,7 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
     confirmDangerMock.mockClear()
     mockRoute.query = {}
     savedFiltersHolder.list = []
+    savedFiltersHolder.shared = []
   })
 
   it('hides the Save affordance when the route carries no filter dimension', () => {
@@ -259,6 +296,212 @@ describe('SavedFilters — save affordance derives from route.query (#42)', () =
   })
 })
 
+// --- #51: filters published to every user -------------------------------------------
+
+const OWN_FILTER = { id: 'f1', name: 'Invoices', query: 'search=x', create_date: 1, published: false, publish_date: null }
+const OWN_PUBLISHED = { ...OWN_FILTER, id: 'f2', name: 'Payroll', published: true, publish_date: 99 }
+const SHARED_OPEN = {
+  id: 's1',
+  name: 'Contracts',
+  query: 'tags=a&search=c',
+  username: 'alice',
+  create_date: 2,
+  publish_date: 3,
+  hidden_tag_count: 0,
+}
+const SHARED_LOCKED = {
+  id: 's2',
+  name: 'HR matters',
+  // The server withholds the criteria of a filter this viewer cannot apply.
+  query: '',
+  username: 'bob',
+  create_date: 4,
+  publish_date: 5,
+  hidden_tag_count: 2,
+}
+
+describe('SavedFilters — filters published to every user (#51)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    publishMock.mockClear()
+    unpublishMock.mockClear()
+    mockRoute.query = {}
+    savedFiltersHolder.list = []
+    savedFiltersHolder.shared = []
+    authHolder.isAdmin = false
+  })
+
+  // THE BASELINE GUARD. `document-list-{en,de}-{desktop,mobile}.png` capture this toolbar with
+  // the popover CLOSED, so every pixel of #51 has to be behind it. Asserted against the loaded
+  // state, not the empty one: a share control that only appeared once something was published
+  // would still move those four screenshots.
+  it('adds NOTHING to the closed toolbar, however much is published', async () => {
+    savedFiltersHolder.list = [OWN_FILTER, OWN_PUBLISHED]
+    savedFiltersHolder.shared = [SHARED_OPEN, SHARED_LOCKED]
+    const wrapper = mountClosed()
+    await flushPromises()
+
+    // Exactly the one pre-existing control, with its pre-existing label.
+    const buttons = wrapper.findAll('button')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].text()).toBe('ui.saved_filters.saved_label')
+
+    const html = wrapper.html()
+    for (const marker of [
+      'saved-filters-section',
+      'saved-filters-owner',
+      'saved-filters-publish',
+      'saved-filters-shared',
+      'ui.saved_filters.section_mine',
+      'ui.saved_filters.section_shared',
+      'ui.saved_filters.publish_button',
+      'ui.saved_filters.unpublish_button',
+    ]) {
+      expect(html, `"${marker}" must not reach the closed toolbar`).not.toContain(marker)
+    }
+  })
+
+  // The #67 geometry guard in visual.spec.ts asserts `.saved-filters button` is exactly 2 in
+  // the savable state. Publishing must not add a third.
+  it('keeps the savable toolbar at two buttons', async () => {
+    mockRoute.query = { search: 'y' }
+    savedFiltersHolder.list = [OWN_PUBLISHED]
+    savedFiltersHolder.shared = [SHARED_OPEN]
+    const wrapper = mountClosed()
+    await flushPromises()
+
+    expect(wrapper.findAll('button')).toHaveLength(2)
+  })
+
+  it('splits the popover into "mine" and "shared by others" once anything is published', async () => {
+    savedFiltersHolder.list = [OWN_FILTER]
+    savedFiltersHolder.shared = [SHARED_OPEN]
+    const wrapper = mountView()
+    await flushPromises()
+
+    const sections = wrapper.findAll('.saved-filters-section').map((s) => s.text())
+    expect(sections).toEqual(['ui.saved_filters.section_mine', 'ui.saved_filters.section_shared'])
+    // Each name sits in its own section — a shared filter is never mixed into the caller's list.
+    expect(wrapper.findAll('.saved-filters-items')[0].text()).toContain('Invoices')
+    expect(wrapper.find('.saved-filters-shared').text()).toContain('Contracts')
+    // …and the shared row names its publisher, so two same-named filters can be told apart.
+    expect(wrapper.find('.saved-filters-owner').text()).toBe('ui.saved_filters.shared_by(username=alice)')
+  })
+
+  it('leaves the popover unlabelled while nobody else has published anything', async () => {
+    savedFiltersHolder.list = [OWN_FILTER]
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('.saved-filters-section')).toHaveLength(0)
+    expect(renderedNames(wrapper)).toEqual(['Invoices'])
+  })
+
+  it('renders a shared filter with invisible tags disabled, explained, and unapplicable', async () => {
+    savedFiltersHolder.shared = [SHARED_LOCKED]
+    const wrapper = mountView()
+    await flushPromises()
+
+    const row = wrapper.find('.saved-filters-item.unavailable')
+    expect(row.exists()).toBe(true)
+    // The reason is on the row as a tooltip AND in the control's accessible name — never left
+    // to the dimming alone. It names the filter and the problem; it names no tag.
+    const reason = 'ui.saved_filters.unavailable_label(name=HR matters)'
+    expect(row.attributes('title')).toBe(reason)
+    const apply = row.find('.saved-filters-apply')
+    expect(apply.attributes('disabled')).toBeDefined()
+    expect(apply.attributes('aria-label')).toBe(reason)
+
+    // The guard behind the disabled attribute: dispatching the event directly (which bypasses
+    // the DOM's disabled handling, as a stray programmatic click would) still applies nothing.
+    apply.element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('applies an available shared filter exactly like an own one', async () => {
+    savedFiltersHolder.shared = [SHARED_OPEN]
+    const wrapper = mountView()
+    await flushPromises()
+
+    await buttonByText(wrapper, 'Contracts').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'documents',
+      query: { tags: 'a', search: 'c', filter: 's1' },
+    })
+  })
+
+  it('offers publish/rename/delete on OWN rows only — a shared row carries none of them', async () => {
+    savedFiltersHolder.list = [OWN_FILTER]
+    savedFiltersHolder.shared = [SHARED_OPEN]
+    const wrapper = mountView()
+    await flushPromises()
+
+    const ownRow = wrapper.findAll('.saved-filters-item')[0]
+    expect(ownRow.text()).toContain('Invoices')
+    expect(ownRow.find('.saved-filters-publish').exists()).toBe(true)
+    expect(
+      ownRow.findAll('button').map((b) => b.attributes('aria-label')),
+    ).toContain('ui.saved_filters.rename_button(name=Invoices)')
+
+    const sharedRow = wrapper.find('.saved-filters-shared .saved-filters-item')
+    expect(sharedRow.find('.saved-filters-publish').exists()).toBe(false)
+    const sharedLabels = sharedRow.findAll('button').map((b) => b.attributes('aria-label'))
+    expect(sharedLabels).not.toContain('ui.saved_filters.rename_button(name=Contracts)')
+    expect(sharedLabels).not.toContain('ui.saved_filters.delete_button(name=Contracts)')
+    expect(sharedLabels).not.toContain('ui.saved_filters.publish_button(name=Contracts)')
+  })
+
+  it('publishes an unpublished own filter and withdraws a published one', async () => {
+    savedFiltersHolder.list = [OWN_FILTER, OWN_PUBLISHED]
+    const wrapper = mountView()
+    await flushPromises()
+
+    await buttonByAria(wrapper, 'ui.saved_filters.publish_button(name=Invoices)').trigger('click')
+    await flushPromises()
+    expect(publishMock).toHaveBeenCalledWith('f1')
+    expect(unpublishMock).not.toHaveBeenCalled()
+
+    // The SAME control on an already-published filter withdraws instead — and says so.
+    await buttonByAria(wrapper, 'ui.saved_filters.unpublish_button(name=Payroll)').trigger('click')
+    await flushPromises()
+    expect(unpublishMock).toHaveBeenCalledWith('f2')
+    expect(publishMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives an administrator — and only an administrator — a withdraw control on another user\'s publication', async () => {
+    savedFiltersHolder.shared = [SHARED_OPEN]
+
+    const plain = mountView()
+    await flushPromises()
+    expect(
+      plain.find('.saved-filters-shared').findAll('button').map((b) => b.attributes('aria-label')),
+    ).not.toContain('ui.saved_filters.unpublish_button(name=Contracts)')
+
+    authHolder.isAdmin = true
+    const admin = mountView()
+    await flushPromises()
+    await buttonByAria(admin, 'ui.saved_filters.unpublish_button(name=Contracts)').trigger('click')
+    await flushPromises()
+    expect(unpublishMock).toHaveBeenCalledWith('s1')
+  })
+
+  it('never lets an unapplicable shared filter become the active or modified filter', async () => {
+    // The route matches nothing, but carries the locked filter's identity — the state that
+    // would otherwise mark the toolbar with a filter this viewer cannot even see the tags of.
+    mockRoute.query = { search: 'anything' }
+    savedFiltersHolder.shared = [SHARED_LOCKED]
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.saved-filters-item.active').exists()).toBe(false)
+    expect(wrapper.find('.saved-filters-item.modified').exists()).toBe(false)
+    expect(buttonByText(wrapper, 'ui.saved_filters.saved_label')).toBeTruthy()
+  })
+})
+
 describe('SavedFilters — list sort, search and rename (#193)', () => {
   // Mixed case on purpose: the server orders under a BINARY collation ("Zebra"
   // before "apple"), so the list arrives in that order and the component must
@@ -278,6 +521,7 @@ describe('SavedFilters — list sort, search and rename (#193)', () => {
     confirmDangerMock.mockClear()
     mockRoute.query = {}
     savedFiltersHolder.list = serverOrder.map((f) => ({ ...f }))
+    savedFiltersHolder.shared = []
   })
 
   it('sorts with localeCompare and toggles the direction', async () => {
@@ -394,6 +638,7 @@ describe('SavedFilters — the ACTIVE saved filter is highlighted (#297)', () =>
     confirmDangerMock.mockClear()
     mockRoute.query = {}
     savedFiltersHolder.list = []
+    savedFiltersHolder.shared = []
   })
 
   /** The saved-filters toolbar button: the group's first control. */
@@ -502,6 +747,7 @@ describe('SavedFilters — an EDITED saved filter reads as MODIFIED (#297 part 2
     confirmDangerMock.mockClear()
     mockRoute.query = {}
     savedFiltersHolder.list = []
+    savedFiltersHolder.shared = []
   })
 
   function toggleButton(wrapper: Wrapper) {

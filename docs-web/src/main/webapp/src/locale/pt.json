@@ -1269,7 +1269,16 @@
       "rename_failed": "Falha ao renomear o filtro",
       "replace_title": "Substituir filtro guardado",
       "replace_confirm": "Já existe um filtro guardado com o nome \"{name}\". Substituí-lo pelo filtro atual?",
-      "replaced": "Filtro substituído"
+      "replaced": "Filtro substituído",
+      "section_mine": "Os meus filtros",
+      "section_shared": "Partilhados por outros",
+      "shared_by": "de {username}",
+      "publish_button": "Partilhar o filtro guardado \"{name}\" com todos",
+      "unpublish_button": "Deixar de partilhar o filtro guardado \"{name}\"",
+      "published": "Filtro partilhado com todos",
+      "unpublished": "O filtro já não é partilhado",
+      "publish_failed": "Não foi possível alterar a partilha do filtro",
+      "unavailable_label": "{name} — não aplicável: usa etiquetas que não pode ver"
     },
     "favorite": {
       "add": "Adicionar aos favoritos",

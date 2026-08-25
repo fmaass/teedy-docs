@@ -1269,7 +1269,16 @@
       "rename_failed": "Failed to rename the filter",
       "replace_title": "Replace saved filter",
       "replace_confirm": "A saved filter named \"{name}\" already exists. Replace it with the current filter?",
-      "replaced": "Filter replaced"
+      "replaced": "Filter replaced",
+      "section_mine": "My filters",
+      "section_shared": "Shared by others",
+      "shared_by": "by {username}",
+      "publish_button": "Share the saved filter \"{name}\" with everyone",
+      "unpublish_button": "Stop sharing the saved filter \"{name}\"",
+      "published": "Filter shared with everyone",
+      "unpublished": "Filter no longer shared",
+      "publish_failed": "Failed to change the filter's sharing",
+      "unavailable_label": "{name} — cannot be applied: it uses tags you cannot see"
     },
     "favorite": {
       "add": "Add to favorites",

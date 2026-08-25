@@ -1269,7 +1269,16 @@
       "rename_failed": "重命名筛选器失败",
       "replace_title": "替换已保存的筛选器",
       "replace_confirm": "已存在名为“{name}”的已保存筛选器。要用当前筛选器替换它吗？",
-      "replaced": "筛选器已替换"
+      "replaced": "筛选器已替换",
+      "section_mine": "我的筛选器",
+      "section_shared": "他人共享的",
+      "shared_by": "来自 {username}",
+      "publish_button": "将已保存的筛选器“{name}”共享给所有人",
+      "unpublish_button": "停止共享已保存的筛选器“{name}”",
+      "published": "筛选器已共享给所有人",
+      "unpublished": "筛选器已停止共享",
+      "publish_failed": "更改筛选器共享状态失败",
+      "unavailable_label": "{name} — 无法应用：其中包含你无权查看的标签"
     },
     "favorite": {
       "add": "添加到收藏",

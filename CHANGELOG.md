@@ -8,7 +8,10 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+This release contains a database migration to schema level 67.
+
 ### Added
+- A saved filter can be shared with everyone on the instance. Any user may publish one of their own filters; it then appears for every other user in a "Shared by others" section of the saved-filters list, separate from their own filters and labelled with the name of whoever published it. Anyone may apply a shared filter — the results are always their own documents, because the search is permission-scoped — but only its owner may rename, re-save, delete or unpublish it, and an administrator may additionally unpublish anyone's, which withdraws the sharing without touching the filter itself. A shared filter that uses a tag the viewer is not allowed to see is shown greyed out and cannot be applied, with a tooltip saying so; it is never quietly applied with those tags dropped, and neither the tag's name nor its identifier is sent to that viewer (#51).
 - Tags can be deleted from the tag management tree, from a right-click menu or the row's own button. Only a fully unused branch may go: the tag itself carries no document and neither does anything below it, and deleting it removes the whole branch. A tag that is still on a document — or that has a sub-tag which is — offers no delete and says why, so an unused chain of parents above a used sub-tag keeps its structure; nothing is ever un-assigned from a document to make a tag deletable (#298).
 - A "Clean up unused tags" action on the same page finds every fully unused branch at once. It lists them first and deletes nothing until the deletion is confirmed, then reports exactly which tags were removed. A tag an auto-tagging rule points at counts as in use even with no documents on it, so a cleanup cannot quietly break a rule (#298).
 

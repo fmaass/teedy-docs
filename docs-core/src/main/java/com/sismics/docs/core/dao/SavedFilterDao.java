@@ -1,5 +1,6 @@
 package com.sismics.docs.core.dao;
 
+import com.sismics.docs.core.dao.dto.SavedFilterDto;
 import com.sismics.docs.core.model.jpa.SavedFilter;
 import com.sismics.util.context.ThreadLocalContext;
 
@@ -9,6 +10,7 @@ import jakarta.persistence.PersistenceException;
 import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -147,6 +149,127 @@ public class SavedFilterDao {
             throw e;
         }
         return savedFilter;
+    }
+
+    /**
+     * Returns a saved filter by ID, whoever owns it.
+     *
+     * <p>The ONLY caller that may not scope by owner is the administrator's unpublish path (#51),
+     * which needs the row precisely because it is not the caller's. Every other read goes through
+     * {@link #getByIdAndUser} — an owner-scoped lookup is what makes a foreign id answerable as
+     * "not found" without confirming that someone else's filter exists.</p>
+     *
+     * @param id Saved filter ID
+     * @return Saved filter or null if no such filter exists
+     */
+    public SavedFilter getById(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<SavedFilter> q = em.createQuery(
+                "select f from SavedFilter f where f.id = :id", SavedFilter.class);
+        q.setParameter("id", id);
+        try {
+            return q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Lists every PUBLISHED saved filter with its publisher's username, ordered by name (#51).
+     *
+     * <p>Joined to {@code User} as a theta join because {@link SavedFilter} deliberately holds a
+     * plain owner id and no association — and RESTRICTED to live users: a soft-deleted account's
+     * filters stop being offered to the instance, since nobody is left to curate, rename or
+     * withdraw them. The row itself is untouched, so restoring the account restores its
+     * publications.</p>
+     *
+     * <p>This method makes NO visibility judgement about the caller: whether a given viewer may
+     * apply one of these filters depends on the tags it names and on that viewer's ACLs, which is
+     * decided per request in {@code SavedFilterUtil}, not stored.</p>
+     *
+     * @return List of published filters
+     */
+    public List<SavedFilterDto> getPublished() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Object[]> q = em.createQuery(
+                "select f, u.username from SavedFilter f, User u "
+                        + "where f.userId = u.id and u.deleteDate is null and f.publishDate is not null "
+                        + "order by f.name", Object[].class);
+        List<SavedFilterDto> dtoList = new ArrayList<>();
+        for (Object[] row : q.getResultList()) {
+            SavedFilter filter = (SavedFilter) row[0];
+            dtoList.add(new SavedFilterDto()
+                    .setId(filter.getId())
+                    .setUserId(filter.getUserId())
+                    .setUsername((String) row[1])
+                    .setName(filter.getName())
+                    .setQuery(filter.getQuery())
+                    .setCreateDate(filter.getCreateDate())
+                    .setPublishDate(filter.getPublishDate()));
+        }
+        return dtoList;
+    }
+
+    /**
+     * Publishes or unpublishes a saved filter OWNED by the given user (#51).
+     *
+     * <p>Publication is authorship, so this path is owner-scoped exactly like
+     * {@link #update}: a filter that is not the caller's is answered {@code null} and left alone.
+     * Re-publishing an already-published filter keeps the ORIGINAL publish date — it is the same
+     * publication, and "shared since" must not reset because someone pressed the control twice.</p>
+     *
+     * <p>The entity manager is taken FIRST and every later step uses that reference, for the same
+     * reason as {@link #update}: {@link ThreadLocalContext#getEntityManager()} flushes on every
+     * access, so re-fetching it after the mutation would push a half-applied change out through an
+     * accessor rather than through this method's own flush.</p>
+     *
+     * @param id Saved filter ID
+     * @param userId Owner user ID (for authorization)
+     * @param published true to publish, false to withdraw the publication
+     * @return the updated saved filter, or null if no filter with this id is owned by the user
+     */
+    public SavedFilter setPublished(String id, String userId, boolean published) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+
+        TypedQuery<SavedFilter> q = em.createQuery(
+                "select f from SavedFilter f where f.id = :id and f.userId = :userId", SavedFilter.class);
+        q.setParameter("id", id);
+        q.setParameter("userId", userId);
+        SavedFilter savedFilter;
+        try {
+            savedFilter = q.getSingleResult();
+        } catch (NoResultException e) {
+            return null;
+        }
+
+        if (published) {
+            if (savedFilter.getPublishDate() == null) {
+                savedFilter.setPublishDate(new Date());
+            }
+        } else {
+            savedFilter.setPublishDate(null);
+        }
+        em.flush();
+        return savedFilter;
+    }
+
+    /**
+     * Withdraws a saved filter's publication REGARDLESS of who owns it — the administrator's
+     * management path (#51).
+     *
+     * <p>Deliberately narrower than {@link #setPublished}: it can only ever clear the publication,
+     * never set one and never touch the name, the query or the owner. An administrator governs what
+     * the instance is shown; the filter stays its author's.</p>
+     *
+     * @param id Saved filter ID
+     * @return true if a published filter was withdrawn, false if there was nothing to withdraw
+     */
+    public boolean unpublish(String id) {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        Query q = em.createQuery(
+                "update SavedFilter f set f.publishDate = null where f.id = :id and f.publishDate is not null");
+        q.setParameter("id", id);
+        return q.executeUpdate() > 0;
     }
 
     /**

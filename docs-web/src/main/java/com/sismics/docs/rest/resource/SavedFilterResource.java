@@ -2,8 +2,10 @@ package com.sismics.docs.rest.resource;
 
 import com.sismics.docs.core.dao.SavedFilterDao;
 import com.sismics.docs.core.dao.SavedFilterExistsException;
+import com.sismics.docs.core.dao.dto.SavedFilterDto;
 import com.sismics.docs.core.model.jpa.SavedFilter;
 import com.sismics.docs.core.util.SavedFilterUtil;
+import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
@@ -22,9 +24,14 @@ import java.util.Set;
 /**
  * Saved filter REST resource.
  *
- * <p>Per-user document-list filters. The stored payload is the CANONICAL URL query
- * string captured from the documents route (the URL is the source of truth). Filters
- * are never shared between users; delete is a hard delete.
+ * <p>Document-list filters. The stored payload is the CANONICAL URL query string captured from the
+ * documents route (the URL is the source of truth). A filter belongs to exactly one user, who may
+ * PUBLISH it to the whole instance (#51); delete is a hard delete.
+ *
+ * <p>Publication draws the authorship/management line this resource enforces: any user may APPLY a
+ * published filter, only its OWNER may edit, rename, delete, publish or withdraw it, and an
+ * ADMINISTRATOR may additionally withdraw anyone's publication — governing what the instance is
+ * shown, never what a filter says.
  */
 @Path("/savedfilter")
 public class SavedFilterResource extends BaseResource {
@@ -32,7 +39,12 @@ public class SavedFilterResource extends BaseResource {
     private static final Set<String> ALLOWED_KEYS = Set.of("tags", "exclude", "mode", "search", "workflow");
 
     /**
-     * Lists the current user's saved filters (ordered by name).
+     * Lists the saved filters available to the current user, in two separate sections (#51):
+     * {@code saved_filters} — the caller's OWN filters, each carrying whether the caller has
+     * published it — and {@code shared_filters} — the filters OTHER users have published, each
+     * naming its publisher and carrying {@code hidden_tag_count}, the number of tags it names that
+     * the caller cannot read (0 = applicable). A filter with a non-zero count comes back with an
+     * EMPTY query: the caller cannot apply it, so its criteria are not theirs to receive.
      *
      * @return Response
      */
@@ -47,15 +59,37 @@ public class SavedFilterResource extends BaseResource {
 
         JsonArrayBuilder array = Json.createArrayBuilder();
         for (SavedFilter filter : filters) {
-            array.add(Json.createObjectBuilder()
+            JsonObjectBuilder item = Json.createObjectBuilder()
                     .add("id", filter.getId())
                     .add("name", filter.getName())
                     .add("query", filter.getQuery())
-                    .add("create_date", filter.getCreateDate().getTime()));
+                    .add("create_date", filter.getCreateDate().getTime())
+                    .add("published", filter.getPublishDate() != null);
+            if (filter.getPublishDate() == null) {
+                item.addNull("publish_date");
+            } else {
+                item.add("publish_date", filter.getPublishDate().getTime());
+            }
+            array.add(item);
+        }
+
+        JsonArrayBuilder sharedArray = Json.createArrayBuilder();
+        for (SavedFilterUtil.PublishedFilter published
+                : SavedFilterUtil.listPublished(principal.getId(), getTargetIdList(null))) {
+            SavedFilterDto filter = published.filter();
+            sharedArray.add(Json.createObjectBuilder()
+                    .add("id", filter.getId())
+                    .add("name", filter.getName())
+                    .add("query", filter.getQuery())
+                    .add("username", filter.getUsername())
+                    .add("create_date", filter.getCreateDate().getTime())
+                    .add("publish_date", filter.getPublishDate().getTime())
+                    .add("hidden_tag_count", published.hiddenTagCount()));
         }
 
         return Response.ok().entity(Json.createObjectBuilder()
-                .add("saved_filters", array).build()).build();
+                .add("saved_filters", array)
+                .add("shared_filters", sharedArray).build()).build();
     }
 
     /**
@@ -180,6 +214,79 @@ public class SavedFilterResource extends BaseResource {
         if (!dao.delete(id, principal.getId())) {
             throw new NotFoundException();
         }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok").build()).build();
+    }
+
+    /**
+     * Publishes one of the current user's saved filters to every user (#51).
+     *
+     * <p>Owner-only, because publishing is an act of AUTHORSHIP: a filter carries its owner's name
+     * in the shared list, so letting anyone else put it there would attribute a decision to someone
+     * who never made it. An administrator is no exception — they may withdraw a publication, not
+     * create one. A foreign or unknown id therefore yields 404, exactly as the update path does:
+     * this resource never confirms the existence of another user's filter.</p>
+     *
+     * <p>Publishing an already-published filter keeps the original publish date (the DAO's
+     * contract): it is the same publication, so "shared since" must not reset.</p>
+     *
+     * @param id Saved filter ID
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/publish")
+    public Response publish(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        SavedFilter published = SavedFilterUtil.setPublished(id, principal.getId(), true);
+        if (published == null) {
+            throw new NotFoundException();
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok")
+                .add("publish_date", published.getPublishDate().getTime())
+                .build()).build();
+    }
+
+    /**
+     * Withdraws a saved filter's publication (#51). The filter itself is untouched — it goes back
+     * to being private to its owner.
+     *
+     * <p>Two callers may do this, for different reasons: the OWNER (it is theirs) and an
+     * ADMINISTRATOR (governance — the reporter's "curator" who cleans up what the instance is
+     * shown). An administrator explicitly may NOT edit, rename or delete it.</p>
+     *
+     * <p>The refusal codes are chosen so neither answer discloses anything the caller did not
+     * already know. A PUBLISHED filter is in every user's shared list, so a plain user who tries to
+     * withdraw one gets 403: they know it exists, they simply may not. An UNPUBLISHED filter that
+     * is not theirs gets 404 — the same answer as an unknown id, so the route cannot be used to
+     * probe for another user's private filters.</p>
+     *
+     * @param id Saved filter ID
+     * @return Response
+     */
+    @DELETE
+    @Path("{id: [a-z0-9\\-]+}/publish")
+    public Response unpublish(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        SavedFilter filter = SavedFilterUtil.getById(id);
+        boolean owner = filter != null && filter.getUserId().equals(principal.getId());
+        boolean admin = hasBaseFunction(BaseFunction.ADMIN);
+        if (filter == null || (!owner && !admin && filter.getPublishDate() == null)) {
+            throw new NotFoundException();
+        }
+        if (!owner && !admin) {
+            throw new ForbiddenClientException();
+        }
+
+        SavedFilterUtil.unpublish(id);
 
         return Response.ok().entity(Json.createObjectBuilder()
                 .add("status", "ok").build()).build();

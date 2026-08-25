@@ -1,6 +1,7 @@
 package com.sismics.docs.core.dao;
 
 import com.sismics.docs.BaseTransactionalTest;
+import com.sismics.docs.core.dao.dto.SavedFilterDto;
 import com.sismics.docs.core.model.jpa.SavedFilter;
 import com.sismics.docs.core.model.jpa.User;
 import com.sismics.util.context.ThreadLocalContext;
@@ -251,5 +252,118 @@ public class TestSavedFilterDao extends BaseTransactionalTest {
         Assertions.assertNotNull(aliceId);
         Assertions.assertNotNull(bobId);
         Assertions.assertNotEquals(aliceId, bobId);
+    }
+
+    // --- #51: the PUBLISHED state -------------------------------------------------------
+
+    @Test
+    public void aNewFilterIsNotPublished() throws Exception {
+        User user = createUser("sfl_pub_default");
+        SavedFilterDao dao = new SavedFilterDao();
+
+        String id = dao.create(filter(user.getId(), "Private", "search=p"));
+
+        Assertions.assertNull(dao.getByIdAndUser(id, user.getId()).getPublishDate(),
+                "a saved filter is private until its owner publishes it");
+        Assertions.assertTrue(dao.getPublished().isEmpty(),
+                "an unpublished filter must not appear in the published list");
+    }
+
+    @Test
+    public void publishingIsOwnerScopedAndReversible() throws Exception {
+        User alice = createUser("sfl_pub_owner");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(alice.getId(), "Invoices", "search=acme"));
+
+        // A NON-owner cannot publish: null verdict, and the stored row is untouched.
+        Assertions.assertNull(dao.setPublished(id, "someone-else", true),
+                "a foreign user must not be able to publish another user's filter");
+        Assertions.assertNull(dao.getByIdAndUser(id, alice.getId()).getPublishDate(),
+                "the refused publish must not have changed the row");
+
+        SavedFilter published = dao.setPublished(id, alice.getId(), true);
+        Assertions.assertNotNull(published);
+        Assertions.assertNotNull(published.getPublishDate(), "publishing stamps a publish date");
+
+        // A NON-owner cannot unpublish through the owner path either.
+        Assertions.assertNull(dao.setPublished(id, "someone-else", false));
+        Assertions.assertNotNull(dao.getByIdAndUser(id, alice.getId()).getPublishDate(),
+                "the refused unpublish must not have changed the row");
+
+        SavedFilter unpublished = dao.setPublished(id, alice.getId(), false);
+        Assertions.assertNotNull(unpublished);
+        Assertions.assertNull(unpublished.getPublishDate(), "unpublishing clears the publish date");
+    }
+
+    @Test
+    public void republishingKeepsTheOriginalPublishDate() throws Exception {
+        User user = createUser("sfl_pub_idem");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(user.getId(), "Invoices", "search=acme"));
+
+        Date first = dao.setPublished(id, user.getId(), true).getPublishDate();
+        Assertions.assertNotNull(first);
+        // Publishing an already-published filter is a no-op: the publication is the same
+        // publication, so "published since" must not silently reset.
+        Assertions.assertEquals(first, dao.setPublished(id, user.getId(), true).getPublishDate(),
+                "re-publishing must keep the original publish date");
+    }
+
+    @Test
+    public void getPublishedSpansUsersAndCarriesTheOwnerUsername() throws Exception {
+        User alice = createUser("sfl_pub_alice");
+        User bob = createUser("sfl_pub_bob");
+        SavedFilterDao dao = new SavedFilterDao();
+
+        String aliceZeta = dao.create(filter(alice.getId(), "Zeta", "search=z"));
+        String aliceAlpha = dao.create(filter(alice.getId(), "Alpha", "search=a"));
+        String bobPrivate = dao.create(filter(bob.getId(), "Bob private", "search=b"));
+        dao.setPublished(aliceZeta, alice.getId(), true);
+        dao.setPublished(aliceAlpha, alice.getId(), true);
+
+        List<SavedFilterDto> published = dao.getPublished();
+        Assertions.assertEquals(2, published.size(), "only the two published filters");
+        Assertions.assertEquals("Alpha", published.get(0).getName(), "ordered by name");
+        Assertions.assertEquals("Zeta", published.get(1).getName());
+        for (SavedFilterDto dto : published) {
+            Assertions.assertEquals(alice.getId(), dto.getUserId());
+            Assertions.assertEquals(alice.getUsername(), dto.getUsername(),
+                    "the shared list names its publisher so two same-named filters can be told apart");
+            Assertions.assertNotNull(dto.getPublishDate());
+            Assertions.assertNotNull(dto.getQuery());
+            Assertions.assertNotEquals(bobPrivate, dto.getId());
+        }
+    }
+
+    @Test
+    public void adminUnpublishIgnoresOwnership() throws Exception {
+        User alice = createUser("sfl_pub_admin_target");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(alice.getId(), "Invoices", "search=acme"));
+        dao.setPublished(id, alice.getId(), true);
+
+        // The administrator path is management, not authorship: it takes no owner id, and it
+        // removes the PUBLICATION only — the filter itself survives, still owned by alice.
+        Assertions.assertTrue(dao.unpublish(id), "an administrator may withdraw anyone's publication");
+        SavedFilter after = dao.getByIdAndUser(id, alice.getId());
+        Assertions.assertNotNull(after, "unpublishing must not delete the filter");
+        Assertions.assertNull(after.getPublishDate());
+        Assertions.assertEquals("Invoices", after.getName(), "the filter's authorship is untouched");
+
+        // Nothing left to withdraw, and an unknown id changes nothing.
+        Assertions.assertFalse(dao.unpublish(id), "a second withdrawal reports that nothing changed");
+        Assertions.assertFalse(dao.unpublish("no-such-filter"));
+    }
+
+    @Test
+    public void getByIdFindsAFilterWhoeverOwnsIt() throws Exception {
+        User alice = createUser("sfl_pub_byid");
+        SavedFilterDao dao = new SavedFilterDao();
+        String id = dao.create(filter(alice.getId(), "Invoices", "search=acme"));
+
+        SavedFilter found = dao.getById(id);
+        Assertions.assertNotNull(found, "the admin path resolves a filter without knowing its owner");
+        Assertions.assertEquals(alice.getId(), found.getUserId());
+        Assertions.assertNull(dao.getById("no-such-filter"));
     }
 }

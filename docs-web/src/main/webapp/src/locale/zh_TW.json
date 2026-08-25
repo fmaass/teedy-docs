@@ -1269,7 +1269,16 @@
       "rename_failed": "重新命名篩選條件失敗",
       "replace_title": "取代已儲存的篩選條件",
       "replace_confirm": "已存在名為「{name}」的已儲存篩選條件。要用目前的篩選條件取代它嗎？",
-      "replaced": "已取代篩選條件"
+      "replaced": "已取代篩選條件",
+      "section_mine": "我的篩選條件",
+      "section_shared": "他人分享的",
+      "shared_by": "來自 {username}",
+      "publish_button": "將已儲存的篩選條件「{name}」分享給所有人",
+      "unpublish_button": "停止分享已儲存的篩選條件「{name}」",
+      "published": "篩選條件已分享給所有人",
+      "unpublished": "篩選條件已停止分享",
+      "publish_failed": "變更篩選條件分享狀態失敗",
+      "unavailable_label": "{name} — 無法套用：其中包含你無權檢視的標籤"
     },
     "favorite": {
       "add": "加入我的最愛",

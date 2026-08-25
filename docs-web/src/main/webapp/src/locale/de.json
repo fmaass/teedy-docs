@@ -1269,7 +1269,16 @@
       "rename_failed": "Filter konnte nicht umbenannt werden",
       "replace_title": "Gespeicherten Filter ersetzen",
       "replace_confirm": "Ein gespeicherter Filter mit dem Namen \"{name}\" existiert bereits. Durch den aktuellen Filter ersetzen?",
-      "replaced": "Filter ersetzt"
+      "replaced": "Filter ersetzt",
+      "section_mine": "Meine Filter",
+      "section_shared": "Von anderen geteilt",
+      "shared_by": "von {username}",
+      "publish_button": "Gespeicherten Filter \"{name}\" mit allen teilen",
+      "unpublish_button": "Gespeicherten Filter \"{name}\" nicht mehr teilen",
+      "published": "Filter mit allen geteilt",
+      "unpublished": "Filter wird nicht mehr geteilt",
+      "publish_failed": "Freigabe des Filters konnte nicht geändert werden",
+      "unavailable_label": "{name} – nicht anwendbar: enthält Tags, die du nicht sehen kannst"
     },
     "favorite": {
       "add": "Zu Favoriten hinzufügen",

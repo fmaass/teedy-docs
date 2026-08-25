@@ -1269,7 +1269,16 @@
       "rename_failed": "Nie udało się zmienić nazwy filtra",
       "replace_title": "Zastąp zapisany filtr",
       "replace_confirm": "Zapisany filtr o nazwie „{name}” już istnieje. Zastąpić go bieżącym filtrem?",
-      "replaced": "Zastąpiono filtr"
+      "replaced": "Zastąpiono filtr",
+      "section_mine": "Moje filtry",
+      "section_shared": "Udostępnione przez innych",
+      "shared_by": "od {username}",
+      "publish_button": "Udostępnij zapisany filtr „{name}” wszystkim",
+      "unpublish_button": "Przestań udostępniać zapisany filtr „{name}”",
+      "published": "Filtr udostępniony wszystkim",
+      "unpublished": "Filtr nie jest już udostępniany",
+      "publish_failed": "Nie udało się zmienić udostępniania filtra",
+      "unavailable_label": "{name} — nie można zastosować: używa tagów, których nie widzisz"
     },
     "favorite": {
       "add": "Dodaj do ulubionych",

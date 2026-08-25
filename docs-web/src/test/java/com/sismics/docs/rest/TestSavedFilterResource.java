@@ -345,6 +345,336 @@ public class TestSavedFilterResource extends BaseJerseyTest {
                 .post(Entity.form(new Form().param("name", "n").param("query", "search=a"))).getStatus());
     }
 
+    // --- #51: publishing a saved filter to every user -----------------------------------
+
+    /**
+     * The owner's own round trip: a filter is private when created, publishing marks it and stamps
+     * a date, and withdrawing the publication takes both away. Read back from the LIST, not from
+     * the mutation's own answer — the stored state is the claim under test.
+     */
+    @Test
+    public void testOwnerPublishesAndWithdraws() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_owner");
+        String ownerToken = clientUtil.login("sfl_pub_owner");
+        String id = create(ownerToken, "Publishable", "search=a").getString("id");
+
+        JsonObject stored = listById(ownerToken, id);
+        Assertions.assertFalse(stored.getBoolean("published"), "a new filter is private to its owner");
+        Assertions.assertTrue(stored.isNull("publish_date"), "an unpublished filter has no publish date");
+
+        Assertions.assertEquals(200, publish(ownerToken, id).getStatus());
+        stored = listById(ownerToken, id);
+        Assertions.assertTrue(stored.getBoolean("published"));
+        Assertions.assertTrue(stored.getJsonNumber("publish_date").longValue() > 0);
+
+        Assertions.assertEquals(200, unpublish(ownerToken, id).getStatus());
+        stored = listById(ownerToken, id);
+        Assertions.assertFalse(stored.getBoolean("published"));
+        Assertions.assertTrue(stored.isNull("publish_date"));
+
+        delete(ownerToken, id);
+        deleteUser(adminToken, "sfl_pub_owner");
+    }
+
+    /**
+     * The point of the feature: another user SEES a published filter, in a section of its own, named
+     * with its publisher — and it never leaks into either user's "my filters" list.
+     */
+    @Test
+    public void testPublishedFilterReachesASecondUserInItsOwnSection() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_publisher");
+        String publisherToken = clientUtil.login("sfl_pub_publisher");
+        clientUtil.createUser("sfl_pub_reader");
+        String readerToken = clientUtil.login("sfl_pub_reader");
+
+        String id = create(publisherToken, "Shared invoices", "search=acme").getString("id");
+        Assertions.assertNull(sharedById(readerToken, id), "an unpublished filter reaches nobody else");
+
+        publish(publisherToken, id);
+
+        JsonObject shared = sharedById(readerToken, id);
+        Assertions.assertNotNull(shared, "a published filter is offered to every user");
+        Assertions.assertEquals("Shared invoices", shared.getString("name"));
+        Assertions.assertEquals("search=acme", shared.getString("query"));
+        Assertions.assertEquals("sfl_pub_publisher", shared.getString("username"),
+                "the shared section names the publisher, so two same-named filters can be told apart");
+        Assertions.assertEquals(0, shared.getInt("hidden_tag_count"));
+        Assertions.assertTrue(shared.getJsonNumber("publish_date").longValue() > 0);
+
+        // It is not the reader's own filter, and the publisher does not see her own filter twice.
+        Assertions.assertEquals(0, savedFilters(readerToken).size(), "a shared filter is not the reader's own");
+        Assertions.assertNull(sharedById(publisherToken, id),
+                "the publisher's own filter stays in her own section, not in the shared one");
+
+        unpublish(publisherToken, id);
+        Assertions.assertNull(sharedById(readerToken, id), "withdrawing the publication takes it back");
+
+        delete(publisherToken, id);
+        deleteUser(adminToken, "sfl_pub_publisher");
+        deleteUser(adminToken, "sfl_pub_reader");
+    }
+
+    /**
+     * USE, not EDIT: a published filter is applicable by everyone and writable by nobody but its
+     * owner. Every refusal is proven by READING THE ROW BACK — a status code alone would not show
+     * that nothing changed.
+     */
+    @Test
+    public void testANonOwnerCanNeitherEditNorDeleteNorPublishAPublishedFilter() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_keeper");
+        String keeperToken = clientUtil.login("sfl_pub_keeper");
+        clientUtil.createUser("sfl_pub_nonowner");
+        String otherToken = clientUtil.login("sfl_pub_nonowner");
+
+        String id = create(keeperToken, "Owned", "search=original").getString("id");
+        publish(keeperToken, id);
+
+        // Rename / re-capture: refused.
+        Assertions.assertEquals(404, post(otherToken, id,
+                new Form().param("name", "Hijacked").param("query", "search=hijacked")).getStatus());
+        // Delete: refused.
+        Assertions.assertEquals(404, target().path("/savedfilter/" + id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, otherToken).delete().getStatus());
+        // Re-publish (an authorship act, even on an already-published filter): refused.
+        Assertions.assertEquals(404, publish(otherToken, id).getStatus());
+
+        JsonObject stored = listById(keeperToken, id);
+        Assertions.assertEquals("Owned", stored.getString("name"), "the refused rename changed nothing");
+        Assertions.assertEquals("search=original", stored.getString("query"));
+        Assertions.assertTrue(stored.getBoolean("published"), "the filter is still published");
+
+        unpublish(keeperToken, id);
+        delete(keeperToken, id);
+        deleteUser(adminToken, "sfl_pub_keeper");
+        deleteUser(adminToken, "sfl_pub_nonowner");
+    }
+
+    /**
+     * The administrator's power is MANAGEMENT, not authorship: he may withdraw anyone's publication
+     * and nothing else. The same call from a plain user is refused.
+     */
+    @Test
+    public void testAdminMayWithdrawAnyPublicationButNotEditIt() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_author");
+        String authorToken = clientUtil.login("sfl_pub_author");
+        clientUtil.createUser("sfl_pub_bystander");
+        String bystanderToken = clientUtil.login("sfl_pub_bystander");
+
+        String id = create(authorToken, "Author filter", "search=author").getString("id");
+        publish(authorToken, id);
+
+        // A plain user may not withdraw someone else's publication. The filter is public knowledge
+        // (it is in his shared list), so the refusal is a forbidden, not a not-found.
+        Assertions.assertEquals(403, unpublish(bystanderToken, id).getStatus());
+        Assertions.assertNotNull(sharedById(bystanderToken, id), "the refused withdrawal changed nothing");
+
+        // The administrator may.
+        Assertions.assertEquals(200, unpublish(adminToken, id).getStatus());
+        Assertions.assertNull(sharedById(bystanderToken, id), "the publication is gone");
+
+        // But the filter itself survives, still the author's, and the administrator cannot edit it.
+        JsonObject stored = listById(authorToken, id);
+        Assertions.assertEquals("Author filter", stored.getString("name"));
+        Assertions.assertEquals("search=author", stored.getString("query"));
+        Assertions.assertFalse(stored.getBoolean("published"));
+        Assertions.assertEquals(404, post(adminToken, id,
+                new Form().param("name", "Admin rename").param("query", "search=admin")).getStatus());
+        Assertions.assertEquals("Author filter", listById(authorToken, id).getString("name"),
+                "an administrator governs what is shared, not what it says");
+
+        // Now that it is private again, a bystander is not even told it exists.
+        Assertions.assertEquals(404, unpublish(bystanderToken, id).getStatus());
+        // The administrator may not publish it on the author's behalf either.
+        Assertions.assertEquals(404, publish(adminToken, id).getStatus());
+        Assertions.assertFalse(listById(authorToken, id).getBoolean("published"));
+
+        delete(authorToken, id);
+        deleteUser(adminToken, "sfl_pub_author");
+        deleteUser(adminToken, "sfl_pub_bystander");
+    }
+
+    /**
+     * The tag-visibility rule (#51, settled on-thread): a published filter that names a tag the
+     * VIEWER cannot read is offered as UNAPPLICABLE, counted but never named, and its criteria are
+     * withheld — and it becomes ordinary the moment the viewer is granted the tag.
+     */
+    @Test
+    public void testAPublishedFilterNamingAnInvisibleTagIsFlaggedWithoutNamingIt() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_viewer");
+        String viewerToken = clientUtil.login("sfl_pub_viewer");
+
+        clientUtil.createUser("sfl_pub_tagowner");
+        String tagOwnerToken = clientUtil.login("sfl_pub_tagowner");
+
+        // A tag only the author can read (creating a tag grants its ACLs to its creator alone).
+        String tagId = createTag(tagOwnerToken, "SflSecretTag");
+        String id = create(tagOwnerToken, "Secret filter", "tags=" + tagId + "&search=acme").getString("id");
+        publish(tagOwnerToken, id);
+
+        JsonObject shared = sharedById(viewerToken, id);
+        Assertions.assertNotNull(shared, "the filter is still OFFERED — it is not hidden, it is unapplicable");
+        Assertions.assertEquals(1, shared.getInt("hidden_tag_count"),
+                "the viewer is told how many tags they cannot see");
+        Assertions.assertEquals("", shared.getString("query"),
+                "a filter the viewer cannot apply hands them none of its criteria");
+
+        // Nothing in the whole response names the tag the viewer cannot read.
+        String body = target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, viewerToken)
+                .get(String.class);
+        Assertions.assertFalse(body.contains("SflSecretTag"), "the invisible tag's NAME must not leak");
+        Assertions.assertFalse(body.contains(tagId), "the invisible tag's id must not leak either");
+
+        // Grant the viewer READ on the tag: the very same filter becomes ordinary.
+        grantTagRead(tagOwnerToken, tagId, "sfl_pub_viewer");
+
+        shared = sharedById(viewerToken, id);
+        Assertions.assertEquals(0, shared.getInt("hidden_tag_count"));
+        Assertions.assertEquals("tags=" + tagId + "&search=acme", shared.getString("query"),
+                "an applicable filter hands over its criteria in full");
+
+        unpublish(tagOwnerToken, id);
+        delete(tagOwnerToken, id);
+        deleteTag(tagOwnerToken, tagId);
+        deleteUser(adminToken, "sfl_pub_tagowner");
+        deleteUser(adminToken, "sfl_pub_viewer");
+    }
+
+    /**
+     * The stored payload is FORM-URL-ENCODED, because the frontend builds it with
+     * {@code URLSearchParams.toString()} — which percent-encodes the separator, so a two-tag
+     * selection is stored as {@code tags=a%2Cb}, never {@code tags=a,b}
+     * (SavedFilters.spec.ts pins that exact string).
+     *
+     * <p>The load-bearing case is the ALL-VISIBLE one: the viewer may read BOTH tags, so the
+     * correct count is 0 and the filter is ordinary. A reader that splits on the comma BEFORE
+     * decoding sees one token, {@code "a%2Cb"}, which matches no tag id at all and reports 1 —
+     * greying out a filter that is perfectly applicable and withholding its criteria. The
+     * half-visible filter beside it pins the ordinary direction on the same encoded shape.</p>
+     */
+    @Test
+    public void testTagIdsAreReadFromTheEncodedPayloadTheFrontendWrites() {
+        String adminToken = adminToken();
+        clientUtil.createUser("sfl_pub_enc_owner");
+        String ownerToken = clientUtil.login("sfl_pub_enc_owner");
+        clientUtil.createUser("sfl_pub_enc_viewer");
+        String viewerToken = clientUtil.login("sfl_pub_enc_viewer");
+
+        String firstTagId = createTag(ownerToken, "SflEncTagOne");
+        String secondTagId = createTag(ownerToken, "SflEncTagTwo");
+        String secretTagId = createTag(ownerToken, "SflEncHidden");
+        grantTagRead(ownerToken, firstTagId, "sfl_pub_enc_viewer");
+        grantTagRead(ownerToken, secondTagId, "sfl_pub_enc_viewer");
+
+        // Exactly what the frontend stores for a two-tag selection, both tags readable.
+        String visibleQuery = "tags=" + firstTagId + "%2C" + secondTagId;
+        String visibleId = create(ownerToken, "Two visible tags", visibleQuery).getString("id");
+        publish(ownerToken, visibleId);
+
+        JsonObject shared = sharedById(viewerToken, visibleId);
+        Assertions.assertNotNull(shared);
+        Assertions.assertEquals(0, shared.getInt("hidden_tag_count"),
+                "both encoded tag ids are readable by the viewer, so nothing is hidden");
+        Assertions.assertEquals(visibleQuery, shared.getString("query"),
+                "an applicable filter keeps its stored payload byte for byte");
+
+        // The same encoded shape, one member of the pair unreadable.
+        String mixedId = create(ownerToken, "One hidden tag", "tags=" + firstTagId + "%2C" + secretTagId)
+                .getString("id");
+        publish(ownerToken, mixedId);
+
+        JsonObject mixed = sharedById(viewerToken, mixedId);
+        Assertions.assertEquals(1, mixed.getInt("hidden_tag_count"));
+        // The readable half is not disclosed either — an unapplicable filter hands over none of
+        // its criteria.
+        Assertions.assertEquals("", mixed.getString("query"));
+
+        unpublish(ownerToken, visibleId);
+        unpublish(ownerToken, mixedId);
+        delete(ownerToken, visibleId);
+        delete(ownerToken, mixedId);
+        deleteTag(ownerToken, firstTagId);
+        deleteTag(ownerToken, secondTagId);
+        deleteTag(ownerToken, secretTagId);
+        deleteUser(adminToken, "sfl_pub_enc_owner");
+        deleteUser(adminToken, "sfl_pub_enc_viewer");
+    }
+
+    @Test
+    public void testPublishRoutesRejectAnonymousCallers() {
+        Assertions.assertEquals(403, target().path("/savedfilter/some-id/publish").request()
+                .post(Entity.form(new Form())).getStatus());
+        Assertions.assertEquals(403, target().path("/savedfilter/some-id/publish").request()
+                .delete().getStatus());
+    }
+
+    private String createTag(String token, String name) {
+        return target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form().param("name", name).param("color", "#ff0000")), JsonObject.class)
+                .getString("id");
+    }
+
+    private void deleteTag(String token, String id) {
+        target().path("/tag/" + id).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token).delete();
+    }
+
+    private void grantTagRead(String ownerToken, String tagId, String username) {
+        target().path("/acl").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("source", tagId)
+                        .param("perm", "READ")
+                        .param("target", username)
+                        .param("type", "USER")), JsonObject.class);
+    }
+
+    private Response publish(String token, String id) {
+        return target().path("/savedfilter/" + id + "/publish").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()));
+    }
+
+    private Response unpublish(String token, String id) {
+        return target().path("/savedfilter/" + id + "/publish").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .delete();
+    }
+
+    private JsonArray savedFilters(String token) {
+        return target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class)
+                .getJsonArray("saved_filters");
+    }
+
+    /** The caller's shared-section entry for a filter, or null when it is not offered to them. */
+    private JsonObject sharedById(String token, String id) {
+        JsonArray shared = target().path("/savedfilter").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class)
+                .getJsonArray("shared_filters");
+        for (int i = 0; i < shared.size(); i++) {
+            JsonObject item = shared.getJsonObject(i);
+            if (id.equals(item.getString("id"))) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private void deleteUser(String adminToken, String username) {
+        target().path("/user/" + username).queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
     private JsonObject create(String token, String name, String query) {
         return target().path("/savedfilter").request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)

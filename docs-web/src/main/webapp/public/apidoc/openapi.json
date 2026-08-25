@@ -3203,6 +3203,68 @@
         }
       }
     },
+    "/savedfilter/{id}/publish": {
+      "post": {
+        "tags": [
+          "savedfilter"
+        ],
+        "summary": "Publish a saved filter to every user",
+        "description": "Owner-only: publishing is an act of authorship, and the shared list names the publisher. An administrator may withdraw a publication (DELETE) but may not create one. Publishing an already-published filter keeps its original publish date. The filter itself is unchanged — only its visibility.",
+        "operationId": "post_savedfilter_id_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9\\-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; returns the publish date"
+          },
+          "403": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "No saved filter with this id is owned by the calling user (a foreign id is indistinguishable from an unknown one)"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "savedfilter"
+        ],
+        "summary": "Withdraw a saved filter's publication",
+        "description": "The owner may withdraw their own publication; an administrator may withdraw anyone's — management, not authorship, so it never edits, renames or deletes the filter. A plain user attempting to withdraw someone else's PUBLISHED filter gets 403 (its existence is already public); an unpublished filter that is not theirs gets 404, the same answer as an unknown id, so the route cannot be used to probe for another user's private filters.",
+        "operationId": "delete_savedfilter_id_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9\\-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "403": {
+            "description": "Not authenticated, or a non-owner without the ADMIN base function attempting to withdraw a published filter"
+          },
+          "404": {
+            "description": "Unknown id, or another user's unpublished filter"
+          }
+        }
+      }
+    },
     "/share": {
       "put": {
         "tags": [

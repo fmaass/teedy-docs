@@ -34,6 +34,14 @@
       "responses": ["200", "400", "403", "404"],
       "requestBodyRequired": true,
       "requiredFields": ["name", "query"]
+    },
+    "POST /savedfilter/{id}/publish": {
+      "responses": ["200", "403", "404"],
+      "requestBodyRequired": false
+    },
+    "DELETE /savedfilter/{id}/publish": {
+      "responses": ["200", "403", "404"],
+      "requestBodyRequired": false
     }
   }
 }

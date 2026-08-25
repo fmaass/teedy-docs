@@ -1269,7 +1269,16 @@
       "rename_failed": "Échec du renommage du filtre",
       "replace_title": "Remplacer le filtre enregistré",
       "replace_confirm": "Un filtre enregistré nommé \"{name}\" existe déjà. Le remplacer par le filtre actuel ?",
-      "replaced": "Filtre remplacé"
+      "replaced": "Filtre remplacé",
+      "section_mine": "Mes filtres",
+      "section_shared": "Partagés par d’autres",
+      "shared_by": "par {username}",
+      "publish_button": "Partager le filtre enregistré « {name} » avec tout le monde",
+      "unpublish_button": "Ne plus partager le filtre enregistré « {name} »",
+      "published": "Filtre partagé avec tout le monde",
+      "unpublished": "Le filtre n’est plus partagé",
+      "publish_failed": "Échec de la modification du partage du filtre",
+      "unavailable_label": "{name} — non applicable : il utilise des tags que vous ne pouvez pas voir"
     },
     "favorite": {
       "add": "Ajouter aux favoris",

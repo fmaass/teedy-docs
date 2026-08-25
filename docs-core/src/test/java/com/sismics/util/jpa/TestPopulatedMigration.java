@@ -44,8 +44,9 @@ public class TestPopulatedMigration {
 
     /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062
      * + group-membership dedup & active-unique index 063 + raw .eml attachment toggle 064
-     * + comment edit-date column 065 + T_ACCESS_EVENT access-event table 066). */
-    private static final int TARGET_VERSION = 66;
+     * + comment edit-date column 065 + T_ACCESS_EVENT access-event table 066
+     * + saved-filter publication column 067). */
+    private static final int TARGET_VERSION = 67;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -921,6 +922,13 @@ public class TestPopulatedMigration {
         Assertions.assertEquals(0, count(connection, "T_SAVED_FILTER", "1 = 1"),
                 "044 must not seed any saved-filter rows");
 
+        // 5a'''. Migration 067 added the PUBLICATION column (#51). Additive and nullable:
+        //        NULL means "not published", which is what every pre-067 row is and must
+        //        stay — an upgrade that published anything would expose one user's filters
+        //        to the whole instance silently.
+        Assertions.assertTrue(columnExists(connection, "T_SAVED_FILTER", "SFL_PUBLISHDATE_D"),
+                "067 must add the SFL_PUBLISHDATE_D column to T_SAVED_FILTER");
+
         // 5b. The workflow/vocabulary tables were dropped by 037/038 (wiping the old rows) and then
         //     REINSTATED empty by 042. The data-loss guardrail is that the OLD seed rows did not
         //     survive the drop: the tables exist again but the retired rows are gone.
@@ -994,6 +1002,11 @@ public class TestPopulatedMigration {
         Assertions.assertEquals(1, scalarCount(connection,
                         "select count(*) from T_SAVED_FILTER f join T_USER u on f.SFL_IDUSER_C = u.USE_ID_C where f.SFL_ID_C = 'sfl-1'"),
                 "saved-filter -> user FK must be resolvable");
+        // 067 (#51): a row inserted WITHOUT naming the publication column is private. This is the
+        // upgrade contract in data form — the column is not merely present, its absence of a value
+        // is what keeps an existing filter unshared.
+        Assertions.assertEquals(1, count(connection, "T_SAVED_FILTER", "SFL_ID_C = 'sfl-1' and SFL_PUBLISHDATE_D is null"),
+                "067 must leave a saved filter unpublished unless a publication date is written");
 
         boolean duplicateRejected = false;
         java.sql.Savepoint sp = connection.setSavepoint("beforeDup");

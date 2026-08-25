@@ -14,7 +14,10 @@ import {
   createSavedFilter,
   updateSavedFilter,
   deleteSavedFilter,
+  publishSavedFilter,
+  unpublishSavedFilter,
   type SavedFilterItem,
+  type SharedSavedFilterItem,
 } from '../api/savedfilter'
 import {
   FILTER_KEYS,
@@ -22,8 +25,10 @@ import {
   parse as parseFilterQuery,
   equals as filterQueriesEqual,
 } from '../utils/savedFilterQuery'
+import { useAuthStore } from '../stores/auth'
 
 const { t } = useI18n()
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -48,10 +53,27 @@ function currentQueryString(): string {
 
 const { data: filtersData } = useQuery({
   queryKey: ['savedFilters'],
-  queryFn: () => listSavedFilters().then((r) => r.data.saved_filters),
+  queryFn: () => listSavedFilters().then((r) => r.data),
 })
 
-const filters = computed<SavedFilterItem[]>(() => filtersData.value ?? [])
+const filters = computed<SavedFilterItem[]>(() => filtersData.value?.saved_filters ?? [])
+
+// #51: the filters OTHER users have published. A section of its own, never mixed into the
+// caller's own list — the reporter's split view: "my own local filters" vs "filters from
+// others".
+const sharedFilters = computed<SharedSavedFilterItem[]>(() => filtersData.value?.shared_filters ?? [])
+
+/** The shape the apply/highlight paths need — all a filter is, once it is being applied. */
+type ApplicableFilter = { id: string; name: string; query: string }
+
+// The filters that can actually BE the applied one. A shared filter naming tags this viewer
+// cannot read is excluded BY CONSTRUCTION: its query comes back empty from the server, so
+// including it would let an unfiltered-looking route match it and mark the toolbar with
+// somebody else's filter name.
+const applicableFilters = computed<ApplicableFilter[]>(() => [
+  ...filters.value,
+  ...sharedFilters.value.filter((f) => f.hidden_tag_count === 0),
+])
 
 // #297: which stored filter is APPLIED right now. DERIVED state — the active filter is
 // the stored one whose query selects the same documents as the current route. The
@@ -62,10 +84,10 @@ const filters = computed<SavedFilterItem[]>(() => filtersData.value ?? [])
 // An UNFILTERED route never has an active filter: without this guard, a stored filter
 // with an empty query would match the bare document list and leave the toolbar
 // permanently marked.
-const activeFilter = computed<SavedFilterItem | null>(() => {
+const activeFilter = computed<ApplicableFilter | null>(() => {
   if (!hasSavableFilter.value) return null
   const current = currentQueryString()
-  return filters.value.find((f) => filterQueriesEqual(current, f.query)) ?? null
+  return applicableFilters.value.find((f) => filterQueriesEqual(current, f.query)) ?? null
 })
 
 // #297 part 2: the applied filter's IDENTITY, persisted in the URL as `filter=<id>` by
@@ -83,11 +105,11 @@ const routeFilterId = computed<string | null>(() => {
 // and gated on the same unfiltered guard, so clearing the criteria reads as plain even in
 // the instant before the serializer drops the now-meaningless id. An id naming a filter
 // that no longer exists (deleted in another tab) names nothing: also plain.
-const modifiedFilter = computed<SavedFilterItem | null>(() => {
+const modifiedFilter = computed<ApplicableFilter | null>(() => {
   if (activeFilter.value || !hasSavableFilter.value) return null
   const id = routeFilterId.value
   if (!id) return null
-  return filters.value.find((f) => f.id === id) ?? null
+  return applicableFilters.value.find((f) => f.id === id) ?? null
 })
 
 // The URL identity must never CONTRADICT the derived truth: once the criteria exactly
@@ -148,15 +170,24 @@ const sortAsc = ref(true)
 // vue-query cache, and Array.prototype.sort reorders IN PLACE — sorting it directly
 // would mutate cached data shared with every other consumer of ['savedFilters'].
 // The search is case-insensitive substring matching on the name.
-const visibleFilters = computed<SavedFilterItem[]>(() => {
+//
+// One function for BOTH sections (#51): the search box and the direction toggle sit above
+// the whole popover, so "Alpha" must sort and match the same way whoever owns it.
+function searchAndSort<T extends { name: string }>(source: readonly T[]): T[] {
   const needle = searchTerm.value.trim().toLowerCase()
-  const matched = needle
-    ? filters.value.filter((f) => f.name.toLowerCase().includes(needle))
-    : filters.value
+  const matched = needle ? source.filter((f) => f.name.toLowerCase().includes(needle)) : source
   return [...matched].sort((a, b) =>
     sortAsc.value ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name),
   )
-})
+}
+
+const visibleFilters = computed<SavedFilterItem[]>(() => searchAndSort(filters.value))
+
+const visibleShared = computed<SharedSavedFilterItem[]>(() => searchAndSort(sharedFilters.value))
+
+// Headings appear only once there is a split to describe. With nothing published anywhere,
+// the popover is exactly what it was before #51 — a single unlabelled list.
+const showSections = computed(() => sharedFilters.value.length > 0)
 
 function toggleSort() {
   sortAsc.value = !sortAsc.value
@@ -169,7 +200,7 @@ function toggleDropdown(event: Event) {
   dropdown.value?.toggle(event)
 }
 
-function applyFilter(filter: SavedFilterItem) {
+function applyFilter(filter: ApplicableFilter) {
   dropdown.value?.hide()
   // The applied filter's identity rides in the URL alongside its criteria, so it survives
   // a reload and the back button, and the store's serializer carries it through every
@@ -180,6 +211,63 @@ function applyFilter(filter: SavedFilterItem) {
     name: 'documents',
     query: { ...parseFilterQuery(filter.query), filter: filter.id },
   })
+}
+
+// #51: applying a SHARED filter, with the tag-visibility rule enforced here as well as by
+// the row's `disabled`. The button being disabled is presentation; this is the behaviour —
+// a filter naming tags the viewer cannot read is never pushed into the route, whatever
+// reaches this function. (Neither is a security boundary: the search itself is ACL-scoped
+// server-side, so an applied filter can never widen anyone's result set. This is about not
+// silently applying something OTHER than what its author saved.)
+function applySharedFilter(filter: SharedSavedFilterItem) {
+  if (filter.hidden_tag_count > 0) return
+  applyFilter(filter)
+}
+
+// --- Publishing (#51) ---
+
+function publishLabel(filter: SavedFilterItem | SharedSavedFilterItem, published: boolean) {
+  return published
+    ? t('ui.saved_filters.unpublish_button', { name: filter.name })
+    : t('ui.saved_filters.publish_button', { name: filter.name })
+}
+
+/** The reason a shared filter cannot be applied — the name and the reason, never the tags. */
+function unavailableLabel(filter: SharedSavedFilterItem) {
+  return t('ui.saved_filters.unavailable_label', { name: filter.name })
+}
+
+const publishMutation = useMutation({
+  mutationFn: (id: string) => publishSavedFilter(id),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['savedFilters'] })
+    toast.add({ severity: 'success', summary: t('ui.saved_filters.published'), life: 3000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: t('ui.saved_filters.publish_failed'), life: 3000 })
+  },
+})
+
+// Withdrawal is ONE mutation for two callers — the owner taking their own filter back, and
+// an administrator clearing somebody else's from the instance. They hit the same endpoint
+// because they are the same act; who may perform it is decided server-side.
+const unpublishMutation = useMutation({
+  mutationFn: (id: string) => unpublishSavedFilter(id),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['savedFilters'] })
+    toast.add({ severity: 'success', summary: t('ui.saved_filters.unpublished'), life: 3000 })
+  },
+  onError: () => {
+    toast.add({ severity: 'error', summary: t('ui.saved_filters.publish_failed'), life: 3000 })
+  },
+})
+
+function togglePublish(filter: SavedFilterItem) {
+  if (filter.published) {
+    unpublishMutation.mutate(filter.id)
+  } else {
+    publishMutation.mutate(filter.id)
+  }
 }
 
 // --- Save dialog ---
@@ -340,7 +428,7 @@ function confirmDelete(filter: SavedFilterItem) {
 
     <Popover ref="dropdown">
       <div class="saved-filters-list">
-        <div v-if="filters.length" class="saved-filters-toolbar">
+        <div v-if="filters.length || sharedFilters.length" class="saved-filters-toolbar">
           <InputText
             id="saved-filter-search"
             v-model="searchTerm"
@@ -361,55 +449,125 @@ function confirmDelete(filter: SavedFilterItem) {
             @click="toggleSort"
           />
         </div>
-        <p v-if="!filters.length" class="saved-filters-empty">
+        <p v-if="!filters.length && !sharedFilters.length" class="saved-filters-empty">
           {{ t('ui.saved_filters.empty') }}
         </p>
-        <p v-else-if="!visibleFilters.length" class="saved-filters-empty">
+        <p v-else-if="!visibleFilters.length && !visibleShared.length" class="saved-filters-empty">
           {{ t('ui.saved_filters.no_matches') }}
         </p>
-        <ul v-else class="saved-filters-items">
-          <li
-            v-for="filter in visibleFilters"
-            :key="filter.id"
-            class="saved-filters-item"
-            :class="{
-              active: filter.id === activeFilter?.id,
-              modified: filter.id === modifiedFilter?.id,
-            }"
-          >
-            <Button
-              :label="filter.name"
-              text
-              size="small"
-              class="saved-filters-apply"
-              :aria-current="filter.id === activeFilter?.id ? 'true' : undefined"
-              :aria-label="
-                filter.id === modifiedFilter?.id
-                  ? t('ui.saved_filters.modified_label', { name: filter.name })
-                  : undefined
-              "
-              @click="applyFilter(filter)"
-            />
-            <Button
-              icon="pi pi-pencil"
-              text
-              rounded
-              size="small"
-              severity="secondary"
-              :aria-label="t('ui.saved_filters.rename_button', { name: filter.name })"
-              @click="openRenameDialog(filter)"
-            />
-            <Button
-              icon="pi pi-trash"
-              text
-              rounded
-              size="small"
-              severity="danger"
-              :aria-label="t('ui.saved_filters.delete_button', { name: filter.name })"
-              @click="confirmDelete(filter)"
-            />
-          </li>
-        </ul>
+        <template v-else>
+          <template v-if="visibleFilters.length">
+            <p v-if="showSections" class="saved-filters-section">
+              {{ t('ui.saved_filters.section_mine') }}
+            </p>
+            <ul class="saved-filters-items">
+              <li
+                v-for="filter in visibleFilters"
+                :key="filter.id"
+                class="saved-filters-item"
+                :class="{
+                  active: filter.id === activeFilter?.id,
+                  modified: filter.id === modifiedFilter?.id,
+                }"
+              >
+                <Button
+                  :label="filter.name"
+                  text
+                  size="small"
+                  class="saved-filters-apply"
+                  :aria-current="filter.id === activeFilter?.id ? 'true' : undefined"
+                  :aria-label="
+                    filter.id === modifiedFilter?.id
+                      ? t('ui.saved_filters.modified_label', { name: filter.name })
+                      : undefined
+                  "
+                  @click="applyFilter(filter)"
+                />
+                <Button
+                  :icon="filter.published ? 'pi pi-globe' : 'pi pi-share-alt'"
+                  text
+                  rounded
+                  size="small"
+                  :severity="filter.published ? undefined : 'secondary'"
+                  class="saved-filters-publish"
+                  :class="{ 'is-published': filter.published }"
+                  :title="publishLabel(filter, filter.published)"
+                  :aria-label="publishLabel(filter, filter.published)"
+                  :aria-pressed="filter.published ? 'true' : 'false'"
+                  @click="togglePublish(filter)"
+                />
+                <Button
+                  icon="pi pi-pencil"
+                  text
+                  rounded
+                  size="small"
+                  severity="secondary"
+                  :aria-label="t('ui.saved_filters.rename_button', { name: filter.name })"
+                  @click="openRenameDialog(filter)"
+                />
+                <Button
+                  icon="pi pi-trash"
+                  text
+                  rounded
+                  size="small"
+                  severity="danger"
+                  :aria-label="t('ui.saved_filters.delete_button', { name: filter.name })"
+                  @click="confirmDelete(filter)"
+                />
+              </li>
+            </ul>
+          </template>
+
+          <template v-if="visibleShared.length">
+            <p class="saved-filters-section">
+              {{ t('ui.saved_filters.section_shared') }}
+            </p>
+            <ul class="saved-filters-items saved-filters-shared">
+              <li
+                v-for="filter in visibleShared"
+                :key="filter.id"
+                class="saved-filters-item"
+                :class="{
+                  active: filter.id === activeFilter?.id,
+                  modified: filter.id === modifiedFilter?.id,
+                  unavailable: filter.hidden_tag_count > 0,
+                }"
+                :title="filter.hidden_tag_count > 0 ? unavailableLabel(filter) : undefined"
+              >
+                <Button
+                  :label="filter.name"
+                  text
+                  size="small"
+                  class="saved-filters-apply"
+                  :disabled="filter.hidden_tag_count > 0"
+                  :aria-current="filter.id === activeFilter?.id ? 'true' : undefined"
+                  :aria-label="
+                    filter.hidden_tag_count > 0
+                      ? unavailableLabel(filter)
+                      : filter.id === modifiedFilter?.id
+                        ? t('ui.saved_filters.modified_label', { name: filter.name })
+                        : undefined
+                  "
+                  @click="applySharedFilter(filter)"
+                />
+                <span class="saved-filters-owner">
+                  {{ t('ui.saved_filters.shared_by', { username: filter.username }) }}
+                </span>
+                <Button
+                  v-if="auth.isAdmin"
+                  icon="pi pi-ban"
+                  text
+                  rounded
+                  size="small"
+                  severity="danger"
+                  :title="t('ui.saved_filters.unpublish_button', { name: filter.name })"
+                  :aria-label="t('ui.saved_filters.unpublish_button', { name: filter.name })"
+                  @click="unpublishMutation.mutate(filter.id)"
+                />
+              </li>
+            </ul>
+          </template>
+        </template>
       </div>
     </Popover>
 
@@ -533,6 +691,56 @@ function confirmDelete(filter: SavedFilterItem) {
   flex: 1;
   justify-content: flex-start;
   text-align: left;
+  min-width: 0;
+}
+
+/* #51: the two-section popover. The heading is a quiet label, not a control — it exists to
+   say whose filters these are, which is the reporter's split view. Nothing here renders
+   while nobody has published anything, so the captured document-list surfaces (which only
+   ever show the CLOSED popover anyway) are untouched twice over. */
+.saved-filters-section {
+  margin: 0.35rem 0 0.1rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--p-text-muted-color);
+}
+
+.saved-filters-section:first-child {
+  margin-top: 0;
+}
+
+/* The publisher's name. Two users may each own an "Invoices"; without this the shared list
+   would show two identical rows. Muted and shrink-last, so a long username gives way to the
+   filter name rather than pushing the row wider. */
+.saved-filters-owner {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
+}
+
+/* A published filter of the caller's own: the control that publishes it is also the state
+   readout, so the ICON changes (share -> globe) as well as the colour — the state survives a
+   greyscale screenshot, and `aria-pressed` carries it to a screen reader. */
+.saved-filters-publish.is-published {
+  color: var(--p-primary-color);
+}
+
+/* A shared filter the viewer cannot apply. Dimmed, and the row carries a `title` explaining
+   why; the button's accessible name says the same thing, so the reason is never left to the
+   dimming alone. */
+.saved-filters-item.unavailable {
+  opacity: 0.6;
+}
+
+.saved-filters-item.unavailable .saved-filters-apply {
+  text-decoration: line-through;
 }
 
 /* #297: the APPLIED saved filter — the toolbar button carries its name, and the row that

@@ -1269,7 +1269,16 @@
       "rename_failed": "Riemërtimi i filtrit dështoi",
       "replace_title": "Zëvendëso filtrin e ruajtur",
       "replace_confirm": "Një filtër i ruajtur me emrin \"{name}\" ekziston tashmë. Të zëvendësohet me filtrin aktual?",
-      "replaced": "Filtri u zëvendësua"
+      "replaced": "Filtri u zëvendësua",
+      "section_mine": "Filtrat e mi",
+      "section_shared": "Ndarë nga të tjerët",
+      "shared_by": "nga {username}",
+      "publish_button": "Ndaje filtrin e ruajtur \"{name}\" me të gjithë",
+      "unpublish_button": "Ndalo ndarjen e filtrit të ruajtur \"{name}\"",
+      "published": "Filtri u nda me të gjithë",
+      "unpublished": "Filtri nuk ndahet më",
+      "publish_failed": "Ndryshimi i ndarjes së filtrit dështoi",
+      "unavailable_label": "{name} — nuk mund të zbatohet: përdor etiketa që nuk i sheh dot"
     },
     "favorite": {
       "add": "Shto te të preferuarat",
