@@ -66,6 +66,11 @@
       "comment_add_failed": "No se pudo añadir el comentario",
       "comment_deleted": "Comentario eliminado",
       "comment_delete_failed": "No se pudo eliminar el comentario",
+      "edit_comment": "Editar comentario",
+      "comment_edited": "editado",
+      "comment_edited_at": "Editado el {date}",
+      "comment_updated": "Comentario actualizado",
+      "comment_update_failed": "No se pudo actualizar el comentario",
       "content": {
         "content": "Contenido"
       },

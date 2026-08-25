@@ -66,6 +66,11 @@
       "comment_add_failed": "Failed to add comment",
       "comment_deleted": "Comment deleted",
       "comment_delete_failed": "Failed to delete comment",
+      "edit_comment": "Edit comment",
+      "comment_edited": "edited",
+      "comment_edited_at": "Edited on {date}",
+      "comment_updated": "Comment updated",
+      "comment_update_failed": "Failed to update comment",
       "content": {
         "content": "Content"
       },

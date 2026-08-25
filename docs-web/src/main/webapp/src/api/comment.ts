@@ -6,6 +6,9 @@ export interface Comment {
   creator: string
   creator_gravatar: string
   create_date: number
+  // Present only when the comment was edited (#285). Its ABSENCE is what says "never edited" —
+  // the backend omits the field rather than sending a null.
+  update_date?: number
 }
 
 export interface CommentListResponse {
@@ -25,6 +28,15 @@ export function addComment(documentId: string, content: string) {
   params.set('id', documentId)
   params.set('content', content)
   return api.put<Comment>('/comment', params)
+}
+
+// POST /comment/:id — edit a comment (#285). ONLY the author may edit their own
+// comment; the backend answers 404 for anyone else, WRITE access included. Returns
+// the edited comment with its new update_date.
+export function updateComment(id: string, content: string) {
+  const params = new URLSearchParams()
+  params.set('content', content)
+  return api.post<Comment>(`/comment/${id}`, params)
 }
 
 // DELETE /comment/:id — delete a comment. The creator may delete their own

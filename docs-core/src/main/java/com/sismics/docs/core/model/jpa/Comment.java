@@ -49,6 +49,14 @@ public class Comment implements Loggable {
     private Date createDate;
 
     /**
+     * Date of the last edit of this comment, or null when it was never edited (#285). The creation
+     * date is never moved by an edit, so the pair is the comment's audit trail: written then, last
+     * changed then.
+     */
+    @Column(name = "COM_UPDATEDATE_D")
+    private Date updateDate;
+
+    /**
      * Deletion date.
      */
     @Column(name = "COM_DELETEDATE_D")
@@ -76,6 +84,14 @@ public class Comment implements Loggable {
 
     public void setCreateDate(Date createDate) {
         this.createDate = createDate;
+    }
+
+    public Date getUpdateDate() {
+        return updateDate;
+    }
+
+    public void setUpdateDate(Date updateDate) {
+        this.updateDate = updateDate;
     }
 
     @Override

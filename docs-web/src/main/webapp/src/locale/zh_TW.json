@@ -66,6 +66,11 @@
       "comment_add_failed": "新增評論失敗",
       "comment_deleted": "已刪除評論",
       "comment_delete_failed": "刪除評論失敗",
+      "edit_comment": "編輯評論",
+      "comment_edited": "已編輯",
+      "comment_edited_at": "編輯於 {date}",
+      "comment_updated": "評論已更新",
+      "comment_update_failed": "更新評論失敗",
       "content": {
         "content": "內容"
       },

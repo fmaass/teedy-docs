@@ -66,6 +66,11 @@
       "comment_add_failed": "添加评论失败",
       "comment_deleted": "评论已删除",
       "comment_delete_failed": "删除评论失败",
+      "edit_comment": "编辑评论",
+      "comment_edited": "已编辑",
+      "comment_edited_at": "编辑于 {date}",
+      "comment_updated": "评论已更新",
+      "comment_update_failed": "更新评论失败",
       "content": {
         "content": "内容"
       },

@@ -66,6 +66,11 @@
       "comment_add_failed": "Échec de l'ajout du commentaire",
       "comment_deleted": "Commentaire supprimé",
       "comment_delete_failed": "Échec de la suppression du commentaire",
+      "edit_comment": "Modifier le commentaire",
+      "comment_edited": "modifié",
+      "comment_edited_at": "Modifié le {date}",
+      "comment_updated": "Commentaire modifié",
+      "comment_update_failed": "Échec de la modification du commentaire",
       "content": {
         "content": "Contenu"
       },

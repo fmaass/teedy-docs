@@ -66,6 +66,11 @@
       "comment_add_failed": "Не удалось добавить комментарий",
       "comment_deleted": "Комментарий удалён",
       "comment_delete_failed": "Не удалось удалить комментарий",
+      "edit_comment": "Редактировать комментарий",
+      "comment_edited": "изменён",
+      "comment_edited_at": "Изменён {date}",
+      "comment_updated": "Комментарий обновлён",
+      "comment_update_failed": "Не удалось обновить комментарий",
       "content": {
         "content": "Содержание"
       },

@@ -208,4 +208,154 @@ public class TestCommentResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
+
+    /**
+     * #285 slice 1 — the author edits their OWN comment. The new content replaces the old one, the
+     * comment gains an edit timestamp that every reader of the document sees, and the CREATE date is
+     * left exactly as it was (the audit trail keeps both dates; an edit is not a re-post).
+     */
+    @Test
+    public void testCommentEditOwnComment() {
+        String adminToken = adminToken();
+        clientUtil.createUser("comment_author");
+        String authorToken = clientUtil.login("comment_author");
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, authorToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Editable comment doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        json = target().path("/comment").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, authorToken)
+                .put(Entity.form(new Form()
+                        .param("id", documentId)
+                        .param("content", "Teh original comment")), JsonObject.class);
+        String commentId = json.getString("id");
+        long createDate = json.getJsonNumber("create_date").longValue();
+        // A freshly posted comment carries no edit stamp at all.
+        Assertions.assertFalse(json.containsKey("update_date"), "a new comment is not marked edited");
+
+        // Edit it.
+        json = target().path("/comment/" + commentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, authorToken)
+                .post(Entity.form(new Form()
+                        .param("content", "The original comment")), JsonObject.class);
+        Assertions.assertEquals(commentId, json.getString("id"));
+        Assertions.assertEquals("The original comment", json.getString("content"));
+        Assertions.assertEquals("comment_author", json.getString("creator"));
+        Assertions.assertEquals(createDate, json.getJsonNumber("create_date").longValue(),
+                "editing must not move the creation date");
+        long updateDate = json.getJsonNumber("update_date").longValue();
+        Assertions.assertTrue(updateDate >= createDate, "the edit stamp cannot predate the creation date");
+
+        // The list endpoint — what every reader of the document sees — carries the same three facts.
+        json = target().path("/comment/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, authorToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("comments").size());
+        JsonObject comment = json.getJsonArray("comments").getJsonObject(0);
+        Assertions.assertEquals("The original comment", comment.getString("content"));
+        Assertions.assertEquals(createDate, comment.getJsonNumber("create_date").longValue());
+        Assertions.assertEquals(updateDate, comment.getJsonNumber("update_date").longValue());
+
+        // Cleanup
+        target().path("/user/comment_author")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * #285 slice 1 — ONLY the author may edit. A collaborator holding WRITE on the document (who may
+     * therefore DELETE the comment) is still refused the edit, as is a user with no access at all, and
+     * so is an edit of an already-deleted comment. Every refusal is NOT_FOUND — the convention the
+     * delete endpoint already uses — and leaves the stored comment untouched.
+     */
+    @Test
+    public void testCommentEditByNonAuthorDenied() {
+        String adminToken = adminToken();
+
+        clientUtil.createUser("comment_editowner");
+        String ownerToken = clientUtil.login("comment_editowner");
+        clientUtil.createUser("comment_editwriter");
+        String writerToken = clientUtil.login("comment_editwriter");
+        clientUtil.createUser("comment_editstranger");
+        String strangerToken = clientUtil.login("comment_editstranger");
+
+        JsonObject json = target().path("/document").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("title", "Foreign comment edit doc")
+                        .param("language", "eng")
+                        .param("create_date", Long.toString(new Date().getTime()))), JsonObject.class);
+        String documentId = json.getString("id");
+
+        json = target().path("/comment").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .put(Entity.form(new Form()
+                        .param("id", documentId)
+                        .param("content", "The owner's words")), JsonObject.class);
+        String commentId = json.getString("id");
+        long createDate = json.getJsonNumber("create_date").longValue();
+
+        // The writer really does hold READ+WRITE on the document (so the refusal below is about
+        // authorship, not about access): ACLs are per-permission — WRITE does not imply READ — so grant
+        // both, exactly as the permissions UI does, then prove the grant took by reading the comments.
+        for (String perm : new String[]{"READ", "WRITE"}) {
+            target().path("/acl").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                    .put(Entity.form(new Form()
+                            .param("source", documentId)
+                            .param("perm", perm)
+                            .param("target", "comment_editwriter")
+                            .param("type", "USER")), JsonObject.class);
+        }
+        json = target().path("/comment/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, writerToken)
+                .get(JsonObject.class);
+        Assertions.assertEquals(1, json.getJsonArray("comments").size(),
+                "the writer must be able to READ the comment, so the edit refusal is about authorship");
+
+        // A WRITE-holder who is not the author is refused.
+        Response response = target().path("/comment/" + commentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, writerToken)
+                .post(Entity.form(new Form().param("content", "Rewritten by the writer")));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // A user with no access at all is refused.
+        response = target().path("/comment/" + commentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, strangerToken)
+                .post(Entity.form(new Form().param("content", "Rewritten by a stranger")));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // Nothing changed: same content, same create date, and no edit stamp was written.
+        json = target().path("/comment/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .get(JsonObject.class);
+        JsonObject comment = json.getJsonArray("comments").getJsonObject(0);
+        Assertions.assertEquals("The owner's words", comment.getString("content"));
+        Assertions.assertEquals(createDate, comment.getJsonNumber("create_date").longValue());
+        Assertions.assertFalse(comment.containsKey("update_date"),
+                "a refused edit must not stamp the comment as edited");
+
+        // A deleted comment cannot be edited back into existence, not even by its author.
+        target().path("/comment/" + commentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .delete(JsonObject.class);
+        response = target().path("/comment/" + commentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, ownerToken)
+                .post(Entity.form(new Form().param("content", "Back from the dead")));
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()));
+
+        // Cleanup
+        for (String username : new String[]{"comment_editowner", "comment_editwriter", "comment_editstranger"}) {
+            target().path("/user/" + username)
+                    .queryParam("reassign_to_username", "admin").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                    .delete();
+        }
+    }
 }

@@ -31,6 +31,11 @@ public class CommentDto {
      */
     private Long createTimestamp;
 
+    /**
+     * Date of the last edit of this comment, or null when it was never edited (#285).
+     */
+    private Long updateTimestamp;
+
     public String getId() {
         return id;
     }
@@ -69,5 +74,13 @@ public class CommentDto {
 
     public void setCreateTimestamp(Long createTimestamp) {
         this.createTimestamp = createTimestamp;
+    }
+
+    public Long getUpdateTimestamp() {
+        return updateTimestamp;
+    }
+
+    public void setUpdateTimestamp(Long updateTimestamp) {
+        this.updateTimestamp = updateTimestamp;
     }
 }

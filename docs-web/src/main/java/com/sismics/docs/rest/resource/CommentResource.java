@@ -5,6 +5,7 @@ import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.CommentDao;
 import com.sismics.docs.core.dao.dto.CommentDto;
 import com.sismics.docs.core.model.jpa.Comment;
+import com.sismics.docs.rest.util.CommentResourceHelper;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.ImageUtil;
@@ -81,6 +82,59 @@ public class CommentResource extends BaseResource {
         return Response.ok().entity(response.build()).build();
     }
     
+    /**
+     * Edit a comment.
+     *
+     * @api {post} /comment/:id Edit a comment
+     * @apiName PostComment
+     * @apiGroup Comment
+     * @apiParam {String} id Comment ID
+     * @apiParam {String} content New comment content
+     * @apiSuccess {String} id Comment ID
+     * @apiSuccess {String} content Content
+     * @apiSuccess {String} creator Username
+     * @apiSuccess {String} creator_gravatar Creator Gravatar hash
+     * @apiSuccess {Number} create_date Create date (timestamp)
+     * @apiSuccess {Number} update_date Last edit date (timestamp)
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Validation error
+     * @apiError (client) NotFound Comment not found, or not authored by the current user
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param id Comment ID
+     * @param content New comment content
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}")
+    public Response update(@PathParam("id") String id,
+            @FormParam("content") String content) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        // Validate input data — same bounds as posting a comment
+        content = ValidationUtil.validateLength(content, "content", 1, 4000, false);
+
+        // Only the author may edit their own comment; anything else is answered as not-found, the same
+        // convention the delete endpoint uses for a comment the caller may not touch.
+        Comment comment = CommentResourceHelper.updateOwnComment(id, content, principal.getId());
+        if (comment == null) {
+            throw new NotFoundException();
+        }
+
+        // Returns the updated comment
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("id", comment.getId())
+                .add("content", comment.getContent())
+                .add("creator", principal.getName())
+                .add("creator_gravatar", ImageUtil.computeGravatar(principal.getEmail()))
+                .add("create_date", comment.getCreateDate().getTime())
+                .add("update_date", comment.getUpdateDate().getTime());
+        return Response.ok().entity(response.build()).build();
+    }
+
     /**
      * Delete a comment.
      *
@@ -167,12 +221,18 @@ public class CommentResource extends BaseResource {
         List<CommentDto> commentDtoList = commentDao.getByDocumentId(documentId);
         JsonArrayBuilder comments = Json.createArrayBuilder();
         for (CommentDto commentDto : commentDtoList) {
-            comments.add(Json.createObjectBuilder()
+            JsonObjectBuilder comment = Json.createObjectBuilder()
                     .add("id", commentDto.getId())
                     .add("content", commentDto.getContent())
                     .add("creator", commentDto.getCreatorName())
                     .add("creator_gravatar", ImageUtil.computeGravatar(commentDto.getCreatorEmail()))
-                    .add("create_date", commentDto.getCreateTimestamp()));
+                    .add("create_date", commentDto.getCreateTimestamp());
+            // Present only when the comment was edited (#285); its absence is what tells a reader the
+            // comment is unchanged, so it is omitted rather than sent as null.
+            if (commentDto.getUpdateTimestamp() != null) {
+                comment.add("update_date", commentDto.getUpdateTimestamp());
+            }
+            comments.add(comment);
         }
         
         // Always return OK

@@ -66,6 +66,11 @@
       "comment_add_failed": "Shtimi i komentit dështoi",
       "comment_deleted": "Komenti u fshi",
       "comment_delete_failed": "Fshirja e komentit dështoi",
+      "edit_comment": "Redakto komentin",
+      "comment_edited": "i redaktuar",
+      "comment_edited_at": "Redaktuar më {date}",
+      "comment_updated": "Komenti u përditësua",
+      "comment_update_failed": "Përditësimi i komentit dështoi",
       "content": {
         "content": "përmbajtja"
       },
