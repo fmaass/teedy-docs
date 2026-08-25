@@ -1,6 +1,7 @@
 package com.sismics.rest.util;
 
 import com.google.common.base.Strings;
+import com.sismics.docs.core.util.TagNameNormalizer;
 import com.sismics.rest.exception.ClientException;
 import org.apache.commons.lang3.StringUtils;
 
@@ -24,6 +25,14 @@ public class ValidationUtil {
     private static Pattern USERNAME_PATTERN = Pattern.compile("[a-zA-Z0-9_@.-]+");
 
     private static Pattern HEX_COLOR_PATTERN = Pattern.compile("#[0-9a-fA-F]{6}");
+
+    /**
+     * The one refusal message for a tag name carrying a character the search grammar owns. Held as a
+     * constant rather than written twice so the guarantee is structural: an exotic space (#305) gets
+     * the SAME answer as an ordinary one, and the two cannot drift apart in a later edit.
+     */
+    private static final String ILLEGAL_TAG_NAME_MESSAGE =
+            "Spaces, colons and asterisks are not allowed in tag name";
     
     /**
      * Checks that the argument is not null.
@@ -152,25 +161,55 @@ public class ValidationUtil {
     }
 
     /**
-     * Validate a tag name.
+     * Validate a tag name and return the name to store.
      *
      * <p>The rejected characters are the ones the document search grammar owns: it splits a query
      * on spaces, separates a criteria from its value on a colon, and reads an asterisk in a tag
      * term as a wildcard standing for any run of characters. A name carrying one of them could not
      * be searched for unambiguously.
      *
+     * <p>#305: "a space" is not only U+0020. A name can be pasted carrying any of Unicode's other
+     * whitespace characters, and carrying invisible format characters that render as nothing at all.
+     * {@link TagNameNormalizer} owns the whole name rule — strip the invisible characters, trim the
+     * edges, refuse what is left if it still carries whitespace — and this method is the place that
+     * turns its verdict into the {@code IllegalTagName} the ordinary space has always produced,
+     * because a thin space is a space. The space check is not a separate condition any more: U+0020
+     * is simply the most common member of the class the normalizer refuses.
+     *
+     * <p>Because names are rewritten rather than merely judged, this returns the name to store and
+     * the caller MUST use the returned value — persisting the argument instead would store exactly
+     * the characters this removed.
+     *
+     * <p><b>Call this BEFORE {@link #validateLength}, not after.</b> The length bound has to be
+     * measured on the name that will be stored: a 36-character name carrying a zero-width character
+     * is 36 characters, and checking the raw argument would refuse it as overlength over a character
+     * the user cannot see. Running normalization first also means the edge-trimming is done here
+     * rather than falling out of {@code validateLength}'s {@code StringUtils.strip} as a side effect
+     * — one rule in one place, instead of a contract that depends on the order two validators happen
+     * to be called in.
+     *
      * <p>A null name means the caller is not changing the name (a colour- or parent-only tag
-     * update), so there is nothing to validate.
+     * update), so there is nothing to validate; an empty one means the same on the update path. Both
+     * come back unchanged.
      *
      * @param name Name of the tag, or null when the name is left unchanged
+     * @return The name to store: the argument with its invisible format characters removed
      */
-    public static void validateTagName(String name) throws ClientException {
-        if (name == null) {
-            return;
+    public static String validateTagName(String name) throws ClientException {
+        TagNameNormalizer.Result result = TagNameNormalizer.normalize(name);
+        switch (result.verdict()) {
+            case VISIBLE_WHITESPACE -> throw new ClientException("IllegalTagName", ILLEGAL_TAG_NAME_MESSAGE);
+            case EMPTY_AFTER_NORMALIZE -> throw new ClientException("IllegalTagName",
+                    "Tag name must contain at least one visible character");
+            case OK -> {
+                // Fall through to the search-grammar characters below.
+            }
         }
-        if (name.contains(" ") || name.contains(":") || name.contains("*")) {
-            throw new ClientException("IllegalTagName", "Spaces, colons and asterisks are not allowed in tag name");
+        String normalized = result.name();
+        if (normalized != null && (normalized.contains(":") || normalized.contains("*"))) {
+            throw new ClientException("IllegalTagName", ILLEGAL_TAG_NAME_MESSAGE);
         }
+        return normalized;
     }
 
     /**

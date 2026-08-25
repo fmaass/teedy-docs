@@ -191,7 +191,9 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
-     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed in tag name
+     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed inside a tag name;
+     *                                 invisible format characters are removed and the edges are trimmed, and a
+     *                                 name left empty by that normalization is refused
      * @apiError (client) ParentNotFound Parent not found
      * @apiPermission user
      * @apiVersion 1.5.0
@@ -212,7 +214,9 @@ public class TagResource extends BaseResource {
                             content = @Content(schema = @Schema(implementation = TagIdResult.class))),
                     @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
                     @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
-                            + "IllegalTagName - Spaces, colons and asterisks are not allowed in tag name; "
+                            + "IllegalTagName - Spaces, colons and asterisks are not allowed inside a tag name "
+                            + "(invisible format characters are removed and the edges trimmed instead, and a name "
+                            + "left empty by that normalization is refused); "
                             + "ParentNotFound - Parent not found")
             }
     )
@@ -225,9 +229,13 @@ public class TagResource extends BaseResource {
         }
         
         // Validate input data
+        // #305: normalization runs FIRST and owns the whole name rule (invisible characters removed,
+        // edges trimmed, interior whitespace refused). The length bound is then measured on the name
+        // that will actually be stored — a 36-character name carrying a zero-width character is 36
+        // characters, not 37 — and the returned value is what gets persisted.
+        name = ValidationUtil.validateTagName(name);
         name = ValidationUtil.validateLength(name, "name", 1, 36, false);
         ValidationUtil.validateHexColor(color, "color", true);
-        ValidationUtil.validateTagName(name);
 
         // Check the parent
         if (StringUtils.isEmpty(parentId)) {
@@ -274,7 +282,9 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
-     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed in tag name
+     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed inside a tag name;
+     *                                 invisible format characters are removed and the edges are trimmed, and a
+     *                                 name left empty by that normalization is refused
      * @apiError (client) ParentNotFound Parent not found
      * @apiError (client) CircularReference Circular reference in parent tag
      * @apiError (client) NotFound Tag not found
@@ -303,7 +313,9 @@ public class TagResource extends BaseResource {
                     @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
                     @ApiResponse(responseCode = "404", description = "NotFound - Tag not found"),
                     @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
-                            + "IllegalTagName - Spaces, colons and asterisks are not allowed in tag name; "
+                            + "IllegalTagName - Spaces, colons and asterisks are not allowed inside a tag name "
+                            + "(invisible format characters are removed and the edges trimmed instead, and a name "
+                            + "left empty by that normalization is refused); "
                             + "ParentNotFound - Parent not found; "
                             + "CircularReference - Circular reference in parent tag")
             }
@@ -318,9 +330,11 @@ public class TagResource extends BaseResource {
         }
         
         // Validate input data
+        // #305: same order as create — a rename must not be a back door for the characters create
+        // refuses, and the length bound must measure the normalized name it returns.
+        name = ValidationUtil.validateTagName(name);
         name = ValidationUtil.validateLength(name, "name", 1, 36, true);
         ValidationUtil.validateHexColor(color, "color", true);
-        ValidationUtil.validateTagName(name);
 
         // Check permission
         AclDao aclDao = new AclDao();

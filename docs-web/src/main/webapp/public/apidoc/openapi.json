@@ -3609,7 +3609,7 @@
             "description": "Success"
           },
           "400": {
-            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a space or a colon; ParentNotFound when the parent tag is not readable"
+            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable"
           },
           "403": {
             "description": "Not authenticated, or the calling account stopped being active before the tag was created"

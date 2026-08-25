@@ -388,4 +388,239 @@ public class TestTagResource extends BaseJerseyTest {
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
                 .delete();
     }
+
+    /** U+200B ZERO WIDTH SPACE — an invisible format character (Unicode category Cf). */
+    private static final String ZWSP = new String(Character.toChars(0x200B));
+
+    /** U+200D ZERO WIDTH JOINER — an invisible format character (Cf). */
+    private static final String ZWJ = new String(Character.toChars(0x200D));
+
+    /** U+FEFF ZERO WIDTH NO-BREAK SPACE / BOM — an invisible format character (Cf). */
+    private static final String BOM = new String(Character.toChars(0xFEFF));
+
+    /** U+2009 THIN SPACE — a VISIBLE whitespace character (Unicode category Zs). */
+    private static final String THIN_SPACE = new String(Character.toChars(0x2009));
+
+    /** U+00A0 NO-BREAK SPACE — a VISIBLE whitespace character (Zs). */
+    private static final String NBSP = new String(Character.toChars(0x00A0));
+
+    /** U+3000 IDEOGRAPHIC SPACE — a VISIBLE whitespace character (Zs). */
+    private static final String IDEOGRAPHIC_SPACE = new String(Character.toChars(0x3000));
+
+    /**
+     * #305, CREATE path. A name pasted from a "whitespace generator" carries characters that do not
+     * render. The two classes are answered differently and the difference is the whole point:
+     *
+     * <ul>
+     *   <li>an INVISIBLE format character (zero-width space/joiner, BOM) is removed silently — it
+     *       carries no visible meaning, so refusing it would only tell the user to delete something
+     *       they cannot see;</li>
+     *   <li>a VISIBLE whitespace character (thin space, no-break space, ideographic space) is
+     *       REFUSED with the same error an ordinary space already gets — silently deleting it would
+     *       turn "Test 123" into "Test123" while the same name typed with a normal space fails.</li>
+     * </ul>
+     */
+    @Test
+    public void tagCreateNormalizesInvisiblesAndRefusesVisibleWhitespace() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_ws_create");
+        String token = clientUtil.login("tag_ws_create");
+
+        // Invisible format characters are stripped: the tag is created under the clean name.
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "Rech" + ZWSP + "nung" + BOM)
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Rechnung", json.getString("name"),
+                "an invisible format character must be stripped before the name is stored");
+
+        // Visible whitespace is refused, exactly like an ordinary space.
+        for (String separator : new String[] { THIN_SPACE, NBSP, IDEOGRAPHIC_SPACE }) {
+            Response response = target().path("/tag").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .put(Entity.form(new Form()
+                            .param("name", "Test" + separator + "123")
+                            .param("color", "#ff0000")));
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                    "a visible whitespace character must be refused in a tag name");
+        }
+
+        // A name that is nothing but invisible characters has no name left after stripping.
+        Response response = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", ZWSP + ZWJ + BOM)
+                        .param("color", "#ff0000")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a name consisting only of invisible characters must be refused, not stored empty");
+
+        // Cleanup
+        target().path("/user/tag_ws_create")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * #305, RENAME path. The same rule has to hold on update, or the validation is a front door with
+     * the back door open: a tag created clean could be renamed to carry the exotic characters.
+     */
+    @Test
+    public void tagRenameNormalizesInvisiblesAndRefusesVisibleWhitespace() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_ws_rename");
+        String token = clientUtil.login("tag_ws_rename");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "Beleg")
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        // Rename carrying invisible format characters: accepted, stored stripped.
+        Response response = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("name", "Quit" + ZWJ + "tung")));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()));
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Quittung", json.getString("name"),
+                "an invisible format character must be stripped before the rename is stored");
+
+        // Rename carrying visible whitespace: refused, and the stored name is untouched.
+        for (String separator : new String[] { THIN_SPACE, NBSP, IDEOGRAPHIC_SPACE }) {
+            response = target().path("/tag/" + tagId).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .post(Entity.form(new Form()
+                            .param("name", "Test" + separator + "123")));
+            Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                    "a visible whitespace character must be refused when renaming a tag");
+        }
+
+        // A rename to nothing but invisible characters is refused too.
+        response = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form()
+                        .param("name", ZWSP + BOM)));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "a rename to only invisible characters must be refused, not stored empty");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Quittung", json.getString("name"),
+                "a refused rename must leave the stored name untouched");
+
+        // Cleanup
+        target().path("/user/tag_ws_rename")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * #305 ordering. Normalization runs BEFORE the length bound, so the 36-character limit is
+     * measured on the name that will actually be stored. A 36-character name that happens to carry a
+     * zero-width character is 36 characters, not 37 — refusing it as overlength would tell the user
+     * to shorten a name that is already exactly at the limit, over a character they cannot see.
+     */
+    @Test
+    public void tagNameIsNormalizedBeforeTheLengthBoundIsApplied() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_ws_len");
+        String token = clientUtil.login("tag_ws_len");
+
+        String maxLengthName = "R".repeat(36);
+        Assertions.assertEquals(36, maxLengthName.length(), "fixture must sit exactly on the limit");
+
+        JsonObject json = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", maxLengthName.substring(0, 4) + ZWSP + maxLengthName.substring(4))
+                        .param("color", "#ff0000")), JsonObject.class);
+        String tagId = json.getString("id");
+
+        json = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals(maxLengthName, json.getString("name"),
+                "a 36-character name plus an invisible character must be stored, not refused as overlength");
+
+        // The bound itself still bites once the name really is too long.
+        Response response = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", "R".repeat(37))
+                        .param("color", "#ff0000")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "37 real characters must still be refused");
+
+        // Cleanup
+        target().path("/user/tag_ws_len")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
+
+    /**
+     * #305 edge whitespace. A LEADING or TRAILING ordinary space has always been trimmed rather than
+     * refused, and the exotic spaces must behave the same way — the rule is about what the name IS,
+     * not about how carefully it was pasted. Interior whitespace is the thing being refused, and a
+     * no-break space on the edge is not interior.
+     */
+    @Test
+    public void tagNameEdgeWhitespaceIsTrimmedLikeAnOrdinarySpace() {
+        String adminToken = adminToken();
+        clientUtil.createUser("tag_ws_edge");
+        String token = clientUtil.login("tag_ws_edge");
+
+        String[] padded = {
+                " Report ",                       // ordinary space, the behaviour being matched
+                "\tReport\t",                     // tab
+                NBSP + "Report" + NBSP,           // no-break space
+                THIN_SPACE + "Report" + THIN_SPACE,
+                IDEOGRAPHIC_SPACE + "Report",
+                "Report" + ZWSP + NBSP,           // invisible + edge space together
+        };
+        int index = 0;
+        for (String name : padded) {
+            JsonObject json = target().path("/tag").request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .put(Entity.form(new Form()
+                            .param("name", name)
+                            .param("color", "#ff0000")), JsonObject.class);
+            String tagId = json.getString("id");
+            json = target().path("/tag/" + tagId).request()
+                    .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                    .get(JsonObject.class);
+            Assertions.assertEquals("Report", json.getString("name"),
+                    "edge whitespace must be trimmed exactly like an ordinary space (case " + index + ")");
+            index++;
+        }
+
+        // Interior whitespace is still refused — trimming the edges must not soften that.
+        Response response = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form()
+                        .param("name", " Re" + THIN_SPACE + "port ")
+                        .param("color", "#ff0000")));
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()),
+                "an interior thin space must still be refused after the edges are trimmed");
+
+        // Cleanup
+        target().path("/user/tag_ws_edge")
+                .queryParam("reassign_to_username", "admin").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+    }
 }

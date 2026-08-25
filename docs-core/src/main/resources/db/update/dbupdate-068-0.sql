@@ -1,0 +1,13 @@
+-- #305 tag names carrying Unicode whitespace. This step changes no schema on purpose: its whole
+-- substance is the Java repair TagNameWhitespaceRepair, which DbOpenHelper runs once on the upgrade
+-- that crosses this version. The rewrite it performs cannot be expressed here — stripping "every
+-- whitespace class" means Unicode general categories (Cf, Zs, Zl, Zp) that H2's Java-regex
+-- REGEXP_REPLACE and PostgreSQL's POSIX regex do not spell the same way, and the collision rule and
+-- the per-row before/after logging are not SQL at all.
+--
+-- The version number is what makes the repair one-time: this bump and the repair commit in the same
+-- transaction, so an instance that has already run it reads DB_VERSION=68 on the next start and the
+-- gate stays shut. That is also why this file exists at all rather than the repair being gated on a
+-- marker row it writes itself — the version IS the project's exactly-once mechanism, and a second
+-- one would be a second thing to keep in step.
+update T_CONFIG set CFG_VALUE_C = '68' where CFG_ID_C = 'DB_VERSION';

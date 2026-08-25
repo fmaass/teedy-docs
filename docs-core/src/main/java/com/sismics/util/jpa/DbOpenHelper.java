@@ -118,6 +118,20 @@ abstract class DbOpenHelper {
             }
 
             onUpgrade(oldVersion, currentVersion);
+
+            // #305 tag-name repair. Gated like the 050 preflight above on the version crossing — but
+            // ALSO on a retry marker a previous failed attempt left behind, because the version gate
+            // shuts as soon as this upgrade commits and a swallowed failure would otherwise be lost
+            // for good (TagNameWhitespaceRepair.isDue owns both conditions). It sits AFTER onUpgrade
+            // because it is a data repair, not a schema step — it needs the schema the scripts just
+            // applied — and it runs inside this transaction so the rewritten names, the marker state
+            // and the DB_VERSION bump commit together or not at all. Unlike every other step here it
+            // must NOT fail startup: it swallows its own errors behind a savepoint, so a failure
+            // cannot poison this transaction.
+            if (TagNameWhitespaceRepair.isDue(connection, oldVersion, currentVersion)) {
+                TagNameWhitespaceRepair.run(connection);
+            }
+
             log.info("Database upgrade complete");
 
             connection.commit();
