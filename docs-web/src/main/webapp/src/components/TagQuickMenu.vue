@@ -165,13 +165,20 @@ function hide() {
 // first open, then reuses it for the life of the component), and the anchor is what the
 // popover treats as "clicked itself". Both contracts are asserted in `tag-add-focus.spec.ts`.
 // Correcting the RESULT leaves the anchor, and therefore all of that, exactly as it was: this
-// only ever moves the finished panel horizontally, and only when it hangs off an edge.
+// only ever moves the finished panel along an axis, and only when it hangs off an edge.
 const PANEL_EDGE_GUTTER = 4
 
 function clampPanelIntoViewport() {
   const container = popover.value?.container as HTMLElement | undefined
   if (!container) return
 
+  // Both axes, every time: they correct independent insets, so an inline axis that is already
+  // where it belongs must not return before the block axis has been looked at.
+  clampPanelInlineAxis(container)
+  clampPanelBlockAxis(container)
+}
+
+function clampPanelInlineAxis(container: HTMLElement) {
   // Read back the value the popover placed the panel with, and correct it by a DELTA. Both of
   // `absolutePosition`'s branches write a physical left edge in PAGE coordinates — in RTL it
   // writes `inset-inline-end`, which maps to `left` there — so one arithmetic serves both
@@ -209,6 +216,51 @@ function clampPanelIntoViewport() {
   // The arrow (`--p-popover-arrow-left`) is deliberately left where `alignOverlay` put it: it
   // is an offset INSIDE the panel, and in the case this clamp fires it is already 0, i.e. the
   // panel's own leading corner — the anchor row it would otherwise point at is off screen.
+}
+
+// The same correction on the BLOCK axis, for the other way this anchor is unlike the compact
+// buttons PrimeVue's collision math was written against. A tall panel hung off a row low on
+// the page takes `absolutePosition`'s FLIP branch — `top = rowTop + scrollY - panelHeight`,
+// `transform-origin: bottom` — and that branch has its own guard, `if (top < 0) top = scrollY`,
+// which pins the inset to the top of the viewport. The overshoot happens AFTER it: flipping
+// also makes `alignOverlay` tag the panel `.p-popover-flipped`, whose
+// `margin-block-start: calc(popover.gutter * -1)` (-10px in this theme) pulls the rendered box
+// back up out of the viewport. The guarded inset is inside the screen; the border box is not,
+// by exactly the gutter — the measured -10px.
+//
+// TOP EDGE ONLY. The flip IS PrimeVue's remedy for bottom overflow, and it re-decides on every
+// `alignOverlay`, so a bottom clamp here would be a second, uncoordinated authority over the
+// same overflow: in the un-flipped case it would slide the panel up over the very row it is
+// anchored to, a visible change with no defect behind it. Because the flip converts bottom
+// overflow into top overflow, clamping the top covers the observed class either way.
+function clampPanelBlockAxis(container: HTMLElement) {
+  const style = container.style
+  const placed = Number.parseFloat(style.top)
+  if (Number.isNaN(placed)) return
+
+  // LAYOUT metrics, for the reason spelled out on the inline axis: the 300ms `scale(0.93)`
+  // enter animation makes the client rect lie for the first frames. `offsetHeight` is the
+  // untransformed border box, and computed margins are used values a transform never touches.
+  const height = container.offsetHeight
+  if (!height) return
+
+  // The flip's negative margin is part of where the panel RENDERS but not part of the inset
+  // PrimeVue wrote, so the correction has to carry it or it would clamp a phantom edge.
+  // `marginTop` rather than `marginBlockStart`: identical in this app's horizontal-tb writing
+  // mode, and the physical property is the one every engine resolves.
+  const margin = Number.parseFloat(getComputedStyle(container).marginTop) || 0
+  const scrollTop = window.scrollY
+  const top = placed - scrollTop + margin
+  const slack = document.documentElement.clientHeight - height
+  // Capped at half the slack, as inline: that is what keeps a downward correction from
+  // creating the bottom overflow it was never asked to fix. A panel taller than the screen
+  // degenerates the range to 0 and simply gets its top edge back.
+  const gutter = Math.max(0, Math.min(PANEL_EDGE_GUTTER, slack / 2))
+  const wanted = Math.max(gutter, top)
+  // Fixed point, so the observer's own re-entry converges instead of ringing.
+  if (Math.abs(wanted - top) < 0.5) return
+
+  style.top = `${wanted + scrollTop - margin}px`
 }
 
 // `alignOverlay()` is not a one-shot: the popover re-runs it from its own content

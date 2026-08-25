@@ -1,4 +1,11 @@
-import { test, expect, type APIRequestContext, type CleanupFixture, type Page } from './fixtures'
+import {
+  test,
+  expect,
+  request as pwRequest,
+  type APIRequestContext,
+  type CleanupFixture,
+  type Page,
+} from './fixtures'
 import {
   unique,
   uniqueTag,
@@ -6,6 +13,7 @@ import {
   deleteDocApi,
   deleteTagApi,
   gotoDocumentList,
+  login,
   MAX_TAG_NAME_LENGTH,
 } from './helpers'
 
@@ -109,7 +117,23 @@ async function seed(
     cleanup.defer(`delete the geometry tag ${name}`, () => deleteTagApi(request, id))
   }
 
-  const docTitle = unique('tqm-geometry-doc')
+  // The narrow-viewport test's PREMISE is that the document table is wider than a 393px
+  // screen. That width comes from the table's CONTENT, so the seeded document — which is also
+  // the row the menu anchors to — carries a title built to force the table off screen.
+  // The lever is a single UNBREAKABLE token: the title cell has no nowrap or ellipsis, so
+  // hyphens and spaces are line-break opportunities and a long hyphenated title simply wraps,
+  // leaving the row no wider than its container. One ~60-character compound with no break
+  // points gives the cell a min-content width well past 393px. Total stays under the API's
+  // 100-character title cap.
+  // The token alone is NOT sufficient, and that is the other half of the narrow test's design.
+  // MEASURED 2026-08-25: with this exact title, the anchor row's right edge read >393px when
+  // the spec ran alone but sat pinned at 377px (the container width under the full suite's
+  // scrollbar) when ambient suite documents shared the table — the same title, the same
+  // viewport, a different premise. The mechanism was not diagnosed; the answer is not a longer
+  // token but removing the ambient rows, which is why the narrow test seeds through a FRESH
+  // USER whose list holds nothing else (see the describe block below).
+  const docTitle =
+    unique('tqmgeo') + '-Bebauungsplanaenderungsverfahrensdokumentationszusammenfassung'
   const docId = await apiCreateDocument(request, docTitle)
   cleanup.defer('purge the geometry document', () => deleteDocApi(request, docId))
 
@@ -285,77 +309,171 @@ test('the quick-menu tag rows keep their text box and the panel takes the room i
   ).toBeLessThanOrEqual(0)
 })
 
+// The seeded account's password. The server enforces upper+lower+digit, so a weaker literal
+// would 400 at create time and surface as an unrelated "create the geometry user" failure.
+const GEOMETRY_USER_PASSWORD = 'GeoPass123'
+
+// Create a throwaway account as admin. A dedicated admin API context is opened and disposed
+// here rather than borrowing the spec's `request` fixture: the describe below runs on CLEARED
+// storage state (see its comment), where the fixture is anonymous and every admin call 403s.
+async function createGeometryUser(baseURL: string): Promise<string> {
+  // `unique()` mints a name with separators the username field does not accept; stripping them
+  // keeps the per-worker uniqueness (timestamp + pid + counter) inside the server's 50-char cap.
+  const username = unique('tqmgeo').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const admin = await pwRequest.newContext({ baseURL })
+  const adminLogin = await admin.post('/api/user/login', {
+    form: { username: 'admin', password: 'admin', remember: false },
+  })
+  expect(adminLogin.ok(), 'admin login for the geometry user seed').toBeTruthy()
+  const created = await admin.put('/api/user', {
+    form: {
+      username,
+      password: GEOMETRY_USER_PASSWORD,
+      email: `${username}@example.com`,
+      storage_quota: 1_000_000_000,
+    },
+  })
+  expect(created.ok(), `create the geometry user ${username}`).toBeTruthy()
+  await admin.dispose()
+  return username
+}
+
+// Delete the throwaway account as admin. The reassign target is supplied because deletion is
+// refused with ReassignRequired while the account still owns anything (#55/#180) — and its
+// success is ASSERTED, or a leaked account (with whatever survived the seed teardown) would
+// quietly become ambient data for later runs. The context is built and disposed inside the
+// step so nothing has to stay alive across teardown ordering.
+async function deleteGeometryUser(baseURL: string, username: string): Promise<void> {
+  const admin = await pwRequest.newContext({ baseURL })
+  const adminLogin = await admin.post('/api/user/login', {
+    form: { username: 'admin', password: 'admin', remember: false },
+  })
+  expect(adminLogin.ok(), 'admin login for the geometry user teardown').toBeTruthy()
+  const deleted = await admin.delete(`/api/user/${username}`, {
+    params: { reassign_to_username: 'admin' },
+  })
+  expect(deleted.ok(), `cleanup: delete the geometry user ${username}`).toBeTruthy()
+  await admin.dispose()
+}
+
+// An API context carrying THAT user's session, so everything seeded through it is owned by
+// them — which is what keeps it out of every other account's list.
+async function openGeometryUserRequest(baseURL: string, username: string): Promise<APIRequestContext> {
+  const asUser = await pwRequest.newContext({ baseURL })
+  const userLogin = await asUser.post('/api/user/login', {
+    form: { username, password: GEOMETRY_USER_PASSWORD, remember: false },
+  })
+  expect(userLogin.ok(), `log the geometry user ${username} in`).toBeTruthy()
+  return asUser
+}
+
 // The narrow-viewport half, driven with the desktop project's pointer at the mobile
 // project's own viewport (Pixel 5 = 393×851). `width: min(24rem, calc(100vw - 2rem))` has two
 // branches and only this one exercises the clamp: 24rem (384px) plus the popover's chrome
 // would otherwise be wider than a 393px screen.
-test('at a 393px-wide viewport the quick menu still fits on screen (#284)', async ({
-  page,
-  request,
-  cleanup,
-}) => {
-  test.skip(isMobileViewport(page), NO_TOUCH_CONTEXTMENU)
-  test.setTimeout(60_000)
+//
+// It runs as a FRESH USER, on CLEARED storage state, for one reason: its premise is a
+// measurement of the document table, and a table is only as wide as the rows in it. As admin
+// the table also holds whatever every earlier spec in the run left behind, and those rows
+// decided the anchor's right edge instead of the seeded title (measured — see `seed`). Teedy's
+// document list is ACL-scoped with no admin bypass (`DocumentResource#list` →
+// `getTargetIdList`), and tags are owned the same way, so a brand-new account's list contains
+// exactly what this test seeds through that account's own session and nothing else. That makes
+// the premise a property of the seed rather than of the suite order.
+test.describe('at a phone width, on an isolated account', () => {
+  // Cleared so the shared admin session cannot log the browser in first; the test authenticates
+  // through the real form as the seeded user. `request` is anonymous under this override, which
+  // is why the admin and user contexts above are built explicitly.
+  test.use({ storageState: { cookies: [], origins: [] } })
 
-  const { docTitle, shortName } = await seed(request, cleanup)
+  test('at a 393px-wide viewport the quick menu still fits on screen (#284)', async ({
+    page,
+    baseURL,
+    cleanup,
+  }) => {
+    test.skip(isMobileViewport(page), NO_TOUCH_CONTEXTMENU)
+    test.setTimeout(60_000)
 
-  // Set BEFORE the navigation so the app lays out for this width from the start.
-  await page.setViewportSize({ width: 393, height: 851 })
-  await openQuickMenu(page, docTitle)
-  const g = await measure(page)
+    const username = await createGeometryUser(baseURL!)
+    const asUser = await openGeometryUserRequest(baseURL!, username)
+    // Registration order is teardown order (the `cleanup` fixture is FIFO), and this order is
+    // load-bearing: `seed` registers the tag and document deletions against `asUser`, so they
+    // run FIRST, while that session and its context are still alive. Only then is the account
+    // removed, and only then is the context disposed.
+    const { docTitle, shortName } = await seed(asUser, cleanup)
+    cleanup.defer('delete the geometry user', () => deleteGeometryUser(baseURL!, username))
+    cleanup.defer('dispose the geometry user API context', () => asUser.dispose())
 
-  expect(g.viewport.width, 'the viewport really narrowed').toBe(393)
-  expect(g.rowCount, 'the menu really offers the seeded tags').toBeGreaterThanOrEqual(SEEDED_TAGS)
-  expect(
-    g.minRowContentHeight,
-    'every tag row keeps a rendered text box at a phone width too',
-  ).toBeGreaterThanOrEqual(MIN_ROW_CONTENT_HEIGHT)
-  expect(
-    g.bodyWidth,
-    'the narrow panel is still wider than the old fixed 15rem it replaced',
-  ).toBeGreaterThan(OLD_FIXED_PANEL_WIDTH)
+    // Set BEFORE the navigation so the app lays out for this width from the start.
+    await page.setViewportSize({ width: 393, height: 851 })
+    await login(page, username, GEOMETRY_USER_PASSWORD)
+    await openQuickMenu(page, docTitle)
 
-  // The property this phase owns: the panel is never WIDER than the screen. `min()`'s second
-  // branch is what delivers it — a flat 24rem would render 408px of panel into a 393px
-  // viewport, which is exactly the trade this fix had to avoid while widening the panel.
-  expect(
-    g.panelWidth,
-    `the panel is no wider than the ${g.viewport.width}px screen ` +
-      `(document client width ${g.viewport.documentClientWidth}px)`,
-  ).toBeLessThanOrEqual(g.viewport.width)
+    // ISOLATION, asserted rather than assumed: the premise below reads the widest row in
+    // `tbody`, so an ambient row wider (or a scrollbar-forcing list longer) than the seeded one
+    // would silently take the measurement over — which is exactly the failure this structure
+    // replaces. One row means the number the premise reads is the seeded title's.
+    await expect(
+      page.locator('tbody tr'),
+      "the fresh account's document list holds ONLY this test's seeded row, so the table's " +
+        'width — and with it the anchor the panel is aligned to — is decided by the seeded title',
+    ).toHaveCount(1)
 
-  // PLACEMENT (#284 follow-up, TEEDY-117). MEASURED on 791d258b in the first e2e run of this
-  // spec: inline `inset-inline-start: 325px`, panel width 385.1px, panel RIGHT EDGE 710.1px —
-  // 317px off a 393px screen, while the click that opened it was at 204.5px, well inside.
-  //
-  // The panel's own width is not what puts it there, which is why the `min()` clamp asserted
-  // just above cannot fix it: `@primeuix/utils`' `absolutePosition` aligns the panel to its
-  // ANCHOR, and this menu's anchor is the right-clicked `<tr>` (TagQuickMenu.show hands
-  // `event.currentTarget` to `Popover.show`). At a phone width the document table is ~694px
-  // wide and scrolls horizontally inside `.p-datatable-table-container`, so the row itself
-  // ends off screen; the collision branch then right-aligns the panel to the ROW's right edge
-  // (`left = max(0, targetLeft + scrollX + targetWidth - panelWidth)`) and follows it off the
-  // screen. The same 710.1px right edge came out of the old 15rem panel, so this predates
-  // #284 and is fixed separately, by clamping the placed panel back into the viewport.
-  expect(
-    g.anchorRowRight,
-    'PREMISE: the table really is wider than the viewport, so the anchor row the panel is ' +
-      'aligned to runs off screen — without that, the placement assertion below is vacuous',
-  ).toBeGreaterThan(g.viewport.width)
-  expectPanelInsideViewport(g, `${g.viewport.width}px viewport, anchor row off screen`)
+    const g = await measure(page)
 
-  // …and it STAYS inside when the popover re-aligns itself. `Popover.alignOverlay()` runs
-  // again on every delivery of the popover's own content ResizeObserver, so a correction
-  // applied once at open time is overwritten as soon as the panel's content changes size.
-  // Typing in the search box shrinks the bounded tag list — an ordinary thing to do with this
-  // menu open, and a real content resize — so this second measurement is what distinguishes a
-  // clamp that holds from one that is undone a frame later.
-  await page.locator('.p-popover input.tqm-filter-input').fill(shortName)
-  await expect(
-    page.locator('.p-popover .tqm-option'),
-    'the search narrowed the list to the one seeded match, so the panel really did resize',
-  ).toHaveCount(1)
-  const afterResize = await measure(page)
-  expect(afterResize.rowCount, 'the list really shrank').toBeLessThan(g.rowCount)
-  expectPanelInsideViewport(afterResize, 'after a content resize re-aligned the panel')
+    expect(g.viewport.width, 'the viewport really narrowed').toBe(393)
+    expect(g.rowCount, 'the menu really offers the seeded tags').toBeGreaterThanOrEqual(SEEDED_TAGS)
+    expect(
+      g.minRowContentHeight,
+      'every tag row keeps a rendered text box at a phone width too',
+    ).toBeGreaterThanOrEqual(MIN_ROW_CONTENT_HEIGHT)
+    expect(
+      g.bodyWidth,
+      'the narrow panel is still wider than the old fixed 15rem it replaced',
+    ).toBeGreaterThan(OLD_FIXED_PANEL_WIDTH)
+
+    // The property this phase owns: the panel is never WIDER than the screen. `min()`'s second
+    // branch is what delivers it — a flat 24rem would render 408px of panel into a 393px
+    // viewport, which is exactly the trade this fix had to avoid while widening the panel.
+    expect(
+      g.panelWidth,
+      `the panel is no wider than the ${g.viewport.width}px screen ` +
+        `(document client width ${g.viewport.documentClientWidth}px)`,
+    ).toBeLessThanOrEqual(g.viewport.width)
+
+    // PLACEMENT (#284 follow-up, TEEDY-117). MEASURED on 791d258b in the first e2e run of this
+    // spec: inline `inset-inline-start: 325px`, panel width 385.1px, panel RIGHT EDGE 710.1px —
+    // 317px off a 393px screen, while the click that opened it was at 204.5px, well inside.
+    //
+    // The panel's own width is not what puts it there, which is why the `min()` clamp asserted
+    // just above cannot fix it: `@primeuix/utils`' `absolutePosition` aligns the panel to its
+    // ANCHOR, and this menu's anchor is the right-clicked `<tr>` (TagQuickMenu.show hands
+    // `event.currentTarget` to `Popover.show`). At a phone width the document table is ~694px
+    // wide and scrolls horizontally inside `.p-datatable-table-container`, so the row itself
+    // ends off screen; the collision branch then right-aligns the panel to the ROW's right edge
+    // (`left = max(0, targetLeft + scrollX + targetWidth - panelWidth)`) and follows it off the
+    // screen. The same 710.1px right edge came out of the old 15rem panel, so this predates
+    // #284 and is fixed separately, by clamping the placed panel back into the viewport.
+    expect(
+      g.anchorRowRight,
+      'PREMISE: the table really is wider than the viewport, so the anchor row the panel is ' +
+        'aligned to runs off screen — without that, the placement assertion below is vacuous',
+    ).toBeGreaterThan(g.viewport.width)
+    expectPanelInsideViewport(g, `${g.viewport.width}px viewport, anchor row off screen`)
+
+    // …and it STAYS inside when the popover re-aligns itself. `Popover.alignOverlay()` runs
+    // again on every delivery of the popover's own content ResizeObserver, so a correction
+    // applied once at open time is overwritten as soon as the panel's content changes size.
+    // Typing in the search box shrinks the bounded tag list — an ordinary thing to do with this
+    // menu open, and a real content resize — so this second measurement is what distinguishes a
+    // clamp that holds from one that is undone a frame later.
+    await page.locator('.p-popover input.tqm-filter-input').fill(shortName)
+    await expect(
+      page.locator('.p-popover .tqm-option'),
+      'the search narrowed the list to the one seeded match, so the panel really did resize',
+    ).toHaveCount(1)
+    const afterResize = await measure(page)
+    expect(afterResize.rowCount, 'the list really shrank').toBeLessThan(g.rowCount)
+    expectPanelInsideViewport(afterResize, 'after a content resize re-aligned the panel')
+  })
 })
