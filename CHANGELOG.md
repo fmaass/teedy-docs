@@ -8,6 +8,21 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.8] - 2026-08-25
+
+There is no database migration; the schema level remains 64.
+
+### Added
+- Duplicating a document now carries its outgoing links: the copy's "links to" list matches the original's, limited to link targets the duplicating user is allowed to read, with duplicate rows collapsed. The "linked from" list starts empty on the copy, because those links belong to the other documents and copying them would silently edit documents the user never touched. This applies to the single duplicate action and the bulk duplicate, which run the same operation (#292).
+- The linked-documents lists can also be sorted by the linked document's own creation date, oldest or newest first, beside the title orders — one choice driving both lists for the session. Each relation now carries that date; a document whose stored date is missing sorts last in either direction (#296).
+- A loaded saved filter is marked as modified once one of its criteria is edited, instead of silently dropping back to the plain state: the toolbar keeps the filter's name in a faded modified label, spelled out for screen readers rather than carried by colour alone, and the loaded filter's identity survives reload because it travels in the address bar. Clearing the filters removes it (#297).
+
+### Fixed
+- The user-and-group search inputs on the permissions panels sized their box for the English placeholder, clipping longer languages — reported in German on the tag page. They now grow to fit the longest shipped translation and wrap to their own line on narrow cards; the document permissions panel had the same defect on phones in every language and is fixed the same way (#301).
+- Custom metadata definitions listed in a case-sensitive order on databases with a case-sensitive collation, so all upper-case names sorted before all lower-case ones; the default listing now compares names case-insensitively (#291).
+- The right-click tag menu could land outside the viewport when the document table was wider than a narrow screen; it now clamps its position back into view, and its narrow-screen width leaves room for its own padding and border (#284).
+- The tag edit page's document count froze at first open because nothing refreshed its private cache; it now follows the shared count that document changes already update.
+
 ## [3.8.7] - 2026-08-23
 
 There is no database migration; the schema level remains 64.
