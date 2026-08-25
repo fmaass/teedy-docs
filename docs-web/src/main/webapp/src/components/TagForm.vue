@@ -58,6 +58,13 @@ const props = defineProps<{
   idPrefix: string
   acl: TagFormAcl
   /**
+   * Placeholder for the Name field. Only the tag management page sets it: its create card has
+   * always carried "Tag name" there, and six e2e specs seed their tags through that placeholder
+   * (tags, tag-acl, bulk, search, saved-filters, settings-crud). Left off elsewhere, so the
+   * edit page and the side panel render the labelled field exactly as before.
+   */
+  namePlaceholder?: string
+  /**
    * Drop the card chrome. The management page has always shown the form as two cards and its
    * screenshots pin that; the side panel is already a surface of its own, so it renders flat.
    */
@@ -205,6 +212,7 @@ function onHexBlur() {
           :id="`${idPrefix}-name`"
           :modelValue="props.name"
           :autofocus="autofocusName"
+          :placeholder="namePlaceholder"
           class="w-full"
           @update:modelValue="emit('update:name', $event ?? '')"
         />

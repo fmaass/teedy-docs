@@ -22,7 +22,9 @@
  * written when the user presses Save on the form, never behind their back.
  *
  * Permissions are collected, not applied, until the tag exists: AclEditor's deferred mode
- * emits each grant, and they are PUT to /acl immediately after PUT /tag returns an id.
+ * emits each grant, and they are PUT to /acl immediately after PUT /tag returns an id. That
+ * contract — the collection, the ordering, the in-flight snapshot — lives in
+ * composables/useTagCreate.ts, shared with the tag management page's create card (#306).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -31,12 +33,11 @@ import Drawer from 'primevue/drawer'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
-import TagForm, { type TagFormAcl } from './TagForm.vue'
-import { createTag, type Tag } from '../api/tag'
-import { addAcl, type AclEntry } from '../api/acl'
+import TagForm from './TagForm.vue'
+import { type Tag } from '../api/tag'
 import { queryKeys } from '../api/queryKeys'
-import { useAuthStore } from '../stores/auth'
 import { useResizablePanel, type ClampCfg } from '../composables/useResizablePanel'
+import { useTagCreate, DEFAULT_TAG_COLOR } from '../composables/useTagCreate'
 
 const props = defineProps<{
   visible: boolean
@@ -57,24 +58,20 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useToast()
 const queryClient = useQueryClient()
-const auth = useAuthStore()
 
-/** The same seed colour the tag management page's create row uses, so a tag looks the same
- *  whichever surface made it. */
-const DEFAULT_COLOR = '2aabd2'
+// The shared create contract: the grants collected while the tag has no id, and the call that
+// creates it and applies them (composables/useTagCreate.ts).
+const { errorMessage, aclState, addGrant, removeGrant, reset, create } = useTagCreate()
 
 const name = ref('')
-const color = ref(DEFAULT_COLOR)
+const color = ref(DEFAULT_TAG_COLOR)
 const parent = ref<string | null>(null)
+
+// The panel's own in-flight flag, covering its WHOLE save — the create AND the tail that hands
+// the tag to the document and closes the panel. It is not the shared composable's to hold: a
+// flag released when the request came back would leave the panel closeable while `created` had
+// still not been emitted, stranding a tag that exists on the server but reaches no document.
 const saving = ref(false)
-const errorMessage = ref<string | null>(null)
-
-/** Grants collected in the panel, applied only once the tag has an id. */
-const pendingAcls = ref<AclEntry[]>([])
-
-interface ApiError {
-  response?: { data?: { message?: string } }
-}
 
 // Every open starts from scratch: the panel is opened FOR a particular typed name, and a
 // draft abandoned by a cancel must not come back with the next one. `immediate` covers the
@@ -84,11 +81,10 @@ watch(
   (visible) => {
     if (!visible) return
     name.value = props.initialName
-    color.value = DEFAULT_COLOR
+    color.value = DEFAULT_TAG_COLOR
     parent.value = null
-    pendingAcls.value = []
-    errorMessage.value = null
     saving.value = false
+    reset()
   },
   { immediate: true },
 )
@@ -101,47 +97,6 @@ const parentOptions = computed(() => [
   { label: t('ui.tags_page.none_root'), value: null },
   ...props.tags.map((tag) => ({ label: tag.name, value: tag.id })),
 ])
-
-// The base grants the server will create for the creator (TagCreationUtil gives the owner
-// READ and WRITE). Showing the owner row makes the permissions section read as it will after
-// the save, rather than as an empty list; it is locked because those grants are the backend's
-// and it refuses to remove them.
-const ownerAcl = computed<AclEntry | null>(() =>
-  auth.username
-    ? { perm: 'WRITE', id: auth.username, name: auth.username, type: 'USER' }
-    : null,
-)
-
-function isOwnerRow(acl: AclEntry): boolean {
-  return acl.type === 'USER' && acl.perm === 'WRITE' && acl.id === auth.username
-}
-
-const aclEntries = computed<AclEntry[]>(() =>
-  ownerAcl.value ? [ownerAcl.value, ...pendingAcls.value] : [...pendingAcls.value],
-)
-
-const aclState = computed<TagFormAcl>(() => ({
-  // No id exists yet — deferred mode never reads it.
-  sourceId: '',
-  entries: aclEntries.value,
-  writable: true,
-  immutable: (acl) => isOwnerRow(acl),
-  deferred: true,
-}))
-
-function onAclAdd(grant: AclEntry) {
-  // The owner's grants are the server's to create, and a grant already collected is already
-  // collected — either would just be a round trip that changes nothing.
-  if (isOwnerRow(grant)) return
-  if (pendingAcls.value.some((a) => a.perm === grant.perm && a.id === grant.id)) return
-  pendingAcls.value = [...pendingAcls.value, grant]
-}
-
-function onAclRemove(grant: AclEntry) {
-  pendingAcls.value = pendingAcls.value.filter(
-    (a) => !(a.perm === grant.perm && a.id === grant.id),
-  )
-}
 
 /** Close the panel. Used by a completed save, which is entitled to close itself. */
 function close() {
@@ -170,52 +125,39 @@ async function save() {
   // SNAPSHOT the whole draft before the first await. Every field below is a ref the user can
   // still edit while the request is in flight, and re-reading one after an await would apply
   // a later draft's value to the tag this call created — the second draft's grants landing on
-  // the first draft's tag. Nothing in the chain below reads a ref again.
+  // the first draft's tag. The collected grants are snapshotted the same way inside `create`,
+  // and nothing in the chain below reads a ref again.
   const draft = {
     name: name.value.trim(),
     color: '#' + color.value,
     parent: parent.value,
-    grants: [...pendingAcls.value],
   }
   if (!draft.name) return
 
+  // The flag is raised around the ENTIRE flow, not just the request: the tail below is what
+  // hands the tag over, and a panel closed between the two would leave it on the server and
+  // off the document.
   saving.value = true
-  errorMessage.value = null
   try {
-    const { data } = await createTag(draft.name, draft.color, draft.parent ?? undefined)
-
-    // Now, and only now, the grants have somewhere to land. A grant that fails does NOT undo
-    // the tag — it exists and is about to go on the document — so it is reported and the flow
-    // continues; the permissions can be finished on the tag management page.
-    let grantFailed = false
-    for (const grant of draft.grants) {
-      try {
-        await addAcl(data.id, grant.perm, grant.name ?? '', grant.type)
-      } catch {
-        grantFailed = true
-      }
-    }
+    const outcome = await create(draft)
+    // The create failed: `errorMessage` carries the server's own reason and the panel stays
+    // open on the draft that produced it.
+    if (!outcome) return
 
     await queryClient.invalidateQueries({ queryKey: queryKeys.tags() })
     toast.add(
-      grantFailed
+      outcome.grantFailed
         ? { severity: 'error', summary: t('ui.acl_editor.failed_add'), life: 3000 }
         : { severity: 'success', summary: t('ui.tags_page.tag_created'), life: 2000 },
     )
 
     emit('created', {
-      id: data.id,
+      id: outcome.id,
       name: draft.name,
       color: draft.color,
       parent: draft.parent,
     })
     close()
-  } catch (error) {
-    // The tag endpoints answer with a named client error (IllegalTagName, ValidationError,
-    // ParentNotFound). Quoting it in the panel is the difference between "fix the name" and
-    // "try again"; a toast would be gone by the time the name is being retyped.
-    errorMessage.value =
-      (error as ApiError).response?.data?.message || t('ui.tags_page.failed_create_tag')
   } finally {
     saving.value = false
   }
@@ -307,8 +249,8 @@ const drawerStyle = computed(() => (isMobile.value ? {} : { width: panelWidth.va
       v-model:parent="parent"
       :parent-options="parentOptions"
       :acl="aclState"
-      @acl-add="onAclAdd"
-      @acl-remove="onAclRemove"
+      @acl-add="addGrant"
+      @acl-remove="removeGrant"
     >
       <template #permissions-hint>
         <Message

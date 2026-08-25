@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import {
   listTags,
-  createTag,
   getTagStats,
   getTagMaintenance,
   deleteTagSubtree,
@@ -22,10 +21,13 @@ import ColorPicker from 'primevue/colorpicker'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Dialog from 'primevue/dialog'
+import Message from 'primevue/message'
 import ContextMenu from 'primevue/contextmenu'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import { useTagCreate, DEFAULT_TAG_COLOR } from '../../composables/useTagCreate'
 import ErrorState from '../../components/ErrorState.vue'
+import TagForm from '../../components/TagForm.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -34,8 +36,37 @@ const { confirmDanger } = useConfirmDanger()
 const queryClient = useQueryClient()
 
 const newTagName = ref('')
-const newTagColor = ref('2aabd2')
+const newTagColor = ref(DEFAULT_TAG_COLOR)
 const newTagParent = ref<string | null>(null)
+
+// #306 — "let permissions be set directly in the tag-management CREATE flow" (the reporter).
+// Creating a tag here used to mean creating it bare, finding it in the tree, opening it, and
+// only then reaching a permissions section. The full form — the SAME components/TagForm.vue
+// the tag edit page and the #288 side panel host, permissions section included — is one click
+// away, and the grants set in it are applied to the tag the moment it has an id.
+//
+// It EXPANDS rather than replacing the compact row, so the page's resting state is unchanged:
+// that row is the seeding path of six e2e specs and the surface #86's German button-geometry
+// gate measures (e2e/mobile-button-overflow.spec.ts). Both states drive the same three fields
+// and the same create call — only the second one can reach the permissions.
+const fullForm = ref(false)
+
+// The shared create contract: the grants collected while the tag has no id, and the call that
+// creates it and applies them (composables/useTagCreate.ts, shared with TagCreatePanel).
+const {
+  errorMessage: createError,
+  aclState: createAclState,
+  addGrant,
+  removeGrant,
+  reset: resetCreateGrants,
+  create,
+} = useTagCreate()
+
+// This page's own in-flight flag, covering its WHOLE create — the request and the tail that
+// clears the draft and refreshes the tree. It is the host's, not the shared composable's, for
+// the same reason the side panel keeps its own: a flag released when the request came back
+// would re-open the Cancel (which resets the very draft the tail is still finishing with).
+const creating = ref(false)
 
 const { data: tags, isLoading, isError, refetch } = useQuery({
   queryKey: ['tags'],
@@ -84,14 +115,6 @@ interface TagTreeNode {
   label: string
   data: Tag
   children: TagTreeNode[]
-}
-
-interface ApiError {
-  response?: {
-    data?: {
-      message?: string
-    }
-  }
 }
 
 const tagTreeNodes = computed(() => {
@@ -149,23 +172,59 @@ function onTreeFilterInput(event: Event) {
   }
 }
 
-const { mutate: addTag } = useMutation({
-  mutationFn: () => createTag(newTagName.value.trim(), '#' + newTagColor.value, newTagParent.value ?? undefined),
-  onSuccess: () => {
+async function handleAddTag() {
+  if (creating.value) return
+  // SNAPSHOT the fields before the first await — every one of them stays editable while the
+  // request is in flight, and the grants are snapshotted the same way inside `create`.
+  const draft = {
+    name: newTagName.value.trim(),
+    color: '#' + newTagColor.value,
+    parent: newTagParent.value,
+  }
+  if (!draft.name) return
+
+  creating.value = true
+  try {
+    const outcome = await create(draft)
+    // The create failed: `createError` carries the server's own reason (a duplicate name, an
+    // illegal character, a parent that has gone) and the draft stays exactly as it was, so the
+    // name and the collected grants can be corrected rather than retyped.
+    if (!outcome) return
+
     newTagName.value = ''
     newTagParent.value = null
-    queryClient.invalidateQueries({ queryKey: ['tags'] })
-    toast.add({ severity: 'success', summary: t('ui.tags_page.tag_created'), life: 2000 })
-  },
-  onError: (error: unknown) => {
-    const message = (error as ApiError).response?.data?.message || t('ui.tags_page.failed_create_tag')
-    toast.add({ severity: 'error', summary: message, life: 3000 })
-  },
-})
+    // The grants that were just applied belong to the tag that now exists — they must not
+    // follow the next one into a second tag.
+    resetCreateGrants()
+    queryClient.invalidateQueries({ queryKey: queryKeys.tags() })
+    toast.add(
+      outcome.grantFailed
+        ? { severity: 'error', summary: t('ui.acl_editor.failed_add'), life: 3000 }
+        : { severity: 'success', summary: t('ui.tags_page.tag_created'), life: 2000 },
+    )
+  } finally {
+    creating.value = false
+  }
+}
 
-function handleAddTag() {
-  if (!newTagName.value.trim()) return
-  addTag()
+/** Open the full form, carrying whatever is already typed in the compact row into it. */
+function openFullForm() {
+  createError.value = null
+  fullForm.value = true
+}
+
+/**
+ * Abandon the draft and fold the form away again. Refused while a create is in flight — the
+ * running request would be left applying the grants of a draft the card no longer shows. The
+ * button is disabled for the duration too, so this is the last line rather than the only one.
+ */
+function cancelFullForm() {
+  if (creating.value) return
+  newTagName.value = ''
+  newTagColor.value = DEFAULT_TAG_COLOR
+  newTagParent.value = null
+  resetCreateGrants()
+  fullForm.value = false
 }
 
 function selectTag(node: { key: string }) {
@@ -400,30 +459,94 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
       <p class="page-subtitle">{{ t('ui.tags_page.subtitle') }}</p>
     </div>
 
-    <!-- Create tag -->
+    <!-- Create tag. Two states over ONE draft: the compact row it has always been, and — since
+         #306 — the shared full form, which is the only one of the two that can reach the
+         permissions of a tag that does not exist yet. -->
     <Card class="mb-4" style="max-width: 520px">
       <template #content>
         <h3 class="section-title">{{ t('ui.tags_page.create_tag') }}</h3>
-        <div class="create-row">
-          <ColorPicker v-model="newTagColor" />
-          <InputText
-            v-model="newTagName"
-            :placeholder="t('ui.tags_page.tag_name_placeholder')"
-            class="flex-1"
-            @keydown.enter="handleAddTag"
+
+        <template v-if="!fullForm">
+          <div class="create-row">
+            <ColorPicker v-model="newTagColor" />
+            <InputText
+              v-model="newTagName"
+              :placeholder="t('ui.tags_page.tag_name_placeholder')"
+              class="flex-1"
+              @keydown.enter="handleAddTag"
+            />
+          </div>
+          <div class="create-row mt-3">
+            <Select
+              v-model="newTagParent"
+              :options="parentOptions"
+              optionLabel="label"
+              optionValue="value"
+              :placeholder="t('ui.tags_page.parent_placeholder')"
+              class="flex-1"
+              showClear
+            />
+            <Button
+              class="tag-create-btn"
+              :label="t('create')"
+              icon="pi pi-plus"
+              :loading="creating"
+              @click="handleAddTag"
+            />
+          </div>
+          <div class="create-more">
+            <Button
+              class="tag-new-permissions-btn"
+              :label="t('ui.tag_acl.title')"
+              icon="pi pi-lock"
+              text
+              size="small"
+              :aria-expanded="false"
+              @click="openFullForm"
+            />
+          </div>
+        </template>
+
+        <!-- The same form the tag edit page and the document editor's create panel host, with
+             its permissions section in deferred mode: the grants are collected here and applied
+             the moment the tag has an id. `flat` because this card is already the surface. -->
+        <TagForm
+          v-else
+          flat
+          id-prefix="tag-new"
+          v-model:name="newTagName"
+          v-model:color="newTagColor"
+          v-model:parent="newTagParent"
+          :parent-options="parentOptions"
+          :name-placeholder="t('ui.tags_page.tag_name_placeholder')"
+          :acl="createAclState"
+          @acl-add="addGrant"
+          @acl-remove="removeGrant"
+        />
+
+        <!-- The server's own reason for refusing a create (a duplicate name, an illegal
+             character, a parent that has gone), stated where the name is being typed. -->
+        <Message v-if="createError" severity="error" :closable="false" class="tag-new-error">
+          {{ createError }}
+        </Message>
+
+        <div v-if="fullForm" class="create-actions">
+          <Button
+            class="tag-create-btn"
+            :label="t('create')"
+            icon="pi pi-plus"
+            :disabled="!newTagName.trim()"
+            :loading="creating"
+            @click="handleAddTag"
           />
-        </div>
-        <div class="create-row mt-3">
-          <Select
-            v-model="newTagParent"
-            :options="parentOptions"
-            optionLabel="label"
-            optionValue="value"
-            :placeholder="t('ui.tags_page.parent_placeholder')"
-            class="flex-1"
-            showClear
+          <Button
+            class="tag-create-cancel-btn"
+            :label="t('cancel')"
+            severity="secondary"
+            text
+            :disabled="creating"
+            @click="cancelFullForm"
           />
-          <Button :label="t('create')" icon="pi pi-plus" @click="handleAddTag" />
         </div>
       </template>
     </Card>
@@ -591,6 +714,30 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
 }
 .create-row :deep(.p-select) {
   min-width: 0;
+}
+
+/* The way into the full form, on its own row so the compact row above keeps holding exactly
+   one button — the one #86's geometry gate measures. */
+.create-more {
+  margin-top: 0.5rem;
+}
+.create-more :deep(.p-button) {
+  padding-inline: 0;
+}
+
+.create-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+.create-actions :deep(.p-button) {
+  flex-shrink: 0;
+}
+
+.tag-new-error {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
 }
 
 .tag-tree :deep(.p-tree) {

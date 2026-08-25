@@ -66,9 +66,12 @@ const TAGS: Tag[] = [
   { id: 'tag-blue', name: 'Contract', color: '#1565c0', parent: null },
 ]
 
-function mountPanel(props: Record<string, unknown> = {}) {
+// `queryClient` is injectable so a test can hold the panel's own cache invalidation open and
+// observe what the panel does while its save is still finishing (the tail-window spec below).
+function mountPanel(props: Record<string, unknown> = {}, opts: { queryClient?: QueryClient } = {}) {
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } })
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient =
+    opts.queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return mount(TagCreatePanel, {
     props: {
       visible: true,
@@ -386,15 +389,16 @@ describe('TagCreatePanel — cancelling', () => {
 // both — a save in flight cannot be closed out from under, and even if it could, the request
 // that is running carries the draft it STARTED with rather than whatever the refs say when each
 // `await` happens to resume.
+/** A promise whose settling the test controls, standing in for a slow server. */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
 describe('TagCreatePanel — a save already in flight', () => {
-  /** A promise whose settling this test controls, standing in for a slow server. */
-  function deferred<T>() {
-    let resolve!: (value: T) => void
-    const promise = new Promise<T>((r) => {
-      resolve = r
-    })
-    return { promise, resolve }
-  }
 
   async function startSlowSave() {
     const pending = deferred<{ data: { id: string } }>()
@@ -454,6 +458,51 @@ describe('TagCreatePanel — a save already in flight', () => {
     expect(wrapper.emitted('created')).toEqual([
       [{ id: 'tag-new', name: 'First draft', color: '#2aabd2', parent: null }],
     ])
+    wrapper.unmount()
+  })
+})
+
+// A save does not end when the tag lands. The panel still has to refresh the tag cache, report,
+// hand the tag to the document's selection and close itself — and until `created` has been
+// emitted, a close would throw away a tag that already exists on the server, unclaimed by the
+// document it was made for. So the whole flow is one window, not just the request part.
+describe('TagCreatePanel — the tail between the tag landing and the panel closing', () => {
+  it('stays sealed until the WHOLE save is finished, not merely until the tag exists', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidation = deferred<void>()
+    // createTag and the grants resolve normally; the cache refresh that follows them does not.
+    vi.spyOn(queryClient, 'invalidateQueries').mockReturnValue(invalidation.promise)
+
+    const wrapper = mountPanel({ initialName: 'First draft' }, { queryClient })
+    await flushPromises()
+    saveButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    // The tag exists by now, but the panel has not handed it over yet.
+    expect(tagApi.createTag).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('created'), 'the tail has not run yet').toBeFalsy()
+
+    // So every way out is still withdrawn...
+    expect(wrapper.findComponent({ name: 'Drawer' }).props('showCloseIcon')).toBe(false)
+    expect((cancelButton() as HTMLButtonElement).disabled).toBe(true)
+    wrapper.findComponent({ name: 'Drawer' }).vm.$emit('update:visible', false)
+    await flushPromises()
+    expect(
+      wrapper.emitted('update:visible'),
+      'closing here would strand a tag the document never receives',
+    ).toBeFalsy()
+
+    // ...and a second Save cannot start a second tag on top of the first.
+    saveButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(tagApi.createTag).toHaveBeenCalledTimes(1)
+
+    invalidation.resolve()
+    await flushPromises()
+    expect(wrapper.emitted('created')).toEqual([
+      [{ id: 'tag-new', name: 'First draft', color: '#2aabd2', parent: null }],
+    ])
+    expect(wrapper.emitted('update:visible')?.at(-1)).toEqual([false])
     wrapper.unmount()
   })
 })

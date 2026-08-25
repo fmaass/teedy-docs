@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
+import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
@@ -93,7 +94,10 @@ async function mountList() {
   const wrapper = mount(TagList, {
     attachTo: document.body,
     global: {
-      plugins: [i18n, router, PrimeVue, ToastService, ConfirmationService, [VueQueryPlugin, { queryClient }]],
+      // Pinia: the create card reads the signed-in username from the auth store (#306) to show
+      // the owner grant the server will create. A real, empty store answers "nobody", which
+      // leaves this spec's delete affordances untouched.
+      plugins: [i18n, router, createPinia(), PrimeVue, ToastService, ConfirmationService, [VueQueryPlugin, { queryClient }]],
     },
   })
   await flushPromises()
