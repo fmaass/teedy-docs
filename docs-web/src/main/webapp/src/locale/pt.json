@@ -843,6 +843,19 @@
       "total_count": "{count} entradas de registo",
       "no_logs": "Nenhuma entrada de registo corresponde a estes filtros"
     },
+    "access": {
+      "personal_document": "Aberto uma vez por si | Aberto {count} vezes por si",
+      "personal_file": "Consultado uma vez por si | Consultado {count} vezes por si",
+      "col_accesses": "Os seus acessos",
+      "admin_title": "Contadores de acesso",
+      "admin_description": "Com que frequência os documentos foram abertos e por quem. Apenas são listados os documentos que pode ler.",
+      "admin_total_documents": "Acessos a documentos",
+      "admin_total_files": "Acessos a ficheiros",
+      "admin_col_document": "Documento",
+      "admin_col_total": "Total",
+      "admin_col_users": "Por utilizador",
+      "admin_empty": "Ainda não há acessos registados."
+    },
     "stats": {
       "title": "Estatísticas",
       "description": "Estatísticas de utilização globais em toda a instância.",

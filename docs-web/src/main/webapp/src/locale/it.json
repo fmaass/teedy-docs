@@ -843,6 +843,19 @@
       "total_count": "{count} voci di log",
       "no_logs": "Nessuna voce di log corrisponde a questi filtri"
     },
+    "access": {
+      "personal_document": "Aperto una volta da te | Aperto {count} volte da te",
+      "personal_file": "Consultato una volta da te | Consultato {count} volte da te",
+      "col_accesses": "I tuoi accessi",
+      "admin_title": "Contatori di accesso",
+      "admin_description": "Quante volte i documenti sono stati aperti e da chi. Sono elencati solo i documenti che puoi leggere.",
+      "admin_total_documents": "Accessi ai documenti",
+      "admin_total_files": "Accessi ai file",
+      "admin_col_document": "Documento",
+      "admin_col_total": "Totale",
+      "admin_col_users": "Per utente",
+      "admin_empty": "Nessun accesso registrato finora."
+    },
     "stats": {
       "title": "Statistiche",
       "description": "Statistiche di utilizzo globali dell'intera istanza.",

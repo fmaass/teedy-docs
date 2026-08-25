@@ -26,6 +26,12 @@ export const queryKeys = {
   tagFacets: () => ['tagFacets'] as const,
   /** Tag co-occurrence pairs (facets-mode tree). */
   tagCoOccurrence: () => ['tagCoOccurrence'] as const,
+  /**
+   * The CALLING user's own access counts for one document and its files (#300). One key for both
+   * consumers — the document header and the file panel — so a document view issues ONE request for
+   * the numbers both of them render.
+   */
+  accessCounts: (id: string) => ['access-counts', id] as const,
   /** Trashed documents. */
   trash: () => ['trash'] as const,
   /** Application info. */

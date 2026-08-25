@@ -58,6 +58,12 @@ vi.mock('../../api/document', () => ({
   duplicateDocument: vi.fn(() => Promise.resolve({ data: { id: 'copy-1' } })),
 }))
 
+// The header also shows the caller's own access count (#300), whose query would otherwise reach
+// for the network. Stub it; DocumentView.access.spec.ts covers that surface.
+vi.mock('../../api/access', () => ({
+  getDocumentAccessCounts: vi.fn(() => Promise.resolve({ data: { count: 0, files: [] } })),
+}))
+
 // Mirrors the REAL getFileUrl signature (size, shareId, rotation → `?size=…&v=…`): a mock
 // that swallowed the extra arguments would let a header thumbnail request the ORIGINAL file
 // (a multi-MB attachment download) or a stale pre-rotation raster and still read green.

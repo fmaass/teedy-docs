@@ -38,6 +38,7 @@ import FileActionMenu, { type FileActionTarget } from '../../components/FileActi
 import FileExtraActions from '../../components/FileExtraActions.vue'
 import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
+import AccessCountBadge from '../../components/AccessCountBadge.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { usePreviewQueue } from '../../composables/usePreviewQueue'
@@ -51,8 +52,17 @@ import {
   type RelationSortField,
 } from '../../utils/relationSort'
 import { injectDocument } from './documentKey'
+import { injectAccessCounts } from './accessCountsKey'
+import { fileAccessCountMap } from '../../composables/useAccessCounts'
 
 const doc = injectDocument()
+
+// #300 — the CALLING user's own per-file counts, indexed by file id. The one query lives in
+// DocumentView; this tab only reads it, so the file panel adds no request of its own however many
+// files it renders. Undefined per file until the counts resolve, which is what makes the badge
+// render nothing instead of a premature zero.
+const accessCounts = injectAccessCounts()
+const fileAccessCounts = computed(() => fileAccessCountMap(accessCounts.value))
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -1680,7 +1690,13 @@ onUnmounted(() => {
                 />
               </div>
             </div>
-            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+            <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
+                 hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">
+              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
+              <!-- #300: the CALLER's own access count for this file. -->
+              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
+            </div>
             <div class="file-card-actions">
               <!-- The ONLY drag origin on a tile (#211): a mousedown here is what arms the CARD
                    as a drag source (onGridCardMouseDown), so everything else on the card stays
@@ -1759,7 +1775,13 @@ onUnmounted(() => {
                 @open="openPreview(file)"
               />
             </div>
-            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+            <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
+                 hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">
+              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
+              <!-- #300: the CALLER's own access count for this file. -->
+              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
+            </div>
             <div class="file-card-actions">
               <span
                 v-if="gridReorderEnabled && gridRenamingId !== file.id"
@@ -1824,7 +1846,13 @@ onUnmounted(() => {
               <div class="generic-preview-stage">
                 <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
               </div>
-              <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+              <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
+                 hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">
+              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
+              <!-- #300: the CALLER's own access count for this file. -->
+              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
+            </div>
             </button>
             <div class="file-card-actions">
               <span
@@ -1878,6 +1906,7 @@ onUnmounted(() => {
         :writable="doc.writable"
         :document-id="doc.id"
         :cover-file-id="doc.file_id_cover"
+        :access-counts="fileAccessCounts"
         @open="openPreview"
         @rename="renameFileTo"
         @delete="confirmDelete"
@@ -2183,10 +2212,20 @@ onUnmounted(() => {
 }
 
 .file-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
   padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
   border-top: 1px solid var(--p-content-border-color);
+}
+
+/* The name keeps the ellipsis the label used to own, so the access badge beside it is never the
+   thing that gets truncated away. */
+.file-preview-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

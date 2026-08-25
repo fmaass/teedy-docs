@@ -13,6 +13,16 @@ const apiMock = vi.hoisted(() => ({
 }))
 vi.mock('../../api/app', async (orig) => ({ ...(await orig()), ...apiMock }))
 
+// The screen also hosts the #300 access counters, whose own query would otherwise reach for the
+// network. Stub it empty: this file covers the app-stats half, and SettingsStats.access.spec.ts
+// covers the access half.
+const accessApiMock = vi.hoisted(() => ({
+  getAccessStats: vi.fn(() =>
+    Promise.resolve({ data: { total_document_accesses: 0, total_file_accesses: 0, documents: [] } }),
+  ),
+}))
+vi.mock('../../api/access', () => accessApiMock)
+
 // PrimeVue's Chart wrapper dynamically imports chart.js/auto (a canvas library that does not
 // run under jsdom). Stub it with a marker component that records the received type so the test
 // asserts a chart was rendered for each series WITHOUT booting a real canvas.

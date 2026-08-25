@@ -843,6 +843,19 @@
       "total_count": "{count} wpisów dziennika",
       "no_logs": "Żaden wpis dziennika nie pasuje do tych filtrów"
     },
+    "access": {
+      "personal_document": "Otwarte przez Ciebie raz | Otwarte przez Ciebie {count} razy",
+      "personal_file": "Otwarty przez Ciebie raz | Otwarty przez Ciebie {count} razy",
+      "col_accesses": "Twoje odsłony",
+      "admin_title": "Liczniki dostępu",
+      "admin_description": "Jak często dokumenty były otwierane i przez kogo. Wyświetlane są tylko dokumenty, które możesz czytać.",
+      "admin_total_documents": "Dostępy do dokumentów",
+      "admin_total_files": "Dostępy do plików",
+      "admin_col_document": "Dokument",
+      "admin_col_total": "Łącznie",
+      "admin_col_users": "Na użytkownika",
+      "admin_empty": "Nie zarejestrowano jeszcze żadnych dostępów."
+    },
     "stats": {
       "title": "Statystyki",
       "description": "Globalne statystyki użytkowania w całej instancji.",

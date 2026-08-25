@@ -11,6 +11,7 @@ import Checkbox from 'primevue/checkbox'
 import { formatDate, formatFileSize } from '../utils/formatters'
 import { displayName } from '../utils/fileName'
 import FileActionMenu from './FileActionMenu.vue'
+import AccessCountBadge from './AccessCountBadge.vue'
 
 // Enriched, authenticated file LIST (the grid⇄list toggle's "list" mode). Owns the
 // list-only affordances: quick filter, optional columns, transient sort, drag-handle
@@ -44,6 +45,10 @@ const props = defineProps<{
   // matching row shows a cover badge and offers "remove as cover"; every other row offers "set as
   // cover".
   coverFileId?: string | null
+  // #300 — the CALLING user's own access count per file id, or an empty map while the counts are
+  // still loading. Passed in rather than fetched here: the document view owns the single query, so
+  // an N-row table still costs zero extra requests.
+  accessCounts?: Record<string, number>
 }>()
 
 const emit = defineEmits<{
@@ -67,19 +72,28 @@ const LARGE_LIST_THRESHOLD = 100
 // Optional-column visibility. Icon + Name are always shown; Created + Size default on,
 // Uploader default off (accepted decision). Persisted so a user's column choice sticks.
 const COLUMNS_KEY = 'teedy_file_columns'
-type ColumnKey = 'created' | 'size' | 'uploader'
-const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = { created: true, size: true, uploader: false }
+type ColumnKey = 'created' | 'size' | 'uploader' | 'accesses'
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
+  created: true,
+  size: true,
+  uploader: false,
+  // #300 — on by default: the counter exists to be seen, and a user who does not want it can turn
+  // the column off exactly like the others.
+  accesses: true,
+}
 
 function readColumns(): Record<ColumnKey, boolean> {
   try {
     const raw = localStorage.getItem(COLUMNS_KEY)
     if (!raw) return { ...DEFAULT_COLUMNS }
     const parsed = JSON.parse(raw) as Partial<Record<ColumnKey, unknown>>
-    // Coerce defensively: a stale/tampered value must never drop the mandatory shape.
+    // Coerce defensively: a stale/tampered value must never drop the mandatory shape. A value
+    // persisted before the accesses column existed simply has no entry and falls back to its default.
     return {
       created: typeof parsed.created === 'boolean' ? parsed.created : DEFAULT_COLUMNS.created,
       size: typeof parsed.size === 'boolean' ? parsed.size : DEFAULT_COLUMNS.size,
       uploader: typeof parsed.uploader === 'boolean' ? parsed.uploader : DEFAULT_COLUMNS.uploader,
+      accesses: typeof parsed.accesses === 'boolean' ? parsed.accesses : DEFAULT_COLUMNS.accesses,
     }
   } catch {
     return { ...DEFAULT_COLUMNS }
@@ -292,6 +306,10 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
             <Checkbox v-model="columns.uploader" binary inputId="file-col-uploader" />
             <label for="file-col-uploader">{{ t('ui.file_view.col_uploader') }}</label>
           </div>
+          <div class="file-column-option">
+            <Checkbox v-model="columns.accesses" binary inputId="file-col-accesses" />
+            <label for="file-col-accesses">{{ t('ui.access.col_accesses') }}</label>
+          </div>
         </div>
       </Popover>
     </div>
@@ -414,6 +432,19 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
       >
         <template #body="{ data }">
           <span class="file-meta">{{ data.creator }}</span>
+        </template>
+      </Column>
+
+      <!-- #300: the CALLING user's own count for this file. Never anyone else's — the payload
+           behind it is scoped to the caller and carries no other user's numbers at all. -->
+      <Column
+        v-if="columns.accesses"
+        :header="t('ui.access.col_accesses')"
+        headerClass="file-col-accesses"
+        bodyClass="file-col-accesses"
+      >
+        <template #body="{ data }">
+          <AccessCountBadge :count="accessCounts?.[data.id]" kind="file" />
         </template>
       </Column>
 
@@ -644,6 +675,13 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
   width: 7rem;
 }
 
+/* Narrow by design (#300): the cell holds an icon and a small integer, and the row already
+   carries the widest control cluster in the app. It follows the created/size columns through
+   the responsive bands below rather than getting its own breakpoints. */
+.file-data-table :deep(.file-col-accesses) {
+  width: 5.5rem;
+}
+
 /* The cluster is right-aligned, so the cell's default 1rem gutters are dead space — and
    `.doc-view` caps the content at 960px, which is where a row carrying the Uploader column
    AND the (then nine-icon) cluster ran out of room. Halving the gutters is what made that
@@ -751,7 +789,8 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
 
 @media (max-width: 639px) {
   .file-data-table :deep(.file-col-created),
-  .file-data-table :deep(.file-col-size) {
+  .file-data-table :deep(.file-col-size),
+  .file-data-table :deep(.file-col-accesses) {
     display: none;
   }
   .file-columns-btn {

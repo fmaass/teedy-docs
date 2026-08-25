@@ -78,7 +78,11 @@ public class LegacyDocumentResource extends BaseResource {
 
         DocumentView view;
         try {
-            view = module.unitOfWork().query(() -> module.getDocumentHandler().handle(query));
+            // `required`, not `query`: the read now also SCHEDULES an access record (#300) by registering
+            // an after-commit callback on this frame, and `query` is documented as the path that
+            // registers none. Both join the request filter's transaction identically; naming it
+            // `required` keeps that marker honest. The event itself is written outside this transaction.
+            view = module.unitOfWork().required(() -> module.getDocumentHandler().handle(query));
         } catch (DocumentNotFoundException e) {
             throw new NotFoundException();
         } catch (DocumentFileAccessException e) {

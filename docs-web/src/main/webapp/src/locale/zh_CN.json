@@ -843,6 +843,19 @@
       "total_count": "{count} 条日志记录",
       "no_logs": "没有符合这些筛选条件的日志记录"
     },
+    "access": {
+      "personal_document": "你打开过 {count} 次 | 你打开过 {count} 次",
+      "personal_file": "你访问过该文件 {count} 次 | 你访问过该文件 {count} 次",
+      "col_accesses": "你的访问次数",
+      "admin_title": "访问计数",
+      "admin_description": "文档被打开的次数以及打开者。仅列出你有权阅读的文档。",
+      "admin_total_documents": "文档访问次数",
+      "admin_total_files": "文件访问次数",
+      "admin_col_document": "文档",
+      "admin_col_total": "合计",
+      "admin_col_users": "按用户",
+      "admin_empty": "尚未记录任何访问。"
+    },
     "stats": {
       "title": "统计",
       "description": "整个实例的全局使用统计。",

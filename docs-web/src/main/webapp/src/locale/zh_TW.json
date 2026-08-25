@@ -843,6 +843,19 @@
       "total_count": "{count} 筆日誌項目",
       "no_logs": "沒有符合這些篩選條件的日誌項目"
     },
+    "access": {
+      "personal_document": "你開啟過 {count} 次 | 你開啟過 {count} 次",
+      "personal_file": "你存取過此檔案 {count} 次 | 你存取過此檔案 {count} 次",
+      "col_accesses": "你的存取次數",
+      "admin_title": "存取計數",
+      "admin_description": "文件被開啟的次數以及開啟者。僅列出你有權閱讀的文件。",
+      "admin_total_documents": "文件存取次數",
+      "admin_total_files": "檔案存取次數",
+      "admin_col_document": "文件",
+      "admin_col_total": "合計",
+      "admin_col_users": "依使用者",
+      "admin_empty": "尚未記錄任何存取。"
+    },
     "stats": {
       "title": "統計資料",
       "description": "整個執行個體的全域使用統計資料。",

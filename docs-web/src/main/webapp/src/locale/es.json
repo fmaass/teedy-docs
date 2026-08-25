@@ -843,6 +843,19 @@
       "total_count": "{count} entradas de registro",
       "no_logs": "Ninguna entrada de registro coincide con estos filtros"
     },
+    "access": {
+      "personal_document": "Abierto una vez por ti | Abierto {count} veces por ti",
+      "personal_file": "Consultado una vez por ti | Consultado {count} veces por ti",
+      "col_accesses": "Tus accesos",
+      "admin_title": "Contadores de acceso",
+      "admin_description": "Con qué frecuencia se han abierto los documentos y quién lo ha hecho. Solo se listan los documentos que puedes leer.",
+      "admin_total_documents": "Accesos a documentos",
+      "admin_total_files": "Accesos a archivos",
+      "admin_col_document": "Documento",
+      "admin_col_total": "Total",
+      "admin_col_users": "Por usuario",
+      "admin_empty": "Aún no se ha registrado ningún acceso."
+    },
     "stats": {
       "title": "Estadísticas",
       "description": "Estadísticas de uso globales de toda la instancia.",

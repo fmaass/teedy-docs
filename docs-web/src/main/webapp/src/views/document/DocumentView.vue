@@ -15,8 +15,11 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import TagBadge from '../../components/TagBadge.vue'
 import FavoriteStar from '../../components/FavoriteStar.vue'
+import AccessCountBadge from '../../components/AccessCountBadge.vue'
 import { useTagFilterStore } from '../../stores/tagFilter'
+import { useAccessCounts } from '../../composables/useAccessCounts'
 import { DocumentKey } from './documentKey'
+import { AccessCountsKey } from './accessCountsKey'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -44,6 +47,15 @@ const { data: doc, isLoading: loading, error } = useQuery({
 })
 
 provide(DocumentKey, doc)
+
+// The caller's OWN access counts (#300). Gated on the document query having resolved: serving that
+// document IS the access being counted, so an unordered parallel request would render the count
+// from before this open.
+const { data: accessCounts } = useAccessCounts(
+  computed(() => props.id),
+  computed(() => !!doc.value),
+)
+provide(AccessCountsKey, accessCounts)
 
 // Header Download target: a multi-file document downloads a ZIP of ALL its files
 // (GET /file/zip); a single-file document keeps the direct file download; a document with
@@ -219,6 +231,11 @@ function handleDelete() {
             <span v-if="doc.creator"> · <strong>{{ doc.creator }}</strong></span>
             <span v-if="doc.language" class="lang-badge">{{ languageLabel(doc.language) }}</span>
             <span v-if="doc.file_count"> · {{ t('ui.n_files', doc.file_count) }}</span>
+            <!-- #300: the caller's OWN open count. Deliberately here and not on the document LIST
+                 row or the slide-over: those are captured visual-regression surfaces. -->
+            <span v-if="accessCounts" class="doc-header-access">
+              · <AccessCountBadge :count="accessCounts.count" kind="document" />
+            </span>
           </p>
           <div v-if="doc.tags?.length" class="doc-header-tags">
             <TagBadge
@@ -386,6 +403,12 @@ function handleDelete() {
   margin: 0.3rem 0 0;
   font-size: 0.8125rem;
   color: var(--p-text-muted-color);
+}
+
+.doc-header-access {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
 }
 
 .lang-badge {

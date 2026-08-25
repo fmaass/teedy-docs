@@ -13,6 +13,9 @@
   ],
   "tags": [
     {
+      "name": "access"
+    },
+    {
       "name": "acl"
     },
     {
@@ -77,6 +80,67 @@
     }
   ],
   "paths": {
+    "/access/document/{id}": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Get the calling user's own access counts for a document and its files",
+        "operationId": "get_access_document_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. `count` is how many times the CALLING user opened this document, and each `files[]` entry carries that same user's own count for one file. The endpoint takes no user parameter, so no request shape can report another user's accesses."
+          },
+          "403": {
+            "description": "Access denied (the caller is anonymous)"
+          },
+          "404": {
+            "description": "Document not found, or not readable by the caller"
+          }
+        }
+      }
+    },
+    "/access/stats": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Get aggregate access statistics (administrator only)",
+        "operationId": "get_access_stats",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of documents to rank (default 10, capped at 100)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. Global access totals plus the most-accessed documents with their per-user breakdown. The ranking is restricted to documents the calling administrator may read, so it never names a document the caller could not open."
+          },
+          "400": {
+            "description": "ValidationError: limit is not an integer"
+          },
+          "403": {
+            "description": "Access denied (not an administrator)"
+          }
+        }
+      }
+    },
     "/acl": {
       "put": {
         "tags": [

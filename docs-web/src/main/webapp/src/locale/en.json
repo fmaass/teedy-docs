@@ -843,6 +843,19 @@
       "total_count": "{count} log entries",
       "no_logs": "No log entries match these filters"
     },
+    "access": {
+      "personal_document": "Opened once by you | Opened {count} times by you",
+      "personal_file": "Accessed once by you | Accessed {count} times by you",
+      "col_accesses": "Your accesses",
+      "admin_title": "Access counters",
+      "admin_description": "How often documents have been opened, and by whom. Only documents you can read are listed.",
+      "admin_total_documents": "Document accesses",
+      "admin_total_files": "File accesses",
+      "admin_col_document": "Document",
+      "admin_col_total": "Total",
+      "admin_col_users": "Per user",
+      "admin_empty": "No accesses recorded yet."
+    },
     "stats": {
       "title": "Statistics",
       "description": "Global usage statistics across the whole instance.",

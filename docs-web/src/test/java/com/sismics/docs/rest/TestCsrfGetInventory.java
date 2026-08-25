@@ -31,10 +31,28 @@ public class TestCsrfGetInventory {
     };
 
     /**
-     * Every {@code @GET} route that is READ-ONLY (no server side effect) and therefore intentionally NOT
-     * in the CSRF mutating-GET inventory. Normalized (path params -> {@code {}}).
+     * Every {@code @GET} route that is CSRF-SAFE and therefore intentionally NOT in the CSRF mutating-GET
+     * inventory. Normalized (path params -> {@code {}}).
+     *
+     * <p>Safe here means a forged cross-site GET of the route cannot change anything the victim would
+     * care about. That is "no server side effect at all" for every route below except the two access-
+     * recorded reads, which are called out explicitly:</p>
+     *
+     * <ul>
+     *   <li>{@code /document/{}} and {@code /file/{}/data} append an ACCESS EVENT (#300) recording that
+     *       the caller was served that document/file. The record is append-only, attributed to the
+     *       caller's own identity, describes a fetch the caller's browser genuinely performed, and is
+     *       visible to that caller (plus an administrator) only — a forged request can at worst add a
+     *       row saying the victim read something the victim's browser did in fact read. Neither route
+     *       may become CSRF-evaluated: {@code /file/{}/data} is loaded by {@code <img>} tags and download
+     *       anchors, which cannot carry the {@code X-Csrf-Token} header at all, so enforcing CSRF there
+     *       would break every preview and every download. Contrast {@code /document/export}, which IS in
+     *       the mutating inventory because it also acquires a bounded export permit.</li>
+     * </ul>
      */
     private static final Set<String> KNOWN_SAFE_GET_ROUTES = Set.of(
+            "/access/document/{}",
+            "/access/stats",
             "/acl/target/search",
             "/apikey",
             "/app",

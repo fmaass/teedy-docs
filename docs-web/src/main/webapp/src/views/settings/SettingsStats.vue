@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { getAppStats, STATS_WINDOWS, type StatsWindow, type StatsSeriesPoint } from '../../api/app'
+import { getAccessStats } from '../../api/access'
 import { formatStorage } from '../../utils/formatters'
 import Chart from 'primevue/chart'
 import DataTable from 'primevue/datatable'
@@ -27,6 +28,36 @@ const { data, isLoading, isFetching, isError, refetch } = useQuery({
   queryFn: () => getAppStats(selectedWindow.value),
   placeholderData: keepPreviousData,
 })
+
+// #300 access counters. Deliberately hosted on this EXISTING admin screen rather than behind a new
+// settings entry: the settings hub and the settings sidebar are both captured by the standing visual
+// gate, so a new nav item would move committed baselines for a feature that has nothing to do with
+// them. Its own query, so a failure here cannot blank the rest of the dashboard.
+const {
+  data: accessData,
+  isError: accessIsError,
+  refetch: refetchAccess,
+} = useQuery({
+  queryKey: ['access-stats'],
+  queryFn: () => getAccessStats(10).then((r) => r.data),
+})
+
+const accessTotals = computed(() => [
+  {
+    key: 'documents',
+    icon: 'pi pi-eye',
+    label: t('ui.access.admin_total_documents'),
+    value: accessData.value?.total_document_accesses ?? 0,
+  },
+  {
+    key: 'files',
+    icon: 'pi pi-download',
+    label: t('ui.access.admin_total_files'),
+    value: accessData.value?.total_file_accesses ?? 0,
+  },
+])
+
+const mostUsedDocuments = computed(() => accessData.value?.documents ?? [])
 
 const totals = computed(() => data.value?.totals)
 const perUser = computed(() => data.value?.storage.per_user ?? [])
@@ -215,6 +246,53 @@ async function onRefresh() {
         <EmptyState v-else icon="pi pi-database" :message="t('ui.stats.storage_empty')" />
       </div>
     </template>
+
+    <!-- Access counters (#300). Administrator-only, and the server enforces that: this screen's
+         route is admin-gated and GET /access/stats answers a non-admin with 403 regardless. -->
+    <div class="access-section">
+      <div class="storage-header">
+        <h3 class="chart-title">{{ t('ui.access.admin_title') }}</h3>
+      </div>
+      <p class="section-desc">{{ t('ui.access.admin_description') }}</p>
+
+      <ErrorState v-if="accessIsError" @retry="refetchAccess()" />
+      <template v-else>
+        <!-- Its own class, not `.totals-grid`: that one identifies the app-stats totals, and a
+             second element answering to it would make "the dashboard failed" assertions lie. -->
+        <div class="access-totals">
+          <div v-for="card in accessTotals" :key="card.key" class="total-card">
+            <i :class="card.icon" class="total-icon" />
+            <div class="total-body">
+              <span class="total-value">{{ card.value.toLocaleString(locale) }}</span>
+              <span class="total-label">{{ card.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <DataTable v-if="mostUsedDocuments.length" :value="mostUsedDocuments" stripedRows class="storage-table">
+          <Column :header="t('ui.access.admin_col_document')">
+            <template #body="{ data: row }">
+              <span>{{ row.title }}</span>
+            </template>
+          </Column>
+          <Column :header="t('ui.access.admin_col_total')" style="width: 120px">
+            <template #body="{ data: row }">
+              <span>{{ row.total.toLocaleString(locale) }}</span>
+            </template>
+          </Column>
+          <Column :header="t('ui.access.admin_col_users')">
+            <template #body="{ data: row }">
+              <span class="access-user-list">
+                <span v-for="user in row.users" :key="user.username" class="access-user">
+                  {{ user.username }} · {{ user.count.toLocaleString(locale) }}
+                </span>
+              </span>
+            </template>
+          </Column>
+        </DataTable>
+        <EmptyState v-else icon="pi pi-eye" :message="t('ui.access.admin_empty')" />
+      </template>
+    </div>
   </div>
 </template>
 
@@ -309,11 +387,32 @@ async function onRefresh() {
   height: 240px;
 }
 
-.storage-section {
+.storage-section,
+.access-section {
   border: 1px solid var(--p-content-border-color);
   border-radius: var(--p-content-border-radius, 8px);
   padding: 1rem 1.125rem;
   background: var(--p-content-background);
+}
+
+.access-section {
+  margin-top: 1.75rem;
+}
+.access-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.25rem;
+}
+.access-user-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+}
+.access-user {
+  white-space: nowrap;
+  color: var(--p-text-muted-color);
 }
 .storage-header {
   display: flex;

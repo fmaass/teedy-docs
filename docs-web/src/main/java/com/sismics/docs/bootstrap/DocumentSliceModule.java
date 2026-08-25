@@ -1,5 +1,6 @@
 package com.sismics.docs.bootstrap;
 
+import com.sismics.docs.application.document.AccessRecorder;
 import com.sismics.docs.application.document.Clock;
 import com.sismics.docs.application.document.DocumentAuthorizationService;
 import com.sismics.docs.application.document.DocumentCoverHandler;
@@ -10,6 +11,7 @@ import com.sismics.docs.application.document.GetDocumentHandler;
 import com.sismics.docs.application.document.SwapDocumentRelationHandler;
 import com.sismics.docs.application.document.UnitOfWork;
 import com.sismics.docs.application.document.UpdateDocumentHandler;
+import com.sismics.docs.infrastructure.persistence.JpaAccessRecorder;
 import com.sismics.docs.infrastructure.persistence.JpaDocumentAuthorizationService;
 import com.sismics.docs.infrastructure.persistence.JpaDocumentEventPublisher;
 import com.sismics.docs.infrastructure.persistence.JpaDocumentRepository;
@@ -42,9 +44,10 @@ public final class DocumentSliceModule {
         DocumentRepository documentRepository = new JpaDocumentRepository(clock);
         DocumentAuthorizationService authorizationService = new JpaDocumentAuthorizationService();
         DocumentEventPublisher eventPublisher = new JpaDocumentEventPublisher(transactionRunner);
+        AccessRecorder accessRecorder = new JpaAccessRecorder();
 
         this.unitOfWork = transactionRunner;
-        this.getDocumentHandler = new GetDocumentHandler(documentRepository);
+        this.getDocumentHandler = new GetDocumentHandler(documentRepository, accessRecorder);
         this.updateDocumentHandler = new UpdateDocumentHandler(documentRepository, authorizationService, eventPublisher);
         this.documentCoverHandler = new DocumentCoverHandler(documentRepository, authorizationService, eventPublisher);
         this.duplicateDocumentHandler = new DuplicateDocumentHandler(documentRepository, authorizationService);

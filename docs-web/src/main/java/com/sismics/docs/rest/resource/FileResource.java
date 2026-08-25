@@ -59,6 +59,7 @@ import com.sismics.rest.exception.ConflictException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.exception.TooManyRequestsException;
+import com.sismics.docs.core.util.AccessRecordingUtil;
 import com.sismics.docs.rest.util.DocumentResourceHelper;
 import com.sismics.docs.core.util.ExportUtil;
 import com.sismics.rest.util.ValidationUtil;
@@ -955,14 +956,34 @@ public class FileResource extends BaseResource {
             @PathParam("id") final String fileId,
             @QueryParam("share") String shareId,
             @QueryParam("size") String size) {
-        authenticate();
-        
+        boolean authenticated = authenticate();
+
         if (size != null && !Lists.newArrayList("web", "thumb", "content").contains(size)) {
             throw new ClientException("SizeError", "Size must be web, thumb or content");
         }
 
         // Get the file
         File file = findFile(fileId, shareId, PermType.READ);
+
+        // Record the access (#300), AFTER the permission check, so an event exists only for bytes this
+        // user is genuinely being served.
+        //
+        // What counts is the file's OWN content: the original bytes (no size -- the download, and the
+        // PDF viewer) and the `web` rendition (the preview raster the file panel and the preview dialog
+        // render). What does NOT count is `thumb` -- the raster a document LIST, gallery or cover tile
+        // draws, which is an artifact of rendering a listing rather than of opening the file -- and
+        // `content`, the extracted plain text the app derives from the file. Recording those two would
+        // make every scroll of the document list an access of every file in it.
+        //
+        // An anonymous share reader is skipped: there is no identity to attribute the read to.
+        //
+        // The call only SCHEDULES the event: it is written after this request's transaction durably
+        // commits, in its own short transaction, and a failure there drops the event rather than the
+        // response (see AccessRecordingUtil). So this line cannot fail the file read, and a read that
+        // ends non-2xx records nothing even though the call sits here.
+        if (authenticated && isCountableFileAccess(size)) {
+            AccessRecordingUtil.recordFileAccess(principal.getId(), file.getId(), file.getDocumentId());
+        }
 
         // Get the stored file
         UserDao userDao = new UserDao();
@@ -1050,6 +1071,20 @@ public class FileResource extends BaseResource {
                     .header(HttpHeaders.EXPIRES, "0");
         }
         return builder.build();
+    }
+
+    /**
+     * Whether a {@code /file/:id/data} serve at this size variation is an access of the FILE (#300).
+     *
+     * <p>True for the file's own content: the original bytes ({@code size} absent) and the {@code web}
+     * preview rendition. False for {@code thumb} (a listing's raster) and {@code content} (text derived
+     * from the file).</p>
+     *
+     * @param size Requested size variation, or null for the original
+     * @return True when this serve is recorded as a file access
+     */
+    private static boolean isCountableFileAccess(String size) {
+        return size == null || "web".equals(size);
     }
 
     private String filenameEncode(String name) {

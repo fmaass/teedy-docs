@@ -843,6 +843,19 @@
       "total_count": "{count} zëra regjistri",
       "no_logs": "Asnjë zë regjistri nuk përputhet me këta filtra"
     },
+    "access": {
+      "personal_document": "E keni hapur një herë | E keni hapur {count} herë",
+      "personal_file": "E keni hapur skedarin një herë | E keni hapur skedarin {count} herë",
+      "col_accesses": "Aksesat tuaja",
+      "admin_title": "Numëruesit e aksesit",
+      "admin_description": "Sa shpesh janë hapur dokumentet dhe nga kush. Listohen vetëm dokumentet që mund të lexoni.",
+      "admin_total_documents": "Aksese në dokumente",
+      "admin_total_files": "Aksese në skedarë",
+      "admin_col_document": "Dokument",
+      "admin_col_total": "Gjithsej",
+      "admin_col_users": "Për përdorues",
+      "admin_empty": "Ende nuk është regjistruar asnjë akses."
+    },
     "stats": {
       "title": "Statistikat",
       "description": "Statistika globale të përdorimit në të gjithë instancën.",
