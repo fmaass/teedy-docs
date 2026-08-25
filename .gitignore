@@ -52,3 +52,6 @@ docs/v2.8.0-release-notes.md
 
 # Per-worktree isolated Maven repository (parallel builds; never committed)
 .repo.local/
+
+# Byte-code cache of the seeded search benchmark harness (docs/bench)
+docs/bench/__pycache__/
