@@ -113,6 +113,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
             :key="tag.id"
             :name="tag.name"
             :color="tag.color"
+            :icon="tag.icon"
             clickable
             @select="tagFilter.selectTag(tag.id)"
             @click.stop
@@ -201,6 +202,7 @@ function onRowSelect(event: DataTableRowSelectEvent) {
             :key="tag.id"
             :name="tag.name"
             :color="tag.color"
+            :icon="tag.icon"
             clickable
             @select="tagFilter.selectTag(tag.id)"
             @click.stop

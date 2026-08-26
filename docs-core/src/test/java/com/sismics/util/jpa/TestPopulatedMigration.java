@@ -45,8 +45,9 @@ public class TestPopulatedMigration {
     /** Target version after the full upgrade path runs (retirements 037-039 + index 040 + LDAP-origin column 041 + workflow/vocabulary reinstatement 042 + metadata vocabulary-name column 043 + saved-filter table 044 + T_CONFIG.CFG_VALUE_C widening 045 + OIDC state provider-binding columns 046 + favorite table 047 + DOC_DESCRIPTION_C widening 048 + FIL_ROTATION_N column 049 + OIDC active-unique-username constraint 050 + T_CLEANUP_RUN protocol table 051 + CLEAN_STORAGE_LOCK sentinel 052 + T_INBOX_RECEIPT idempotency table + GLOBAL_QUOTA_LOCK sentinel 053 + T_USER locale column 054 + credential-epoch columns + forced-logout seed 055 + ghost-file covering index 056 + content-MAC column & index 057 + T_USER dark-mode column 058 + file processing-completion marker & reconciliation claim columns 059 + explicit document cover column 060 + pending-TOTP-key column & OIDC-account key clearing 061 + audit-feed order-matching indexes 062
      * + group-membership dedup & active-unique index 063 + raw .eml attachment toggle 064
      * + comment edit-date column 065 + T_ACCESS_EVENT access-event table 066
-     * + saved-filter publication column 067 + tag-name whitespace repair 068). */
-    private static final int TARGET_VERSION = 68;
+     * + saved-filter publication column 067 + tag-name whitespace repair 068
+     * + tag icon column & T_TAG_ICON 069). */
+    private static final int TARGET_VERSION = 69;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -928,6 +929,20 @@ public class TestPopulatedMigration {
         //        to the whole instance silently.
         Assertions.assertTrue(columnExists(connection, "T_SAVED_FILTER", "SFL_PUBLISHDATE_D"),
                 "067 must add the SFL_PUBLISHDATE_D column to T_SAVED_FILTER");
+
+        // 5a''''. Migration 069 added the tag ICON column and the custom icon set (#287). The
+        //         column is additive and nullable, and the retained tag below proves the upgrade
+        //         gave it NO icon — an upgrade that invented one would change how every existing
+        //         tag is drawn, everywhere it is drawn. The new table arrives empty: an icon set
+        //         has to be uploaded, never seeded.
+        Assertions.assertTrue(columnExists(connection, "T_TAG", "TAG_ICON_C"),
+                "069 must add the TAG_ICON_C column to T_TAG");
+        Assertions.assertTrue(tableExists(connection, "T_TAG_ICON"),
+                "069 must create the T_TAG_ICON table");
+        Assertions.assertEquals(0, count(connection, "T_TAG_ICON", "1 = 1"),
+                "069 must not seed any icon rows");
+        Assertions.assertEquals(1, count(connection, "T_TAG", "TAG_ID_C = 'tag-1' and TAG_ICON_C is null"),
+                "069 must leave an existing tag without an icon");
 
         // 5b. The workflow/vocabulary tables were dropped by 037/038 (wiping the old rows) and then
         //     REINSTATED empty by 042. The data-loss guardrail is that the OLD seed rows did not

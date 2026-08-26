@@ -451,6 +451,30 @@
       "document_count": "Documents avec ce tag : {count}",
       "view_documents": "Voir les documents"
     },
+    "tag_icon": {
+      "label": "Icône",
+      "none": "Aucune",
+      "emoji": "Émoji",
+      "from_set": "Jeu d'icônes",
+      "emoji_input": "Émoji",
+      "emoji_invalid": "Saisissez exactement un émoji.",
+      "suggested": "Émojis suggérés",
+      "loading": "Chargement des icônes…",
+      "set_empty": "Aucune icône n'a encore été téléversée.",
+      "set_title": "Jeu d'icônes",
+      "set_intro": "Les icônes téléversées ici peuvent être associées à n’importe quelle étiquette.",
+      "name_placeholder": "Nom de l'icône",
+      "upload": "Téléverser",
+      "upload_hint": "PNG ou SVG, 32 Ko maximum. Affichée en 16 sur 16 pixels.",
+      "upload_failed": "L'icône n'a pas pu être téléversée.",
+      "uploaded": "Icône ajoutée",
+      "delete_icon": "Supprimer l'icône {name}",
+      "delete_header": "Supprimer l'icône",
+      "delete_confirm": "Supprimer l’icône « {name} » ? Les étiquettes qui l’utilisent continuent de fonctionner, elles n’auront simplement plus d’icône.",
+      "deleted": "Icône supprimée. {count} étiquette n’a plus d’icône. | Icône supprimée. {count} étiquettes n’ont plus d’icône.",
+      "delete_failed": "L'icône n'a pas pu être supprimée.",
+      "admin_only": "Seul un administrateur peut ajouter ou retirer des icônes."
+    },
     "account": {
       "title": "Compte utilisateur",
       "logged_in_as": "Connecté en tant que {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Impossible de démarrer la configuration de l'authentification en deux étapes",
         "activate_failed": "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
         "disable_failed": "Impossible de désactiver l'authentification en deux étapes"
-      }
+      },
+      "tag_icons": "Afficher les icônes des étiquettes",
+      "tag_icons_hint": "Ne s’applique qu’à cet appareil."
     },
     "default_password_banner": {
       "title": "Mot de passe administrateur par défaut utilisé",

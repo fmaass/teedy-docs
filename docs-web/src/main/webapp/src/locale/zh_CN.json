@@ -451,6 +451,30 @@
       "document_count": "带有此标签的文档：{count}",
       "view_documents": "查看文档"
     },
+    "tag_icon": {
+      "label": "图标",
+      "none": "无",
+      "emoji": "表情符号",
+      "from_set": "图标集",
+      "emoji_input": "表情符号",
+      "emoji_invalid": "请输入且仅输入一个表情符号。",
+      "suggested": "建议的表情符号",
+      "loading": "正在加载图标…",
+      "set_empty": "尚未上传任何图标。",
+      "set_title": "图标集",
+      "set_intro": "在此上传的图标可用于任何标签。",
+      "name_placeholder": "图标名称",
+      "upload": "上传",
+      "upload_hint": "PNG 或 SVG，最大 32 KB。以 16 × 16 像素显示。",
+      "upload_failed": "无法上传该图标。",
+      "uploaded": "已添加图标",
+      "delete_icon": "删除图标 {name}",
+      "delete_header": "删除图标",
+      "delete_confirm": "删除图标“{name}”？使用它的标签仍可正常使用，只是不再有图标。",
+      "deleted": "图标已删除。{count} 个标签不再有图标。 | 图标已删除。{count} 个标签不再有图标。",
+      "delete_failed": "无法删除该图标。",
+      "admin_only": "只有管理员才能添加或删除图标。"
+    },
     "account": {
       "title": "用户帐号",
       "logged_in_as": "已登录为 {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "无法开始双重身份验证的设置",
         "activate_failed": "该验证码无效。请检查您的身份验证器应用后重试。",
         "disable_failed": "无法停用双重身份验证"
-      }
+      },
+      "tag_icons": "显示标签图标",
+      "tag_icons_hint": "仅适用于此设备。"
     },
     "default_password_banner": {
       "title": "正在使用默认管理员密码",

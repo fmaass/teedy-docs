@@ -15,7 +15,7 @@ export interface DocumentListItem {
   // thumbnail/preview cache-bust so a rotated document shows the oriented raster.
   file_rotation?: number
   file_count: number
-  tags: Array<{ id: string; name: string; color: string }>
+  tags: Array<{ id: string; name: string; color: string; icon?: string }>
   shared: boolean
   active_route?: boolean
   current_step_name?: string | null

@@ -308,10 +308,17 @@ public final class DocumentResourceHelper {
     public static JsonArrayBuilder createTagsArrayBuilder(List<TagDto> tagDtoList) {
         JsonArrayBuilder tags = Json.createArrayBuilder();
         for (TagDto tagDto : tagDtoList) {
-            tags.add(Json.createObjectBuilder()
+            JsonObjectBuilder tag = Json.createObjectBuilder()
                     .add("id", tagDto.getId())
                     .add("name", tagDto.getName())
-                    .add("color", tagDto.getColor()));
+                    .add("color", tagDto.getColor());
+            // #287. Omitted for a tag with no icon, which is what an upgraded instance's tags all
+            // are. The document list is where a tag chip is drawn most often, and it does not go
+            // back to /tag/list per row — so the icon has to travel with the document.
+            if (tagDto.getIcon() != null) {
+                tag.add("icon", tagDto.getIcon());
+            }
+            tags.add(tag);
         }
         return tags;
     }

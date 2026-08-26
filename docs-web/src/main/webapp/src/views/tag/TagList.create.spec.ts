@@ -195,7 +195,7 @@ describe('TagList — creating a tag with its permissions (#306)', () => {
 
     await clickCreate(wrapper)
 
-    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#2aabd2', undefined)
+    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#2aabd2', undefined, null)
     // The tag has to exist before a grant has anywhere to land, and the grants are applied
     // in the order they were collected.
     expect(order).toEqual(['create', 'grant:bob', 'grant:carol'])
@@ -229,7 +229,7 @@ describe('TagList — creating a tag with its permissions (#306)', () => {
     await flushPromises()
 
     await clickCreate(wrapper)
-    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#ff8800', 'tag-a')
+    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#ff8800', 'tag-a', null)
   })
 
   it('refreshes the tree and clears the draft once the tag and its grants are in', async () => {
@@ -405,7 +405,7 @@ describe('TagList — the compact create row still works (#306 regression)', () 
     await typeName(wrapper, 'Quick tag')
     await clickCreate(wrapper)
 
-    expect(tagApi.createTag).toHaveBeenCalledWith('Quick tag', '#2aabd2', undefined)
+    expect(tagApi.createTag).toHaveBeenCalledWith('Quick tag', '#2aabd2', undefined, null)
     expect(aclApi.addAcl).not.toHaveBeenCalled()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tags'] })
     expect(toastAdd).toHaveBeenCalledWith(

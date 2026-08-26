@@ -451,6 +451,30 @@
       "document_count": "Documents with this tag: {count}",
       "view_documents": "View documents"
     },
+    "tag_icon": {
+      "label": "Icon",
+      "none": "None",
+      "emoji": "Emoji",
+      "from_set": "Icon set",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Enter exactly one emoji.",
+      "suggested": "Suggested emoji",
+      "loading": "Loading icons…",
+      "set_empty": "No icons have been uploaded yet.",
+      "set_title": "Icon set",
+      "set_intro": "Icons uploaded here can be put on any tag.",
+      "name_placeholder": "Icon name",
+      "upload": "Upload",
+      "upload_hint": "PNG or SVG, up to 32 KB. Shown at 16 by 16 pixels.",
+      "upload_failed": "The icon could not be uploaded.",
+      "uploaded": "Icon added",
+      "delete_icon": "Delete icon {name}",
+      "delete_header": "Delete icon",
+      "delete_confirm": "Delete the icon \"{name}\"? Tags using it keep working, they simply have no icon.",
+      "deleted": "Icon deleted. {count} tag no longer has an icon. | Icon deleted. {count} tags no longer have an icon.",
+      "delete_failed": "The icon could not be deleted.",
+      "admin_only": "Only an administrator can add or remove icons."
+    },
     "account": {
       "title": "User account",
       "logged_in_as": "Logged in as {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Could not start two-factor setup",
         "activate_failed": "That code is not valid. Check your authenticator app and try again.",
         "disable_failed": "Could not disable two-factor authentication"
-      }
+      },
+      "tag_icons": "Show tag icons",
+      "tag_icons_hint": "Applies to this device only."
     },
     "default_password_banner": {
       "title": "Default admin password in use",

@@ -27,6 +27,12 @@ export const queryKeys = {
   /** Tag co-occurrence pairs (facets-mode tree). */
   tagCoOccurrence: () => ['tagCoOccurrence'] as const,
   /**
+   * The instance's custom tag icon set (#287). One shared list, read by every tag form's icon
+   * picker and by the management section that maintains it — so an upload or a deletion has one
+   * key to invalidate and every picker on the page follows.
+   */
+  tagIcons: () => ['tagIcons'] as const,
+  /**
    * The CALLING user's own access counts for one document and its files (#300). One key for both
    * consumers — the document header and the file panel — so a document view issues ONE request for
    * the numbers both of them render.

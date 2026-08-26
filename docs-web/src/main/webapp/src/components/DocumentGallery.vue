@@ -218,6 +218,7 @@ function onThumbClick(event: MouseEvent, doc: DocumentListItem) {
           :key="tag.id"
           :name="tag.name"
           :color="tag.color"
+          :icon="tag.icon"
           clickable
           @select="tagFilter.selectTag(tag.id)"
         />

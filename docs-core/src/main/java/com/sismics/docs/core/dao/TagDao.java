@@ -488,6 +488,11 @@ public class TagDao {
         // Update the tag
         tagDb.setName(tag.getName());
         tagDb.setColor(tag.getColor());
+        // The icon is written unconditionally, like the parent and unlike the colour: clearing it
+        // has to be expressible, and a tag with no icon is the ordinary state rather than an
+        // error. The caller decides — it is the caller that knows whether the form omitted the
+        // field or asked for no icon.
+        tagDb.setIcon(tag.getIcon());
         tagDb.setParentId(tag.getParentId());
         
         // Create audit log
@@ -507,7 +512,7 @@ public class TagDao {
         Map<String, Object> parameterMap = new HashMap<>();
         List<String> criteriaList = new ArrayList<>();
 
-        StringBuilder sb = new StringBuilder("select distinct t.TAG_ID_C as c0, t.TAG_NAME_C as c1, t.TAG_COLOR_C as c2, t.TAG_IDPARENT_C as c3, u.USE_USERNAME_C as c4 ");
+        StringBuilder sb = new StringBuilder("select distinct t.TAG_ID_C as c0, t.TAG_NAME_C as c1, t.TAG_COLOR_C as c2, t.TAG_IDPARENT_C as c3, u.USE_USERNAME_C as c4, t.TAG_ICON_C as c5 ");
         sb.append(" from T_TAG t ");
         sb.append(" join T_USER u on t.TAG_IDUSER_C = u.USE_ID_C ");
 
@@ -546,7 +551,8 @@ public class TagDao {
                     .setName((String) o[i++])
                     .setColor((String) o[i++])
                     .setParentId((String) o[i++])
-                    .setCreator((String) o[i]);
+                    .setCreator((String) o[i++])
+                    .setIcon((String) o[i]);
             tagDtoList.add(tagDto);
         }
 

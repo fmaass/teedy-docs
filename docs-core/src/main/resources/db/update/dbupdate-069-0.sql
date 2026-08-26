@@ -1,0 +1,40 @@
+-- #287: a tag may carry an ICON.
+--
+-- TAG_ICON_C is ONE nullable, discriminated column rather than a pair, because a tag has at most
+-- one icon: two columns would make "both set" representable and leave every reader to invent a
+-- precedence rule. The prefix says which kind it is —
+--   'emoji:<grapheme>'  a single emoji, stored verbatim (the reporter already pastes emoji into
+--                       tag NAMES by hand, so this is the affordance he is improvising today)
+--   'set:<iconId>'      an icon uploaded into the instance's one custom icon set, below
+-- NULL means "no icon", which is what every pre-069 row is and the only truthful answer for one,
+-- so the upgrade needs no backfill and cannot change how a single existing tag is drawn.
+--
+-- 64 characters holds either form with room to spare: the longest accepted emoji payload is 32
+-- code units and an icon id is a 36-character UUID behind a 4-character prefix.
+--
+-- `varchar` is spelled the same on H2 and PostgreSQL and is left untouched by the H2->PG dialect
+-- transform (DialectUtil rewrites only cached/memory table, datetime, longvarchar and bit), so no
+-- !H2!/!PGSQL! split is needed; ADD COLUMN IF NOT EXISTS is accepted by both engines, so a
+-- partially applied re-run skips an already-created column rather than failing.
+alter table T_TAG add column if not exists TAG_ICON_C varchar(64);
+-- The custom icon SET: one row per uploaded icon, reusable across any number of tags ("advantage
+-- of having icon sets: we can recycle the uploaded icons to use it at many tags", #287).
+--
+-- METADATA ONLY — the image bytes live in the file store under docs.home/tagicon/<TIC_ID_C>,
+-- which is how this application has always stored images (the theme logo/background/favicon sit
+-- in docs.home/theme, document files in docs.home/storage). The schema carries no binary column
+-- anywhere and this is not the place to introduce the first one.
+--   TIC_ID_C         icon id (UUID); also the file name in the store
+--   TIC_NAME_C       the name shown in the picker
+--   TIC_MIMETYPE_C   'image/png' or 'image/svg+xml' — decided by SNIFFING the uploaded bytes,
+--                    never by trusting the client's declared type, and replayed as the
+--                    Content-Type when the icon is served
+--   TIC_IDUSER_C     the uploading administrator (a plain value, NOT an FK: the icon must outlive
+--                    that account's deletion, because tags all over the instance point at it)
+--   TIC_CREATEDATE_D upload timestamp
+--   TIC_DELETEDATE_D soft deletion, following the schema's own NULL-means-not idiom
+-- The whole DDL is on one physical line: DbOpenHelper executes one statement per line.
+-- No index: this table holds one row per icon in a single shared set — tens of rows in this
+-- deployment class — and every read is the whole list.
+create cached table if not exists T_TAG_ICON ( TIC_ID_C varchar(36) not null, TIC_NAME_C varchar(50) not null, TIC_MIMETYPE_C varchar(100) not null, TIC_IDUSER_C varchar(36) not null, TIC_CREATEDATE_D timestamp not null, TIC_DELETEDATE_D timestamp, primary key (TIC_ID_C) );
+update T_CONFIG set CFG_VALUE_C = '69' where CFG_ID_C = 'DB_VERSION';

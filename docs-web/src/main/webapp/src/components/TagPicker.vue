@@ -145,9 +145,11 @@ function removeTagChip(removeCallback: (event: Event, item?: unknown) => void) {
 // before the list populates) still renders a VISIBLE, REMOVABLE fallback chip — a neutral
 // grey chip labelled with the raw id — so a selected tag is never invisible/unremovable.
 const UNKNOWN_TAG_COLOR = '#9e9e9e'
-function tagChip(tagId: string): { name: string; color: string } {
+function tagChip(tagId: string): { name: string; color: string; icon?: string } {
   const tag = tagMap.value.get(tagId)
-  return tag ? { name: tag.name, color: tag.color } : { name: tagId, color: UNKNOWN_TAG_COLOR }
+  return tag
+    ? { name: tag.name, color: tag.color, icon: tag.icon }
+    : { name: tagId, color: UNKNOWN_TAG_COLOR }
 }
 
 function focusFilter() {
@@ -387,6 +389,7 @@ defineExpose({ show, hide })
       <TagBadge
         :name="tagChip(value).name"
         :color="tagChip(value).color"
+        :icon="tagChip(value).icon"
         removable
         @remove="removeTagChip(removeCallback)"
       />

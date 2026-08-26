@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import Chip from 'primevue/chip'
+import TagIconMark from './TagIconMark.vue'
 
 interface SimpleTag {
   id: string
   name: string
   color: string
+  /** The tag's icon (#287); absent for a tag with no icon, which draws nothing. */
+  icon?: string
 }
 
 interface RelatedTagEntry {
@@ -35,6 +38,7 @@ const emit = defineEmits<{
     >
       <template #default>
         <span class="chip-dot" :style="{ background: tag.color }" />
+        <TagIconMark :icon="tag.icon" />
         <span class="chip-label">{{ tag.name }}</span>
       </template>
     </Chip>
@@ -48,6 +52,7 @@ const emit = defineEmits<{
     >
       <template #default>
         <i class="pi pi-minus-circle excl-icon" />
+        <TagIconMark :icon="tag.icon" />
         <span class="chip-label chip-excluded-label">{{ tag.name }}</span>
       </template>
     </Chip>
@@ -61,6 +66,7 @@ const emit = defineEmits<{
         @click="emit('toggleTag', entry.tag.id)"
       >
         <span class="pill-dot" :style="{ background: entry.tag.color }" />
+        <TagIconMark :icon="entry.tag.icon" />
         <span class="pill-name">{{ entry.tag.name }}</span>
         <span class="pill-count">{{ entry.count }}</span>
       </button>

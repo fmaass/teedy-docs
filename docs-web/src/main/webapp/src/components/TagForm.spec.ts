@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PrimeVue from 'primevue/config'
+import { VueQueryPlugin } from '@tanstack/vue-query'
 import en from '../locale/en.json'
 import AclEditor from './AclEditor.vue'
 import TagForm from './TagForm.vue'
@@ -20,6 +21,11 @@ vi.mock('../api/acl', () => ({
   searchAclTargets: vi.fn().mockResolvedValue({ data: { users: [], groups: [] } }),
 }))
 vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: vi.fn() }) }))
+// The icon field (#287) reads the instance's uploaded icon set. Nothing in this file is about
+// that list, so it answers empty — what a fresh installation has.
+vi.mock('../api/tag', () => ({
+  listTagIcons: vi.fn().mockResolvedValue({ data: { icons: [] } }),
+}))
 vi.mock('../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: vi.fn() }),
 }))
@@ -61,7 +67,7 @@ function mountForm(props: Record<string, unknown> = {}, slots: Record<string, st
     } as never,
     slots,
     global: {
-      plugins: [i18n, PrimeVue],
+      plugins: [i18n, PrimeVue, VueQueryPlugin],
       directives: { tooltip: {} },
     },
   })

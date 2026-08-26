@@ -3540,6 +3540,10 @@
                   "color": {
                     "type": "string"
                   },
+                  "icon": {
+                    "type": "string",
+                    "description": "The tag's icon: 'emoji:<grapheme>' for a single emoji, or 'set:<iconId>' for an icon from the custom icon set. Empty or absent means no icon."
+                  },
                   "parent": {
                     "type": "string"
                   }
@@ -3596,6 +3600,10 @@
                   "color": {
                     "type": "string"
                   },
+                  "icon": {
+                    "type": "string",
+                    "description": "The tag's icon: 'emoji:<grapheme>' for a single emoji, or 'set:<iconId>' for an icon from the custom icon set. Empty or absent means no icon."
+                  },
                   "parent": {
                     "type": "string"
                   }
@@ -3609,7 +3617,7 @@
             "description": "Success"
           },
           "400": {
-            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable"
+            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable; ValidationError when the icon is not exactly one emoji or names an unknown scheme; IconNotFound when the icon is not in the icon set"
           },
           "403": {
             "description": "Not authenticated, or the calling account stopped being active before the tag was created"
@@ -3790,6 +3798,128 @@
         "responses": {
           "200": {
             "description": "Success"
+          }
+        }
+      }
+    },
+    "/tag/icon": {
+      "get": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Get the tag icon set",
+        "operationId": "get_tag_icon",
+        "responses": {
+          "200": {
+            "description": "Success: every icon in the instance custom tag icon set"
+          },
+          "403": {
+            "description": "Not authenticated"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Add an icon to the tag icon set",
+        "operationId": "put_tag_icon",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "image"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The name shown beside the icon in the picker"
+                  },
+                  "image": {
+                    "type": "string",
+                    "description": "PNG or SVG image, at most 32 KiB. The type is decided from the CONTENT, not from the declared type or the file name."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success: the created icon id"
+          },
+          "400": {
+            "description": "ValidationError when the name is missing or too long; NoImageProvided when no image was sent; InvalidImageType when the content is neither a PNG nor an SVG; InvalidImageContent when an SVG carries scripting or external references; PayloadTooLarge when the image exceeds 32 KiB"
+          },
+          "403": {
+            "description": "Not authenticated, or not an administrator"
+          },
+          "500": {
+            "description": "CopyError when the icon could not be written to the icon store"
+          }
+        }
+      }
+    },
+    "/tag/icon/{id}": {
+      "delete": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Remove an icon from the tag icon set",
+        "operationId": "delete_tag_icon_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success: how many tags were left with no icon"
+          },
+          "403": {
+            "description": "Not authenticated, or not an administrator"
+          },
+          "404": {
+            "description": "The icon does not exist"
+          }
+        }
+      }
+    },
+    "/tag/icon/{id}/data": {
+      "get": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Get a tag icon image",
+        "operationId": "get_tag_icon_id_data",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success: the image bytes, typed as stored and cacheable"
+          },
+          "403": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "The icon does not exist, or its file is missing"
           }
         }
       }

@@ -16,6 +16,9 @@
  *   through completely different calls (POST /tag/{id} vs PUT /tag + deferred grants).
  * - `color` is the hex WITHOUT the leading '#', which is what PrimeVue's ColorPicker binds and
  *   what both hosts have always stored.
+ * - `icon` (#287) is the STORED reference — `emoji:<grapheme>` or `set:<iconId>` — or null, and
+ *   is passed through to the server unchanged. The field reports null while a half-typed emoji is
+ *   in the box, so a Save mid-typing stores no icon rather than something the server would refuse.
  * - `idPrefix` prefixes every field id. `tag-name`/`tag-color-label`/`tag-parent` are e2e
  *   selectors on the management page (e2e/tags.spec.ts), so that host keeps `tag`; the panel
  *   takes its own prefix, which is also what stops the two forms colliding on ids should they
@@ -30,6 +33,8 @@ import Select from 'primevue/select'
 import ColorPicker from 'primevue/colorpicker'
 import Card from 'primevue/card'
 import AclEditor from './AclEditor.vue'
+import TagIconField from './TagIconField.vue'
+import TagIconMark from './TagIconMark.vue'
 import type { AclEntry, AclTarget } from '../api/acl'
 
 export interface TagFormParentOption {
@@ -53,6 +58,11 @@ const props = defineProps<{
   name: string
   /** Hex colour WITHOUT the leading '#'. */
   color: string
+  /**
+   * The tag's icon reference (#287) — `emoji:<grapheme>` or `set:<iconId>` — or nothing.
+   * Optional: absent is what the API says for a tag with no icon, which is most of them.
+   */
+  icon?: string | null
   parent: string | null
   parentOptions: TagFormParentOption[]
   idPrefix: string
@@ -83,6 +93,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:name': [value: string]
   'update:color': [value: string]
+  'update:icon': [value: string | null]
   'update:parent': [value: string | null]
   /** The persisted ACL list changed on the server; the host must re-read it. */
   'acl-changed': []
@@ -243,7 +254,7 @@ function onHexBlur() {
             @update:modelValue="onHexInput($event ?? '')"
             @blur="onHexBlur"
           />
-          <span class="color-preview" :style="{ background: '#' + props.color }">{{
+          <span class="color-preview" :style="{ background: '#' + props.color }"><TagIconMark :icon="props.icon" />{{
             props.name || t('ui.tag_edit.preview')
           }}</span>
         </div>
@@ -251,6 +262,11 @@ function onHexBlur() {
           {{ t('ui.tag_edit.color_hex_invalid') }}
         </small>
       </div>
+      <TagIconField
+        :icon="props.icon ?? null"
+        :id-prefix="idPrefix"
+        @update:icon="emit('update:icon', $event)"
+      />
       <div class="form-field">
         <label :for="`${idPrefix}-parent`">{{ t('ui.tag_edit.parent') }}</label>
         <Select

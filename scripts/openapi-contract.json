@@ -22,6 +22,15 @@
       "responses": ["200", "400", "403"],
       "requestBodyRequired": false
     },
+    "PUT /tag/icon": {
+      "responses": ["200", "400", "403", "500"],
+      "requestBodyRequired": true,
+      "requiredFields": ["name", "image"]
+    },
+    "DELETE /tag/icon/{id}": {
+      "responses": ["200", "403", "404"],
+      "requestBodyRequired": false
+    },
     "DELETE /tag/{id}/subtree": {
       "responses": ["200", "400", "403", "404"],
       "requestBodyRequired": false

@@ -451,6 +451,30 @@
       "document_count": "Dokumente me këtë etiketë: {count}",
       "view_documents": "Shiko dokumentet"
     },
+    "tag_icon": {
+      "label": "Ikonë",
+      "none": "Asnjë",
+      "emoji": "Emoji",
+      "from_set": "Grup ikonash",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Shkruani saktësisht një emoji.",
+      "suggested": "Emoji të sugjeruara",
+      "loading": "Po ngarkohen ikonat…",
+      "set_empty": "Ende nuk është ngarkuar asnjë ikonë.",
+      "set_title": "Grup ikonash",
+      "set_intro": "Ikonat e ngarkuara këtu mund t’i vendosni në çdo etiketë.",
+      "name_placeholder": "Emri i ikonës",
+      "upload": "Ngarko",
+      "upload_hint": "PNG ose SVG, deri në 32 KB. Shfaqet me 16 me 16 piksel.",
+      "upload_failed": "Ikona nuk mund të ngarkohej.",
+      "uploaded": "Ikona u shtua",
+      "delete_icon": "Fshi ikonën {name}",
+      "delete_header": "Fshi ikonën",
+      "delete_confirm": "Të fshihet ikona «{name}»? Etiketat që e përdorin vazhdojnë të funksionojnë, thjesht nuk do të kenë ikonë.",
+      "deleted": "Ikona u fshi. {count} etiketë nuk ka më ikonë. | Ikona u fshi. {count} etiketa nuk kanë më ikonë.",
+      "delete_failed": "Ikona nuk mund të fshihej.",
+      "admin_only": "Vetëm një administrator mund të shtojë ose të heqë ikona."
+    },
     "account": {
       "title": "Llogaria e përdoruesit",
       "logged_in_as": "I identifikuar si {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Nuk u arrit të nisej konfigurimi i autentifikimit me dy faktorë",
         "activate_failed": "Ky kod nuk është i vlefshëm. Kontrolloni aplikacionin tuaj të autentifikimit dhe provoni sërish.",
         "disable_failed": "Nuk u arrit të çaktivizohej autentifikimi me dy faktorë"
-      }
+      },
+      "tag_icons": "Shfaq ikonat e etiketave",
+      "tag_icons_hint": "Vlen vetëm për këtë pajisje."
     },
     "default_password_banner": {
       "title": "Fjalëkalimi i parazgjedhur i administratorit është në përdorim",

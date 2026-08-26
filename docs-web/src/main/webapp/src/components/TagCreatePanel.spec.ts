@@ -212,7 +212,7 @@ describe('TagCreatePanel — saving', () => {
     saveButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
-    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#ff8800', undefined)
+    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#ff8800', undefined, null)
     expect(wrapper.emitted('created')).toEqual([
       [{ id: 'tag-new', name: 'Insurance 2026', color: '#ff8800', parent: null }],
     ])
@@ -238,7 +238,7 @@ describe('TagCreatePanel — saving', () => {
     await flushPromises()
     saveButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
-    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#2aabd2', 'tag-red')
+    expect(tagApi.createTag).toHaveBeenCalledWith('Insurance 2026', '#2aabd2', 'tag-red', null)
     wrapper.unmount()
   })
 

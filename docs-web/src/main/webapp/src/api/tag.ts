@@ -5,6 +5,12 @@ export interface Tag {
   id: string
   name: string
   color: string
+  /**
+   * The tag's icon (#287): `emoji:<grapheme>` or `set:<iconId>`. ABSENT — not null — for a tag
+   * with no icon, which is what every tag is until somebody chooses one. `utils/tagIcon.ts`
+   * reads it; nothing else should take the string apart.
+   */
+  icon?: string
   parent: string | null
   count?: number
 }
@@ -19,6 +25,7 @@ export interface TagDetail {
   name: string
   creator: string
   color: string
+  icon?: string
   parent: string | null
   acls: AclEntry[]
   writable: boolean
@@ -42,19 +49,29 @@ export function getTag(id: string) {
   return api.get<TagDetail>(`/tag/${id}`)
 }
 
-export function createTag(name: string, color: string, parent?: string) {
+export function createTag(name: string, color: string, parent?: string, icon?: string | null) {
   const params = new URLSearchParams()
   params.set('name', name)
   params.set('color', color)
   if (parent) params.set('parent', parent)
+  if (icon) params.set('icon', icon)
   return api.put<{ id: string }>('/tag', params)
 }
 
-export function updateTag(id: string, name: string, color: string, parent?: string | null) {
+export function updateTag(
+  id: string,
+  name: string,
+  color: string,
+  parent?: string | null,
+  icon?: string | null,
+) {
   const params = new URLSearchParams()
   params.set('name', name)
   params.set('color', color)
   params.set('parent', parent ?? '')
+  // Always sent, like `parent` and unlike `color`: an empty value is how the form says "no icon",
+  // and omitting the field would make taking an icon back off a tag impossible.
+  params.set('icon', icon ?? '')
   return api.post<{ id: string }>(`/tag/${id}`, params)
 }
 
@@ -198,4 +215,35 @@ export function getTagFacets(tagIds?: string[], mode?: 'and' | 'or', excludedTag
     for (const id of excludedTagIds) params.append('exclude', id)
   }
   return api.get<{ facets: Record<string, number>; total: number }>('/tag/facets', { params })
+}
+
+/**
+ * One icon in the instance's custom icon set (#287). Admin-managed, used by everybody: any user
+ * may put any of these on their own tags, but only an administrator adds to or removes from the
+ * set, because an upload writes a file the whole instance then loads.
+ */
+export interface TagIcon {
+  id: string
+  name: string
+  mimetype: string
+}
+
+export function listTagIcons() {
+  return api.get<{ icons: TagIcon[] }>('/tag/icon')
+}
+
+/** Adds a PNG or SVG to the set. ADMIN. The server decides the type from the bytes. */
+export function uploadTagIcon(name: string, file: File) {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('image', file)
+  return api.put<{ id: string }>('/tag/icon', form)
+}
+
+/**
+ * Removes an icon from the set. ADMIN. Reports how many tags were left with no icon: the server
+ * clears the reference off every tag that used it, so nothing is ever left pointing at it.
+ */
+export function deleteTagIcon(id: string) {
+  return api.delete<{ status: string; tags: number }>(`/tag/icon/${id}`)
 }

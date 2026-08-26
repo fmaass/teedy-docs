@@ -27,6 +27,8 @@ import { exportAccountBlob } from '../../api/document'
 import TotpQrCode from '../../components/TotpQrCode.vue'
 import { triggerBlobDownload } from '../../utils/download'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
+import ToggleSwitch from 'primevue/toggleswitch'
+import { tagIconsVisible, setTagIconsVisible } from '../../composables/useTagIcons'
 
 // `useI18n()` with no options binds to the GLOBAL scope, so `locale` is the effective active UI
 // locale (including a value server-seeded at login via the auth store) — the source of truth for
@@ -309,6 +311,15 @@ async function handleExport() {
           @change="onThemeSelect"
         />
       </div>
+      <div class="form-field form-field-inline">
+        <label for="account-tag-icons">{{ t('ui.account.tag_icons') }}</label>
+        <ToggleSwitch
+          inputId="account-tag-icons"
+          :modelValue="tagIconsVisible"
+          @update:modelValue="setTagIconsVisible($event)"
+        />
+      </div>
+      <small class="field-hint">{{ t('ui.account.tag_icons_hint') }}</small>
       <div class="form-field">
         <label for="account-locale">{{ t('ui.account.language') }}</label>
         <Select
@@ -457,6 +468,25 @@ async function handleExport() {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--p-text-color);
+}
+
+/* A switch belongs BESIDE its label, not under it: the control is the answer to the label, and a
+   stacked one reads as a heading over an unlabelled toggle. */
+.form-field-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+.form-field-inline label {
+  margin-bottom: 0;
+}
+.field-hint {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.75rem;
+  color: var(--p-text-muted-color);
 }
 .sessions-card {
   max-width: 720px;

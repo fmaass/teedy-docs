@@ -451,6 +451,30 @@
       "document_count": "Dokumenty z tą etykietą: {count}",
       "view_documents": "Pokaż dokumenty"
     },
+    "tag_icon": {
+      "label": "Ikona",
+      "none": "Brak",
+      "emoji": "Emoji",
+      "from_set": "Zestaw ikon",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Wpisz dokładnie jedno emoji.",
+      "suggested": "Proponowane emoji",
+      "loading": "Wczytywanie ikon…",
+      "set_empty": "Nie przesłano jeszcze żadnej ikony.",
+      "set_title": "Zestaw ikon",
+      "set_intro": "Ikony przesłane tutaj można przypisać do dowolnego tagu.",
+      "name_placeholder": "Nazwa ikony",
+      "upload": "Prześlij",
+      "upload_hint": "PNG lub SVG, maksymalnie 32 KB. Wyświetlana w rozmiarze 16 na 16 pikseli.",
+      "upload_failed": "Nie udało się przesłać ikony.",
+      "uploaded": "Dodano ikonę",
+      "delete_icon": "Usuń ikonę {name}",
+      "delete_header": "Usuń ikonę",
+      "delete_confirm": "Usunąć ikonę „{name}”? Tagi, które jej używają, będą działać dalej – po prostu nie będą miały ikony.",
+      "deleted": "Ikona usunięta. {count} tag nie ma już ikony. | Ikona usunięta. {count} tagi nie mają już ikony. | Ikona usunięta. {count} tagów nie ma już ikony.",
+      "delete_failed": "Nie udało się usunąć ikony.",
+      "admin_only": "Tylko administrator może dodawać i usuwać ikony."
+    },
     "account": {
       "title": "Konto użytkownika",
       "logged_in_as": "Zalogowano jako {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Nie udało się rozpocząć konfiguracji uwierzytelniania dwuskładnikowego",
         "activate_failed": "Ten kod jest nieprawidłowy. Sprawdź aplikację uwierzytelniającą i spróbuj ponownie.",
         "disable_failed": "Nie udało się wyłączyć uwierzytelniania dwuskładnikowego"
-      }
+      },
+      "tag_icons": "Pokazuj ikony tagów",
+      "tag_icons_hint": "Dotyczy tylko tego urządzenia."
     },
     "default_password_banner": {
       "title": "Używane jest domyślne hasło administratora",

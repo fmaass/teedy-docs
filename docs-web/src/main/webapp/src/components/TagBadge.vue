@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TagIconMark from './TagIconMark.vue'
 
 const { t } = useI18n()
 
@@ -15,6 +16,13 @@ const props = defineProps<{
    * — a chip is either a clickable filter action or a removable label.
    */
   clickable?: boolean
+  /**
+   * The tag's stored icon (#287): `emoji:<grapheme>`, `set:<iconId>`, or nothing.
+   *
+   * Optional at every one of the eight call sites, and a tag WITHOUT one must render exactly
+   * as it did before icons existed — see the render note below.
+   */
+  icon?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -31,6 +39,13 @@ const textColor = computed(() => {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   return luminance > 0.6 ? '#1e1e1e' : '#ffffff'
 })
+
+// --- The tag icon (#287) ---
+//
+// Drawn by TagIconMark, which is written so that a tag WITHOUT an icon contributes nothing at all
+// to the chip's DOM — see the note in that component, and TagBadge.icon.spec.ts, which freezes
+// the no-icon chip's HTML as a literal captured from this component before icons existed. Three
+// of the eight surfaces this chip renders on are screenshotted by the standing visual gate.
 </script>
 
 <template>
@@ -41,8 +56,8 @@ const textColor = computed(() => {
     :style="{ backgroundColor: color, color: textColor }"
     :aria-label="t('tag.filter_by_tag', { name })"
     @click="emit('select')"
-  >{{ name }}</button>
-  <span v-else class="teedy-tag" :style="{ backgroundColor: color, color: textColor }">{{ name }}<button v-if="removable" type="button" class="tag-remove-btn" :aria-label="t('tag.remove_tag', { name })" @click.stop="emit('remove')"><i class="pi pi-times" /></button></span>
+  ><TagIconMark :icon="icon" />{{ name }}</button>
+  <span v-else class="teedy-tag" :style="{ backgroundColor: color, color: textColor }"><TagIconMark :icon="icon" />{{ name }}<button v-if="removable" type="button" class="tag-remove-btn" :aria-label="t('tag.remove_tag', { name })" @click.stop="emit('remove')"><i class="pi pi-times" /></button></span>
 </template>
 
 <style scoped>

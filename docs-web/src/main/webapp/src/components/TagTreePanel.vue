@@ -2,9 +2,10 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { type Tag } from '../api/tag'
-import type { FacetTreeNodeData, OverflowNodeData } from '../composables/useCoOccurrenceTree'
+import type { FacetNodeData, FacetTreeNodeData, OverflowNodeData } from '../composables/useCoOccurrenceTree'
 import Tree from 'primevue/tree'
 import SelectButton from 'primevue/selectbutton'
+import TagIconMark from './TagIconMark.vue'
 
 const { t } = useI18n()
 
@@ -133,6 +134,9 @@ function getNodeCount(node: any): number | undefined {
           <i v-if="selectedTagIds.has(nodeTagId(node.key))" class="pi pi-check-circle state-icon include" />
           <i v-else-if="excludedTagIds.has(nodeTagId(node.key))" class="pi pi-minus-circle state-icon exclude" />
           <span class="tag-dot" :style="{ background: node.data.color }" />
+          <!-- #287. Renders nothing at all for a tag with no icon — this panel is inside the
+               document-list screenshot the standing visual gate compares. -->
+          <TagIconMark :icon="(node.data as FacetNodeData).icon" />
           <span class="tag-name">{{ node.label }}</span>
           <span class="tag-count" v-if="getNodeCount(node) != null">
             {{ getNodeCount(node) }}

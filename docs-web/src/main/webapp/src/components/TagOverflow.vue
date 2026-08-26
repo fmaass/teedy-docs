@@ -11,7 +11,7 @@ const tagFilter = useTagFilterStore()
 
 const props = defineProps<{
   /** The tags that overflow the inline row — shown inside the reveal panel. */
-  tags: Pick<Tag, 'id' | 'name' | 'color'>[]
+  tags: Pick<Tag, 'id' | 'name' | 'color' | 'icon'>[]
 }>()
 
 // Stable id so the trigger can reference the panel for assistive tech.
@@ -68,6 +68,7 @@ function selectTag(tagId: string) {
           :key="tag.id"
           :name="tag.name"
           :color="tag.color"
+          :icon="tag.icon"
           clickable
           @select="selectTag(tag.id)"
         />

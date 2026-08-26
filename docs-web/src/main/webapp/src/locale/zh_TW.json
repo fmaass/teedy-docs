@@ -451,6 +451,30 @@
       "document_count": "帶有此標籤的文件：{count}",
       "view_documents": "檢視文件"
     },
+    "tag_icon": {
+      "label": "圖示",
+      "none": "無",
+      "emoji": "表情符號",
+      "from_set": "圖示集",
+      "emoji_input": "表情符號",
+      "emoji_invalid": "請輸入且僅輸入一個表情符號。",
+      "suggested": "建議的表情符號",
+      "loading": "正在載入圖示…",
+      "set_empty": "尚未上傳任何圖示。",
+      "set_title": "圖示集",
+      "set_intro": "在此上傳的圖示可用於任何標籤。",
+      "name_placeholder": "圖示名稱",
+      "upload": "上傳",
+      "upload_hint": "PNG 或 SVG，最大 32 KB。以 16 × 16 像素顯示。",
+      "upload_failed": "無法上傳此圖示。",
+      "uploaded": "已新增圖示",
+      "delete_icon": "刪除圖示 {name}",
+      "delete_header": "刪除圖示",
+      "delete_confirm": "刪除圖示「{name}」？使用它的標籤仍可正常運作，只是不再有圖示。",
+      "deleted": "圖示已刪除。{count} 個標籤不再有圖示。 | 圖示已刪除。{count} 個標籤不再有圖示。",
+      "delete_failed": "無法刪除此圖示。",
+      "admin_only": "只有管理員才能新增或移除圖示。"
+    },
     "account": {
       "title": "使用者帳號",
       "logged_in_as": "已以 {username} 登入",
@@ -512,7 +536,9 @@
         "enable_failed": "無法開始雙重身份驗證的設定",
         "activate_failed": "此驗證碼無效。請檢查您的驗證器應用程式後再試一次。",
         "disable_failed": "無法停用雙重身份驗證"
-      }
+      },
+      "tag_icons": "顯示標籤圖示",
+      "tag_icons_hint": "僅適用於此裝置。"
     },
     "default_password_banner": {
       "title": "正在使用預設的管理員密碼",

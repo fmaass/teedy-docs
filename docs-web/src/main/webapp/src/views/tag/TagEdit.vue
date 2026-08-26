@@ -25,6 +25,7 @@ const tagFilter = useTagFilterStore()
 const name = ref('')
 const color = ref('2aabd2')
 const parent = ref<string | null>(null)
+const icon = ref<string | null>(null)
 
 const { data: tags } = useQuery({
   queryKey: ['tags'],
@@ -148,13 +149,16 @@ function loadFromCache() {
     name.value = tag.name
     color.value = tag.color.replace('#', '')
     parent.value = tag.parent
+    // Absent means no icon (#287) — the tag list omits the key rather than sending null.
+    icon.value = tag.icon ?? null
   }
 }
 
 watch([tags, () => props.id], loadFromCache, { immediate: true })
 
 const { mutate: save, isPending: loading } = useMutation({
-  mutationFn: () => updateTag(props.id, name.value, '#' + color.value, parent.value ?? undefined),
+  mutationFn: () =>
+    updateTag(props.id, name.value, '#' + color.value, parent.value ?? undefined, icon.value),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tags'] })
     toast.add({ severity: 'success', summary: t('ui.tag_edit.tag_updated'), life: 2000 })
@@ -209,6 +213,7 @@ function handleDelete() {
     <TagForm
       v-model:name="name"
       v-model:color="color"
+      v-model:icon="icon"
       v-model:parent="parent"
       :parent-options="parentOptions"
       id-prefix="tag"

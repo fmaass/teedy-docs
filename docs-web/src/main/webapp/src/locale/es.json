@@ -451,6 +451,30 @@
       "document_count": "Documentos con esta etiqueta: {count}",
       "view_documents": "Ver documentos"
     },
+    "tag_icon": {
+      "label": "Icono",
+      "none": "Ninguno",
+      "emoji": "Emoji",
+      "from_set": "Conjunto de iconos",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Introduce exactamente un emoji.",
+      "suggested": "Emojis sugeridos",
+      "loading": "Cargando iconos…",
+      "set_empty": "Todavía no se ha subido ningún icono.",
+      "set_title": "Conjunto de iconos",
+      "set_intro": "Los iconos subidos aquí se pueden asignar a cualquier etiqueta.",
+      "name_placeholder": "Nombre del icono",
+      "upload": "Subir",
+      "upload_hint": "PNG o SVG, hasta 32 KB. Se muestra a 16 por 16 píxeles.",
+      "upload_failed": "No se ha podido subir el icono.",
+      "uploaded": "Icono añadido",
+      "delete_icon": "Eliminar el icono {name}",
+      "delete_header": "Eliminar icono",
+      "delete_confirm": "¿Eliminar el icono «{name}»? Las etiquetas que lo usan seguirán funcionando, simplemente se quedarán sin icono.",
+      "deleted": "Icono eliminado. {count} etiqueta se ha quedado sin icono. | Icono eliminado. {count} etiquetas se han quedado sin icono.",
+      "delete_failed": "No se ha podido eliminar el icono.",
+      "admin_only": "Solo un administrador puede añadir o quitar iconos."
+    },
     "account": {
       "title": "Cuenta de usuario",
       "logged_in_as": "Sesión iniciada como {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "No se pudo iniciar la configuración de la autenticación en dos pasos",
         "activate_failed": "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
         "disable_failed": "No se pudo desactivar la autenticación en dos pasos"
-      }
+      },
+      "tag_icons": "Mostrar los iconos de las etiquetas",
+      "tag_icons_hint": "Solo se aplica a este dispositivo."
     },
     "default_password_banner": {
       "title": "Contraseña de administrador predeterminada en uso",

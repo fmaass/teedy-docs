@@ -28,6 +28,8 @@ import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { useTagCreate, DEFAULT_TAG_COLOR } from '../../composables/useTagCreate'
 import ErrorState from '../../components/ErrorState.vue'
 import TagForm from '../../components/TagForm.vue'
+import TagIconMark from '../../components/TagIconMark.vue'
+import TagIconSetManager from '../../components/TagIconSetManager.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -38,6 +40,7 @@ const queryClient = useQueryClient()
 const newTagName = ref('')
 const newTagColor = ref(DEFAULT_TAG_COLOR)
 const newTagParent = ref<string | null>(null)
+const newTagIcon = ref<string | null>(null)
 
 // #306 — "let permissions be set directly in the tag-management CREATE flow" (the reporter).
 // Creating a tag here used to mean creating it bare, finding it in the tree, opening it, and
@@ -180,6 +183,7 @@ async function handleAddTag() {
     name: newTagName.value.trim(),
     color: '#' + newTagColor.value,
     parent: newTagParent.value,
+    icon: newTagIcon.value,
   }
   if (!draft.name) return
 
@@ -193,6 +197,7 @@ async function handleAddTag() {
 
     newTagName.value = ''
     newTagParent.value = null
+    newTagIcon.value = null
     // The grants that were just applied belong to the tag that now exists — they must not
     // follow the next one into a second tag.
     resetCreateGrants()
@@ -223,6 +228,7 @@ function cancelFullForm() {
   newTagName.value = ''
   newTagColor.value = DEFAULT_TAG_COLOR
   newTagParent.value = null
+  newTagIcon.value = null
   resetCreateGrants()
   fullForm.value = false
 }
@@ -516,6 +522,7 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
           id-prefix="tag-new"
           v-model:name="newTagName"
           v-model:color="newTagColor"
+          v-model:icon="newTagIcon"
           v-model:parent="newTagParent"
           :parent-options="parentOptions"
           :name-placeholder="t('ui.tags_page.tag_name_placeholder')"
@@ -550,6 +557,10 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
         </div>
       </template>
     </Card>
+
+    <!-- The uploaded icon set (#287). Collapsed until asked for, and deliberately NOT a new
+         Settings entry — the set exists to be put on tags, so it belongs where tags are made. -->
+    <TagIconSetManager />
 
     <!-- Tag tree -->
     <Card>
@@ -586,6 +597,7 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
           <template #default="{ node }">
             <span class="tag-node" @contextmenu.prevent.stop="openNodeMenu($event, node.key)">
               <span class="tag-dot" :style="{ background: node.data.color }" />
+              <TagIconMark :icon="node.data.icon" />
               <span class="tag-label">{{ node.label }}</span>
               <span v-if="countsLoaded" class="tag-count">{{ docCount(node.key) }}</span>
               <!-- The row affordance beside the right-click menu: a context menu has no touch

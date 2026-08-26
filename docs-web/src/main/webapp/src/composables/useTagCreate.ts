@@ -34,6 +34,8 @@ export interface TagCreateDraft {
   /** Hex colour WITH the leading '#', the form the tag endpoints take. */
   color: string
   parent: string | null
+  /** The tag's icon (#287): the stored reference, or null for none. */
+  icon: string | null
 }
 
 export interface TagCreateOutcome {
@@ -130,7 +132,7 @@ export function useTagCreate() {
 
     errorMessage.value = null
     try {
-      const { data } = await createTag(draft.name, draft.color, draft.parent ?? undefined)
+      const { data } = await createTag(draft.name, draft.color, draft.parent ?? undefined, draft.icon)
 
       // Now, and only now, the grants have somewhere to land. A grant that fails does NOT undo
       // the tag — it exists — so it is reported and the flow continues.

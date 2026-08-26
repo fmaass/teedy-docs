@@ -104,7 +104,7 @@ public class JpaDocumentRepository implements DocumentRepository {
                     new SortCriteria(1, true));
             tags = new ArrayList<>();
             for (TagDto tagDto : tagDtoList) {
-                tags.add(new TagView(tagDto.getId(), tagDto.getName(), tagDto.getColor()));
+                tags.add(new TagView(tagDto.getId(), tagDto.getName(), tagDto.getColor(), tagDto.getIcon()));
             }
         }
 

@@ -51,7 +51,7 @@ public record DocumentView(
     /**
      * A tag visible to the caller on this document.
      */
-    public record TagView(String id, String name, String color) {
+    public record TagView(String id, String name, String color, String icon) {
     }
 
     /**

@@ -9,6 +9,7 @@ import InputIcon from 'primevue/inputicon'
 import { type Tag } from '../api/tag'
 import { type DocumentListItem } from '../api/document'
 import TagBadge from './TagBadge.vue'
+import TagIconMark from './TagIconMark.vue'
 import { assignableTags, filterTagsByName, topUsedTags } from '../utils/tagQuickMenu'
 import { nextFrame } from '../utils/nextFrame'
 
@@ -468,7 +469,7 @@ defineExpose({ show, hide })
             :aria-label="t('ui.tag_menu.add_named', { name: tag.name })"
             @click="onQuickAdd(tag.id)"
           >
-            <i class="pi pi-plus tqm-chip-icon" aria-hidden="true" />{{ tag.name }}
+            <i class="pi pi-plus tqm-chip-icon" aria-hidden="true" /><TagIconMark :icon="tag.icon" />{{ tag.name }}
           </button>
         </div>
       </div>
@@ -482,6 +483,7 @@ defineExpose({ show, hide })
             :key="tag.id"
             :name="tag.name"
             :color="tag.color"
+            :icon="tag.icon"
             removable
             @remove="onRemove(tag.id)"
           />

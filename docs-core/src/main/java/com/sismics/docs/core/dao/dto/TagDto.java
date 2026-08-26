@@ -22,6 +22,11 @@ public class TagDto {
     private String color;
     
     /**
+     * Icon (#287): {@code emoji:<grapheme>}, {@code set:<iconId>}, or null for no icon.
+     */
+    private String icon;
+
+    /**
      * Parent ID.
      */
     private String parentId;
@@ -58,6 +63,15 @@ public class TagDto {
         return this;
     }
     
+    public String getIcon() {
+        return icon;
+    }
+
+    public TagDto setIcon(String icon) {
+        this.icon = icon;
+        return this;
+    }
+
     public String getParentId() {
         return parentId;
     }

@@ -61,10 +61,21 @@ public final class LegacyDocumentResponseMapper {
 
         JsonArrayBuilder tags = Json.createArrayBuilder();
         for (TagView tag : view.tags()) {
-            tags.add(Json.createObjectBuilder()
+            JsonObjectBuilder tagBuilder = Json.createObjectBuilder()
                     .add("id", tag.id())
                     .add("name", tag.name())
-                    .add("color", tag.color()));
+                    .add("color", tag.color());
+            // #287. OMITTED, not null, for a tag with no icon.
+            //
+            // Deliberately NOT nullableString(), which is what the document's own nullable fields
+            // use: those have always been present-and-null on the wire, and the golden corpus
+            // pins that. A tag object is a different shape — the legacy builder
+            // (DocumentResourceHelper#createTagsArrayBuilder) omits absent keys — and the two
+            // must agree byte for byte, because the golden differential compares them.
+            if (tag.icon() != null) {
+                tagBuilder.add("icon", tag.icon());
+            }
+            tags.add(tagBuilder);
         }
         document.add("tags", tags);
 

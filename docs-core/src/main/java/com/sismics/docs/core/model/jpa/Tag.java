@@ -60,6 +60,18 @@ public class Tag implements Loggable {
     @Column(name = "TAG_COLOR_C", nullable = false, length = 7)
     private String color;
 
+    /**
+     * Tag icon (#287), or null for a tag with no icon — which is what every tag was before the
+     * feature existed and what most stay.
+     *
+     * <p>ONE discriminated column rather than a pair, because a tag has at most one icon:
+     * {@code emoji:<grapheme>} holds an emoji verbatim, {@code set:<iconId>} names an icon
+     * uploaded into the instance's custom set (see {@link TagIcon}). Two nullable columns would
+     * make "both set" representable and leave every reader to invent a precedence rule.</p>
+     */
+    @Column(name = "TAG_ICON_C", length = 64)
+    private String icon;
+
     public String getId() {
         return id;
     }
@@ -98,6 +110,14 @@ public class Tag implements Loggable {
 
     public void setColor(String color) {
         this.color = color;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
     }
 
     @Override

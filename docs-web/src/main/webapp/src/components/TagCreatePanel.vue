@@ -66,6 +66,7 @@ const { errorMessage, aclState, addGrant, removeGrant, reset, create } = useTagC
 const name = ref('')
 const color = ref(DEFAULT_TAG_COLOR)
 const parent = ref<string | null>(null)
+const icon = ref<string | null>(null)
 
 // The panel's own in-flight flag, covering its WHOLE save — the create AND the tail that hands
 // the tag to the document and closes the panel. It is not the shared composable's to hold: a
@@ -83,6 +84,7 @@ watch(
     name.value = props.initialName
     color.value = DEFAULT_TAG_COLOR
     parent.value = null
+    icon.value = null
     saving.value = false
     reset()
   },
@@ -131,6 +133,7 @@ async function save() {
     name: name.value.trim(),
     color: '#' + color.value,
     parent: parent.value,
+    icon: icon.value,
   }
   if (!draft.name) return
 
@@ -246,6 +249,7 @@ const drawerStyle = computed(() => (isMobile.value ? {} : { width: panelWidth.va
       autofocus-name
       v-model:name="name"
       v-model:color="color"
+      v-model:icon="icon"
       v-model:parent="parent"
       :parent-options="parentOptions"
       :acl="aclState"

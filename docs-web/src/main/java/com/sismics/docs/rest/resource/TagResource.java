@@ -9,15 +9,22 @@ import com.sismics.docs.core.dao.dto.TagCoOccurrence;
 import com.sismics.docs.core.dao.dto.TagDto;
 import com.sismics.docs.core.exception.InactiveOwnerException;
 import com.sismics.docs.core.model.jpa.Tag;
+import com.sismics.docs.core.model.jpa.TagIcon;
 import com.sismics.docs.core.util.TagCreationUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
+import com.sismics.docs.rest.constant.BaseFunction;
+import com.sismics.docs.rest.util.TagIconUtil;
 import com.sismics.docs.rest.util.TagMaintenanceUtil;
 import com.sismics.docs.rest.util.TagReductionUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
+import com.sismics.rest.exception.ServerException;
 import com.sismics.rest.util.AclUtil;
 import com.sismics.rest.util.ValidationUtil;
+import com.sismics.util.HttpUtil;
 import org.apache.commons.lang3.StringUtils;
+import org.glassfish.jersey.media.multipart.FormDataBodyPart;
+import org.glassfish.jersey.media.multipart.FormDataParam;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -31,11 +38,16 @@ import jakarta.json.Json;
 import jakarta.json.JsonArrayBuilder;
 import jakarta.json.JsonObjectBuilder;
 import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.text.MessageFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.Set;
 
 /**
@@ -55,6 +67,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} tags.id ID
      * @apiSuccess {String} tags.name Name
      * @apiSuccess {String} tags.color Color
+     * @apiSuccess {String} tags.icon Icon (absent when the tag has none)
      * @apiSuccess {String} tags.parent Parent
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission user
@@ -94,6 +107,11 @@ public class TagResource extends BaseResource {
                     .add("id", tagDto.getId())
                     .add("name", tagDto.getName())
                     .add("color", tagDto.getColor());
+            // OMITTED rather than null for a tag with no icon (#287), which is most of them: the
+            // key's absence is what an older client and the pre-icon SPA already handle correctly.
+            if (tagDto.getIcon() != null) {
+                item.add("icon", tagDto.getIcon());
+            }
             if (tagIdSet.contains(tagDto.getParentId())) {
                 item.add("parent", tagDto.getParentId());
             }
@@ -115,6 +133,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} name Name
      * @apiSuccess {String} creator Username of the creator
      * @apiSuccess {String} color Color
+     * @apiSuccess {String} icon Icon (absent when the tag has none)
      * @apiSuccess {String} parent Parent
      * @apiSuccess {Boolean} writable True if the tag is writable by the current user
      * @apiSuccess {Object[]} acls List of ACL
@@ -164,6 +183,9 @@ public class TagResource extends BaseResource {
                 .add("creator", tagDto.getCreator())
                 .add("name", tagDto.getName())
                 .add("color", tagDto.getColor());
+        if (tagDto.getIcon() != null) {
+            tag.add("icon", tagDto.getIcon());
+        }
 
         // Add the parent if its visible
         if (tagDto.getParentId() != null) {
@@ -187,6 +209,7 @@ public class TagResource extends BaseResource {
      * @apiGroup Tag
      * @apiParam {String} name Name
      * @apiParam {String} color Color
+     * @apiParam {String} icon Icon: 'emoji:<grapheme>' or 'set:<iconId>'; empty for none
      * @apiParam {String} parent Parent ID
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
@@ -200,6 +223,7 @@ public class TagResource extends BaseResource {
      *
      * @param name Name
      * @param color Color
+     * @param icon Icon
      * @param parentId Parent ID
      * @return Response
      */
@@ -217,17 +241,19 @@ public class TagResource extends BaseResource {
                             + "IllegalTagName - Spaces, colons and asterisks are not allowed inside a tag name "
                             + "(invisible format characters are removed and the edges trimmed instead, and a name "
                             + "left empty by that normalization is refused); "
-                            + "ParentNotFound - Parent not found")
+                            + "ParentNotFound - Parent not found; "
+                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon)")
             }
     )
     public Response add(
             @Parameter(description = "Name") @FormParam("name") String name,
             @Parameter(description = "Color") @FormParam("color") String color,
+            @Parameter(description = "Icon") @FormParam("icon") String icon,
             @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
-        
+
         // Validate input data
         // #305: normalization runs FIRST and owns the whole name rule (invisible characters removed,
         // edges trimmed, interior whitespace refused). The length bound is then measured on the name
@@ -236,6 +262,11 @@ public class TagResource extends BaseResource {
         name = ValidationUtil.validateTagName(name);
         name = ValidationUtil.validateLength(name, "name", 1, 36, false);
         ValidationUtil.validateHexColor(color, "color", true);
+        // #287. Absent or empty means no icon, which is what every tag was before the feature
+        // existed. Anything else has to be an emoji this server recognises as ONE emoji, or an
+        // icon that is in the set right now — checked here rather than trusted, because the set
+        // can change between the picker loading it and the form being saved.
+        String iconReference = TagIconUtil.validateIconReference(icon);
 
         // Check the parent
         if (StringUtils.isEmpty(parentId)) {
@@ -255,6 +286,7 @@ public class TagResource extends BaseResource {
         Tag tag = new Tag();
         tag.setName(name);
         tag.setColor(color);
+        tag.setIcon(iconReference);
         tag.setUserId(principal.getId());
         tag.setParentId(parentId);
         String id;
@@ -278,6 +310,7 @@ public class TagResource extends BaseResource {
      * @apiParam {String} id Tag ID
      * @apiParam {String} name Name
      * @apiParam {String} color Color
+     * @apiParam {String} icon Icon: 'emoji:<grapheme>' or 'set:<iconId>'; empty for none
      * @apiParam {String} parent Parent ID
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
@@ -293,6 +326,7 @@ public class TagResource extends BaseResource {
      *
      * @param name Name
      * @param color Color
+     * @param icon Icon
      * @param parentId Parent ID
      * @return Response
      */
@@ -317,24 +351,27 @@ public class TagResource extends BaseResource {
                             + "(invisible format characters are removed and the edges trimmed instead, and a name "
                             + "left empty by that normalization is refused); "
                             + "ParentNotFound - Parent not found; "
-                            + "CircularReference - Circular reference in parent tag")
+                            + "CircularReference - Circular reference in parent tag; "
+                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon)")
             }
     )
     public Response update(
             @PathParam("id") String id,
             @Parameter(description = "Name") @FormParam("name") String name,
             @Parameter(description = "Color") @FormParam("color") String color,
+            @Parameter(description = "Icon") @FormParam("icon") String icon,
             @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
         }
-        
+
         // Validate input data
         // #305: same order as create — a rename must not be a back door for the characters create
         // refuses, and the length bound must measure the normalized name it returns.
         name = ValidationUtil.validateTagName(name);
         name = ValidationUtil.validateLength(name, "name", 1, 36, true);
         ValidationUtil.validateHexColor(color, "color", true);
+        String iconReference = TagIconUtil.validateIconReference(icon);
 
         // Check permission
         AclDao aclDao = new AclDao();
@@ -369,6 +406,11 @@ public class TagResource extends BaseResource {
         if (!StringUtils.isEmpty(color)) {
             tag.setColor(color);
         }
+        // The icon is always written, like the parent and unlike the colour: taking an icon back
+        // OFF a tag has to be expressible, and an empty parameter is the only way a form can say
+        // it. A caller that means "leave the icon alone" must send the value it already has —
+        // which is what the tag form does, since it loads the tag before saving it.
+        tag.setIcon(iconReference);
         // Parent tag is always updated to have the possibility to delete it
         tag.setParentId(parentId);
         
@@ -855,6 +897,261 @@ public class TagResource extends BaseResource {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // The custom tag-icon set (#287).
+    //
+    // One set for the whole instance, managed by an administrator and USED by everybody: "the
+    // custom uploaded icons could be saved into one or more custom set(s) ... i think one custom
+    // icon set should be enough for the start", and the point of a set rather than a per-tag
+    // upload was reuse — "we can recycle the uploaded icons to use it at many tags".
+    //
+    // The split of permissions follows from that. Adding to and removing from the set is an
+    // administrative act: it writes a file to the server that every user then loads. Choosing one
+    // for your own tag is not, and is handled by the ordinary tag create/update above.
+    //
+    // Every DAO and file-store call goes through TagIconUtil rather than being made here: this
+    // package may not depend on core.dao, and the architecture test freezes the existing
+    // violations so a new one cannot be introduced.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Returns the custom icon set.
+     *
+     * @api {get} /tag/icon Get the tag icon set
+     * @apiName GetTagIconList
+     * @apiGroup Tag
+     * @apiSuccess {Object[]} icons List of icons
+     * @apiSuccess {String} icons.id ID
+     * @apiSuccess {String} icons.name Name
+     * @apiSuccess {String} icons.mimetype Media type
+     * @apiError (client) ForbiddenError Access denied
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @return Response
+     */
+    @GET
+    @Path("/icon")
+    @Operation(
+            summary = "Get the tag icon set",
+            description = "Returns every icon in the instance's custom tag icon set.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIconListResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied")
+            }
+    )
+    public Response iconList() {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        JsonArrayBuilder icons = Json.createArrayBuilder();
+        for (TagIcon tagIcon : TagIconUtil.list()) {
+            icons.add(Json.createObjectBuilder()
+                    .add("id", tagIcon.getId())
+                    .add("name", tagIcon.getName())
+                    .add("mimetype", tagIcon.getMimeType()));
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("icons", icons).build()).build();
+    }
+
+    /**
+     * Adds an icon to the custom icon set.
+     *
+     * @api {put} /tag/icon Add an icon to the tag icon set
+     * @apiDescription This resource accepts only multipart/form-data. The image must be a PNG or
+     * an SVG, decided by its CONTENT rather than by the declared type or file name, and must fit
+     * the size limit.
+     * @apiName PutTagIcon
+     * @apiGroup Tag
+     * @apiParam {String} name Name
+     * @apiParam {String} image Image data
+     * @apiSuccess {String} id Icon ID
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError Validation error
+     * @apiError (client) NoImageProvided An image is required
+     * @apiError (client) InvalidImageType The image must be a PNG or an SVG
+     * @apiError (client) InvalidImageContent The SVG contains scripting or external references
+     * @apiError (client) PayloadTooLarge The image exceeds the size limit
+     * @apiError (server) CopyError Error writing the icon to the icon store
+     * @apiPermission admin
+     * @apiVersion 1.5.0
+     *
+     * @param name Name
+     * @param imageBodyPart Image data
+     * @return Response
+     */
+    @PUT
+    @Path("/icon")
+    @Consumes("multipart/form-data")
+    @Operation(
+            summary = "Add an icon to the tag icon set",
+            description = "Adds an uploaded PNG or SVG image to the instance's custom tag icon set.",
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIconIdResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "400", description = "ValidationError - Validation error; "
+                            + "NoImageProvided - An image is required; "
+                            + "InvalidImageType - The image must be a PNG or an SVG; "
+                            + "InvalidImageContent - The SVG contains scripting or external references; "
+                            + "PayloadTooLarge - The image exceeds the size limit"),
+                    @ApiResponse(responseCode = "500", description = "CopyError - Error writing the icon")
+            }
+    )
+    public Response addIcon(
+            @Parameter(description = "Name") @FormDataParam("name") String name,
+            @Parameter(description = "Image data") @FormDataParam("image") FormDataBodyPart imageBodyPart) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        if (imageBodyPart == null) {
+            throw new ClientException("NoImageProvided", "An image is required");
+        }
+
+        String iconId;
+        try (InputStream inputStream = imageBodyPart.getValueAs(InputStream.class)) {
+            iconId = TagIconUtil.create(name, inputStream, principal.getId());
+        } catch (IOException e) {
+            throw new ServerException("ReadError", "Error reading the uploaded icon", e);
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("id", iconId).build()).build();
+    }
+
+    /**
+     * Removes an icon from the custom icon set.
+     *
+     * <p>Every tag that was using it is left with NO icon — see
+     * {@link com.sismics.docs.core.dao.TagIconDao#delete}. That is the whole of the fallback:
+     * nothing renders a reference to an icon that is gone, because no such reference survives.</p>
+     *
+     * @api {delete} /tag/icon/:id Remove an icon from the tag icon set
+     * @apiName DeleteTagIcon
+     * @apiGroup Tag
+     * @apiParam {String} id Icon ID
+     * @apiSuccess {String} status Status OK
+     * @apiSuccess {Number} tags Number of tags whose icon was cleared
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) NotFound Icon not found
+     * @apiPermission admin
+     * @apiVersion 1.5.0
+     *
+     * @param id Icon ID
+     * @return Response
+     */
+    @DELETE
+    @Path("/icon/{id: [a-z0-9\\-]+}")
+    @Operation(
+            summary = "Remove an icon from the tag icon set",
+            description = "Removes an icon from the set. Every tag that used it is left with no icon.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Icon ID", schema = @Schema(type = "string"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIconDeleteResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Icon not found")
+            }
+    )
+    public Response deleteIcon(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+        checkBaseFunction(BaseFunction.ADMIN);
+
+        // ONE step, not a look-then-delete. The pre-check this replaces left a window in which a
+        // concurrent delete could remove the row between the two, and the loser then hit a query
+        // that expected exactly one result — a 500 for what is, from the client's side, simply an
+        // icon that is not there. The delete reports absence itself, so both orderings answer 404.
+        OptionalInt clearedTags = TagIconUtil.delete(id);
+        if (clearedTags.isEmpty()) {
+            throw new NotFoundException();
+        }
+
+        return Response.ok().entity(Json.createObjectBuilder()
+                .add("status", "ok")
+                .add("tags", clearedTags.getAsInt()).build()).build();
+    }
+
+    /**
+     * Serves one icon's image.
+     *
+     * <p>Authenticated like the rest of the instance's content. The response is cached hard
+     * because an icon is immutable for a given ID — replacing an icon means uploading a new one,
+     * which gets a new ID and therefore a new URL — so nothing can go stale.</p>
+     *
+     * @api {get} /tag/icon/:id/data Get a tag icon's image
+     * @apiName GetTagIconData
+     * @apiGroup Tag
+     * @apiParam {String} id Icon ID
+     * @apiSuccess {String} image The whole response is the image
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) NotFound Icon not found
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param id Icon ID
+     * @return Response
+     */
+    @GET
+    @Path("/icon/{id: [a-z0-9\\-]+}/data")
+    @Operation(
+            summary = "Get a tag icon's image",
+            description = "Returns the image bytes of one icon in the custom tag icon set.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Icon ID", schema = @Schema(type = "string"))
+            },
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success"),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Icon not found")
+            }
+    )
+    public Response getIconData(@PathParam("id") String id) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        TagIcon tagIcon = TagIconUtil.getActive(id);
+        if (tagIcon == null) {
+            throw new NotFoundException();
+        }
+        java.nio.file.Path path = TagIconUtil.iconPath(tagIcon.getId());
+        byte[] content;
+        try {
+            // Bounded by the upload cap, so reading it whole is a few kilobytes and lets the
+            // response carry a Content-Length.
+            content = Files.readAllBytes(path);
+        } catch (IOException e) {
+            // The row says the icon exists but its file does not. Answering 404 keeps the chip's
+            // fallback path (drop the image) working instead of serving a truncated image.
+            throw new NotFoundException();
+        }
+
+        return Response.ok(content)
+                .header(HttpHeaders.CONTENT_TYPE, tagIcon.getMimeType())
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=1296000, immutable")
+                .header(HttpHeaders.EXPIRES, HttpUtil.buildExpiresHeader(3_600_000L * 24L * 15L))
+                // The stored type is the only one the browser may use. Without this an SVG that
+                // slipped past the upload checks could still be re-interpreted as something else.
+                .header("X-Content-Type-Options", "nosniff")
+                // An SVG is a document that a same-origin page could otherwise script from. This
+                // denies the response everything: no scripts, no fetches, no framing, no plugins.
+                .header("Content-Security-Policy",
+                        "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+                .build();
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // OpenAPI schema models (v3.5 build-time generation spike). Documentation-only DTOs referenced
     // by the @Schema annotations above; they mirror the JSON shapes the resource actually returns.
     // Not used at runtime — the endpoints build their JSON via Json.createObjectBuilder.
@@ -866,6 +1163,8 @@ public class TagResource extends BaseResource {
         public String name;
         @Schema(description = "Color")
         public String color;
+        @Schema(description = "Icon: 'emoji:<grapheme>' or 'set:<iconId>'; empty for none")
+        public String icon;
         @Schema(name = "parent", description = "Parent ID")
         public String parent;
     }
@@ -874,6 +1173,36 @@ public class TagResource extends BaseResource {
     private static class TagIdResult {
         @Schema(description = "Tag ID")
         public String id;
+    }
+
+    @Schema(name = "TagIconItem", description = "An icon in the custom tag icon set")
+    private static class TagIconItem {
+        @Schema(description = "ID")
+        public String id;
+        @Schema(description = "Name")
+        public String name;
+        @Schema(description = "Media type", allowableValues = {"image/png", "image/svg+xml"})
+        public String mimetype;
+    }
+
+    @Schema(name = "TagIconListResult", description = "The custom tag icon set")
+    private static class TagIconListResult {
+        @Schema(description = "List of icons")
+        public List<TagIconItem> icons;
+    }
+
+    @Schema(name = "TagIconIdResult", description = "Icon ID envelope")
+    private static class TagIconIdResult {
+        @Schema(description = "Icon ID")
+        public String id;
+    }
+
+    @Schema(name = "TagIconDeleteResult", description = "Icon removal report")
+    private static class TagIconDeleteResult {
+        @Schema(description = "Status OK")
+        public String status;
+        @Schema(description = "Number of tags whose icon was cleared")
+        public Integer tags;
     }
 
     @Schema(name = "StatusResult", description = "Status envelope")
@@ -890,6 +1219,8 @@ public class TagResource extends BaseResource {
         public String name;
         @Schema(description = "Color")
         public String color;
+        @Schema(description = "Icon: 'emoji:<grapheme>' or 'set:<iconId>'; absent when the tag has none")
+        public String icon;
         @Schema(description = "Parent")
         public String parent;
     }
@@ -922,6 +1253,8 @@ public class TagResource extends BaseResource {
         public String creator;
         @Schema(description = "Color")
         public String color;
+        @Schema(description = "Icon: 'emoji:<grapheme>' or 'set:<iconId>'; absent when the tag has none")
+        public String icon;
         @Schema(description = "Parent")
         public String parent;
         @Schema(description = "True if the tag is writable by the current user")

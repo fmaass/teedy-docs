@@ -120,8 +120,22 @@ public class DirectoryUtil {
     }
 
     /**
+     * Returns the tag icon directory (#287).
+     *
+     * <p>Uploaded tag icons are files, stored the same way the theme images are: one file per
+     * icon, named by the icon's ID, with the row in T_TAG_ICON carrying only the metadata. They
+     * are deliberately NOT under {@code storage} — that directory holds document files, which are
+     * encrypted per user and swept by clean_storage against T_FILE.</p>
+     *
+     * @return Tag icon directory.
+     */
+    public static Path getTagIconDirectory() {
+        return getDataSubDirectory("tagicon");
+    }
+
+    /**
      * Returns a subdirectory of the base data directory
-     * 
+     *
      * @return Subdirectory
      */
     private static Path getDataSubDirectory(String subdirectory) {

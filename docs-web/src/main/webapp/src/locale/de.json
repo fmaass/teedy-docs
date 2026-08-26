@@ -451,6 +451,30 @@
       "document_count": "Dokumente mit diesem Tag: {count}",
       "view_documents": "Dokumente anzeigen"
     },
+    "tag_icon": {
+      "label": "Symbol",
+      "none": "Keines",
+      "emoji": "Emoji",
+      "from_set": "Symbolsatz",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Gib genau ein Emoji ein.",
+      "suggested": "Emoji-Vorschläge",
+      "loading": "Symbole werden geladen …",
+      "set_empty": "Es wurden noch keine Symbole hochgeladen.",
+      "set_title": "Symbolsatz",
+      "set_intro": "Hier hochgeladene Symbole kannst du jedem Tag zuweisen.",
+      "name_placeholder": "Symbolname",
+      "upload": "Hochladen",
+      "upload_hint": "PNG oder SVG, höchstens 32 KB. Wird mit 16 mal 16 Pixeln angezeigt.",
+      "upload_failed": "Das Symbol konnte nicht hochgeladen werden.",
+      "uploaded": "Symbol hinzugefügt",
+      "delete_icon": "Symbol {name} löschen",
+      "delete_header": "Symbol löschen",
+      "delete_confirm": "Das Symbol „{name}“ löschen? Tags, die es verwenden, funktionieren weiter – sie haben dann einfach kein Symbol.",
+      "deleted": "Symbol gelöscht. {count} Tag hat jetzt kein Symbol mehr. | Symbol gelöscht. {count} Tags haben jetzt kein Symbol mehr.",
+      "delete_failed": "Das Symbol konnte nicht gelöscht werden.",
+      "admin_only": "Nur Administratoren können Symbole hinzufügen oder entfernen."
+    },
     "account": {
       "title": "Benutzerkonto",
       "logged_in_as": "Angemeldet als {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Die Einrichtung der Zwei-Faktor-Authentifizierung konnte nicht gestartet werden",
         "activate_failed": "Dieser Code ist ungültig. Prüfe deine Authenticator-App und versuche es erneut.",
         "disable_failed": "Die Zwei-Faktor-Authentifizierung konnte nicht deaktiviert werden"
-      }
+      },
+      "tag_icons": "Tag-Symbole anzeigen",
+      "tag_icons_hint": "Gilt nur für dieses Gerät."
     },
     "default_password_banner": {
       "title": "Standard-Administratorpasswort in Verwendung",

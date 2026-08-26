@@ -451,6 +451,30 @@
       "document_count": "Documentos com esta etiqueta: {count}",
       "view_documents": "Ver documentos"
     },
+    "tag_icon": {
+      "label": "Ícone",
+      "none": "Nenhum",
+      "emoji": "Emoji",
+      "from_set": "Conjunto de ícones",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Introduza exatamente um emoji.",
+      "suggested": "Emojis sugeridos",
+      "loading": "A carregar os ícones…",
+      "set_empty": "Ainda não foi carregado nenhum ícone.",
+      "set_title": "Conjunto de ícones",
+      "set_intro": "Os ícones carregados aqui podem ser atribuídos a qualquer etiqueta.",
+      "name_placeholder": "Nome do ícone",
+      "upload": "Carregar",
+      "upload_hint": "PNG ou SVG, até 32 KB. Apresentado a 16 por 16 píxeis.",
+      "upload_failed": "Não foi possível carregar o ícone.",
+      "uploaded": "Ícone adicionado",
+      "delete_icon": "Eliminar o ícone {name}",
+      "delete_header": "Eliminar ícone",
+      "delete_confirm": "Eliminar o ícone «{name}»? As etiquetas que o usam continuam a funcionar, ficam apenas sem ícone.",
+      "deleted": "Ícone eliminado. {count} etiqueta ficou sem ícone. | Ícone eliminado. {count} etiquetas ficaram sem ícone.",
+      "delete_failed": "Não foi possível eliminar o ícone.",
+      "admin_only": "Apenas um administrador pode adicionar ou remover ícones."
+    },
     "account": {
       "title": "Conta de utilizador",
       "logged_in_as": "Sessão iniciada como {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Não foi possível iniciar a configuração da autenticação de dois fatores",
         "activate_failed": "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
         "disable_failed": "Não foi possível desativar a autenticação de dois fatores"
-      }
+      },
+      "tag_icons": "Mostrar os ícones das etiquetas",
+      "tag_icons_hint": "Aplica-se apenas a este dispositivo."
     },
     "default_password_banner": {
       "title": "Palavra-passe de administrador predefinida em uso",

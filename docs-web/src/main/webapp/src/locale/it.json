@@ -451,6 +451,30 @@
       "document_count": "Documenti con questo tag: {count}",
       "view_documents": "Visualizza documenti"
     },
+    "tag_icon": {
+      "label": "Icona",
+      "none": "Nessuna",
+      "emoji": "Emoji",
+      "from_set": "Set di icone",
+      "emoji_input": "Emoji",
+      "emoji_invalid": "Inserisci esattamente una emoji.",
+      "suggested": "Emoji suggerite",
+      "loading": "Caricamento delle icone…",
+      "set_empty": "Non è ancora stata caricata alcuna icona.",
+      "set_title": "Set di icone",
+      "set_intro": "Le icone caricate qui possono essere assegnate a qualsiasi tag.",
+      "name_placeholder": "Nome dell'icona",
+      "upload": "Carica",
+      "upload_hint": "PNG o SVG, fino a 32 KB. Mostrata a 16 per 16 pixel.",
+      "upload_failed": "Non è stato possibile caricare l'icona.",
+      "uploaded": "Icona aggiunta",
+      "delete_icon": "Elimina l'icona {name}",
+      "delete_header": "Elimina icona",
+      "delete_confirm": "Eliminare l’icona «{name}»? I tag che la usano continuano a funzionare, semplicemente non avranno più un’icona.",
+      "deleted": "Icona eliminata. {count} tag non ha più un’icona. | Icona eliminata. {count} tag non hanno più un’icona.",
+      "delete_failed": "Non è stato possibile eliminare l'icona.",
+      "admin_only": "Solo un amministratore può aggiungere o rimuovere icone."
+    },
     "account": {
       "title": "Account utente",
       "logged_in_as": "Connesso come {username}",
@@ -512,7 +536,9 @@
         "enable_failed": "Impossibile avviare la configurazione dell'autenticazione a due fattori",
         "activate_failed": "Questo codice non è valido. Controlla la tua app di autenticazione e riprova.",
         "disable_failed": "Impossibile disattivare l'autenticazione a due fattori"
-      }
+      },
+      "tag_icons": "Mostra le icone dei tag",
+      "tag_icons_hint": "Vale solo per questo dispositivo."
     },
     "default_password_banner": {
       "title": "Password amministratore predefinita in uso",
