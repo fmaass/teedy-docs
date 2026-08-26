@@ -268,6 +268,26 @@ public class TestTagIconResource extends BaseJerseyTest {
         Assertions.assertNull(findIcon(adminToken, "ExternalImage"), "nothing was stored");
     }
 
+    /**
+     * A same-document href that the walk accepts must not be retargetable at render time: SMIL
+     * animation elements rewrite attributes, so {@code <set attributeName="href" to="https://…">}
+     * would turn a local reference into an external fetch after validation.
+     */
+    @Test
+    public void testAnAnimatedHrefRetargetIsRefused() throws Exception {
+        String adminToken = adminToken();
+        String hostile = "<svg xmlns=\"http://www.w3.org/2000/svg\">"
+                + "<image href=\"#local\"><set attributeName=\"href\" to=\"https://example.invalid/x\"/>"
+                + "</image></svg>";
+
+        Response response = upload(adminToken, "AnimatedHref",
+                hostile.getBytes(StandardCharsets.UTF_8), "animated.svg");
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals("InvalidImageContent",
+                response.readEntity(JsonObject.class).getString("type"));
+        Assertions.assertNull(findIcon(adminToken, "AnimatedHref"), "nothing was stored");
+    }
+
     /** The same, through the legacy xlink spelling. */
     @Test
     public void testAnExternalXlinkReferenceIsRefused() throws Exception {

@@ -85,8 +85,13 @@ public final class TagIconUtil {
     /** One extended grapheme cluster and nothing else. */
     private static final Pattern SINGLE_GRAPHEME = Pattern.compile("\\A\\X\\z");
 
-    /** Elements an SVG icon may not contain, by LOCAL name. */
-    private static final Set<String> FORBIDDEN_ELEMENTS = Set.of("script", "foreignobject");
+    /**
+     * Elements an SVG icon may not contain, by LOCAL name. The SMIL animation elements are here
+     * because they rewrite attributes at render time: a same-document href that passes the walk
+     * could be retargeted to an external URL by a {@code <set attributeName="href" to="…">}.
+     */
+    private static final Set<String> FORBIDDEN_ELEMENTS = Set.of("script", "foreignobject",
+            "set", "animate", "animatemotion", "animatetransform", "animatecolor");
 
     /** CSS that reaches for something. Refused in a style attribute and in a style element alike. */
     private static final Pattern CSS_FETCHES = Pattern.compile("url\\s*\\(|expression\\s*\\(",
