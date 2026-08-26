@@ -526,3 +526,59 @@ describe('TagQuickMenu — outside right-click dismissal (#234)', () => {
     expect(popoverHide).not.toHaveBeenCalled()
   })
 })
+
+// #280 — the same synonym search the document editor's picker does. A tag offered because one
+// of its SYNONYMS matched has to say so on the row: offering "Invoice" to somebody who typed
+// "Rechnung", with nothing to explain it, reads as a broken search. (The i18n stub echoes the
+// key, so the reason shows up as `ui.tag_menu.via` rather than the rendered wording.)
+describe('TagQuickMenu — synonym matches (#280)', () => {
+  const synonymTags: Tag[] = [
+    { id: 't1', name: 'Invoice', color: '#123456', parent: null, synonyms: ['Rechnung'] },
+    { id: 't2', name: 'Receipt', color: '#123456', parent: null },
+  ]
+
+  function mountSynonymMenu() {
+    return mountMenu({
+      document: { id: 'doc1', title: 'Doc', tags: [] } as unknown as DocumentListItem,
+      allTags: synonymTags,
+    })
+  }
+
+  it('finds a tag by one of its synonyms and says which one on the row', async () => {
+    const wrapper = mountSynonymMenu()
+    await wrapper.find('input.tqm-filter-input').setValue('Rechnung')
+
+    const rows = wrapper.findAll('.tqm-option')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Invoice')
+    expect(rows[0].text()).toContain('ui.tag_menu.via')
+    expect(rows[0].find('.tqm-via').exists()).toBe(true)
+  })
+
+  it('leaves a row matched by the tag name alone', async () => {
+    const wrapper = mountSynonymMenu()
+    await wrapper.find('input.tqm-filter-input').setValue('Invo')
+
+    const rows = wrapper.findAll('.tqm-option')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toBe('Invoice')
+    expect(rows[0].find('.tqm-via').exists()).toBe(false)
+  })
+
+  it('adds the CANONICAL tag when a synonym row is chosen', async () => {
+    const wrapper = mountSynonymMenu()
+    await wrapper.find('input.tqm-filter-input').setValue('Rechnung')
+    await wrapper.findAll('.tqm-option')[0].trigger('click')
+
+    expect(wrapper.emitted('addTag')).toEqual([['t1']])
+  })
+
+  it('commits the top synonym match on Enter, by the tag id', async () => {
+    const wrapper = mountSynonymMenu()
+    const input = wrapper.find('input.tqm-filter-input')
+    await input.setValue('Rechnung')
+    await input.trigger('keydown.enter')
+
+    expect(wrapper.emitted('addTag')).toEqual([['t1']])
+  })
+})

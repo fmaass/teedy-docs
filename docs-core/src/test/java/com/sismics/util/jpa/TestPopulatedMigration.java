@@ -46,8 +46,8 @@ public class TestPopulatedMigration {
      * + group-membership dedup & active-unique index 063 + raw .eml attachment toggle 064
      * + comment edit-date column 065 + T_ACCESS_EVENT access-event table 066
      * + saved-filter publication column 067 + tag-name whitespace repair 068
-     * + tag icon column & T_TAG_ICON 069). */
-    private static final int TARGET_VERSION = 69;
+     * + tag icon column &amp; T_TAG_ICON 069 + T_TAG_SYNONYM tag-synonym table 070). */
+    private static final int TARGET_VERSION = 70;
 
     /** Version the fixture is seeded at (before the retirements). */
     private static final int SEED_VERSION = 36;
@@ -943,6 +943,18 @@ public class TestPopulatedMigration {
                 "069 must not seed any icon rows");
         Assertions.assertEquals(1, count(connection, "T_TAG", "TAG_ID_C = 'tag-1' and TAG_ICON_C is null"),
                 "069 must leave an existing tag without an icon");
+
+        // 5a'''''. Migration 070 added tag SYNONYMS (#280). The table arrives EMPTY: a synonym is
+        //          a name somebody chose, so an upgrade that invented one would make a word
+        //          resolve to a tag nobody pointed it at. The retained tag below proves the
+        //          upgrade left it with none, which is also what keeps every existing
+        //          `tag:<something>` search answering exactly what it answered before.
+        Assertions.assertTrue(tableExists(connection, "T_TAG_SYNONYM"),
+                "070 must create the T_TAG_SYNONYM table");
+        Assertions.assertEquals(0, count(connection, "T_TAG_SYNONYM", "1 = 1"),
+                "070 must not seed any synonym rows");
+        Assertions.assertEquals(0, count(connection, "T_TAG_SYNONYM", "TSY_IDTAG_C = 'tag-1'"),
+                "070 must leave an existing tag without synonyms");
 
         // 5b. The workflow/vocabulary tables were dropped by 037/038 (wiping the old rows) and then
         //     REINSTATED empty by 042. The data-loss guardrail is that the OLD seed rows did not

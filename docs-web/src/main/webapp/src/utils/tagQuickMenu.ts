@@ -22,19 +22,9 @@ export function assignableTags(allTags: Tag[], assignedTagIds: Set<string>): Tag
   return allTags.filter((tag) => !assignedTagIds.has(tag.id))
 }
 
-/**
- * Case-insensitive substring filter over assignable tags by name. An empty/blank
- * query returns all assignable tags unchanged (the popover shows the full list to
- * scroll). Pure.
- *
- * @param tags  Candidate tags (already assignable — see assignableTags).
- * @param query Raw search text.
- */
-export function filterTagsByName(tags: Tag[], query: string): Tag[] {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return tags
-  return tags.filter((tag) => tag.name.toLowerCase().includes(needle))
-}
+// The name filter that used to live here moved to utils/tagSynonyms.ts as `matchTagsByName`
+// (#280): a query now reaches a tag by its name OR by one of its synonyms, and the caller needs
+// to know WHICH, so the same matcher serves this menu and the document editor's TagPicker.
 
 /**
  * The top-N most-used assignable tags, for quick-add chips. Ranks the assignable

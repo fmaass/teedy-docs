@@ -8,6 +8,7 @@ import InputText from 'primevue/inputtext'
 import { usePrimeVue } from 'primevue/config'
 import TagBadge from './TagBadge.vue'
 import type { Tag } from '../api/tag'
+import { matchTagsByName } from '../utils/tagSynonyms'
 
 /**
  * The single tag-selection field, shared by the document edit form and the bulk
@@ -65,6 +66,14 @@ const props = defineProps<{
    * bar wants: a bulk apply picks one EXISTING tag for many documents.
    */
   createTagLabel?: (name: string) => string
+  /**
+   * Label for an option the search reached through one of the tag's SYNONYMS (#280) — the
+   * reporter-approved "Insurance (via Versicherung)". A BUILDER rather than a boolean, for the
+   * same reason `createTagLabel` is one: this component adds no locale keys of its own, so the
+   * caller owns the wording. Omitted means synonym matches are offered under the canonical name
+   * alone, with nothing to say why.
+   */
+  viaLabel?: (name: string, synonym: string) => string
 }>()
 
 const emit = defineEmits<{
@@ -97,34 +106,22 @@ const filterInput = ref<{ $el: HTMLInputElement } | null>(null)
 const filterText = ref('')
 const primevue = usePrimeVue()
 
-const allOptions = computed(() =>
-  props.tags.map((tag) => ({ label: tag.name, value: tag.id, color: tag.color })),
-)
-
-/**
- * Accent-folded, lower-cased comparison key. PrimeVue's built-in `contains` filter folded
- * accents through a Latin-1/Latin-Extended-A lookup table, so a German user typing "uber"
- * found "Über"; canonical decomposition reproduces that for every accented letter that
- * decomposes, which covers the diacritics of all twelve shipped locales. It does NOT fold
- * the stroked/ligature letters that have no decomposition (Ø, Ł, Đ, Æ, Œ) — those still
- * match on themselves, they just no longer match their unstroked spelling.
- */
-function foldForSearch(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLocaleLowerCase()
-}
-
 // What the overlay lists. PrimeVue derives its `visibleOptions` from `options` and only
 // narrows them further when ITS filter holds a value, so handing it the already-narrowed
 // list keeps everything downstream (toggle-all, keyboard navigation, the empty-filter
 // message) working off exactly the set the user can see.
-const options = computed(() => {
-  if (!filterText.value) return allOptions.value
-  const needle = foldForSearch(filterText.value)
-  return allOptions.value.filter((option) => foldForSearch(option.label).includes(needle))
-})
+//
+// The matching itself (accent folding included) lives in utils/tagSynonyms.ts, shared with the
+// document list's quick menu (#280): a query reaches a tag by its name OR by one of its
+// synonyms, and an option reached through a synonym says so through `viaLabel` — otherwise the
+// list would silently offer a tag whose name the user did not type.
+const options = computed(() =>
+  matchTagsByName(props.tags, filterText.value).map(({ tag, via }) => ({
+    label: via && props.viaLabel ? props.viaLabel(tag.name, via) : tag.name,
+    value: tag.id,
+    color: tag.color,
+  })),
+)
 
 const tagMap = computed(() => {
   const map = new Map<string, Tag>()

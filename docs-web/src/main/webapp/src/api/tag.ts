@@ -13,6 +13,17 @@ export interface Tag {
   icon?: string
   parent: string | null
   count?: number
+  /**
+   * Alternative names that resolve to this tag (#280). Typing one of them in a tag input offers
+   * the tag itself, and searching `tag:<synonym>` returns its documents.
+   *
+   * The server always sends the field (empty when the tag has none), so a tag reaching the app
+   * through an API response always has it. It is OPTIONAL here because tags are also built
+   * locally — the create panel hands the document editor the tag it just made, and every test
+   * fixture in the app constructs one — and a tag with no synonyms is the honest default for all
+   * of them. Read it as `tag.synonyms ?? []`.
+   */
+  synonyms?: string[]
 }
 
 /**
@@ -29,6 +40,8 @@ export interface TagDetail {
   parent: string | null
   acls: AclEntry[]
   writable: boolean
+  /** Alternative names that resolve to this tag (#280); empty when it has none. */
+  synonyms?: string[]
 }
 
 /**
@@ -49,12 +62,40 @@ export function getTag(id: string) {
   return api.get<TagDetail>(`/tag/${id}`)
 }
 
-export function createTag(name: string, color: string, parent?: string, icon?: string | null) {
+/**
+ * Put the tag's synonyms on a write (#280).
+ *
+ * The field is REPLACE semantics, and the two ways of saying nothing are different: OMITTING it
+ * leaves the tag's synonyms untouched (so a caller that does not manage them cannot wipe them),
+ * while sending it once with an empty value clears them. `undefined` means the caller is not
+ * setting synonyms; an empty array means "none".
+ *
+ * `icon` beside it works the OTHER way round (see updateTag): the two fields are deliberately
+ * not symmetric, because an icon is one value a tag either has or does not, while synonyms are a
+ * set a caller may not be managing at all.
+ */
+function appendSynonyms(params: URLSearchParams, synonyms?: string[]) {
+  if (synonyms === undefined) return
+  if (synonyms.length === 0) {
+    params.set('synonyms', '')
+    return
+  }
+  for (const synonym of synonyms) params.append('synonyms', synonym)
+}
+
+export function createTag(
+  name: string,
+  color: string,
+  parent?: string,
+  icon?: string | null,
+  synonyms?: string[],
+) {
   const params = new URLSearchParams()
   params.set('name', name)
   params.set('color', color)
   if (parent) params.set('parent', parent)
   if (icon) params.set('icon', icon)
+  appendSynonyms(params, synonyms)
   return api.put<{ id: string }>('/tag', params)
 }
 
@@ -64,6 +105,7 @@ export function updateTag(
   color: string,
   parent?: string | null,
   icon?: string | null,
+  synonyms?: string[],
 ) {
   const params = new URLSearchParams()
   params.set('name', name)
@@ -72,6 +114,7 @@ export function updateTag(
   // Always sent, like `parent` and unlike `color`: an empty value is how the form says "no icon",
   // and omitting the field would make taking an icon back off a tag impossible.
   params.set('icon', icon ?? '')
+  appendSynonyms(params, synonyms)
   return api.post<{ id: string }>(`/tag/${id}`, params)
 }
 

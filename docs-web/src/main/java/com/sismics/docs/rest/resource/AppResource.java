@@ -1283,6 +1283,15 @@ public class AppResource extends BaseResource {
         q.setParameter("dateNow", new Date());
         log.info("Deleting {} orphan tags", q.executeUpdate());
 
+        // #280: and the synonyms of every tag that is now gone. Straight AFTER the tag pass and
+        // keyed off the TAG's state rather than the user's, so it also catches a synonym left
+        // behind by a tag deleted through any other path. A name that outlived its tag is a
+        // search term no screen can reach to repair, and it would go on blocking that word for
+        // every other tag's collision check.
+        q = em.createNativeQuery("update T_TAG_SYNONYM set TSY_DELETEDATE_D = :dateNow where TSY_DELETEDATE_D is null and TSY_IDTAG_C in (select t.TAG_ID_C from T_TAG t where t.TAG_DELETEDATE_D is not null)");
+        q.setParameter("dateNow", new Date());
+        log.info("Deleting {} orphan tag synonyms", q.executeUpdate());
+
         // Soft delete orphan files. A file is orphaned when its uploader is gone (soft-deleted or
         // absent) — EXCEPT a file that still backs a LIVE (non-deleted) document is NEVER an orphan,
         // regardless of uploader state. This is the invariant that keeps a document reassigned away

@@ -494,3 +494,90 @@ describe('TagPicker — create-tag row (#288)', () => {
     host.remove()
   })
 })
+
+// #280 — a tag can carry synonyms, and typing one has to offer the TAG. The option must say so:
+// offering "Insurance" to somebody who typed "Rechnung" with nothing to explain the jump would
+// read as a broken search. The label builder is the caller's, exactly as the create row's is.
+describe('TagPicker — synonym matches (#280)', () => {
+  const SYNONYM_TAGS: Tag[] = [
+    { id: 'tag-red', name: 'Invoice', color: '#d32f2f', parent: null, synonyms: ['Rechnung'] },
+    { id: 'tag-green', name: 'Receipt', color: '#2e7d32', parent: null },
+  ]
+
+  async function openPicker(props: Record<string, unknown> = {}) {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const wrapper = mountPicker({ filterPlaceholder: 'filter', tags: SYNONYM_TAGS, ...props }, host)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    return { wrapper, host }
+  }
+
+  const filterBox = () => document.querySelector('input.tp-filter-input') as HTMLInputElement | null
+
+  async function type(text: string) {
+    const input = filterBox()!
+    input.value = text
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+  }
+
+  const viaLabel = (name: string, synonym: string) => `${name} (via ${synonym})`
+
+  function options(wrapper: ReturnType<typeof mountPicker>) {
+    return wrapper.findComponent({ name: 'MultiSelect' }).props('options') as Array<{
+      label: string
+      value: string
+    }>
+  }
+
+  it('offers the canonical tag for a typed synonym, labelled with the reason', async () => {
+    const { wrapper, host } = await openPicker({ viaLabel })
+    await type('Rechnung')
+
+    expect(options(wrapper)).toEqual([
+      { label: 'Invoice (via Rechnung)', value: 'tag-red', color: '#d32f2f' },
+    ])
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('keeps the plain canonical name when the tag matched by its own name', async () => {
+    const { wrapper, host } = await openPicker({ viaLabel })
+    await type('Invoice')
+
+    expect(options(wrapper)).toEqual([{ label: 'Invoice', value: 'tag-red', color: '#d32f2f' }])
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('still offers the tag, unlabelled, to a caller that supplied no builder (the bulk bar)', async () => {
+    const { wrapper, host } = await openPicker()
+    await type('Rechnung')
+
+    expect(options(wrapper)).toEqual([{ label: 'Invoice', value: 'tag-red', color: '#d32f2f' }])
+
+    wrapper.unmount()
+    host.remove()
+  })
+
+  it('selects the CANONICAL tag id, never the synonym', async () => {
+    // Taking the option through the keyboard path the picker already pins (type, ArrowDown,
+    // Enter): what is asserted is the VALUE that comes back, which must be the tag the synonym
+    // belongs to — a selection carrying the synonym would be a name no document can hold.
+    const { wrapper, host } = await openPicker({ viaLabel })
+    await type('Rechnung')
+    const input = filterBox()!
+    for (const code of ['ArrowDown', 'Enter']) {
+      input.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }))
+      await flushPromises()
+    }
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['tag-red']])
+
+    wrapper.unmount()
+    host.remove()
+  })
+})

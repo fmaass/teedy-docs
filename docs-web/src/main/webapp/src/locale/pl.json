@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Szukaj etykiet…",
       "all_assigned": "Wszystkie etykiety już dodane",
-      "add_named": "Dodaj etykietę {name}"
+      "add_named": "Dodaj etykietę {name}",
+      "via": " (przez {synonym})"
     },
     "tag_picker": {
-      "create_named": "Utwórz etykietę „{name}”…"
+      "create_named": "Utwórz etykietę „{name}”…",
+      "via_named": "{name} (przez {synonym})"
     },
     "tag_panel": {
       "lead": "Etykieta zostanie utworzona i dodana do {title} po zapisaniu.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Usunięto etykietę",
       "failed_delete": "Nie udało się usunąć etykiety",
       "document_count": "Dokumenty z tą etykietą: {count}",
-      "view_documents": "Pokaż dokumenty"
+      "view_documents": "Pokaż dokumenty",
+      "synonyms": "Synonimy",
+      "synonyms_hint": "Inne nazwy, które znajdują tę etykietę. Wyszukanie jednej z nich pokazuje dokumenty tej etykiety.",
+      "synonym_placeholder": "Dodaj kolejną nazwę…",
+      "synonym_add": "Dodaj",
+      "synonym_remove": "Usuń synonim {name}",
+      "synonym_duplicate": "„{name}” jest już przy tej etykiecie.",
+      "synonym_in_use": "„{name}” jest już używane przez: {tags}. Zapis zostanie odrzucony.",
+      "synonym_similar": "Już istnieje: {tags}"
     },
     "tag_icon": {
       "label": "Ikona",

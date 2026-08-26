@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Search tags…",
       "all_assigned": "All tags already added",
-      "add_named": "Add tag {name}"
+      "add_named": "Add tag {name}",
+      "via": " (via {synonym})"
     },
     "tag_picker": {
-      "create_named": "Create tag “{name}”…"
+      "create_named": "Create tag “{name}”…",
+      "via_named": "{name} (via {synonym})"
     },
     "tag_panel": {
       "lead": "The tag is created and added to {title} when you save.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Tag deleted",
       "failed_delete": "Failed to delete tag",
       "document_count": "Documents with this tag: {count}",
-      "view_documents": "View documents"
+      "view_documents": "View documents",
+      "synonyms": "Synonyms",
+      "synonyms_hint": "Other names that find this tag. Searching one of them shows this tag's documents.",
+      "synonym_placeholder": "Add another name…",
+      "synonym_add": "Add",
+      "synonym_remove": "Remove synonym {name}",
+      "synonym_duplicate": "\"{name}\" is already on this tag.",
+      "synonym_in_use": "\"{name}\" is already used by: {tags}. Saving will be refused.",
+      "synonym_similar": "Already there: {tags}"
     },
     "tag_icon": {
       "label": "Icon",

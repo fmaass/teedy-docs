@@ -290,3 +290,64 @@ describe('TagEdit — hosts the shared tag form (#288)', () => {
     expect(wrapper.find('input#tag-name').attributes('autofocus')).toBeUndefined()
   })
 })
+
+// #280 — this page is the host that MANAGES synonyms: it seeds them from the tag detail, hands
+// them to the shared form, and sends the whole list back on save (replace semantics). The other
+// two hosts of that form create tags and leave the section off entirely.
+describe('TagEdit — synonyms (#280)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTag.mockReset().mockResolvedValue({
+      data: {
+        id: 'b',
+        name: 'Bravo',
+        creator: 'admin',
+        color: '#222222',
+        parent: null,
+        writable: true,
+        acls: [],
+        synonyms: ['Rechnung'],
+      },
+    })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: {} } })
+    tagApiMock.updateTag.mockReset().mockResolvedValue({ data: { id: 'b' } })
+  })
+
+  it('seeds the form from the tag detail and excludes the tag itself from the in-use hint', async () => {
+    const wrapper = await mountEdit()
+    const form = wrapper.findComponent(TagForm)
+
+    expect(form.props('synonyms')).toEqual(['Rechnung'])
+    expect(form.props('synonymTagId')).toBe('b')
+    expect((form.props('synonymTags') as Tag[]).map((tag) => tag.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('sends the whole synonym list on save', async () => {
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagForm).vm.$emit('update:synonyms', ['Rechnung', 'Quittung'])
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Save'))!.trigger('click')
+    await flushPromises()
+
+    // The merged signature is (id, name, color, parent, icon, synonyms): #287 put `icon` in
+    // front of the synonyms this test is about, and a tag with no icon sends null.
+    expect(tagApiMock.updateTag).toHaveBeenCalledWith('b', 'Bravo', '#222222', undefined, null, [
+      'Rechnung',
+      'Quittung',
+    ])
+  })
+
+  it('sends an EMPTY list once the last chip is removed, which is what clears them', async () => {
+    // Not the same as omitting the field: an absent field leaves the stored synonyms alone, so
+    // removing the last chip has to be an explicit empty list or it would silently do nothing.
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagForm).vm.$emit('update:synonyms', [])
+    await flushPromises()
+
+    await wrapper.findAll('button').find((b) => b.text().includes('Save'))!.trigger('click')
+    await flushPromises()
+
+    expect(tagApiMock.updateTag).toHaveBeenCalledWith('b', 'Bravo', '#222222', undefined, null, [])
+  })
+})

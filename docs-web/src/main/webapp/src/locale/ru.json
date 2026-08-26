@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Поиск тегов…",
       "all_assigned": "Все теги уже добавлены",
-      "add_named": "Добавить тег {name}"
+      "add_named": "Добавить тег {name}",
+      "via": " (через {synonym})"
     },
     "tag_picker": {
-      "create_named": "Создать тег «{name}»…"
+      "create_named": "Создать тег «{name}»…",
+      "via_named": "{name} (через {synonym})"
     },
     "tag_panel": {
       "lead": "Тег будет создан и добавлен к {title} при сохранении.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Тег удалён",
       "failed_delete": "Не удалось удалить тег",
       "document_count": "Документы с этим тегом: {count}",
-      "view_documents": "Показать документы"
+      "view_documents": "Показать документы",
+      "synonyms": "Синонимы",
+      "synonyms_hint": "Другие названия, по которым находится этот тег. Поиск по любому из них покажет документы этого тега.",
+      "synonym_placeholder": "Добавить ещё одно название…",
+      "synonym_add": "Добавить",
+      "synonym_remove": "Удалить синоним {name}",
+      "synonym_duplicate": "«{name}» уже есть у этого тега.",
+      "synonym_in_use": "«{name}» уже используется: {tags}. Сохранение будет отклонено.",
+      "synonym_similar": "Уже есть: {tags}"
     },
     "tag_icon": {
       "label": "Значок",

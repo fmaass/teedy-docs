@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Pesquisar etiquetas…",
       "all_assigned": "Todas as etiquetas já foram adicionadas",
-      "add_named": "Adicionar etiqueta {name}"
+      "add_named": "Adicionar etiqueta {name}",
+      "via": " (via {synonym})"
     },
     "tag_picker": {
-      "create_named": "Criar etiqueta «{name}»…"
+      "create_named": "Criar etiqueta «{name}»…",
+      "via_named": "{name} (via {synonym})"
     },
     "tag_panel": {
       "lead": "A etiqueta é criada e adicionada a {title} ao guardar.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Etiqueta eliminada",
       "failed_delete": "Falha ao eliminar a etiqueta",
       "document_count": "Documentos com esta etiqueta: {count}",
-      "view_documents": "Ver documentos"
+      "view_documents": "Ver documentos",
+      "synonyms": "Sinónimos",
+      "synonyms_hint": "Outros nomes que encontram esta etiqueta. Pesquisar um deles mostra os documentos desta etiqueta.",
+      "synonym_placeholder": "Adicionar outro nome…",
+      "synonym_add": "Adicionar",
+      "synonym_remove": "Remover o sinónimo {name}",
+      "synonym_duplicate": "«{name}» já está nesta etiqueta.",
+      "synonym_in_use": "«{name}» já é usado por: {tags}. A gravação será recusada.",
+      "synonym_similar": "Já existe: {tags}"
     },
     "tag_icon": {
       "label": "Ícone",

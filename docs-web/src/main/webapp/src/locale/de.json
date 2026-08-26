@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Tags suchen…",
       "all_assigned": "Alle Tags bereits hinzugefügt",
-      "add_named": "Tag {name} hinzufügen"
+      "add_named": "Tag {name} hinzufügen",
+      "via": " (über {synonym})"
     },
     "tag_picker": {
-      "create_named": "Tag „{name}“ erstellen…"
+      "create_named": "Tag „{name}“ erstellen…",
+      "via_named": "{name} (über {synonym})"
     },
     "tag_panel": {
       "lead": "Der Tag wird erstellt und beim Speichern zu {title} hinzugefügt.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Tag gelöscht",
       "failed_delete": "Tag konnte nicht gelöscht werden",
       "document_count": "Dokumente mit diesem Tag: {count}",
-      "view_documents": "Dokumente anzeigen"
+      "view_documents": "Dokumente anzeigen",
+      "synonyms": "Synonyme",
+      "synonyms_hint": "Weitere Namen, die dieses Tag finden. Wenn du nach einem davon suchst, siehst du die Dokumente dieses Tags.",
+      "synonym_placeholder": "Weiteren Namen hinzufügen…",
+      "synonym_add": "Hinzufügen",
+      "synonym_remove": "Synonym {name} entfernen",
+      "synonym_duplicate": "„{name}“ ist bereits an diesem Tag.",
+      "synonym_in_use": "„{name}“ wird bereits verwendet von: {tags}. Das Speichern wird abgelehnt.",
+      "synonym_similar": "Schon vorhanden: {tags}"
     },
     "tag_icon": {
       "label": "Symbol",

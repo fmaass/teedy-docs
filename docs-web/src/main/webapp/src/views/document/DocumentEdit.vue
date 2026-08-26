@@ -602,6 +602,7 @@ async function onEmlSelected(event: Event) {
           :filterPlaceholder="t('ui.tag_menu.search')"
           :clearFilterLabel="t('document.search_clear')"
           :createTagLabel="(name: string) => t('ui.tag_picker.create_named', { name })"
+          :viaLabel="(name: string, synonym: string) => t('ui.tag_picker.via_named', { name, synonym })"
           class="w-full"
           @create="openTagPanel"
         />

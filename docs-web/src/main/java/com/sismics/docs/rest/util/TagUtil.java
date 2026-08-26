@@ -40,7 +40,30 @@ public class TagUtil {
     }
 
     /**
-     * Find tags by name (case-insensitive).
+     * Every name a term may reach a tag by: its own name, then its synonyms (#280).
+     *
+     * <p>A synonym is a second NAME for the tag, not a second tag, so it takes part in all three
+     * resolution steps below and in none of the results: what comes back is always the tag. The
+     * tag's own name is first so that the cheapest and most common match is tested first.</p>
+     *
+     * <p>Because the list this walks is the caller's own ACL-scoped tag list, a synonym cannot
+     * arrive on a tag the caller may not read — which is the whole of the permission rule for
+     * synonym resolution. There is no second check here, and there must not be one: a check that
+     * could disagree with the list would be a second authority over the same question.</p>
+     */
+    private static List<String> searchableNames(TagDto tagDto) {
+        List<String> synonyms = tagDto.getSynonyms();
+        if (synonyms == null || synonyms.isEmpty()) {
+            return Collections.singletonList(tagDto.getName());
+        }
+        List<String> names = new ArrayList<>(synonyms.size() + 1);
+        names.add(tagDto.getName());
+        names.addAll(synonyms);
+        return names;
+    }
+
+    /**
+     * Find tags by name (case-insensitive), a tag's synonyms counting as names of it (#280).
      *
      * <p>The term is resolved in three steps:
      * <ol>
@@ -103,10 +126,14 @@ public class TagUtil {
     private static List<TagDto> matchByName(String name, List<TagDto> allTagDtoList, boolean exact) {
         List<TagDto> tagDtoList = new ArrayList<>();
         for (TagDto tagDto : allTagDtoList) {
-            String tagName = tagDto.getName();
-            if (exact ? name.equalsIgnoreCase(tagName)
-                    : tagName.regionMatches(true, 0, name, 0, name.length())) {
-                tagDtoList.add(tagDto);
+            // A tag reached through two of its own names is still ONE tag: the loop stops at the
+            // first name that matches, so a term cannot put the same id in the criteria twice.
+            for (String tagName : searchableNames(tagDto)) {
+                if (exact ? name.equalsIgnoreCase(tagName)
+                        : tagName.regionMatches(true, 0, name, 0, name.length())) {
+                    tagDtoList.add(tagDto);
+                    break;
+                }
             }
         }
         return tagDtoList;
@@ -131,8 +158,13 @@ public class TagUtil {
 
         List<TagDto> tagDtoList = new ArrayList<>();
         for (TagDto tagDto : allTagDtoList) {
-            if (globMatches(literals, anchoredStart, anchoredEnd, tagDto.getName())) {
-                tagDtoList.add(tagDto);
+            // As in matchByName: the first of the tag's names that matches is enough, and the
+            // tag is added once however many of them the glob happens to fit.
+            for (String tagName : searchableNames(tagDto)) {
+                if (globMatches(literals, anchoredStart, anchoredEnd, tagName)) {
+                    tagDtoList.add(tagDto);
+                    break;
+                }
             }
         }
         return tagDtoList;

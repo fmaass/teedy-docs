@@ -1,9 +1,11 @@
 package com.sismics.docs.core.dao.dto;
 
+import java.util.List;
+
 /**
  * Tag DTO.
  *
- * @author bgamard 
+ * @author bgamard
  */
 public class TagDto {
     /**
@@ -35,6 +37,16 @@ public class TagDto {
      * Creator.
      */
     private String creator;
+
+    /**
+     * Alternative names that resolve to this tag (#280).
+     *
+     * <p>Carried on the tag itself rather than fetched separately, which is what makes synonym
+     * resolution ACL-scoped for free: every list of these DTOs is already restricted to the tags
+     * the caller may READ, so a synonym can never arrive attached to a tag that is not in it.
+     * Never null — a tag with no synonym has an empty list, so no caller has to null-check.</p>
+     */
+    private List<String> synonyms = List.of();
 
     public String getId() {
         return id;
@@ -87,6 +99,15 @@ public class TagDto {
 
     public TagDto setCreator(String creator) {
         this.creator = creator;
+        return this;
+    }
+
+    public List<String> getSynonyms() {
+        return synonyms;
+    }
+
+    public TagDto setSynonyms(List<String> synonyms) {
+        this.synonyms = synonyms == null ? List.of() : synonyms;
         return this;
     }
 }

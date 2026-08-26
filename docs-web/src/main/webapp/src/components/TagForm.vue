@@ -26,16 +26,19 @@
  * - `parentOptions` is the host's to build: the management page must exclude the tag itself
  *   and its descendants (a cycle), while a tag that does not exist yet has neither.
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import ColorPicker from 'primevue/colorpicker'
 import Card from 'primevue/card'
+import Button from 'primevue/button'
 import AclEditor from './AclEditor.vue'
 import TagIconField from './TagIconField.vue'
 import TagIconMark from './TagIconMark.vue'
 import type { AclEntry, AclTarget } from '../api/acl'
+import type { Tag } from '../api/tag'
+import { matchTagsByName } from '../utils/tagSynonyms'
 
 export interface TagFormParentOption {
   label: string
@@ -88,6 +91,22 @@ const props = defineProps<{
    * ahead of anything else, which is the whole of the panel's focus handling.
    */
   autofocusName?: boolean
+  /**
+   * The tag's synonyms (#280). PRESENT (even as an empty array) is what makes the chips editor
+   * render at all, which is how the section stays on the tag EDIT page only — the approved
+   * design manages synonyms there, and the two CREATE hosts (the document editor's side panel,
+   * the management page's create card) leave the prop off and render exactly as before.
+   */
+  synonyms?: string[]
+  /**
+   * Every tag the host knows about, WITH their synonyms — the source for the live "already in
+   * use" hint the reporter asked for ("while typing the beginning of a word, we already could
+   * visualize similar words"). Purely an early warning: the authority on a collision is the
+   * server, which refuses the save and names the conflict. Omitted means no hint.
+   */
+  synonymTags?: Tag[]
+  /** The tag being edited, excluded from that hint — its own names are not conflicts. */
+  synonymTagId?: string
 }>()
 
 const emit = defineEmits<{
@@ -95,6 +114,8 @@ const emit = defineEmits<{
   'update:color': [value: string]
   'update:icon': [value: string | null]
   'update:parent': [value: string | null]
+  /** The synonym chip list changed. */
+  'update:synonyms': [value: string[]]
   /** The persisted ACL list changed on the server; the host must re-read it. */
   'acl-changed': []
   /** Deferred mode: a grant to hold until the tag exists. */
@@ -171,6 +192,109 @@ watch(
     hexInvalid.value = false
   },
 )
+
+// --- Synonym chips (#280) ---
+//
+// A synonym is a second name that finds this tag. The editor is a chip list plus one input,
+// because that is what the approved design describes and because a synonym has no attributes of
+// its own — there is nothing to edit about one, only to add or remove it.
+//
+// Everything here is a HINT. Whether a name may be used is a question about tags this account
+// can read, which only the server can answer, and it answers it by refusing the save with an
+// error that names the conflict. Warning while typing is what the reporter asked for on top of
+// that; it must never be the thing that decides.
+
+const synonymDraft = ref('')
+
+/** How many similar names are worth listing before the hint stops being readable. */
+const SIMILAR_LIMIT = 3
+
+const synonymList = computed(() => props.synonyms ?? [])
+
+/**
+ * Case-insensitive equality for the hint.
+ *
+ * `toLowerCase`, NOT `toLocaleLowerCase`: the locale-aware fold maps ASCII "I" to the dotless
+ * "ı" on a Turkish host, which would make the hint disagree with the server — whose comparison
+ * (`equalsIgnoreCase`) folds per character and is locale-independent.
+ */
+function sameName(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+/** Tags whose name or one of whose synonyms the draft resembles — the tag being edited aside. */
+const draftMatches = computed(() => {
+  const draft = synonymDraft.value.trim()
+  if (!draft || !props.synonymTags) return []
+  const others = props.synonymTags.filter((tag) => tag.id !== props.synonymTagId)
+  return matchTagsByName(others, draft)
+})
+
+/** A name is TAKEN when it is exactly a visible tag's name or synonym. */
+const draftTaken = computed(() =>
+  draftMatches.value
+    .filter(
+      (match) =>
+        sameName(match.tag.name, synonymDraft.value.trim()) ||
+        (match.tag.synonyms ?? []).some((synonym) =>
+          sameName(synonym, synonymDraft.value.trim()),
+        ),
+    )
+    .map((match) => match.tag.name),
+)
+
+/** Already a chip on this tag, or the tag's own name — nothing to add either way. */
+const draftOnThisTag = computed(() => {
+  const draft = synonymDraft.value.trim()
+  return (
+    !!draft && (synonymList.value.some((s) => sameName(s, draft)) || sameName(props.name, draft))
+  )
+})
+
+/** One line under the input: what the typed word already is, or what it looks like. */
+const synonymNotice = computed<{ severity: 'warn' | 'info'; text: string } | null>(() => {
+  const draft = synonymDraft.value.trim()
+  if (!draft) return null
+  if (draftOnThisTag.value) {
+    return { severity: 'warn', text: t('ui.tag_edit.synonym_duplicate', { name: draft }) }
+  }
+  if (draftTaken.value.length) {
+    return {
+      severity: 'warn',
+      text: t('ui.tag_edit.synonym_in_use', { name: draft, tags: draftTaken.value.join(', ') }),
+    }
+  }
+  const similar = draftMatches.value
+    .map((match) => (match.via ? `${match.tag.name} (${match.via})` : match.tag.name))
+    .slice(0, SIMILAR_LIMIT)
+  if (similar.length) {
+    return { severity: 'info', text: t('ui.tag_edit.synonym_similar', { tags: similar.join(', ') }) }
+  }
+  return null
+})
+
+/**
+ * Add the typed word as a chip.
+ *
+ * A word already on THIS tag is refused here rather than at save: the list would be unchanged,
+ * so there is nothing for the server to reject and nothing for the user to see happen. A word
+ * that collides with ANOTHER tag is deliberately allowed through — the notice above has already
+ * said so, and the reporter's own shape for this is "if we then still forcively try to overcome,
+ * the save button will say NO", with the server naming the conflict.
+ */
+function addSynonym() {
+  const draft = synonymDraft.value.trim()
+  if (!draft || draftOnThisTag.value) return
+  emit('update:synonyms', [...synonymList.value, draft])
+  synonymDraft.value = ''
+}
+
+function removeSynonym(synonym: string) {
+  emit(
+    'update:synonyms',
+    synonymList.value.filter((value) => value !== synonym),
+  )
+}
 
 function onHexInput(raw: string) {
   hexText.value = raw
@@ -282,6 +406,57 @@ function onHexBlur() {
           @update:modelValue="emit('update:parent', $event ?? null)"
         />
       </div>
+      <!-- Synonyms (#280). Rendered only for a host that manages them: the approved design puts
+           them on the tag edit page, and a host that leaves the prop off renders the form exactly
+           as it did before this section existed. -->
+      <div v-if="props.synonyms !== undefined" class="form-field">
+        <label :for="`${idPrefix}-synonym`">{{ t('ui.tag_edit.synonyms') }}</label>
+        <p class="synonym-hint">{{ t('ui.tag_edit.synonyms_hint') }}</p>
+        <div v-if="synonymList.length" class="synonym-chips">
+          <span v-for="synonym in synonymList" :key="synonym" class="synonym-chip">
+            {{ synonym }}
+            <button
+              type="button"
+              class="synonym-remove"
+              :aria-label="t('ui.tag_edit.synonym_remove', { name: synonym })"
+              @click="removeSynonym(synonym)"
+            >
+              <i class="pi pi-times" aria-hidden="true" />
+            </button>
+          </span>
+        </div>
+        <div class="synonym-row">
+          <InputText
+            :id="`${idPrefix}-synonym`"
+            v-model="synonymDraft"
+            class="synonym-input"
+            :placeholder="t('ui.tag_edit.synonym_placeholder')"
+            :aria-describedby="synonymNotice ? `${idPrefix}-synonym-notice` : undefined"
+            autocomplete="off"
+            @keydown.enter.prevent="addSynonym"
+          />
+          <Button
+            type="button"
+            severity="secondary"
+            outlined
+            :label="t('ui.tag_edit.synonym_add')"
+            :disabled="!synonymDraft.trim() || draftOnThisTag"
+            @click="addSynonym"
+          />
+        </div>
+        <!-- A live status rather than an alert: it changes on every keystroke, and a screen
+             reader announcing an alert that often would drown the field it belongs to. -->
+        <small
+          v-if="synonymNotice"
+          :id="`${idPrefix}-synonym-notice`"
+          class="synonym-notice"
+          :class="synonymNotice.severity"
+          role="status"
+          aria-live="polite"
+        >
+          {{ synonymNotice.text }}
+        </small>
+      </div>
       <slot name="actions" />
     </template>
   </Card>
@@ -360,6 +535,82 @@ function onHexBlur() {
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--teedy-tag-text);
+}
+
+/* Synonym chips (#280). Neutral rather than tag-coloured: a synonym is a NAME for the tag, not
+   a tag of its own, and colouring it like one would suggest it appears on documents. */
+.synonym-hint {
+  margin: -0.125rem 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--p-text-muted-color);
+}
+
+.synonym-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+.synonym-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.25rem 0.15rem 0.6rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 999px;
+  background: var(--p-content-background);
+  font-size: 0.8125rem;
+}
+.synonym-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--p-text-muted-color);
+  cursor: pointer;
+}
+.synonym-remove:hover {
+  background: var(--p-content-hover-background);
+  color: var(--p-text-color);
+}
+.synonym-remove:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--p-primary-color);
+}
+.synonym-remove .pi {
+  font-size: 0.625rem;
+}
+
+.synonym-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* The panel is as narrow as 360px, so the Add button drops under the field rather than
+     squeezing it to nothing. */
+  flex-wrap: wrap;
+}
+.synonym-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.synonym-notice {
+  display: block;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.synonym-notice.info {
+  color: var(--p-text-muted-color);
+}
+.synonym-notice.warn {
+  color: var(--p-orange-600, var(--p-text-color));
 }
 
 .acl-card {

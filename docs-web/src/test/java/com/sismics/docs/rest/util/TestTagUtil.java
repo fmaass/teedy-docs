@@ -326,4 +326,104 @@ public class TestTagUtil extends BaseTransactionalTest {
         assertIds(TagUtil.findByName("*sample*", globTagList()), SAMPLE, RESAMPLE, SAMPLER);
         assertIds(TagUtil.findByName("sam*ple", globTagList()), SAMPLE);
     }
+
+    // ---------------------------------------------------------------------------------------
+    // Synonyms (#280). A tag's SEARCHABLE NAMES are its name plus every synonym it carries, and
+    // each of the three resolution steps above is applied to all of them. Nothing else changes:
+    // the term still resolves to TAGS, so a synonym never appears in a result, a facet or a
+    // chip — only the tag it belongs to does.
+    //
+    // The list handed in here is the caller's own ACL-scoped tag list (TagDao.findByCriteria),
+    // which is what keeps a synonym from revealing a tag the caller cannot read: an invisible
+    // tag is not in the list, so neither are its synonyms.
+    // ---------------------------------------------------------------------------------------
+
+    private static final String INSURANCE = "insurance-id";
+    private static final String CAR = "car-id";
+
+    private static TagDto tag(String id, String name, String... synonyms) {
+        return new TagDto().setId(id).setName(name).setSynonyms(List.of(synonyms));
+    }
+
+    private static List<TagDto> synonymTagList() {
+        return List.of(
+                tag(INSURANCE, "Insurance", "Versicherung", "Assurance"),
+                tag(CAR, "Car", "Auto")
+        );
+    }
+
+    /** The reporter's case: searching a synonym returns the canonical tag. */
+    @Test
+    public void anExactSynonymResolvesToItsTag() {
+        assertIds(TagUtil.findByName("Versicherung", synonymTagList()), INSURANCE);
+        assertIds(TagUtil.findByName("Auto", synonymTagList()), CAR);
+    }
+
+    /** A synonym is matched with the same case folding a name is. */
+    @Test
+    public void synonymMatchingIgnoresCase() {
+        assertIds(TagUtil.findByName("vErSiChErUnG", synonymTagList()), INSURANCE);
+    }
+
+    /** The default prefix mode reaches a synonym exactly as it reaches a name. */
+    @Test
+    public void aPrefixOfASynonymResolvesToItsTag() {
+        assertIds(TagUtil.findByName("Versich", synonymTagList()), INSURANCE);
+    }
+
+    /** So does a glob, wherever its asterisks sit. */
+    @Test
+    public void aGlobMatchesASynonym() {
+        assertIds(TagUtil.findByName("*sicher*", synonymTagList()), INSURANCE);
+        assertIds(TagUtil.findByName("Ass*", synonymTagList()), INSURANCE);
+    }
+
+    /**
+     * A tag reached through two of its own names is still ONE tag. Without this the term would
+     * put the same id in the criteria twice and the tag would be counted twice everywhere
+     * downstream.
+     */
+    @Test
+    public void aTagMatchedByNameAndSynonymAppearsOnce() {
+        List<TagDto> tags = List.of(tag(INSURANCE, "Insurance", "Insurances", "Insured"));
+        assertIds(TagUtil.findByName("Insur*", tags), INSURANCE);
+    }
+
+    /**
+     * A name and another tag's synonym that collide. The save-time collision rule refuses to
+     * CREATE this state, but it can still arise afterwards — a tag becomes readable through a
+     * grant made later, and the two names meet in one caller's list for the first time. The
+     * resolution is then the UNION, each tag once: hiding either would silently drop documents
+     * the caller is entitled to see, and there is no honest basis for preferring one.
+     */
+    @Test
+    public void aNameAndAForeignSynonymThatCollideBothResolve() {
+        List<TagDto> tags = List.of(
+                tag(INSURANCE, "Insurance", "Versicherung"),
+                tag("other-id", "Versicherung")
+        );
+        assertIds(TagUtil.findByName("Versicherung", tags), INSURANCE, "other-id");
+    }
+
+    /** In EXACT mode a synonym is still exact — it is the PREFIX fallback that is suppressed. */
+    @Test
+    public void exactModeKeepsExactSynonymsAndDropsTheirPrefixes() {
+        setExactMatchMode();
+        assertIds(TagUtil.findByName("Versicherung", synonymTagList()), INSURANCE);
+        assertIds(TagUtil.findByName("Versich", synonymTagList()));
+    }
+
+    /**
+     * An exact hit on a synonym wins over a PREFIX hit on a name, the same way an exact name
+     * does — otherwise typing a synonym in full would drag in every tag whose name starts with
+     * it.
+     */
+    @Test
+    public void anExactSynonymWinsOverPrefixSiblings() {
+        List<TagDto> tags = List.of(
+                tag(INSURANCE, "Insurance", "Auto"),
+                tag(CAR, "Automobile")
+        );
+        assertIds(TagUtil.findByName("Auto", tags), INSURANCE);
+    }
 }

@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "搜索标签…",
       "all_assigned": "所有标签均已添加",
-      "add_named": "添加标签 {name}"
+      "add_named": "添加标签 {name}",
+      "via": "（通过 {synonym}）"
     },
     "tag_picker": {
-      "create_named": "创建标签“{name}”…"
+      "create_named": "创建标签“{name}”…",
+      "via_named": "{name}（通过 {synonym}）"
     },
     "tag_panel": {
       "lead": "保存时将创建该标签并添加到{title}。",
@@ -449,7 +451,15 @@
       "tag_deleted": "标签已删除",
       "failed_delete": "删除标签失败",
       "document_count": "带有此标签的文档：{count}",
-      "view_documents": "查看文档"
+      "view_documents": "查看文档",
+      "synonyms": "同义词",
+      "synonyms_hint": "可以找到此标签的其他名称。搜索其中任意一个都会显示此标签的文档。",
+      "synonym_placeholder": "添加另一个名称…",
+      "synonym_add": "添加",
+      "synonym_remove": "移除同义词 {name}",
+      "synonym_duplicate": "“{name}”已在此标签上。",
+      "synonym_in_use": "“{name}”已被使用：{tags}。保存将被拒绝。",
+      "synonym_similar": "已存在：{tags}"
     },
     "tag_icon": {
       "label": "图标",

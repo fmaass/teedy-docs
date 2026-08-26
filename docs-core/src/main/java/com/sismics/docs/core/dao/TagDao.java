@@ -465,7 +465,15 @@ public class TagDao {
         q = em.createQuery("update Tag t set t.parentId = null where t.parentId = :tagId and t.deleteDate is null");
         q.setParameter("tagId", tagId);
         q.executeUpdate();
-        
+
+        // #280: the tag's synonyms go with it, carrying the SAME timestamp as the tag, its links
+        // and its ACLs. A name left resolving to a deleted tag would be a search term no screen
+        // can reach to repair, and it would go on blocking that name for every other tag.
+        // Placed here rather than at each call site because this method is the single deletion
+        // path for a tag: TagResource.delete and both #298 maintenance sweeps
+        // (TagMaintenanceUtil.deleteSubtree / deleteUnused) end up in it.
+        new TagSynonymDao().deleteByTagId(tagId, dateNow);
+
         // Create audit log
         AuditLogUtil.create(tagDb, AuditLogType.DELETE, userId);
     }
@@ -544,6 +552,7 @@ public class TagDao {
 
         // Assemble results
         List<TagDto> tagDtoList = new ArrayList<>();
+        List<String> tagIdList = new ArrayList<>();
         for (Object[] o : l) {
             int i = 0;
             TagDto tagDto = new TagDto()
@@ -554,6 +563,18 @@ public class TagDao {
                     .setCreator((String) o[i++])
                     .setIcon((String) o[i]);
             tagDtoList.add(tagDto);
+            tagIdList.add(tagDto.getId());
+        }
+
+        // #280: every tag read carries its synonyms, in ONE further query for the whole list.
+        // Attaching them HERE rather than at each call site is what makes synonym resolution
+        // ACL-scoped without a second permission rule: this list has already been narrowed to
+        // the tags the caller may READ, so a synonym cannot arrive on a tag that is not in it,
+        // and every existing reader of this method (the tag list, the search's tag resolution,
+        // the saved filters, the reduction run) gets them without being changed.
+        Map<String, List<String>> synonymsByTag = new TagSynonymDao().findByTagIds(tagIdList);
+        for (TagDto tagDto : tagDtoList) {
+            tagDto.setSynonyms(synonymsByTag.getOrDefault(tagDto.getId(), List.of()));
         }
 
         return tagDtoList;

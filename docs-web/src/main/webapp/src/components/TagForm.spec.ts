@@ -343,3 +343,123 @@ describe('TagForm — the slots that let one form serve two very different hosts
     expect(mountForm({ flat: true }).findAll('.tag-form-card.flat')).toHaveLength(2)
   })
 })
+
+// #280 — the synonyms chips editor. It renders ONLY for a host that manages synonyms: the
+// approved design puts them on the tag edit page, and the two create hosts must keep rendering
+// the form exactly as they did (the side panel's zero-DOM-while-closed invariant, and every
+// captured baseline that screenshots a surface holding this form).
+describe('TagForm — synonyms (#280)', () => {
+  const OTHER_TAGS = [
+    { id: 'a', name: 'Alpha', color: '#111', parent: null, synonyms: ['Erste'] },
+    { id: 'b', name: 'Bravo', color: '#222', parent: null },
+    { id: 'c', name: 'Alphabet', color: '#333', parent: null },
+  ]
+
+  function mountSynonyms(props: Record<string, unknown> = {}) {
+    return mountForm({ synonyms: [], synonymTags: OTHER_TAGS, synonymTagId: 'b', ...props })
+  }
+
+  async function type(wrapper: ReturnType<typeof mountForm>, text: string) {
+    await wrapper.find('#tag-synonym').setValue(text)
+  }
+
+  it('renders nothing for a host that does not manage synonyms', () => {
+    const wrapper = mountForm()
+    expect(wrapper.find('#tag-synonym').exists()).toBe(false)
+    expect(wrapper.find('.synonym-chips').exists()).toBe(false)
+  })
+
+  it('renders one removable chip per synonym, plus the add field', () => {
+    const wrapper = mountSynonyms({ synonyms: ['Rechnung', 'Quittung'] })
+    expect(wrapper.findAll('.synonym-chip').map((chip) => chip.text())).toEqual([
+      'Rechnung',
+      'Quittung',
+    ])
+    expect(wrapper.find('#tag-synonym').exists()).toBe(true)
+  })
+
+  it('adds the typed name on the Add button and on Enter, and clears the field', async () => {
+    const wrapper = mountSynonyms({ synonyms: ['Rechnung'] })
+    await type(wrapper, 'Quittung')
+    await wrapper.find('.synonym-row button').trigger('click')
+
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Rechnung', 'Quittung']])
+    expect((wrapper.find('#tag-synonym').element as HTMLInputElement).value).toBe('')
+
+    await type(wrapper, 'Faktura')
+    await wrapper.find('#tag-synonym').trigger('keydown.enter')
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Rechnung', 'Faktura']])
+  })
+
+  it('trims the typed name', async () => {
+    const wrapper = mountSynonyms()
+    await type(wrapper, '  Quittung  ')
+    await wrapper.find('.synonym-row button').trigger('click')
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Quittung']])
+  })
+
+  it('removes a chip', async () => {
+    const wrapper = mountSynonyms({ synonyms: ['Rechnung', 'Quittung'] })
+    await wrapper.findAll('.synonym-remove')[0].trigger('click')
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Quittung']])
+  })
+
+  it('refuses a name already on this tag, and says so', async () => {
+    const wrapper = mountSynonyms({ synonyms: ['Rechnung'] })
+    await type(wrapper, 'rechnung')
+
+    expect(wrapper.find('.synonym-notice').text()).toContain('already on this tag')
+    expect(wrapper.find('.synonym-row button').attributes('disabled')).toBeDefined()
+    await wrapper.find('#tag-synonym').trigger('keydown.enter')
+    expect(wrapper.emitted('update:synonyms')).toBeUndefined()
+  })
+
+  it('refuses the tag\'s own name for the same reason', async () => {
+    // `name` is 'Bravo' in the shared fixture.
+    const wrapper = mountSynonyms()
+    await type(wrapper, 'bravo')
+    expect(wrapper.find('.synonym-notice').text()).toContain('already on this tag')
+  })
+
+  /**
+   * The reporter's ask: see the word is taken BEFORE saving. It is a warning, not a block —
+   * the server owns the verdict, and the chip may still be added so the refusal comes from the
+   * one place that can name the conflict.
+   */
+  it('warns while typing that another visible tag already uses the word', async () => {
+    const wrapper = mountSynonyms()
+    await type(wrapper, 'Alpha')
+
+    const notice = wrapper.find('.synonym-notice')
+    expect(notice.classes()).toContain('warn')
+    expect(notice.text()).toContain('Alpha')
+    expect(wrapper.find('.synonym-row button').attributes('disabled')).toBeUndefined()
+  })
+
+  it('warns when the word is another tag\'s SYNONYM, naming that tag', async () => {
+    const wrapper = mountSynonyms()
+    await type(wrapper, 'Erste')
+
+    const notice = wrapper.find('.synonym-notice')
+    expect(notice.classes()).toContain('warn')
+    expect(notice.text()).toContain('Alpha')
+  })
+
+  it('lists merely SIMILAR names as information rather than a warning', async () => {
+    const wrapper = mountSynonyms()
+    await type(wrapper, 'Alph')
+
+    const notice = wrapper.find('.synonym-notice')
+    expect(notice.classes()).toContain('info')
+    expect(notice.text()).toContain('Alpha')
+    expect(notice.text()).toContain('Alphabet')
+  })
+
+  it('ignores the tag being edited when it looks for a conflict', async () => {
+    // Bravo is in the tag list AND is the tag under edit: its own name must not be reported as
+    // somebody else's, or every re-save of an unchanged form would look like a collision.
+    const wrapper = mountSynonyms({ name: 'Bravo', synonymTagId: 'b' })
+    await type(wrapper, 'Charlie')
+    expect(wrapper.find('.synonym-notice').exists()).toBe(false)
+  })
+})

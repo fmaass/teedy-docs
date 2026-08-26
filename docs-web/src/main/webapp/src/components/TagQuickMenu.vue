@@ -10,7 +10,8 @@ import { type Tag } from '../api/tag'
 import { type DocumentListItem } from '../api/document'
 import TagBadge from './TagBadge.vue'
 import TagIconMark from './TagIconMark.vue'
-import { assignableTags, filterTagsByName, topUsedTags } from '../utils/tagQuickMenu'
+import { assignableTags, topUsedTags } from '../utils/tagQuickMenu'
+import { matchTagsByName, type TagNameMatch } from '../utils/tagSynonyms'
 import { nextFrame } from '../utils/nextFrame'
 
 /**
@@ -69,9 +70,11 @@ const assignedTagIds = computed(
 
 const assignable = computed(() => assignableTags(props.allTags, assignedTagIds.value))
 
-// The assignable tags narrowed by the owned search box. `filterTagsByName` is the same pure,
-// unit-tested selector the util exposes; an empty query returns the full list unchanged.
-const filtered = computed(() => filterTagsByName(assignable.value, filterText.value))
+// The assignable tags narrowed by the owned search box. `matchTagsByName` is the same pure,
+// unit-tested selector both tag inputs search with; an empty query returns the full list
+// unchanged. Each entry carries the SYNONYM that matched (#280), or null when the tag's own name
+// did, which is what the row label uses to show why a tag the user did not type is being offered.
+const filtered = computed(() => matchTagsByName(assignable.value, filterText.value))
 
 // Top-5 most-used quick-add chips (falls back to first-5-by-name when no usage data). Ranked
 // over all assignable tags, not the filtered view — the chips are a shortcut, not the search.
@@ -360,7 +363,16 @@ function clearFilter() {
 // onto the row buttons and press Enter.
 function onFilterEnter() {
   const top = filtered.value[0]
-  if (top) onSelect(top.id)
+  if (top) onSelect(top.tag.id)
+}
+
+/**
+ * What the row is called for a screen reader and a tooltip. A tag offered because a SYNONYM
+ * matched is announced with that reason, so the search that produced it is never a mystery —
+ * the same information the visible "(via …)" gives a sighted user.
+ */
+function optionTitle(match: TagNameMatch): string {
+  return match.via ? match.tag.name + t('ui.tag_menu.via', { synonym: match.via }) : match.tag.name
 }
 
 function onQuickAdd(tagId: string) {
@@ -442,15 +454,18 @@ defineExpose({ show, hide })
                instance mid-fade (the reported regression). Buttons have no such state. -->
           <div class="tqm-tag-list">
             <button
-              v-for="tag in filtered"
-              :key="tag.id"
+              v-for="match in filtered"
+              :key="match.tag.id"
               type="button"
               class="tqm-option"
-              :title="tag.name"
-              :aria-label="t('ui.tag_menu.add_named', { name: tag.name })"
-              @click="onSelect(tag.id)"
+              :title="optionTitle(match)"
+              :aria-label="t('ui.tag_menu.add_named', { name: optionTitle(match) })"
+              @click="onSelect(match.tag.id)"
             >
-              {{ tag.name }}
+              {{ match.tag.name
+              }}<span v-if="match.via" class="tqm-via">{{
+                t('ui.tag_menu.via', { synonym: match.via })
+              }}</span>
             </button>
             <div v-if="!filtered.length" class="tqm-option-empty">
               {{ t('primevue.empty_filter_message') }}
@@ -582,6 +597,13 @@ defineExpose({ show, hide })
   outline: none;
   box-shadow: inset 0 0 0 2px var(--p-primary-color);
 }
+/* The "(via …)" reason on a row offered because a SYNONYM matched (#280). Muted, so the
+   canonical name stays the thing being read. */
+.tqm-via {
+  color: var(--p-text-muted-color);
+  font-size: 0.75rem;
+}
+
 .tqm-option-empty {
   padding: 0.3rem 0.5rem;
   font-size: 0.8125rem;

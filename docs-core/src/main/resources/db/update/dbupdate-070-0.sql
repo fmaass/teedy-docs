@@ -1,0 +1,38 @@
+-- #280 tag synonyms: a tag can carry any number of alternative names ("Rechnung = Quittung =
+-- Invoice"), and searching or tagging by one of them resolves to the tag itself.
+--
+-- One row per SYNONYM, each belonging to exactly ONE tag. That is narrower than the reporter's
+-- array-of-tag-ids proposal on purpose (maintainer design, issue #280): with one owner per name a
+-- collision has exactly one answer and a permission check has exactly one subject, while a name
+-- fanning out to several tags would have to answer both questions per member. A later slice can
+-- widen this table without rewriting what is stored here.
+--   TSY_ID_C         synonym id (UUID)
+--   TSY_IDTAG_C      the tag this name resolves to. A REAL foreign key, like T_DOCUMENT_TAG's
+--                    FK_DOT_IDTAG_C: nothing in the code base ever hard-deletes a T_TAG row
+--                    (tags are soft-deleted everywhere — TagDao.delete, TagMaintenanceUtil, and
+--                    the clean_storage orphan sweep all set TAG_DELETEDATE_D), so `on delete
+--                    restrict` can never abort a delete that actually happens.
+--   TSY_NAME_C       the alternative name, held to the same 36 characters as TAG_NAME_C because
+--                    it is validated by the same rule (ValidationUtil.validateTagName →
+--                    TagNameNormalizer, #305) and must be storable wherever a tag name is.
+--   TSY_CREATEDATE_D creation timestamp
+--   TSY_DELETEDATE_D soft-delete timestamp, set when the synonym is removed from the tag form
+--                    AND when the tag itself is deleted — a name that still resolved to a
+--                    deleted tag would be unreachable from any screen that could repair it.
+--
+-- ONE INDEX, on the tag id, because that is the only column anything looks a synonym up by:
+-- every read is "the synonyms of these tags" (the tag list read, which is already ACL-scoped),
+-- and the deletes are per tag. There is deliberately NO index on TSY_NAME_C: no query filters
+-- by name. Name matching — resolution and the collision rule — is done in Java over the tags the
+-- caller can already read, with the same per-character case folding TagUtil uses, because SQL's
+-- lower() is locale-dependent and would reintroduce the Turkish dotted/dotless-I defect that
+-- comparison was written to avoid (#266).
+--
+-- The whole DDL is on one physical line: DbOpenHelper executes one statement per line.
+-- `varchar`/`timestamp` are spelled the same on H2 and PostgreSQL and are untouched by the
+-- H2->PG transform (DialectUtil rewrites only cached/memory table, datetime, longvarchar and
+-- bit), so no !H2!/!PGSQL! split is needed. Retry-safe DDL (IF NOT EXISTS): on H2 a
+-- partially-applied migration leaves the auto-committed DDL behind and a re-run must skip it.
+create cached table if not exists T_TAG_SYNONYM ( TSY_ID_C varchar(36) not null, TSY_IDTAG_C varchar(36) not null, TSY_NAME_C varchar(36) not null, TSY_CREATEDATE_D timestamp not null, TSY_DELETEDATE_D timestamp, primary key (TSY_ID_C), constraint FK_TSY_IDTAG_C foreign key (TSY_IDTAG_C) references T_TAG (TAG_ID_C) on delete restrict on update restrict );
+create index if not exists IDX_TSY_IDTAG_C on T_TAG_SYNONYM (TSY_IDTAG_C);
+update T_CONFIG set CFG_VALUE_C = '70' where CFG_ID_C = 'DB_VERSION';

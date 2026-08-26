@@ -3546,6 +3546,13 @@
                   },
                   "parent": {
                     "type": "string"
+                  },
+                  "synonyms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Alternative names that resolve to this tag. The whole set is replaced: repeat the parameter once per synonym, send it once with an empty value to remove them all, and omit it to leave them untouched."
                   }
                 }
               }
@@ -3555,6 +3562,15 @@
         "responses": {
           "200": {
             "description": "Success"
+          },
+          "400": {
+            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name or a synonym contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable; CircularReference when the parent tag is a descendant of this one; ValidationError when the icon is not exactly one emoji or names an unknown scheme; IconNotFound when the icon is not in the icon set; TagNameIsSynonym when the name is already a synonym of another visible tag; SynonymInUse when a synonym is already the name or the synonym of another visible tag"
+          },
+          "403": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "The tag is not writable by the caller"
           }
         }
       },
@@ -3606,6 +3622,13 @@
                   },
                   "parent": {
                     "type": "string"
+                  },
+                  "synonyms": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Alternative names that resolve to this tag. The whole set is replaced: repeat the parameter once per synonym, send it once with an empty value to remove them all, and omit it to leave them untouched."
                   }
                 }
               }
@@ -3617,7 +3640,7 @@
             "description": "Success"
           },
           "400": {
-            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable; ValidationError when the icon is not exactly one emoji or names an unknown scheme; IconNotFound when the icon is not in the icon set"
+            "description": "ValidationError when the name or color is invalid; IllegalTagName when the name or a synonym contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; ParentNotFound when the parent tag is not readable; ValidationError when the icon is not exactly one emoji or names an unknown scheme; IconNotFound when the icon is not in the icon set; TagNameIsSynonym when the name is already a synonym of another visible tag; SynonymInUse when a synonym is already the name or the synonym of another visible tag"
           },
           "403": {
             "description": "Not authenticated, or the calling account stopped being active before the tag was created"

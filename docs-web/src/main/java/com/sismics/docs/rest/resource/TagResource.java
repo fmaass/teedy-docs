@@ -16,6 +16,7 @@ import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.docs.rest.util.TagIconUtil;
 import com.sismics.docs.rest.util.TagMaintenanceUtil;
 import com.sismics.docs.rest.util.TagReductionUtil;
+import com.sismics.docs.rest.util.TagSynonymUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.exception.ServerException;
@@ -69,6 +70,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} tags.color Color
      * @apiSuccess {String} tags.icon Icon (absent when the tag has none)
      * @apiSuccess {String} tags.parent Parent
+     * @apiSuccess {String[]} tags.synonyms Alternative names that resolve to this tag; empty when it has none
      * @apiError (client) ForbiddenError Access denied
      * @apiPermission user
      * @apiVersion 1.5.0
@@ -106,7 +108,11 @@ public class TagResource extends BaseResource {
             JsonObjectBuilder item = Json.createObjectBuilder()
                     .add("id", tagDto.getId())
                     .add("name", tagDto.getName())
-                    .add("color", tagDto.getColor());
+                    .add("color", tagDto.getColor())
+                    // ALWAYS present, empty when the tag has none (#280): a client that had to
+                    // tell "no synonyms" from "this build does not report them" would have to
+                    // guess, and the tag form would have to guess with it.
+                    .add("synonyms", synonymArray(tagDto));
             // OMITTED rather than null for a tag with no icon (#287), which is most of them: the
             // key's absence is what an older client and the pre-icon SPA already handle correctly.
             if (tagDto.getIcon() != null) {
@@ -135,6 +141,7 @@ public class TagResource extends BaseResource {
      * @apiSuccess {String} color Color
      * @apiSuccess {String} icon Icon (absent when the tag has none)
      * @apiSuccess {String} parent Parent
+     * @apiSuccess {String[]} synonyms Alternative names that resolve to this tag; empty when it has none
      * @apiSuccess {Boolean} writable True if the tag is writable by the current user
      * @apiSuccess {Object[]} acls List of ACL
      * @apiSuccess {String} acls.id ID
@@ -182,7 +189,8 @@ public class TagResource extends BaseResource {
                 .add("id", tagDto.getId())
                 .add("creator", tagDto.getCreator())
                 .add("name", tagDto.getName())
-                .add("color", tagDto.getColor());
+                .add("color", tagDto.getColor())
+                .add("synonyms", synonymArray(tagDto));
         if (tagDto.getIcon() != null) {
             tag.add("icon", tagDto.getIcon());
         }
@@ -211,6 +219,9 @@ public class TagResource extends BaseResource {
      * @apiParam {String} color Color
      * @apiParam {String} icon Icon: 'emoji:<grapheme>' or 'set:<iconId>'; empty for none
      * @apiParam {String} parent Parent ID
+     * @apiParam {String[]} synonyms Alternative names that resolve to this tag; repeat the parameter once
+     *                               per synonym, send it once with an empty value for none, and omit it to
+     *                               leave the tag without any
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
@@ -218,6 +229,8 @@ public class TagResource extends BaseResource {
      *                                 invisible format characters are removed and the edges are trimmed, and a
      *                                 name left empty by that normalization is refused
      * @apiError (client) ParentNotFound Parent not found
+     * @apiError (client) TagNameIsSynonym The name is already a synonym of another visible tag
+     * @apiError (client) SynonymInUse A synonym is already the name or the synonym of another visible tag
      * @apiPermission user
      * @apiVersion 1.5.0
      *
@@ -225,6 +238,7 @@ public class TagResource extends BaseResource {
      * @param color Color
      * @param icon Icon
      * @param parentId Parent ID
+     * @param synonyms Alternative names resolving to this tag
      * @return Response
      */
     @PUT
@@ -242,13 +256,17 @@ public class TagResource extends BaseResource {
                             + "(invisible format characters are removed and the edges trimmed instead, and a name "
                             + "left empty by that normalization is refused); "
                             + "ParentNotFound - Parent not found; "
-                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon)")
+                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon); "
+                            + "TagNameIsSynonym - The name is already a synonym of another visible tag; "
+                            + "SynonymInUse - A synonym is already the name or the synonym of another visible tag")
             }
     )
     public Response add(
             @Parameter(description = "Name") @FormParam("name") String name,
             @Parameter(description = "Color") @FormParam("color") String color,
             @Parameter(description = "Icon") @FormParam("icon") String icon,
+            @Parameter(name = "synonyms", description = "Alternative names resolving to this tag")
+            @FormParam("synonyms") List<String> synonyms,
             @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -267,6 +285,10 @@ public class TagResource extends BaseResource {
         // icon that is in the set right now — checked here rather than trusted, because the set
         // can change between the picker loading it and the form being saved.
         String iconReference = TagIconUtil.validateIconReference(icon);
+        // #280: a synonym goes through the SAME name rule — the whole point of TagNameNormalizer
+        // living in docs-core as one pure function.
+        boolean synonymsProvided = TagSynonymUtil.isProvided(synonyms);
+        List<String> synonymNames = TagSynonymUtil.validateNames(synonyms);
 
         // Check the parent
         if (StringUtils.isEmpty(parentId)) {
@@ -277,6 +299,11 @@ public class TagResource extends BaseResource {
                 throw new ClientException("ParentNotFound", MessageFormat.format("Parent not found: {0}", parentId));
             }
         }
+
+        // #280: refuse a name already in use as a synonym, and a synonym already in use as a name
+        // or a synonym — scoped to what THIS caller can read, so the error can never confirm that
+        // an invisible tag exists (TagSynonymUtil explains the scope in full).
+        TagSynonymUtil.checkCollisions(name, synonymNames, null, getTargetIdList(null));
 
         // Create the tag and its base ACLs. #185: TagCreationUtil takes the owner's row lock FOR UPDATE
         // before the insert, so a tag cannot be created under an owner a concurrent deletion is about to
@@ -296,6 +323,12 @@ public class TagResource extends BaseResource {
             throw new ForbiddenClientException();
         }
 
+        // Only when the caller actually sent the field: a client that predates synonyms must be
+        // able to create a tag without saying anything about them.
+        if (synonymsProvided) {
+            TagSynonymUtil.store(id, synonymNames);
+        }
+
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("id", id);
         return Response.ok().entity(response.build()).build();
@@ -312,6 +345,9 @@ public class TagResource extends BaseResource {
      * @apiParam {String} color Color
      * @apiParam {String} icon Icon: 'emoji:<grapheme>' or 'set:<iconId>'; empty for none
      * @apiParam {String} parent Parent ID
+     * @apiParam {String[]} synonyms Alternative names that resolve to this tag; the whole set is replaced.
+     *                               Repeat the parameter once per synonym, send it once with an empty value to
+     *                               remove them all, and OMIT it to leave them untouched
      * @apiSuccess {String} id Tag ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
@@ -320,6 +356,8 @@ public class TagResource extends BaseResource {
      *                                 name left empty by that normalization is refused
      * @apiError (client) ParentNotFound Parent not found
      * @apiError (client) CircularReference Circular reference in parent tag
+     * @apiError (client) TagNameIsSynonym The name is already a synonym of another visible tag
+     * @apiError (client) SynonymInUse A synonym is already the name or the synonym of another visible tag
      * @apiError (client) NotFound Tag not found
      * @apiPermission user
      * @apiVersion 1.5.0
@@ -328,6 +366,7 @@ public class TagResource extends BaseResource {
      * @param color Color
      * @param icon Icon
      * @param parentId Parent ID
+     * @param synonyms Alternative names resolving to this tag
      * @return Response
      */
     @POST
@@ -352,7 +391,9 @@ public class TagResource extends BaseResource {
                             + "left empty by that normalization is refused); "
                             + "ParentNotFound - Parent not found; "
                             + "CircularReference - Circular reference in parent tag; "
-                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon)")
+                            + "IconNotFound - Icon not in the icon set (an icon must be exactly one emoji or a set icon); "
+                            + "TagNameIsSynonym - The name is already a synonym of another visible tag; "
+                            + "SynonymInUse - A synonym is already the name or the synonym of another visible tag")
             }
     )
     public Response update(
@@ -360,6 +401,8 @@ public class TagResource extends BaseResource {
             @Parameter(description = "Name") @FormParam("name") String name,
             @Parameter(description = "Color") @FormParam("color") String color,
             @Parameter(description = "Icon") @FormParam("icon") String icon,
+            @Parameter(name = "synonyms", description = "Alternative names resolving to this tag")
+            @FormParam("synonyms") List<String> synonyms,
             @Parameter(name = "parent", description = "Parent ID") @FormParam("parent") String parentId) {
         if (!authenticate()) {
             throw new ForbiddenClientException();
@@ -372,13 +415,17 @@ public class TagResource extends BaseResource {
         name = ValidationUtil.validateLength(name, "name", 1, 36, true);
         ValidationUtil.validateHexColor(color, "color", true);
         String iconReference = TagIconUtil.validateIconReference(icon);
+        boolean synonymsProvided = TagSynonymUtil.isProvided(synonyms);
+        List<String> synonymNames = TagSynonymUtil.validateNames(synonyms);
 
-        // Check permission
+        // Check permission. Editing a tag's synonyms is editing the tag, so it takes the same
+        // WRITE the name and colour take — and this check runs BEFORE the collision rule below,
+        // so a caller without it learns nothing about which names are taken.
         AclDao aclDao = new AclDao();
         if (!aclDao.checkPermission(id, PermType.WRITE, getTargetIdList(null))) {
             throw new NotFoundException();
         }
-        
+
         // Check the parent
         TagDao tagDao = new TagDao();
         if (StringUtils.isEmpty(parentId)) {
@@ -398,8 +445,21 @@ public class TagResource extends BaseResource {
             } while (parentTagId != null);
         }
 
-        // Update the tag
         Tag tag = tagDao.getById(id);
+
+        // #280: the collision rule is checked against the name the tag will END UP with — a
+        // rename and a new synonym arrive in the same request, so judging the submitted name
+        // alone would let "rename to X" past while X is a synonym elsewhere, and judging the
+        // stored name would refuse a synonym that only collides with the name being replaced.
+        //
+        // Checked BEFORE the entity is touched, deliberately: the check runs a query, and a
+        // query auto-flushes the persistence context, so a rename applied first would already be
+        // in the table the check reads.
+        String effectiveName = StringUtils.isEmpty(name) ? tag.getName() : name;
+        TagSynonymUtil.checkCollisions(effectiveName, synonymsProvided ? synonymNames : null,
+                id, getTargetIdList(null));
+
+        // Update the tag
         if (!StringUtils.isEmpty(name)) {
             tag.setName(name);
         }
@@ -413,9 +473,15 @@ public class TagResource extends BaseResource {
         tag.setIcon(iconReference);
         // Parent tag is always updated to have the possibility to delete it
         tag.setParentId(parentId);
-        
+
         tagDao.update(tag, principal.getId());
-        
+
+        // Replace semantics, and only when the field was sent: a client saving a colour must not
+        // silently drop the tag's synonyms because it does not know about them.
+        if (synonymsProvided) {
+            TagSynonymUtil.store(id, synonymNames);
+        }
+
         JsonObjectBuilder response = Json.createObjectBuilder()
                 .add("id", id);
         return Response.ok().entity(response.build()).build();
@@ -698,6 +764,21 @@ public class TagResource extends BaseResource {
                 .add("count", count)
                 .add("documents", documents)
                 .add("skipped", skipped).build()).build();
+    }
+
+    /**
+     * A tag's synonyms as a JSON array (#280).
+     *
+     * <p>ALWAYS present, empty when the tag has none, on both the list and the detail read: a
+     * client that has to tell "no synonyms" from "this build does not report them" would have to
+     * guess, and the tag form would have to guess with it.</p>
+     */
+    private static JsonArrayBuilder synonymArray(TagDto tagDto) {
+        JsonArrayBuilder synonyms = Json.createArrayBuilder();
+        for (String synonym : tagDto.getSynonyms()) {
+            synonyms.add(synonym);
+        }
+        return synonyms;
     }
 
     /** The identity half of a maintenance item, shared by the status and deletion responses. */
@@ -1167,6 +1248,10 @@ public class TagResource extends BaseResource {
         public String icon;
         @Schema(name = "parent", description = "Parent ID")
         public String parent;
+        @Schema(name = "synonyms", description = "Alternative names that resolve to this tag. The whole "
+                + "set is replaced: repeat the parameter once per synonym, send it once with an empty "
+                + "value to remove them all, and omit it to leave them untouched.")
+        public List<String> synonyms;
     }
 
     @Schema(name = "TagIdResult", description = "Tag ID envelope")
@@ -1223,6 +1308,8 @@ public class TagResource extends BaseResource {
         public String icon;
         @Schema(description = "Parent")
         public String parent;
+        @Schema(description = "Alternative names that resolve to this tag; empty when it has none")
+        public List<String> synonyms;
     }
 
     @Schema(name = "TagListResult", description = "List of tags")
@@ -1259,6 +1346,8 @@ public class TagResource extends BaseResource {
         public String parent;
         @Schema(description = "True if the tag is writable by the current user")
         public Boolean writable;
+        @Schema(description = "Alternative names that resolve to this tag; empty when it has none")
+        public List<String> synonyms;
         @Schema(description = "List of ACL")
         public List<TagAcl> acls;
     }

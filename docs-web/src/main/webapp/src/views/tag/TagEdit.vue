@@ -26,6 +26,10 @@ const name = ref('')
 const color = ref('2aabd2')
 const parent = ref<string | null>(null)
 const icon = ref<string | null>(null)
+// #280. Seeded from the tag DETAIL rather than the cached list, because the detail read is the
+// one this page already refetches after every change; `synonyms` is undefined only while that
+// read is in flight, and the form renders its (empty) chips editor from the moment it lands.
+const synonyms = ref<string[]>([])
 
 const { data: tags } = useQuery({
   queryKey: ['tags'],
@@ -156,15 +160,45 @@ function loadFromCache() {
 
 watch([tags, () => props.id], loadFromCache, { immediate: true })
 
+// The synonyms come off the detail read and are re-seeded whenever it lands — including after a
+// save, which is what makes the chips show what the SERVER stored (a name normalized on the way
+// in, a case-duplicate collapsed) rather than what was typed.
+watch(
+  detail,
+  (value) => {
+    synonyms.value = [...(value?.synonyms ?? [])]
+  },
+  { immediate: true },
+)
+
 const { mutate: save, isPending: loading } = useMutation({
   mutationFn: () =>
-    updateTag(props.id, name.value, '#' + color.value, parent.value ?? undefined, icon.value),
+    updateTag(
+      props.id,
+      name.value,
+      '#' + color.value,
+      parent.value ?? undefined,
+      icon.value,
+      synonyms.value,
+    ),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['tags'] })
+    // Re-read the tag so the chips show what was actually stored, and so a later save is judged
+    // against the state the server now holds.
+    refetchDetail()
     toast.add({ severity: 'success', summary: t('ui.tag_edit.tag_updated'), life: 2000 })
   },
-  onError: () => {
-    toast.add({ severity: 'error', summary: t('ui.tag_edit.failed_update'), life: 3000 })
+  onError: (error) => {
+    // #280: a collision is refused by NAME ("Versicherung is already a synonym of Insurance"),
+    // and that sentence is the whole point of rejecting at save time — a generic "failed to
+    // update" would leave the user guessing which chip to take out.
+    const message = (error as { response?: { data?: { message?: string } } }).response?.data?.message
+    toast.add({
+      severity: 'error',
+      summary: t('ui.tag_edit.failed_update'),
+      detail: message || undefined,
+      life: 6000,
+    })
   },
 })
 
@@ -215,7 +249,10 @@ function handleDelete() {
       v-model:color="color"
       v-model:icon="icon"
       v-model:parent="parent"
+      v-model:synonyms="synonyms"
       :parent-options="parentOptions"
+      :synonym-tags="tags ?? []"
+      :synonym-tag-id="props.id"
       id-prefix="tag"
       :acl="aclState"
       max-width="480px"

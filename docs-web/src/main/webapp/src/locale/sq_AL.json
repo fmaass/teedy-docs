@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "Kërko etiketa…",
       "all_assigned": "Të gjitha etiketat janë shtuar tashmë",
-      "add_named": "Shto etiketën {name}"
+      "add_named": "Shto etiketën {name}",
+      "via": " (përmes {synonym})"
     },
     "tag_picker": {
-      "create_named": "Krijo etiketën «{name}»…"
+      "create_named": "Krijo etiketën «{name}»…",
+      "via_named": "{name} (përmes {synonym})"
     },
     "tag_panel": {
       "lead": "Etiketa krijohet dhe i shtohet {title} kur ruani.",
@@ -449,7 +451,15 @@
       "tag_deleted": "Etiketa u fshi",
       "failed_delete": "Fshirja e etiketës dështoi",
       "document_count": "Dokumente me këtë etiketë: {count}",
-      "view_documents": "Shiko dokumentet"
+      "view_documents": "Shiko dokumentet",
+      "synonyms": "Sinonime",
+      "synonyms_hint": "Emra të tjerë që e gjejnë këtë etiketë. Kërkimi i njërit prej tyre shfaq dokumentet e kësaj etikete.",
+      "synonym_placeholder": "Shto një emër tjetër…",
+      "synonym_add": "Shto",
+      "synonym_remove": "Hiq sinonimin {name}",
+      "synonym_duplicate": "«{name}» është tashmë në këtë etiketë.",
+      "synonym_in_use": "«{name}» përdoret tashmë nga: {tags}. Ruajtja do të refuzohet.",
+      "synonym_similar": "Ekziston tashmë: {tags}"
     },
     "tag_icon": {
       "label": "Ikonë",

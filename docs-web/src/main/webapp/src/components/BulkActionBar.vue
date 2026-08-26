@@ -170,6 +170,7 @@ function applyLang() {
           :filterPlaceholder="t('ui.tag_menu.search')"
           :clearFilterLabel="t('document.search_clear')"
           :ariaLabel="t('ui.bulk.choose_tag')"
+          :viaLabel="(name: string, synonym: string) => t('ui.tag_picker.via_named', { name, synonym })"
           class="bulk-select"
         />
         <Button size="small" :label="t('ui.bulk.apply')" :disabled="!pendingTags.length" @click="applyTag" />

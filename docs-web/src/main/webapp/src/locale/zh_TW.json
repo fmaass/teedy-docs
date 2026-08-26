@@ -162,10 +162,12 @@
     "tag_menu": {
       "search": "搜尋標籤…",
       "all_assigned": "所有標籤皆已加入",
-      "add_named": "新增標籤 {name}"
+      "add_named": "新增標籤 {name}",
+      "via": "（透過 {synonym}）"
     },
     "tag_picker": {
-      "create_named": "建立標籤「{name}」…"
+      "create_named": "建立標籤「{name}」…",
+      "via_named": "{name}（透過 {synonym}）"
     },
     "tag_panel": {
       "lead": "儲存時將建立此標籤並新增到{title}。",
@@ -449,7 +451,15 @@
       "tag_deleted": "已刪除標籤",
       "failed_delete": "刪除標籤失敗",
       "document_count": "帶有此標籤的文件：{count}",
-      "view_documents": "檢視文件"
+      "view_documents": "檢視文件",
+      "synonyms": "同義詞",
+      "synonyms_hint": "可以找到此標籤的其他名稱。搜尋其中任一個都會顯示此標籤的文件。",
+      "synonym_placeholder": "新增另一個名稱…",
+      "synonym_add": "新增",
+      "synonym_remove": "移除同義詞 {name}",
+      "synonym_duplicate": "「{name}」已在此標籤上。",
+      "synonym_in_use": "「{name}」已被使用：{tags}。儲存將被拒絕。",
+      "synonym_similar": "已存在：{tags}"
     },
     "tag_icon": {
       "label": "圖示",

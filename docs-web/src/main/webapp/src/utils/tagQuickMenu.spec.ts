@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  assignableTags,
-  filterTagsByName,
-  topUsedTags,
-  QUICK_ADD_TAG_LIMIT,
-} from './tagQuickMenu'
+import { assignableTags, topUsedTags, QUICK_ADD_TAG_LIMIT } from './tagQuickMenu'
 import { type Tag } from '../api/tag'
 
 function tag(id: string, name: string): Tag {
@@ -30,21 +25,8 @@ describe('assignableTags', () => {
   })
 })
 
-describe('filterTagsByName', () => {
-  it('matches a case-insensitive substring of the tag name', () => {
-    const result = filterTagsByName(all, 'ra')
-    // "Contract" and "Draft" both contain "ra"; nothing else does.
-    expect(result.map((t) => t.name).sort()).toEqual(['Contract', 'Draft'])
-  })
-
-  it('returns all tags unchanged for a blank query', () => {
-    expect(filterTagsByName(all, '   ')).toEqual(all)
-  })
-
-  it('returns an empty list when nothing matches', () => {
-    expect(filterTagsByName(all, 'zzz')).toEqual([])
-  })
-})
+// The name filter moved to utils/tagSynonyms.ts (#280) and is covered by tagSynonyms.spec.ts,
+// which carries these cases forward and adds the synonym ones.
 
 describe('topUsedTags', () => {
   it('ranks assignable tags by usage count, descending', () => {
