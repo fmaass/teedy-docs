@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "你打开过 {count} 次 | 你打开过 {count} 次",
       "personal_file": "你访问过该文件 {count} 次 | 你访问过该文件 {count} 次",
-      "col_accesses": "你的访问次数",
       "admin_title": "访问计数",
       "admin_description": "文档被打开的次数以及打开者。仅列出你有权阅读的文档。",
       "admin_total_documents": "文档访问次数",

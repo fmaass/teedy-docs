@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "Otwarte przez Ciebie raz | Otwarte przez Ciebie {count} razy",
       "personal_file": "Otwarty przez Ciebie raz | Otwarty przez Ciebie {count} razy",
-      "col_accesses": "Twoje odsłony",
       "admin_title": "Liczniki dostępu",
       "admin_description": "Jak często dokumenty były otwierane i przez kogo. Wyświetlane są tylko dokumenty, które możesz czytać.",
       "admin_total_documents": "Dostępy do dokumentów",

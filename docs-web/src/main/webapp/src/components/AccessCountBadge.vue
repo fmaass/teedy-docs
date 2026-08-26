@@ -20,10 +20,17 @@ const { t } = useI18n()
 const label = computed(() =>
   t(props.kind === 'document' ? 'ui.access.personal_document' : 'ui.access.personal_file', props.count ?? 0),
 )
+
+// Nothing is rendered for an unknown count (still loading) OR for zero. Zero is deliberately
+// silent rather than a "0": on a file panel most files have never been opened, so a grid of zeroes
+// would be noise that says nothing, and — the reason it is a hard rule rather than taste — a badge
+// that renders text next to a filename ends up inside whatever element reads that name. "No
+// accesses" is the absence of the badge, which no textContent can pick up.
+const visible = computed(() => props.count !== undefined && props.count > 0)
 </script>
 
 <template>
-  <span v-if="count !== undefined" class="access-count" :title="label" :aria-label="label">
+  <span v-if="visible" class="access-count" :title="label" :aria-label="label">
     <i class="pi pi-eye" aria-hidden="true" />
     <span class="access-count-value">{{ count }}</span>
   </span>

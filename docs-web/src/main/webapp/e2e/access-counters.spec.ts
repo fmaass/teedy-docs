@@ -94,6 +94,12 @@ test('a personal access count is private to its user, while the admin ranking ag
   await page.locator('.p-fileupload-advanced input[type="file"]').setInputFiles(txtFixture)
   await expect(page.getByText('Files uploaded').first()).toBeVisible()
 
+  // The uploaded file's id, read back from the server rather than guessed, so the download below
+  // addresses the file this spec actually seeded.
+  const fileListResponse = await page.request.get(`/api/file/list?id=${id}`)
+  expect(fileListResponse.ok(), 'reading the seeded file list back must succeed').toBeTruthy()
+  const fileId = (await fileListResponse.json()).files[0].id as string
+
   await grantRead(page, id, alice)
   await grantRead(page, id, bob)
 
@@ -109,13 +115,29 @@ test('a personal access count is private to its user, while the admin ranking ag
   await expect(headerCount(alicePage)).toHaveText('2')
 
   // The file panel carries her own per-file count too. The seeded file is a plain text file, whose
-  // grid card is an icon — the panel renders it without fetching a byte of it — so the count stays
-  // at zero across those two document opens. That is the anti-double-count property: showing a
-  // document is not accessing every file in it.
+  // grid card is an icon — the panel renders it without fetching a byte of it — so it has NO
+  // recorded access across those two document opens, and an unaccessed file shows no badge at all.
+  // That is the anti-double-count property: showing a document is not accessing every file in it.
+  const fileBadge = alicePage.locator('.file-preview-card .access-count')
   await expect(
-    alicePage.locator('.file-preview-label .access-count-value'),
-    'rendering the file panel is not an access of the file it lists',
-  ).toHaveText('0')
+    fileBadge,
+    'rendering the file panel is not an access of the file it lists, so there is no badge yet',
+  ).toHaveCount(0)
+  // The tile's label is the file NAME and nothing else — the contract nullname.spec and
+  // file-panel.spec read, and the one this badge broke on main (TEEDY-139).
+  await expect(alicePage.locator('.file-preview-label')).toHaveText('sample.txt')
+
+  // Now a REAL file access: Alice fetches the file's own bytes over her own authenticated session,
+  // which is exactly what the download affordance issues. The counter is server-side, so this is
+  // the access, not a client-side declaration of one.
+  const bytes = await alicePage.request.get(`/api/file/${fileId}/data`)
+  expect(bytes.ok(), `Alice's file download must succeed (HTTP ${bytes.status()})`).toBeTruthy()
+
+  await openDocument(alicePage, id)
+  await expect(fileBadge, 'the file she downloaded now carries her own count').toHaveCount(1)
+  await expect(fileBadge.locator('.access-count-value')).toHaveText('1')
+  // …and it still is not part of the name.
+  await expect(alicePage.locator('.file-preview-label')).toHaveText('sample.txt')
 
   // --- Bob: opens the same document three times, entirely independently ---
   const bobCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
@@ -133,7 +155,7 @@ test('a personal access count is private to its user, while the admin ranking ag
   await expect(
     headerCount(alicePage),
     "Alice's count is her own opens only — Bob's three must not appear in it",
-  ).toHaveText('3')
+  ).toHaveText('4')
   const aliceBody = await alicePage.locator('body').innerText()
   expect(aliceBody, "Bob's username must not surface anywhere on Alice's document view").not.toContain(bob)
 
@@ -149,14 +171,14 @@ test('a personal access count is private to its user, while the admin ranking ag
   const row = page.locator('.access-section tbody tr', { hasText: title })
   await expect(row, 'the seeded document is ranked for the administrator').toBeVisible()
 
-  // Alice's 3 and Bob's 3 are both inside the one total. The admin's own seeding opens are in there
+  // Alice's 4 and Bob's 3 are both inside the one total. The admin's own seeding opens are in there
   // too but are not pinned to an exact number — the seeding flow's own navigations are not the
   // subject, and asserting them would make this test about the SPA's caching instead.
   const total = Number((await row.locator('td').nth(1).innerText()).trim())
-  expect(total, "the administrator total spans both users' opens").toBeGreaterThanOrEqual(6)
+  expect(total, "the administrator total spans both users' opens").toBeGreaterThanOrEqual(7)
 
   const userText = (await row.locator('.access-user').allInnerTexts()).join(' | ')
-  expect(userText, "Alice's three opens are attributed to her by name").toContain(`${alice} · 3`)
+  expect(userText, "Alice's four opens are attributed to her by name").toContain(`${alice} · 4`)
   expect(userText, "Bob's three opens are attributed to him by name").toContain(`${bob} · 3`)
   expect(userText, 'the administrator sees their own accesses in the same breakdown').toMatch(
     /admin · \d+/,

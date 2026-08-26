@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "Aberto uma vez por si | Aberto {count} vezes por si",
       "personal_file": "Consultado uma vez por si | Consultado {count} vezes por si",
-      "col_accesses": "Os seus acessos",
       "admin_title": "Contadores de acesso",
       "admin_description": "Com que frequência os documentos foram abertos e por quem. Apenas são listados os documentos que pode ler.",
       "admin_total_documents": "Acessos a documentos",

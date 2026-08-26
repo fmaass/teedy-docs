@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "E keni hapur një herë | E keni hapur {count} herë",
       "personal_file": "E keni hapur skedarin një herë | E keni hapur skedarin {count} herë",
-      "col_accesses": "Aksesat tuaja",
       "admin_title": "Numëruesit e aksesit",
       "admin_description": "Sa shpesh janë hapur dokumentet dhe nga kush. Listohen vetëm dokumentet që mund të lexoni.",
       "admin_total_documents": "Aksese në dokumente",

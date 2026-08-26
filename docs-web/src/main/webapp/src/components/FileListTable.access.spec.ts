@@ -7,9 +7,15 @@ import ConfirmationService from 'primevue/confirmationservice'
 import en from '../locale/en.json'
 import FileListTable from './FileListTable.vue'
 
-// The file list's per-file access column (#300). It renders the CALLING user's own counts, handed
-// down from the document view's single query — the table itself must never fetch, or an N-row
-// panel would become N requests.
+// The file list's per-file access count (#300), and the two contracts that shape WHERE it may live
+// (TEEDY-139, after it broke both of them on main):
+//
+//   * it is a SIBLING of `.file-name-text`, never a child — that span's textContent is the file
+//     name, and nullname.spec / file-panel.spec read it with toHaveText. A badge inside it turned
+//     "Untitled file" into "Untitled file0".
+//   * it adds NO column and NO `button, a` to the action cell — the #170 row-geometry contract
+//     pins the table to its container's width and the action cluster to an exact control count.
+//     A 5.5rem column of its own pushed the table 10px past its container at 1023px and 1280px.
 
 const FILES = [
   {
@@ -57,60 +63,64 @@ function mountTable(accessCounts?: Record<string, number>) {
   })
 }
 
-describe('FileListTable access column (#300)', () => {
-  it('shows each file its own count', async () => {
-    const wrapper = mountTable({ f1: 7, f2: 0 })
+describe('FileListTable access count (#300)', () => {
+  it('shows each file its own count, inside the name cell', async () => {
+    const wrapper = mountTable({ f1: 7, f2: 3 })
     await flushPromises()
 
-    const cells = wrapper.findAll('td.file-col-accesses .access-count-value').map((n) => n.text())
-    expect(cells).toEqual(['7', '0'])
+    const counts = wrapper.findAll('td.file-col-name .access-count-value').map((n) => n.text())
+    expect(counts).toEqual(['7', '3'])
   })
 
-  it('headers the column with the possessive label, so it can never read as a global number', async () => {
-    const wrapper = mountTable({ f1: 1, f2: 1 })
+  it('leaves the file-name text node holding the name and nothing else', async () => {
+    // The exact regression that reddened main: this is what toHaveText reads.
+    const wrapper = mountTable({ f1: 7, f2: 3 })
     await flushPromises()
-    expect(wrapper.find('th.file-col-accesses').text()).toBe(en.ui.access.col_accesses)
+    expect(wrapper.findAll('.file-name-text').map((n) => n.text())).toEqual([
+      'contract.pdf',
+      'scan.jpg',
+    ])
   })
 
-  it('renders no number for a file whose count has not arrived', async () => {
-    const wrapper = mountTable({ f1: 3 })
+  it('renders nothing for a file with no recorded access', async () => {
+    const wrapper = mountTable({ f1: 4, f2: 0 })
     await flushPromises()
-    const cells = wrapper.findAll('td.file-col-accesses')
-    expect(cells[0].find('.access-count-value').text()).toBe('3')
-    expect(cells[1].find('.access-count-value').exists()).toBe(false)
+    // One badge, not two - and the silent row is still a row.
+    expect(wrapper.findAll('.access-count')).toHaveLength(1)
+    expect(wrapper.findAll('.file-name-text').map((n) => n.text())).toEqual([
+      'contract.pdf',
+      'scan.jpg',
+    ])
   })
 
-  it('renders the column with no counts at all rather than failing', async () => {
+  it('renders nothing while the counts have not arrived', async () => {
     const wrapper = mountTable(undefined)
     await flushPromises()
-    expect(wrapper.findAll('td.file-col-accesses')).toHaveLength(2)
-    expect(wrapper.findAll('td.file-col-accesses .access-count-value')).toHaveLength(0)
+    expect(wrapper.findAll('.access-count')).toHaveLength(0)
+    expect(wrapper.findAll('.file-name-text').map((n) => n.text())).toEqual([
+      'contract.pdf',
+      'scan.jpg',
+    ])
   })
 
-  it('offers the column in the column chooser and honours turning it off', async () => {
-    const wrapper = mountTable({ f1: 7, f2: 2 })
+  it('adds no column of its own — the header row is unchanged by the counts', async () => {
+    const withCounts = mountTable({ f1: 7, f2: 3 })
+    const withoutCounts = mountTable(undefined)
     await flushPromises()
-    expect(wrapper.findAll('td.file-col-accesses')).toHaveLength(2)
-
-    // The user's stored choice is what hides it; the persisted shape is the contract.
-    localStorage.setItem(
-      'teedy_file_columns',
-      JSON.stringify({ created: true, size: true, uploader: false, accesses: false }),
-    )
-    const hidden = mountTable({ f1: 7, f2: 2 })
-    await flushPromises()
-    expect(hidden.findAll('td.file-col-accesses')).toHaveLength(0)
+    expect(withCounts.findAll('thead th')).toHaveLength(withoutCounts.findAll('thead th').length)
+    expect(withCounts.findAll('th.file-col-accesses')).toHaveLength(0)
+    expect(withCounts.findAll('td.file-col-accesses')).toHaveLength(0)
   })
 
-  it('defaults the column ON for a preference saved before it existed', async () => {
-    localStorage.setItem(
-      'teedy_file_columns',
-      JSON.stringify({ created: true, size: false, uploader: false }),
-    )
-    const wrapper = mountTable({ f1: 7, f2: 2 })
+  it('adds no control to the action cluster the #170 contract counts', async () => {
+    const withCounts = mountTable({ f1: 7, f2: 3 })
+    const withoutCounts = mountTable(undefined)
     await flushPromises()
-    expect(wrapper.findAll('td.file-col-accesses')).toHaveLength(2)
-    // Control: the same stored preference really was honoured for a column it DOES name.
-    expect(wrapper.findAll('td.file-col-size')).toHaveLength(0)
+    // `button, a` inside td.file-col-actions is exactly what file-list-geometry.spec counts.
+    const controls = (w: ReturnType<typeof mountTable>) =>
+      w.findAll('td.file-col-actions').map((cell) => cell.findAll('button, a').length)
+    expect(controls(withCounts)).toEqual(controls(withoutCounts))
+    // And the badge really is elsewhere, so the equality above is not two zeroes.
+    expect(withCounts.findAll('td.file-col-name .access-count')).toHaveLength(2)
   })
 })

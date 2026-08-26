@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "Opened once by you | Opened {count} times by you",
       "personal_file": "Accessed once by you | Accessed {count} times by you",
-      "col_accesses": "Your accesses",
       "admin_title": "Access counters",
       "admin_description": "How often documents have been opened, and by whom. Only documents you can read are listed.",
       "admin_total_documents": "Document accesses",

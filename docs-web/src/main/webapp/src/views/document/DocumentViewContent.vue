@@ -1690,13 +1690,21 @@ onUnmounted(() => {
                 />
               </div>
             </div>
-            <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
-                 hover-to-read-the-full-name affordance to this element. -->
-            <div class="file-preview-label" :title="displayName(file.name, t)">
-              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
-              <!-- #300: the CALLER's own access count for this file. -->
-              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
-            </div>
+            <!-- The label holds the file NAME AND NOTHING ELSE. Its textContent is the name:
+                 nullname.spec and file-panel.spec read this element with toHaveText, so anything
+                 rendered inside it becomes part of the name as far as they (and a screen reader
+                 announcing the label) are concerned. The native `title` stays here too: #207 pins
+                 the hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+            <!-- #300: the CALLER's own access count, a SIBLING of the label rather than a child.
+                 It renders only for a file with at least one recorded access, and it sits below
+                 the label so the label's offset from the card top - the #283 alignment contract
+                 file-panel.spec measures - is untouched. -->
+            <AccessCountBadge
+              class="file-preview-access"
+              :count="fileAccessCounts[file.id]"
+              kind="file"
+            />
             <div class="file-card-actions">
               <!-- The ONLY drag origin on a tile (#211): a mousedown here is what arms the CARD
                    as a drag source (onGridCardMouseDown), so everything else on the card stays
@@ -1775,13 +1783,21 @@ onUnmounted(() => {
                 @open="openPreview(file)"
               />
             </div>
-            <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
-                 hover-to-read-the-full-name affordance to this element. -->
-            <div class="file-preview-label" :title="displayName(file.name, t)">
-              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
-              <!-- #300: the CALLER's own access count for this file. -->
-              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
-            </div>
+            <!-- The label holds the file NAME AND NOTHING ELSE. Its textContent is the name:
+                 nullname.spec and file-panel.spec read this element with toHaveText, so anything
+                 rendered inside it becomes part of the name as far as they (and a screen reader
+                 announcing the label) are concerned. The native `title` stays here too: #207 pins
+                 the hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+            <!-- #300: the CALLER's own access count, a SIBLING of the label rather than a child.
+                 It renders only for a file with at least one recorded access, and it sits below
+                 the label so the label's offset from the card top - the #283 alignment contract
+                 file-panel.spec measures - is untouched. -->
+            <AccessCountBadge
+              class="file-preview-access"
+              :count="fileAccessCounts[file.id]"
+              kind="file"
+            />
             <div class="file-card-actions">
               <span
                 v-if="gridReorderEnabled && gridRenamingId !== file.id"
@@ -1846,13 +1862,21 @@ onUnmounted(() => {
               <div class="generic-preview-stage">
                 <i :class="fileIcon(file.mimetype)" aria-hidden="true" />
               </div>
-              <!-- The native `title` stays on the LABEL, not on the name span: #207 pins the
-                 hover-to-read-the-full-name affordance to this element. -->
-            <div class="file-preview-label" :title="displayName(file.name, t)">
-              <span class="file-preview-name">{{ displayName(file.name, t) }}</span>
-              <!-- #300: the CALLER's own access count for this file. -->
-              <AccessCountBadge :count="fileAccessCounts[file.id]" kind="file" />
-            </div>
+              <!-- The label holds the file NAME AND NOTHING ELSE. Its textContent is the name:
+                 nullname.spec and file-panel.spec read this element with toHaveText, so anything
+                 rendered inside it becomes part of the name as far as they (and a screen reader
+                 announcing the label) are concerned. The native `title` stays here too: #207 pins
+                 the hover-to-read-the-full-name affordance to this element. -->
+            <div class="file-preview-label" :title="displayName(file.name, t)">{{ displayName(file.name, t) }}</div>
+            <!-- #300: the CALLER's own access count, a SIBLING of the label rather than a child.
+                 It renders only for a file with at least one recorded access, and it sits below
+                 the label so the label's offset from the card top - the #283 alignment contract
+                 file-panel.spec measures - is untouched. -->
+            <AccessCountBadge
+              class="file-preview-access"
+              :count="fileAccessCounts[file.id]"
+              kind="file"
+            />
             </button>
             <div class="file-card-actions">
               <span
@@ -2212,23 +2236,19 @@ onUnmounted(() => {
 }
 
 .file-preview-label {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
   padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   color: var(--p-text-muted-color);
   border-top: 1px solid var(--p-content-border-color);
-}
-
-/* The name keeps the ellipsis the label used to own, so the access badge beside it is never the
-   thing that gets truncated away. */
-.file-preview-name {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* #300 — its own line under the name, present only when the file has been accessed. No border of
+   its own: it reads as a continuation of the label rather than a third band on the card. */
+.file-preview-access {
+  padding: 0 0.625rem 0.375rem;
 }
 
 .file-panel {

@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { DocumentKey } from './documentKey'
+import { AccessCountsKey } from './accessCountsKey'
 import type { DocumentDetail } from '../../api/document'
 
 // The view now derives its per-user file-view-mode key from the auth store, so every
@@ -1223,5 +1224,64 @@ describe('DocumentViewContent — grid transient sort (#211)', () => {
     expect(tileNames(wrapper)).toEqual(['alpha.txt', 'bravo.txt', 'ui.file_view.untitled'])
     await chooseSort(wrapper, 'name:desc')
     expect(tileNames(wrapper)).toEqual(['bravo.txt', 'alpha.txt', 'ui.file_view.untitled'])
+  })
+})
+
+// #300 / TEEDY-139 — where the per-file access count may live in the GRID.
+//
+// The badge broke main by rendering INSIDE `.file-preview-label`, whose textContent is the file
+// name that nullname.spec and file-panel.spec read with toHaveText ("Untitled file" arrived as
+// "Untitled file0"). It is now a sibling, and a zero count renders nothing at all.
+describe('DocumentViewContent — grid access count placement (#300)', () => {
+  function mountWithCounts(doc: DocumentDetail, counts: Record<string, number>) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return mount(DocumentViewContent, {
+      global: {
+        plugins: [PrimeVue, [VueQueryPlugin, { queryClient }]],
+        provide: {
+          [DocumentKey as symbol]: ref(doc),
+          [AccessCountsKey as symbol]: ref({
+            count: 0,
+            files: Object.entries(counts).map(([id, count]) => ({ id, count })),
+          }),
+        },
+        stubs: {
+          FileUpload: true,
+          CameraCaptureButton: true,
+          UploadProgressList: true,
+          FileVersionsDialog: true,
+          PdfViewer: PdfViewerStub,
+          EmptyState: true,
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+        directives: { tooltip: {} },
+      },
+    })
+  }
+
+  const gridDocument = () =>
+    makeDoc({
+      relations: [],
+      files: [
+        { id: 'f-seen', name: 'seen.txt', mimetype: 'text/plain', size: 1, version: 0, create_date: 0, creator: 'admin' },
+        { id: 'f-unseen', name: 'unseen.txt', mimetype: 'text/plain', size: 1, version: 0, create_date: 0, creator: 'admin' },
+      ],
+    } as unknown as Partial<DocumentDetail>)
+
+  it('keeps the tile label holding the file name and nothing else', () => {
+    const wrapper = mountWithCounts(gridDocument(), { 'f-seen': 5, 'f-unseen': 0 })
+    expect(wrapper.findAll('.file-preview-label').map((l) => l.text())).toEqual([
+      'seen.txt',
+      'unseen.txt',
+    ])
+  })
+
+  it('renders the badge beside the label, once, only for the accessed file', () => {
+    const wrapper = mountWithCounts(gridDocument(), { 'f-seen': 5, 'f-unseen': 0 })
+    const badges = wrapper.findAll('.access-count')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].find('.access-count-value').text()).toBe('5')
+    // A sibling of the label, not a descendant of it.
+    expect(wrapper.findAll('.file-preview-label .access-count')).toHaveLength(0)
   })
 })

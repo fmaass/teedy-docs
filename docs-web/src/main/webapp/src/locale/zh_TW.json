@@ -882,7 +882,6 @@
     "access": {
       "personal_document": "你開啟過 {count} 次 | 你開啟過 {count} 次",
       "personal_file": "你存取過此檔案 {count} 次 | 你存取過此檔案 {count} 次",
-      "col_accesses": "你的存取次數",
       "admin_title": "存取計數",
       "admin_description": "文件被開啟的次數以及開啟者。僅列出你有權閱讀的文件。",
       "admin_total_documents": "文件存取次數",

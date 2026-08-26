@@ -21,10 +21,18 @@ describe('AccessCountBadge (#300)', () => {
     expect(mountBadge(undefined, 'document').find('.access-count').exists()).toBe(false)
   })
 
-  it('renders a zero count once it is genuinely known', () => {
-    const badge = mountBadge(0, 'document')
-    expect(badge.find('.access-count').exists()).toBe(true)
-    expect(badge.find('.access-count-value').text()).toBe('0')
+  it('renders nothing at all for a known count of zero', () => {
+    // "Never opened" is the ABSENCE of the badge, not a rendered "0". The badge sits beside file
+    // names, and a rendered zero became part of the name's textContent ("Untitled file0") for
+    // every consumer that reads it, tests and screen readers alike.
+    const badge = mountBadge(0, 'file')
+    expect(badge.find('.access-count').exists()).toBe(false)
+    expect(badge.text()).toBe('')
+  })
+
+  it('renders from the first real access onwards', () => {
+    // The boundary, both sides of it: 0 is silent, 1 shows.
+    expect(mountBadge(1, 'file').find('.access-count-value').text()).toBe('1')
   })
 
   it('shows the count and an accessible label for a document', () => {

@@ -72,28 +72,20 @@ const LARGE_LIST_THRESHOLD = 100
 // Optional-column visibility. Icon + Name are always shown; Created + Size default on,
 // Uploader default off (accepted decision). Persisted so a user's column choice sticks.
 const COLUMNS_KEY = 'teedy_file_columns'
-type ColumnKey = 'created' | 'size' | 'uploader' | 'accesses'
-const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = {
-  created: true,
-  size: true,
-  uploader: false,
-  // #300 — on by default: the counter exists to be seen, and a user who does not want it can turn
-  // the column off exactly like the others.
-  accesses: true,
-}
+type ColumnKey = 'created' | 'size' | 'uploader'
+const DEFAULT_COLUMNS: Record<ColumnKey, boolean> = { created: true, size: true, uploader: false }
 
 function readColumns(): Record<ColumnKey, boolean> {
   try {
     const raw = localStorage.getItem(COLUMNS_KEY)
     if (!raw) return { ...DEFAULT_COLUMNS }
     const parsed = JSON.parse(raw) as Partial<Record<ColumnKey, unknown>>
-    // Coerce defensively: a stale/tampered value must never drop the mandatory shape. A value
-    // persisted before the accesses column existed simply has no entry and falls back to its default.
+    // Coerce defensively: a stale/tampered value must never drop the mandatory shape. A preference
+    // saved while #300 briefly had an "accesses" column carries an extra key, which is simply ignored.
     return {
       created: typeof parsed.created === 'boolean' ? parsed.created : DEFAULT_COLUMNS.created,
       size: typeof parsed.size === 'boolean' ? parsed.size : DEFAULT_COLUMNS.size,
       uploader: typeof parsed.uploader === 'boolean' ? parsed.uploader : DEFAULT_COLUMNS.uploader,
-      accesses: typeof parsed.accesses === 'boolean' ? parsed.accesses : DEFAULT_COLUMNS.accesses,
     }
   } catch {
     return { ...DEFAULT_COLUMNS }
@@ -306,10 +298,6 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
             <Checkbox v-model="columns.uploader" binary inputId="file-col-uploader" />
             <label for="file-col-uploader">{{ t('ui.file_view.col_uploader') }}</label>
           </div>
-          <div class="file-column-option">
-            <Checkbox v-model="columns.accesses" binary inputId="file-col-accesses" />
-            <label for="file-col-accesses">{{ t('ui.access.col_accesses') }}</label>
-          </div>
         </div>
       </Popover>
     </div>
@@ -384,6 +372,19 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
               @dblclick.stop="startRename(data)"
               @keydown="onNameKeydown($event, data)"
             >{{ displayName(data.name, t) }}</span>
+            <!-- #300: the CALLING user's own count for this file, folded into the NAME cell
+                 rather than given a column of its own. A column added ~5.5rem of fixed width and
+                 pushed the table past its container at the #170 breakpoints; the name column is
+                 the flexible one, so an inline badge here costs the table no width at all. It is
+                 a SIBLING of .file-name-text, never a child: that span's textContent is the file
+                 name, which nullname.spec and file-panel.spec read. It is a <span>, so it is not
+                 one of the `button, a` controls the #170 cluster contract counts (and it is not
+                 in the action cell either). -->
+            <AccessCountBadge
+              class="file-access-badge"
+              :count="accessCounts?.[data.id]"
+              kind="file"
+            />
             <span
               v-if="coverFileId && data.id === coverFileId"
               class="cover-badge"
@@ -432,19 +433,6 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
       >
         <template #body="{ data }">
           <span class="file-meta">{{ data.creator }}</span>
-        </template>
-      </Column>
-
-      <!-- #300: the CALLING user's own count for this file. Never anyone else's — the payload
-           behind it is scoped to the caller and carries no other user's numbers at all. -->
-      <Column
-        v-if="columns.accesses"
-        :header="t('ui.access.col_accesses')"
-        headerClass="file-col-accesses"
-        bodyClass="file-col-accesses"
-      >
-        <template #body="{ data }">
-          <AccessCountBadge :count="accessCounts?.[data.id]" kind="file" />
         </template>
       </Column>
 
@@ -675,11 +663,11 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
   width: 7rem;
 }
 
-/* Narrow by design (#300): the cell holds an icon and a small integer, and the row already
-   carries the widest control cluster in the app. It follows the created/size columns through
-   the responsive bands below rather than getting its own breakpoints. */
-.file-data-table :deep(.file-col-accesses) {
-  width: 5.5rem;
+/* #300 — the access badge shares the name cell, so it must never be the thing that grows it:
+   it keeps its intrinsic width and the name span (min-width: 0) absorbs the squeeze by
+   ellipsizing, exactly as it already does for the cover badge. */
+.file-data-table :deep(.file-access-badge) {
+  flex: 0 0 auto;
 }
 
 /* The cluster is right-aligned, so the cell's default 1rem gutters are dead space — and
@@ -789,8 +777,7 @@ defineExpose({ columns, reorderEnabled, reorderFailed, reorderPending, confirmRe
 
 @media (max-width: 639px) {
   .file-data-table :deep(.file-col-created),
-  .file-data-table :deep(.file-col-size),
-  .file-data-table :deep(.file-col-accesses) {
+  .file-data-table :deep(.file-col-size) {
     display: none;
   }
   .file-columns-btn {

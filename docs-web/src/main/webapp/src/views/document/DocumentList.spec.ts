@@ -3,6 +3,29 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, computed, reactive, ref, watch as vueWatch } from 'vue'
 
 // --- Router under mock: assert the dblclick navigation target + history state ---
+/**
+ * The rendered markup of `el` with every COMMENT NODE removed.
+ *
+ * Done on the DOM, not with a regex over the HTML string. A `/<!--[\s\S]*?-->/g` replace is
+ * shaped exactly like an HTML sanitizer, and CodeQL flags it as one
+ * (js/incomplete-multi-character-sanitization, HIGH) because that pattern cannot be applied
+ * safely to untrusted input: a single pass leaves `<!--` behind for inputs it does not fully
+ * match. Nothing untrusted goes through here, but the fix is to stop writing the shape at all
+ * rather than to suppress the alert on a test file.
+ *
+ * The element is CLONED and walked, so the mounted component is untouched and no HTML string is
+ * ever re-parsed (re-parsing is what would silently drop table fragments and make the caller's
+ * assertion vacuous).
+ */
+function markupWithoutComments(el: Element): string {
+  const clone = el.cloneNode(true) as Element
+  const walker = document.createTreeWalker(clone, NodeFilter.SHOW_COMMENT)
+  const comments: Comment[] = []
+  while (walker.nextNode()) comments.push(walker.currentNode as Comment)
+  for (const comment of comments) comment.remove()
+  return clone.outerHTML
+}
+
 const routerPush = vi.hoisted(() => vi.fn())
 const routerReplace = vi.hoisted(() => vi.fn())
 // A hoisted holder for the mutable reactive route. The reactive object itself is
@@ -1365,7 +1388,10 @@ describe('DocumentList — tag reduction over the selection (#293)', () => {
     // Nothing of the feature at all — the visual baselines capture this exact state. Comments
     // are stripped first: Vue keeps template comments in a dev build (production drops them),
     // and a comment node paints nothing, so only rendered markup is the subject here.
-    const rendered = wrapper.html().replace(/<!--[\s\S]*?-->/g, '')
+    const rendered = markupWithoutComments(wrapper.element)
+    // Non-vacuity: the stripping must not have emptied the subject, or "does not contain" would
+    // pass against nothing at all.
+    expect(rendered).toContain('doc-list')
     expect(rendered.toLowerCase()).not.toContain('reduc')
   })
 
