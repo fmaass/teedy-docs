@@ -541,6 +541,16 @@ public class TestAppResource extends BaseJerseyTest {
         executeSql("insert into T_DOCUMENT_TAG (DOT_ID_C, DOT_IDDOCUMENT_C, DOT_IDTAG_C) values (:id, :did, :tid)",
                 java.util.Map.of("id", java.util.UUID.randomUUID().toString(), "did", survivorDocId, "tid", ownerTagId));
 
+        // Edge TSY_IDTAG_C (#280) — a LIVE synonym on that same tag. The orphan-tag pass soft-deletes
+        // the tag (owner gone) and the synonym pass follows it, but the synonym ROW still references
+        // the tag under FK_TSY_IDTAG_C RESTRICT and would abort the tag hard-delete unless
+        // clean_storage removes it first. This is the second (and last) RESTRICT edge into T_TAG.
+        String ownerSynonymId = java.util.UUID.randomUUID().toString();
+        executeSql("insert into T_TAG_SYNONYM (TSY_ID_C, TSY_IDTAG_C, TSY_NAME_C, TSY_CREATEDATE_D)"
+                        + " values (:id, :tid, :name, :now)", // NO TSY_DELETEDATE_D → LIVE synonym
+                java.util.Map.of("id", ownerSynonymId, "tid", ownerTagId, "name", "fkSyn" + System.nanoTime(),
+                        "now", new java.util.Date()));
+
         // Edge RTE_IDUSER_C / RTP_IDVALIDATORUSER_C (gap 2b) — a SOFT-DELETED route INITIATED by the
         // departing owner, on the SURVIVOR doc (so it is NOT swept by the trashed-doc route delete),
         // with a soft-deleted step the departing owner VALIDATES. These soft-deleted rows keep their
@@ -660,6 +670,8 @@ public class TestAppResource extends BaseJerseyTest {
                 "the LIVE tag link on the trashed doc is removed (DOT_IDDOCUMENT_C RESTRICT, finding #3b)");
         Assertions.assertEquals(0L, readCount("select count(*) from T_TAG where TAG_ID_C = '" + ownerTagId + "'"),
                 "the departing owner's tag is hard-deleted (its link on the survivor doc was cleared first)");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_TAG_SYNONYM where TSY_ID_C = '" + ownerSynonymId + "'"),
+                "the LIVE synonym on that tag is removed (TSY_IDTAG_C RESTRICT, #280)");
         Assertions.assertEquals(0L, readCount("select count(*) from T_USER where USE_USERNAME_C = 'fk_owner'"),
                 "the departing owner is hard-deleted once nothing live references it");
         // The unrelated survivor document, its LIVE tag link now gone, and the collaborator are intact.
@@ -669,6 +681,74 @@ public class TestAppResource extends BaseJerseyTest {
                 "the surviving collaborator is untouched");
         Assertions.assertTrue(readCount("select count(*) from T_DOCUMENT where DOC_DELETEDATE_D is null") >= liveDocsBefore,
                 "no live document was collaterally removed");
+    }
+
+    /**
+     * #280 / FK_TSY_IDTAG_C: deleting a tag that carries synonyms must not wedge clean_storage.
+     *
+     * <p>{@code T_TAG_SYNONYM.TSY_IDTAG_C} is the second {@code ON DELETE RESTRICT} edge into
+     * T_TAG (the first is {@code T_DOCUMENT_TAG.DOT_IDTAG_C}), and clean_storage HARD-deletes
+     * every soft-deleted tag. TagDao.delete only SOFT-deletes a tag's synonyms, so their rows
+     * outlive the tag and abort that hard-delete — permanently, for every later run: once any
+     * user deletes a tag with a synonym, "Clean storage" answers 500 on that instance forever.</p>
+     *
+     * <p>Drives the whole thing through the REAL API the admin screen uses (create tag with
+     * synonyms, delete tag, POST clean_storage) and runs the purge TWICE — the second run is what
+     * the e2e suite's [mobile] project does after the [desktop] project deleted such a tag. A live
+     * tag's synonyms must survive both runs.</p>
+     */
+    @Test
+    public void testCleanStorageAfterDeletingATagWithSynonyms() throws Exception {
+        String adminToken = adminToken();
+
+        // A tag that carries synonyms, and a second one that stays LIVE (its synonyms must survive).
+        String doomedTagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "tsyDoomed" + System.nanoTime()).param("color", "#ff0000")
+                        .param("synonyms", "tsyAlt" + System.nanoTime())
+                        .param("synonyms", "tsyOther" + System.nanoTime())), JsonObject.class)
+                .getString("id");
+        String liveTagId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .put(Entity.form(new Form().param("name", "tsyLive" + System.nanoTime()).param("color", "#00ff00")
+                        .param("synonyms", "tsyKeep" + System.nanoTime())), JsonObject.class)
+                .getString("id");
+        Assertions.assertEquals(2L, readCount("select count(*) from T_TAG_SYNONYM where TSY_IDTAG_C = '" + doomedTagId + "'"),
+                "precondition: the doomed tag carries its two synonyms");
+
+        // Delete the tag through the API — TagDao.delete soft-deletes the tag AND its synonyms,
+        // leaving synonym ROWS that still reference the tag under a RESTRICT foreign key.
+        Response deleteResponse = target().path("/tag/" + doomedTagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .delete();
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(deleteResponse.getStatus()));
+        Assertions.assertEquals(2L, readCount("select count(*) from T_TAG_SYNONYM where TSY_IDTAG_C = '" + doomedTagId + "'"),
+                "precondition: the synonym rows outlive the deleted tag (soft-deleted, not removed)");
+
+        // First purge: must COMPLETE, not abort on FK_TSY_IDTAG_C.
+        Response first = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(first.getStatus()),
+                "clean_storage must survive a deleted tag's synonyms (FK_TSY_IDTAG_C RESTRICT)");
+
+        // Second purge on the same instance — the e2e [mobile] run — must also complete.
+        Response second = target().path("/app/batch/clean_storage").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, adminToken)
+                .post(Entity.form(new Form()));
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(second.getStatus()),
+                "a second clean_storage run on the same instance must also complete");
+
+        // End state: the tag and its synonym rows are gone; the live tag keeps its synonym.
+        Assertions.assertEquals(0L, readCount("select count(*) from T_TAG where TAG_ID_C = '" + doomedTagId + "'"),
+                "the deleted tag is hard-deleted");
+        Assertions.assertEquals(0L, readCount("select count(*) from T_TAG_SYNONYM where TSY_IDTAG_C = '" + doomedTagId + "'"),
+                "its synonym rows are hard-deleted with it");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_TAG where TAG_ID_C = '" + liveTagId + "'"),
+                "the live tag is untouched");
+        Assertions.assertEquals(1L, readCount("select count(*) from T_TAG_SYNONYM where TSY_IDTAG_C = '" + liveTagId + "'"
+                        + " and TSY_DELETEDATE_D is null"),
+                "the live tag keeps its synonym");
     }
 
     /**

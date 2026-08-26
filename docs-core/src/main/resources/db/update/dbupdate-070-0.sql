@@ -8,10 +8,12 @@
 -- widen this table without rewriting what is stored here.
 --   TSY_ID_C         synonym id (UUID)
 --   TSY_IDTAG_C      the tag this name resolves to. A REAL foreign key, like T_DOCUMENT_TAG's
---                    FK_DOT_IDTAG_C: nothing in the code base ever hard-deletes a T_TAG row
---                    (tags are soft-deleted everywhere — TagDao.delete, TagMaintenanceUtil, and
---                    the clean_storage orphan sweep all set TAG_DELETEDATE_D), so `on delete
---                    restrict` can never abort a delete that actually happens.
+--                    FK_DOT_IDTAG_C. The application only ever SOFT-deletes a tag (TagDao.delete,
+--                    TagMaintenanceUtil and the clean_storage orphan sweep all set TAG_DELETEDATE_D),
+--                    but clean_storage then HARD-deletes every soft-deleted tag, so `on delete
+--                    restrict` CAN abort a real delete — exactly as FK_DOT_IDTAG_C can. Both edges
+--                    are cleared the same way: clean_storage removes the referencing rows just
+--                    before the tag hard-delete (AppResource.batchCleanStorage).
 --   TSY_NAME_C       the alternative name, held to the same 36 characters as TAG_NAME_C because
 --                    it is validated by the same rule (ValidationUtil.validateTagName →
 --                    TagNameNormalizer, #305) and must be storable wherever a tag name is.

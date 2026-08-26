@@ -1398,6 +1398,15 @@ public class AppResource extends BaseResource {
         log.info("Deleting {} soft deleted document tag links", em.createQuery("delete DocumentTag where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted ACLs", em.createQuery("delete Acl where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted shares", em.createQuery("delete Share where deleteDate is not null").executeUpdate());
+        // #280: synonyms go BEFORE their tag. FK_TSY_IDTAG_C is ON DELETE RESTRICT — the second and
+        // last such edge into T_TAG, next to FK_DOT_IDTAG_C — and the tag hard-delete on the next line
+        // is a real hard delete, so a synonym ROW that outlived its tag aborts the whole run. It does
+        // outlive it: TagDao.delete only SOFT-deletes a tag's synonyms, as does the orphan pass above.
+        // Without this line, one user deleting one tag that carries a synonym wedges clean_storage
+        // with a 500 for good. Every synonym of a soft-deleted tag is itself soft-deleted by then
+        // (the orphan-synonym pass keys off the TAG's state and runs after the last tag soft-delete),
+        // so this single pass clears the edge — no live-row sweep like the DOT_IDTAG_C one is needed.
+        log.info("Deleting {} soft deleted tag synonyms", em.createQuery("delete TagSynonym where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted tags", em.createQuery("delete Tag where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted comments", em.createQuery("delete Comment where deleteDate is not null").executeUpdate());
         log.info("Deleting {} soft deleted files", em.createQuery("delete File where deleteDate is not null").executeUpdate());
