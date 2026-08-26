@@ -8,16 +8,27 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
-This release contains a database migration to schema level 68.
+## [3.8.9] - 2026-08-26
+
+This release contains database migrations to schema level 70 (comment edit timestamps, access events, published filters, the tag-name repair marker, tag icons, tag synonyms).
 
 ### Added
 - A saved filter can be shared with everyone on the instance. Any user may publish one of their own filters; it then appears for every other user in a "Shared by others" section of the saved-filters list, separate from their own filters and labelled with the name of whoever published it. Anyone may apply a shared filter — the results are always their own documents, because the search is permission-scoped — but only its owner may rename, re-save, delete or unpublish it, and an administrator may additionally unpublish anyone's, which withdraws the sharing without touching the filter itself. A shared filter that uses a tag the viewer is not allowed to see is shown greyed out and cannot be applied, with a tooltip saying so; it is never quietly applied with those tags dropped, and neither the tag's name nor its identifier is sent to that viewer (#51).
 - Tags can be deleted from the tag management tree, from a right-click menu or the row's own button. Only a fully unused branch may go: the tag itself carries no document and neither does anything below it, and deleting it removes the whole branch. A tag that is still on a document — or that has a sub-tag which is — offers no delete and says why, so an unused chain of parents above a used sub-tag keeps its structure; nothing is ever un-assigned from a document to make a tag deletable (#298).
 - A "Reduce tags" action in the document list's selection toolbar takes redundant parent tags off the selected documents: a tag goes only when a tag below it — at any depth — is on that same document, so a document tagged Insurance / Car / 2026 in full keeps only 2026. It always previews first and removes nothing until the removal is confirmed, then reports what came off each document. It runs on the current selection, so a filter and a page size decide the batch; there is no instance-wide sweep. Tags you cannot see never cause a removal, and selected documents you cannot edit are reported as left untouched (#293).
 - A "Clean up unused tags" action on the same page finds every fully unused branch at once. It lists them first and deletes nothing until the deletion is confirmed, then reports exactly which tags were removed. A tag an auto-tagging rule points at counts as in use even with no documents on it, so a cleanup cannot quietly break a rule (#298).
+- A comment's author can edit it in place. Every reader sees an "edited" marker on a changed comment, with the time of the last edit in its tooltip; the original posting time is never altered. Only the author may edit — a document editor who could delete the comment still cannot rewrite it (#285).
+- Documents and files count how often they are opened. Each user sees their own count on the document view and beside each file; administrators additionally see per-user counts, totals and a most-used ranking on the statistics page, limited to documents they can read themselves. An opening is counted when the server actually serves the document or the file's content — thumbnails, extracted text, list views and anonymous share links do not count — and recording never gets in the way of the read itself. Whether other users can see who opened a document is deliberately not part of this release (#300).
+- A new tag can be created without leaving the document edit view. Typing a name no tag matches offers a "Create tag" row in the tag picker; choosing it opens a panel beside the form with the full tag form — name pre-filled, colour, parent, permissions — and saving creates the tag and adds it to the document in one step. The document itself is still saved by you, as before (#288).
+- The tag colour can be typed as a hex code again, beside the colour picker, in every place the tag form appears; an invalid code is refused inline and never applied (#303).
+- Permissions can be set while creating a tag in tag management: a "Permissions" control expands the compact create row into the full tag form, so the tag is born with its access rights instead of needing a second visit (#306).
+- A tag can carry an icon: either an emoji (one emoji, typed or pasted, with a small grid of suggestions) or one icon from a single custom set that administrators upload on the tag management page (PNG or SVG, up to 32 KB, checked by content and served with a strict content policy). The icon shows wherever the tag shows — list and document chips, the tag tree, facets, search — and a switch in the interface hides tag icons entirely. A tag without an icon looks exactly as before, and deleting an uploaded icon simply leaves its tags icon-less (#287).
+- A tag can carry synonyms, managed as chips on the tag edit page. Searching `tag:<synonym>` finds the tag's documents, and typing a synonym in a tag field suggests the tag itself, labelled "via <synonym>"; list chips and facets keep showing the tag's own name. A synonym cannot take the name of a tag you can see, and a tag cannot take a name that is one of your visible synonyms — both are refused when you save, and a live hint warns while you type. Tags you cannot see are never revealed by any of this (#280).
 
 ### Fixed
 - Tag names could be created and renamed carrying Unicode whitespace that does not render — a zero-width space, a joiner, a byte-order mark, or one of the exotic spaces (thin, hair, en, em, no-break, ideographic) — which made two tags look identical while being different, and made a tag impossible to retype. The two kinds are now handled differently, because they mean different things: an invisible character that renders as nothing is removed from the name without comment, since nobody can see it or be asked to delete it, while every whitespace character that shows as a gap is treated exactly as an ordinary space already was: trimmed off the ends of the name, and refused inside it with the same message — a tag name still may not contain a space, however it was typed, and " Report " still stores "Report" whether that padding was an ordinary space or a no-break one. A name left with nothing at all is refused too. Names already stored are repaired once, during the upgrade: every whitespace character is stripped from them, each change is written to the application log with the tag and the name before and after, and where a repair would leave one user with two identically named tags both are left alone and logged instead, because merging tags is a decision rather than a guess (#305).
+- The French placeholder of the permissions search box was too long for a narrow phone viewport and was cut off; it is shorter now.
+
 
 ## [3.8.8] - 2026-08-25
 
@@ -679,7 +690,10 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.6...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.9...HEAD
+[3.8.9]: https://github.com/fmaass/teedy-docs/compare/v3.8.8...v3.8.9
+[3.8.8]: https://github.com/fmaass/teedy-docs/compare/v3.8.7...v3.8.8
+[3.8.7]: https://github.com/fmaass/teedy-docs/compare/v3.8.6...v3.8.7
 [3.8.6]: https://github.com/fmaass/teedy-docs/compare/v3.8.5...v3.8.6
 [3.8.5]: https://github.com/fmaass/teedy-docs/compare/v3.8.4...v3.8.5
 [3.8.4]: https://github.com/fmaass/teedy-docs/compare/v3.8.3...v3.8.4

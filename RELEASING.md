@@ -137,7 +137,7 @@ before shipping.
 1. Running container digest == published manifest digest (`docker inspect` RepoDigests vs
    `docker buildx imagetools inspect`).
 2. `docker exec teedy curl -s http://localhost:8080/api/app` → `current_version` == release version.
-3. `docker exec postgres17 psql -U postgres -d teedy -tAc "select cfg_value_c from t_config where cfg_id_c='DB_VERSION'"` == expected level; document row count intact.
+3. `DB_VERSION` row == expected level and document row count intact. The database is not a container on the app host: run the client inside the app container's network namespace, sourcing the stack `.env` silently — `docker run --rm --network container:teedy -e PGPASSWORD="$DB_PASSWORD" postgres:17 psql -h <db-host> -p <db-port> -U "$DB_USER" -d teedy -tAc "select cfg_value_c from t_config where cfg_id_c='DB_VERSION'"` (run `\d t_config` first).
 4. Representative real route: `/apidoc/` 200 with correct title, plus one authenticated API read
    exercised in-container.
 5. **Verify the served `current_version` through the real proxy, not just inside the container.** An
