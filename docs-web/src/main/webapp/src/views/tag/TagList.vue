@@ -28,6 +28,7 @@ import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { useTagCreate, DEFAULT_TAG_COLOR } from '../../composables/useTagCreate'
 import ErrorState from '../../components/ErrorState.vue'
 import TagForm from '../../components/TagForm.vue'
+import TagIconField from '../../components/TagIconField.vue'
 import TagIconMark from '../../components/TagIconMark.vue'
 import TagIconSetManager from '../../components/TagIconSetManager.vue'
 
@@ -482,7 +483,20 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
               @keydown.enter="handleAddTag"
             />
           </div>
-          <div class="create-row mt-3">
+          <!-- #324 — the icon field, the SAME component the full form hosts, on the row itself.
+               It was reachable only behind the button below, which says "Permissions": a user who
+               never expanded that never saw the icon feature at all. It needs no tag id, so the
+               compact card can host it directly, and the `tag-new` prefix is the full form's own —
+               only one of the two states is ever mounted, so the ids cannot collide, and a choice
+               made here is already in the draft if the reveal is opened afterwards. -->
+          <TagIconField
+            class="create-icon"
+            :icon="newTagIcon"
+            id-prefix="tag-new"
+            @update:icon="newTagIcon = $event"
+          />
+
+          <div class="create-row">
             <Select
               v-model="newTagParent"
               :options="parentOptions"
@@ -726,6 +740,13 @@ const { mutate: runCleanup, isPending: cleanupPending } = useMutation({
 }
 .create-row :deep(.p-select) {
   min-width: 0;
+}
+
+/* The icon field between the two rows (#324). It brings its own label, so it gets the spacing
+   the form fields have rather than the tighter row gap. */
+.create-icon {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
 }
 
 /* The way into the full form, on its own row so the compact row above keeps holding exactly

@@ -35,6 +35,9 @@ const tagApiMock = vi.hoisted(() => ({
   getTagMaintenance: vi.fn(),
   deleteTagSubtree: vi.fn(),
   deleteUnusedTags: vi.fn(),
+  // Since #324 the compact create row hosts the icon field, so every mount of this page reads
+  // the uploaded icon set.
+  listTagIcons: vi.fn().mockResolvedValue({ data: { icons: [] } }),
 }))
 vi.mock('../../api/tag', () => tagApiMock)
 

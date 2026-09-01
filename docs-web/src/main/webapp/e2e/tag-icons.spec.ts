@@ -115,8 +115,9 @@ test('a tag can carry an emoji or an uploaded icon, hidden on demand (#287)', as
   // ---------------------------------------------------------------------------------------
   await gotoRouteReady(ownerPage, '/#/tag', ROUTE_ROOT.tagList)
   await closeNav(ownerPage)
-  // The compact create row does not carry the icon field — the full form does, and it is one
-  // click away, which is the path #306 built.
+  // Through the FULL form here — the path #306 built, and the only one that also reaches the
+  // permissions. The compact quick-create card carries the same field since #324, which is what
+  // the test below drives.
   await ownerPage.locator('.tag-new-permissions-btn').click()
   await ownerPage.locator('#tag-new-name').fill(tagName)
   // Scoped to the field's own source toggle: "Emoji" and "Icon set" are also words that appear
@@ -280,4 +281,54 @@ test('a tag can carry an emoji or an uploaded icon, hidden on demand (#287)', as
   await expect(fallbackChip).toBeVisible()
   await expect(fallbackChip.locator('.tag-icon')).toHaveCount(0)
   await expect(fallbackChip).toHaveText(tagName)
+})
+
+// #324 — "the icon field only appears after clicking the reveal button labelled Permissions, so
+// the icon feature looks missing" (the reporter, against 3.8.9). The quick-create card is the
+// first thing the tag page offers, and the icon lived behind a button that says "Permissions" —
+// a user who never expands permissions never learns that a tag can carry an icon at all. The
+// card hosts the field itself now, and this drives the whole create without touching the reveal.
+test('an icon can be chosen on the quick-create card, with no reveal opened (#324)', async ({
+  page,
+  cleanup,
+}) => {
+  const tagName = uniqueTag('tgiq')
+
+  await gotoRouteReady(page, '/#/tag', ROUTE_ROOT.tagList)
+  await closeNav(page)
+
+  // The premise, asserted rather than assumed: the card is in its compact state, so the reveal
+  // is still on offer — and it must still be on offer when the tag has been created, which is
+  // what proves nothing expanded on the way.
+  const reveal = page.locator('.tag-new-permissions-btn')
+  await expect(reveal).toBeVisible()
+
+  await page.getByPlaceholder('Tag name').fill(tagName)
+  // Scoped to the field's own source toggle: "Emoji" and "Icon set" are also words that appear
+  // elsewhere on the tag page, and an unscoped role query would be a coin toss.
+  await page
+    .locator('.icon-source-toggle')
+    .getByRole('button', { name: 'Emoji', exact: true })
+    .click()
+  const emojiBox = page.locator('#tag-new-icon-emoji')
+  await expect(emojiBox).toBeVisible()
+  await emojiBox.fill(MEDAL)
+
+  await page.locator('.tag-create-btn').click()
+  await expect(page.getByText('Tag created')).toBeVisible()
+  await expect(reveal, 'the compact card did the whole thing').toBeVisible()
+
+  const created = await page.request.get('/api/tag/list')
+  expect(created.ok(), 'read the tag list back').toBeTruthy()
+  const tag = (await created.json()).tags.find((t: { name: string }) => t.name === tagName)
+  expect(tag, `the tag ${tagName} was created`).toBeTruthy()
+  cleanup.defer('delete the quick-created tag', () => deleteTagApi(page.request, tag.id as string))
+  expect(tag.icon, 'the emoji chosen on the quick-create card reached the server').toBe(
+    `emoji:${MEDAL}`,
+  )
+
+  // And the management tree draws it beside the colour dot, which is where the reporter looked.
+  await expect(
+    page.locator('.tag-node', { hasText: tagName }).locator('.tag-icon-emoji'),
+  ).toHaveText(MEDAL)
 })

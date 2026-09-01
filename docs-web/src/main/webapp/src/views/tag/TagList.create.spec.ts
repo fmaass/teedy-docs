@@ -9,6 +9,7 @@ import ConfirmationService from 'primevue/confirmationservice'
 import en from '../../locale/en.json'
 import type { Tag } from '../../api/tag'
 import TagForm from '../../components/TagForm.vue'
+import TagIconField from '../../components/TagIconField.vue'
 
 // #306 — "let permissions be set directly in the tag-management CREATE flow" (the reporter,
 // off the #288 mockup review). Until now the page could only create a bare tag: name, colour,
@@ -19,6 +20,8 @@ import TagForm from '../../components/TagForm.vue'
 // components/TagForm.vue form (permissions section included) and the deferred-grant create
 // contract — collect the grants while the tag has no id, then apply them to the id the
 // server hands back.
+
+const ICONS = [{ id: 'icon-a', name: 'Warning', mimetype: 'image/png' }]
 
 const TAGS: Tag[] = [
   { id: 'tag-a', name: 'Alpha', color: '#111111', parent: null },
@@ -32,6 +35,9 @@ const tagApi = vi.hoisted(() => ({
   getTagMaintenance: vi.fn(),
   deleteTagSubtree: vi.fn(),
   deleteUnusedTags: vi.fn(),
+  // The icon field reads the instance's uploaded set (#287); since #324 it is on the compact
+  // row too, so every mount of this page asks for it.
+  listTagIcons: vi.fn(),
 }))
 vi.mock('../../api/tag', () => tagApi)
 
@@ -100,6 +106,16 @@ async function typeName(wrapper: Wrapper, value: string) {
   await flushPromises()
 }
 
+/** Open one of the icon field's sources ("None", "Emoji", "Icon set") on the visible card. */
+async function chooseIconSource(wrapper: Wrapper, label: string) {
+  const option = wrapper
+    .get('.icon-source-toggle')
+    .findAll('[role="radio"], button')
+    .filter((o) => o.text() === label)[0]
+  await option.trigger('click')
+  await flushPromises()
+}
+
 async function clickCreate(wrapper: Wrapper) {
   await wrapper.get('.tag-create-btn').trigger('click')
   await flushPromises()
@@ -115,6 +131,7 @@ beforeEach(() => {
   tagApi.getTagMaintenance.mockReset().mockResolvedValue({ data: { tags: [] } })
   tagApi.deleteTagSubtree.mockReset()
   tagApi.deleteUnusedTags.mockReset()
+  tagApi.listTagIcons.mockReset().mockResolvedValue({ data: { icons: ICONS } })
   aclApi.addAcl.mockReset().mockResolvedValue({})
   aclApi.searchAclTargets.mockReset().mockResolvedValue({ data: { users: [], groups: [] } })
   toastAdd.mockReset()
@@ -419,5 +436,56 @@ describe('TagList — the compact create row still works (#306 regression)', () 
     await typeName(wrapper, '   ')
     await clickCreate(wrapper)
     expect(tagApi.createTag).not.toHaveBeenCalled()
+  })
+})
+
+// #324 — "the icon field only appears after clicking the reveal button labelled Permissions, so
+// the icon feature looks missing" (the reporter). The icon was added to the SHARED form (#287)
+// without the #306 quick-create row following it, which left the one control the page advertises
+// as its create card unable to reach it. The row now hosts the very same field.
+describe('TagList — the icon is pickable on the compact create row (#324)', () => {
+  const MEDAL = '\u{1F396}\u{FE0F}'
+
+  it('renders the icon field on the resting card, with no reveal touched', async () => {
+    const { wrapper } = await mountList()
+    expect(wrapper.findComponent(TagForm).exists(), 'still the compact row').toBe(false)
+    expect(
+      wrapper.findComponent(TagIconField).exists(),
+      'the same field the full form hosts, before any reveal',
+    ).toBe(true)
+  })
+
+  it('sends an emoji chosen on the compact row with the tag', async () => {
+    const { wrapper } = await mountList()
+    await chooseIconSource(wrapper, en.ui.tag_icon.emoji)
+    await wrapper.get('#tag-new-icon-emoji').setValue(MEDAL)
+    await typeName(wrapper, 'Insurance 2026')
+    await clickCreate(wrapper)
+
+    expect(wrapper.findComponent(TagForm).exists(), 'the reveal was never opened').toBe(false)
+    expect(tagApi.createTag).toHaveBeenCalledWith(
+      'Insurance 2026',
+      '#2aabd2',
+      undefined,
+      `emoji:${MEDAL}`,
+    )
+  })
+
+  it('carries an icon picked on the row into the full form when the reveal is opened after all', async () => {
+    const { wrapper } = await mountList()
+    await chooseIconSource(wrapper, en.ui.tag_icon.emoji)
+    await wrapper.get('#tag-new-icon-emoji').setValue(MEDAL)
+    await openFullForm(wrapper)
+    expect(wrapper.findComponent(TagForm).props('icon')).toBe(`emoji:${MEDAL}`)
+  })
+
+  it('clears the icon with the rest of the draft once the tag is created', async () => {
+    const { wrapper } = await mountList()
+    await chooseIconSource(wrapper, en.ui.tag_icon.emoji)
+    await wrapper.get('#tag-new-icon-emoji').setValue(MEDAL)
+    await typeName(wrapper, 'Insurance 2026')
+    await clickCreate(wrapper)
+    // The icon just applied belongs to the tag that now exists — it must not follow the next one.
+    expect(wrapper.find('#tag-new-icon-emoji').exists(), 'the field is back on "None"').toBe(false)
   })
 })
