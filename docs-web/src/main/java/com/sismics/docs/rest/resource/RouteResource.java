@@ -24,6 +24,8 @@ import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.ValidationUtil;
 import com.sismics.util.JsonUtil;
 import com.sismics.util.context.ThreadLocalContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import jakarta.json.*;
 import jakarta.ws.rs.*;
@@ -31,8 +33,8 @@ import jakarta.ws.rs.core.Response;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 /**
  * Route REST resources.
@@ -78,6 +80,11 @@ import java.util.TreeSet;
  */
 @Path("/route")
 public class RouteResource extends BaseResource {
+    /**
+     * Logger.
+     */
+    private static final Logger log = LoggerFactory.getLogger(RouteResource.class);
+
     /**
      * Start a route on a document.
      *
@@ -136,7 +143,7 @@ public class RouteResource extends BaseResource {
         // other. Each lock is eligibility-scoped (CredentialLifecycleUtil.lockActiveUser), so a start
         // that parks on a concurrent deletion of one of its targets re-reads the now soft-deleted row
         // and FAILS CLOSED — no step is ever assigned to a user whose deletion has committed.
-        lockUserStepTargets(resolvedSteps, principal.getId());
+        lockUserStepTargets(routeModel, resolvedSteps, principal.getId());
 
         // #202 GLOBAL LOCK ORDER: GROUP after USER, before DOCUMENT. Lock the GROUP-typed step targets'
         // active rows FOR UPDATE (deduplicated, ascending id) — the same rows, in the same ascending-id
@@ -147,7 +154,7 @@ public class RouteResource extends BaseResource {
         // route is stranded on a principal that no longer exists, with no route to cancel it.
         // Symmetrical to the USER lock above: a start that parks on a concurrent deletion of one of its
         // group targets re-reads the now soft-deleted row and FAILS CLOSED.
-        lockGroupStepTargets(resolvedSteps);
+        lockGroupStepTargets(routeModel, resolvedSteps);
 
         // Lock the document row FOR UPDATE before the "no active route" check, making the whole
         // check-and-create atomic per document: two concurrent starts serialize on this lock so the
@@ -221,15 +228,22 @@ public class RouteResource extends BaseResource {
         private final String transitions;
         private final String targetId;
         private final AclTargetType targetType;
+        /**
+         * The target name as STORED in the model blob, kept alongside the id it resolved to. A failure
+         * that surfaces later (a target that stopped being active under its lock) is only actionable for
+         * an operator if the log names what the model actually says, not just the row id it resolved to.
+         */
+        private final String targetName;
 
         private ResolvedStep(String name, int order, RouteStepType type, String transitions,
-                             String targetId, AclTargetType targetType) {
+                             String targetId, AclTargetType targetType, String targetName) {
             this.name = name;
             this.order = order;
             this.type = type;
             this.transitions = transitions;
             this.targetId = targetId;
             this.targetType = targetType;
+            this.targetName = targetName;
         }
     }
 
@@ -254,13 +268,22 @@ public class RouteResource extends BaseResource {
                     transitions = step.getJsonArray("transitions").toString();
                 }
 
-                String targetId = SecurityUtil.getTargetIdFromName(targetName, targetType);
+                // Resolve through the route-model resolver (name, then a GROUP's id), the same one the
+                // model list's "incomplete" flag and the model write gate use, so a model the UI offers
+                // is a model that starts (#312).
+                String targetId = SecurityUtil.getRouteTargetIdFromName(targetName, targetType);
                 if (targetId == null) {
+                    // This rejection used to reach no log at all (the 2-arg ClientException does not log),
+                    // so an operator saw a workflow that would not start with nothing server-side to go on.
+                    log.warn("Route model {} (\"{}\") cannot be started: step {} targets the {} \"{}\", which"
+                                    + " resolves to no active principal",
+                            routeModel.getId(), routeModel.getName(), order, targetType, targetName);
                     throw new ClientException("InvalidRouteModel", "A step has an invalid target");
                 }
 
                 resolvedSteps.add(new ResolvedStep(step.getString("name"), order,
-                        RouteStepType.valueOf(step.getString("type")), transitions, targetId, targetType));
+                        RouteStepType.valueOf(step.getString("type")), transitions, targetId, targetType,
+                        targetName));
             }
         }
         return resolvedSteps;
@@ -304,29 +327,35 @@ public class RouteResource extends BaseResource {
      * {@code DocumentUtil.createDocument} takes for an inactive owner.</p>
      *
      * <p>GROUP targets live in a different principal table and are locked separately, immediately after
-     * this method, by {@link #lockGroupStepTargets(List)} — they are never resolved as users (that would
+     * this method, by {@link #lockGroupStepTargets(RouteModel, List)} — they are never resolved as users (that would
      * reject every group-targeted model, including the seeded administrators-group workflow).</p>
      *
+     * @param routeModel The model being started — named in the rejection log line
      * @param resolvedSteps Resolved steps of the model being started
      * @param initiatorId The starting user's id — the future {@code RTE_IDUSER_C} of the route row
      */
-    private void lockUserStepTargets(List<ResolvedStep> resolvedSteps, String initiatorId) {
-        SortedSet<String> userRowIds = new TreeSet<>();
+    private void lockUserStepTargets(RouteModel routeModel, List<ResolvedStep> resolvedSteps, String initiatorId) {
+        // The map's key set is the ascending-id acquisition sequence; the value keeps the blob's own name
+        // for that row, so a lock failure can be logged in the model's terms.
+        SortedMap<String, String> userRowIds = new TreeMap<>();
         for (ResolvedStep resolvedStep : resolvedSteps) {
             if (resolvedStep.targetType == AclTargetType.USER) {
-                userRowIds.add(resolvedStep.targetId);
+                userRowIds.putIfAbsent(resolvedStep.targetId, resolvedStep.targetName);
             }
         }
         // ONE sorted sequence over targets AND initiator (deduplicated): locking the initiator separately,
         // before or after the target block, would break the ascending-id property two concurrent starts
         // rely on.
-        userRowIds.add(initiatorId);
+        userRowIds.putIfAbsent(initiatorId, null);
 
-        for (String userRowId : userRowIds) {
+        for (String userRowId : userRowIds.keySet()) {
             if (CredentialLifecycleUtil.lockActiveUser(userRowId) == null) {
                 if (userRowId.equals(initiatorId)) {
                     throw new ForbiddenClientException();
                 }
+                log.warn("Route model {} (\"{}\") cannot be started: its USER step target \"{}\" (id {})"
+                                + " is no longer an active principal",
+                        routeModel.getId(), routeModel.getName(), userRowIds.get(userRowId), userRowId);
                 throw new ClientException("InvalidRouteModel", "A step has an invalid target");
             }
         }
@@ -335,7 +364,7 @@ public class RouteResource extends BaseResource {
     /**
      * Lock the ACTIVE group row of every GROUP-typed step target FOR UPDATE, deduplicated and in
      * ascending id order, failing closed (InvalidRouteModel) on a target that is no longer active — the
-     * GROUP half of the start's target locking (#202), taken AFTER {@link #lockUserStepTargets(List, String)}
+     * GROUP half of the start's target locking (#202), taken AFTER {@link #lockUserStepTargets(RouteModel, List, String)}
      * and BEFORE the document lock, per the class's USER -&gt; GROUP -&gt; DOCUMENT order.
      *
      * <p>Uses the same {@link CredentialLifecycleUtil#lockActiveGroup} facade primitive (over
@@ -356,17 +385,21 @@ public class RouteResource extends BaseResource {
      *       route instead of stranding it.</li>
      * </ul>
      *
+     * @param routeModel The model being started — named in the rejection log line
      * @param resolvedSteps Resolved steps of the model being started
      */
-    private void lockGroupStepTargets(List<ResolvedStep> resolvedSteps) {
-        SortedSet<String> groupTargetIds = new TreeSet<>();
+    private void lockGroupStepTargets(RouteModel routeModel, List<ResolvedStep> resolvedSteps) {
+        SortedMap<String, String> groupTargetIds = new TreeMap<>();
         for (ResolvedStep resolvedStep : resolvedSteps) {
             if (resolvedStep.targetType == AclTargetType.GROUP) {
-                groupTargetIds.add(resolvedStep.targetId);
+                groupTargetIds.putIfAbsent(resolvedStep.targetId, resolvedStep.targetName);
             }
         }
-        for (String groupTargetId : groupTargetIds) {
+        for (String groupTargetId : groupTargetIds.keySet()) {
             if (CredentialLifecycleUtil.lockActiveGroup(groupTargetId) == null) {
+                log.warn("Route model {} (\"{}\") cannot be started: its GROUP step target \"{}\" (id {})"
+                                + " is no longer an active principal",
+                        routeModel.getId(), routeModel.getName(), groupTargetIds.get(groupTargetId), groupTargetId);
                 throw new ClientException("InvalidRouteModel", "A step has an invalid target");
             }
         }

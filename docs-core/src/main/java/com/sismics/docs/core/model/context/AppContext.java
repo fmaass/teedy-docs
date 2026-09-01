@@ -18,6 +18,7 @@ import com.sismics.docs.core.service.OidcStatePurgeService;
 import com.sismics.docs.core.service.TrashPurgeService;
 import com.sismics.docs.core.util.ContentMacUtil;
 import com.sismics.docs.core.util.PdfUtil;
+import com.sismics.docs.core.util.RouteModelTargetRepairUtil;
 import com.sismics.docs.core.util.async.RetryingSubscriberExceptionHandler;
 import com.sismics.docs.core.util.indexing.IndexingHandler;
 import com.sismics.util.ClasspathScanner;
@@ -276,6 +277,20 @@ public class AppContext {
                 adminUser.setEmail(envAdminEmail);
                 userDao.update(adminUser, "admin");
             }
+        }
+
+        // One-shot repair of route-model step blobs that still name a group by what is now only its id,
+        // left behind by a group rename that predates the rename-repair (#312). Idempotent, so it costs a
+        // pair of queries on an install with nothing to repair. Best-effort by design: the route-model
+        // resolver already handles that legacy shape, so this only restores the stored data to naming
+        // principals by name — a failure must not take the application context down with it.
+        try {
+            int repairedCount = RouteModelTargetRepairUtil.repairDriftedGroupTargetNames();
+            if (repairedCount > 0) {
+                log.info("Repaired {} route model step blob(s) still naming a renamed group by its id", repairedCount);
+            }
+        } catch (RuntimeException e) {
+            log.error("Error repairing route model step blobs naming a renamed group by its id", e);
         }
     }
 

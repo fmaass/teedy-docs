@@ -69,6 +69,23 @@ public class GroupDao {
     }
 
     /**
+     * Returns the ACTIVE groups whose name no longer equals their id, in ascending id order.
+     *
+     * <p>Legacy seeded groups are created with {@code GRP_ID_C = GRP_NAME_C} ({@code dbupdate-008}), so a
+     * row where the two differ is a group that has been renamed at some point. That is the candidate set
+     * of the startup route-model target drift repair (#312), which rewrites step blobs still naming such
+     * a group by its id. Ascending id order is the process-wide group lock order.</p>
+     *
+     * @return Active groups whose id and name differ, ascending by id
+     */
+    public List<Group> findActiveWithNameDifferentFromId() {
+        EntityManager em = ThreadLocalContext.get().getEntityManager();
+        TypedQuery<Group> q = em.createQuery(
+                "select g from Group g where g.deleteDate is null and g.name <> g.id order by g.id asc", Group.class);
+        return q.getResultList();
+    }
+
+    /**
      * Returns a group by ID, acquiring a pessimistic write lock (SELECT ... FOR UPDATE, dialect-portable
      * via {@link LockModeType#PESSIMISTIC_WRITE} — H2 and PostgreSQL both emit FOR UPDATE) on the group
      * row for the remainder of the caller's transaction.

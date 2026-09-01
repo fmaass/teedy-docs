@@ -17,6 +17,7 @@ import {
   newStep,
   type StepModel,
 } from '../../utils/routeModelSteps'
+import { apiErrorDetail } from '../../utils/apiError'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -115,8 +116,15 @@ const saveMutation = useMutation({
     toast.add({ severity: 'success', summary: t('ui.workflow_admin.saved'), life: 2000 })
     showEditor.value = false
   },
-  onError: () => {
-    toast.add({ severity: 'error', summary: t('ui.workflow_admin.failed_save'), life: 3000 })
+  onError: (error: unknown) => {
+    // Surface the backend's reason (e.g. "<name> is not a valid group") instead of a bare failure —
+    // the same blind spot the document-side start toast had (#312).
+    toast.add({
+      severity: 'error',
+      summary: t('ui.workflow_admin.failed_save'),
+      detail: apiErrorDetail(error),
+      life: 5000,
+    })
   },
 })
 

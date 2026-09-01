@@ -20,8 +20,10 @@ import jakarta.persistence.Query;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -118,24 +120,66 @@ public final class RouteModelStepUtil {
      * so a group that vanished under the resolution fails that re-validation rather than being written
      * back as an orphaned name.</p>
      *
+     * <p><b>Returns the resolution it locked</b>, name -&gt; locked group id, so the caller can re-check
+     * IDENTITY (not merely existence) once the locks are held — see
+     * {@link #findGroupTargetRetargetedUnderLock}. Names that resolved to nothing are absent from the
+     * map.</p>
+     *
      * @param groupNames GROUP names whose rows to lock (any order — the acquisition order is imposed here)
+     * @return the name -&gt; group id resolution whose rows are now locked (never null)
      */
-    public static void lockGroupsByName(List<String> groupNames) {
+    public static Map<String, String> lockGroupsByName(List<String> groupNames) {
         GroupDao groupDao = new GroupDao();
 
         // Resolve to ids first, unlocked: the lock order is the id order, so the ids have to be known
-        // before the first lock is taken.
+        // before the first lock is taken. Resolution goes through the route-model resolver (name, then
+        // a GROUP's id) so a legacy blob naming a renamed group by its id locks that group's row too —
+        // the row the caller's re-validation under the locks will then check (#312).
+        Map<String, String> lockedGroupIdByName = new LinkedHashMap<>();
         SortedSet<String> groupIds = new TreeSet<>();
         for (String groupName : groupNames) {
-            Group group = groupDao.getActiveByName(groupName);
-            if (group != null) {
-                groupIds.add(group.getId());
+            String groupId = SecurityUtil.getRouteTargetIdFromName(groupName, AclTargetType.GROUP);
+            if (groupId != null) {
+                lockedGroupIdByName.put(groupName, groupId);
+                groupIds.add(groupId);
             }
         }
 
         for (String groupId : groupIds) {
             groupDao.getActiveByIdForUpdate(groupId);
         }
+        return lockedGroupIdByName;
+    }
+
+    /**
+     * Re-resolves each GROUP target name under the held locks and returns the first name that no longer
+     * resolves to the SAME group row {@link #lockGroupsByName} locked for it — or null when every name
+     * still resolves to exactly the row it locked.
+     *
+     * <p><b>Why identity, not existence (#312).</b> The route-model resolver tries the NAME first and a
+     * GROUP's ID second, so one piece of target text can address two different rows: group A named
+     * {@code x}, and legacy group B whose id is {@code x}. Between this request resolving {@code x} to A
+     * (and locking A's row) and its post-lock re-validation, a concurrent rename of A away from {@code x}
+     * makes {@code x} resolve to B instead. An existence-only re-check passes — B exists — and the model
+     * is written pointing at a row this transaction never locked, silently re-targeting the step at B.
+     * Requiring the same id closes that: the name must still mean the row we hold.</p>
+     *
+     * <p>A name that resolved to nothing before the locks (absent from the map) but resolves now is the
+     * same defect from the other side — a row we hold no lock on — and is reported too.</p>
+     *
+     * @param lockedGroupIdByName The resolution {@link #lockGroupsByName} locked
+     * @param groupNames The blob's GROUP target names
+     * @return the first name whose resolution moved, or null if none did
+     */
+    public static String findGroupTargetRetargetedUnderLock(Map<String, String> lockedGroupIdByName,
+                                                            List<String> groupNames) {
+        for (String groupName : groupNames) {
+            String currentId = SecurityUtil.getRouteTargetIdFromName(groupName, AclTargetType.GROUP);
+            if (currentId != null && !currentId.equals(lockedGroupIdByName.get(groupName))) {
+                return groupName;
+            }
+        }
+        return null;
     }
 
     /**
@@ -202,6 +246,10 @@ public final class RouteModelStepUtil {
         private final List<String> modelNames = new ArrayList<>();
         private final List<String> repairedBlobs = new ArrayList<>();
 
+        public List<String> getModelIds() {
+            return modelIds;
+        }
+
         public List<String> getModelNames() {
             return modelNames;
         }
@@ -229,20 +277,44 @@ public final class RouteModelStepUtil {
      * @throws RouteModelStepOverflowException if any repaired blob would exceed the column limit
      */
     public static GroupRenameRepairPlan prepareGroupRenameRepair(String oldName, String newName) {
+        Group oldGroup = new GroupDao().getActiveByName(oldName);
+        if (oldGroup == null) {
+            return new GroupRenameRepairPlan();
+        }
+        return prepareGroupTargetNameRepair(oldGroup.getId(), oldName, newName);
+    }
+
+    /**
+     * The id-keyed core of {@link #prepareGroupRenameRepair}: prepares the rewrite of every step blob
+     * that references the group {@code groupId} and still names it {@code oldName}, to {@code newName}.
+     *
+     * <p>Separated out because the stale name is not always resolvable by name. The rename path knows
+     * the old name still resolves (it is renaming that very row), but the startup drift repair (#312)
+     * works from the opposite end: the group's id is the stale name, which by definition resolves to no
+     * group BY name any more. Both reach the referencing models through the id-keyed target index, so
+     * the locking, the fresh re-read under the locks and the length preflight are shared verbatim.</p>
+     *
+     * <p>The caller must already hold the group row's lock (group-first protocol), and must apply the
+     * returned plan with {@link #applyGroupRenameRepair} only once {@code newName} resolves to that
+     * group in the same transaction — the apply re-syncs the derived index from the repaired blob.</p>
+     *
+     * @param groupId Id of the group the blobs reference
+     * @param oldName The name the blobs currently carry
+     * @param newName The name to write
+     * @return The prepared plan (may be empty, never null)
+     * @throws RouteModelStepOverflowException if any repaired blob would exceed the column limit
+     */
+    public static GroupRenameRepairPlan prepareGroupTargetNameRepair(String groupId, String oldName, String newName) {
         GroupRenameRepairPlan plan = new GroupRenameRepairPlan();
         if (oldName == null || oldName.equals(newName)) {
             return plan;
         }
 
         RouteModelDao routeModelDao = new RouteModelDao();
-        Group oldGroup = new GroupDao().getActiveByName(oldName);
-        if (oldGroup == null) {
-            return plan;
-        }
 
         // Referencing model IDs (via the derived target index), sorted for deterministic lock order.
         List<String> modelIds = new ArrayList<>(new LinkedHashSet<>(
-                routeModelDao.findModelsReferencingTarget(oldGroup.getId())));
+                routeModelDao.findModelsReferencingTarget(groupId)));
         Collections.sort(modelIds);
 
         // Lock each model row, re-read its blob fresh, compute the repaired blob, and preflight ALL

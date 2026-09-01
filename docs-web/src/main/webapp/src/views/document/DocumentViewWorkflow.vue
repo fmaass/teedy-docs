@@ -7,6 +7,7 @@ import { getRoutes, startRoute, cancelRoute, routeKeys, type Route, type RouteSt
 import { listRouteModels, routeModelKeys, type RouteModelListItem } from '../../api/routeModel'
 import { stepRender, transitionSeverity, routeStatusSeverity, canStartRoute, startableModels, timeAgo } from '../../utils/routeHistory'
 import { useRouteActions } from '../../composables/useRouteActions'
+import { apiErrorDetail } from '../../utils/apiError'
 import { injectDocument } from './documentKey'
 import Button from 'primevue/button'
 import Select from 'primevue/select'
@@ -65,8 +66,16 @@ async function handleStart() {
     await refetchAll()
     selectedModelId.value = null
     toast.add({ severity: 'success', summary: t('ui.workflow.started'), life: 2000 })
-  } catch {
-    toast.add({ severity: 'error', summary: t('ui.workflow.failed_start'), life: 3000 })
+  } catch (error: unknown) {
+    // Show WHY the start was refused. A workflow whose target group was renamed is rejected
+    // InvalidRouteModel ("A step has an invalid target"); discarding that body left the user with a
+    // bare "could not start" and nothing to act on (#312).
+    toast.add({
+      severity: 'error',
+      summary: t('ui.workflow.failed_start'),
+      detail: apiErrorDetail(error),
+      life: 5000,
+    })
   } finally {
     starting.value = false
   }

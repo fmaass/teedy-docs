@@ -3,23 +3,22 @@ package com.sismics.docs.rest.resource;
 import com.google.common.collect.Lists;
 import com.sismics.docs.core.constant.*;
 import com.sismics.docs.core.dao.AclDao;
-import com.sismics.docs.core.dao.GroupDao;
 import com.sismics.docs.core.dao.RouteModelDao;
-import com.sismics.docs.core.dao.UserDao;
 import com.sismics.docs.core.dao.criteria.RouteModelCriteria;
 import com.sismics.docs.core.dao.dto.RouteModelDto;
 import com.sismics.docs.core.model.jpa.Acl;
-import com.sismics.docs.core.model.jpa.Group;
 import com.sismics.docs.core.model.jpa.RouteModel;
-import com.sismics.docs.core.model.jpa.User;
 import com.sismics.docs.core.util.ActionUtil;
 import com.sismics.docs.core.util.RouteModelStepUtil;
+import com.sismics.docs.core.util.SecurityUtil;
 import com.sismics.docs.core.util.jpa.SortCriteria;
 import com.sismics.docs.rest.constant.BaseFunction;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.exception.ForbiddenClientException;
 import com.sismics.rest.util.AclUtil;
 import com.sismics.rest.util.ValidationUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import jakarta.json.*;
 import jakarta.ws.rs.*;
@@ -27,6 +26,7 @@ import jakarta.ws.rs.core.Response;
 import java.io.StringReader;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -36,6 +36,11 @@ import java.util.Set;
  */
 @Path("/routemodel")
 public class RouteModelResource extends BaseResource {
+    /**
+     * Logger.
+     */
+    private static final Logger log = LoggerFactory.getLogger(RouteModelResource.class);
+
     /**
      * Returns the list of all route models.
      *
@@ -96,6 +101,7 @@ public class RouteModelResource extends BaseResource {
      * @apiSuccess {String} id Route model ID
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
+     * @apiError (client) InvalidRouteModel A step target was re-targeted by a concurrent group rename
      * @apiPermission admin
      * @apiVersion 1.5.0
      *
@@ -160,11 +166,13 @@ public class RouteModelResource extends BaseResource {
     private RouteModel validateAndLockForWrite(String steps, String routeModelId) {
         // Reject malformed blobs and unsupported target types (SHARE, unknown) BEFORE taking any
         // lock — a doomed request should not contend on group rows.
-        validateRouteModelSteps(steps);
+        validateRouteModelSteps(steps, routeModelId);
 
         // Group-first lock protocol: lock every referenced GROUP row (deterministic order), then the
-        // target route-model row when updating.
-        RouteModelStepUtil.lockGroupsByName(RouteModelStepUtil.parseGroupTargetNames(steps));
+        // target route-model row when updating. The locked resolution is kept: the re-validation below
+        // checks IDENTITY, not merely existence.
+        List<String> groupTargetNames = RouteModelStepUtil.parseGroupTargetNames(steps);
+        Map<String, String> lockedGroupIdByName = RouteModelStepUtil.lockGroupsByName(groupTargetNames);
         RouteModel routeModel = null;
         if (routeModelId != null) {
             routeModel = new RouteModelDao().getActiveByIdForUpdate(routeModelId);
@@ -175,7 +183,22 @@ public class RouteModelResource extends BaseResource {
 
         // RE-validate step targets under the held locks: a group renamed before we locked it now
         // fails existence here rather than being written back as an orphaned name.
-        validateRouteModelSteps(steps);
+        validateRouteModelSteps(steps, routeModelId);
+
+        // Existence is not enough once a name can resolve two ways (#312): with a name-then-id resolver,
+        // one piece of target text can address group A (by name) or legacy group B (by id), so a rename
+        // of A between the resolution above and these locks would let the re-validation above pass on B —
+        // a row this transaction never locked — silently re-targeting the step. Require every GROUP name
+        // to still resolve to the very row that was locked for it.
+        String retargeted = RouteModelStepUtil.findGroupTargetRetargetedUnderLock(
+                lockedGroupIdByName, groupTargetNames);
+        if (retargeted != null) {
+            log.warn("Route model {} cannot be saved: the GROUP target \"{}\" no longer resolves to the group"
+                            + " row locked for it (a concurrent rename moved the name to another group)",
+                    routeModelId == null ? "(new)" : routeModelId, retargeted);
+            throw new ClientException("InvalidRouteModel",
+                    retargeted + " no longer refers to the same group; reload and save again");
+        }
         return routeModel;
     }
 
@@ -183,11 +206,9 @@ public class RouteModelResource extends BaseResource {
      * Validate route model steps.
      *
      * @param steps Route model steps data
+     * @param routeModelId The model being updated, or null on a create — for the log line only
      */
-    private void validateRouteModelSteps(String steps) {
-        UserDao userDao = new UserDao();
-        GroupDao groupDao = new GroupDao();
-
+    private void validateRouteModelSteps(String steps, String routeModelId) {
         try (JsonReader reader = Json.createReader(new StringReader(steps))) {
             JsonArray stepsJson = reader.readArray();
             if (stepsJson.isEmpty()) {
@@ -228,15 +249,12 @@ public class RouteModelResource extends BaseResource {
                 }
                 switch (targetType) {
                     case USER:
-                        User user = userDao.getActiveByUsername(targetName);
-                        if (user == null) {
-                            throw new ClientException("ValidationError", targetName + " is not a valid user");
-                        }
-                        break;
                     case GROUP:
-                        Group group = groupDao.getActiveByName(targetName);
-                        if (group == null) {
-                            throw new ClientException("ValidationError", targetName + " is not a valid group");
+                        // The route-model resolver (name, then a GROUP's id) — the same one the model
+                        // list's "incomplete" flag and the route start use, so a model that is offered
+                        // and startable can also be saved back unchanged (#312).
+                        if (SecurityUtil.getRouteTargetIdFromName(targetName, targetType) == null) {
+                            throw unresolvedStepTarget(routeModelId, targetType, targetName);
                         }
                         break;
                     case SHARE:
@@ -316,6 +334,27 @@ public class RouteModelResource extends BaseResource {
     }
 
     /**
+     * Log and build the rejection of a step target that resolves to no active principal.
+     *
+     * <p>Logged because this is the write-side face of the same defect the route start showed (#312): a
+     * 2-arg ClientException reaches no log, so an admin whose workflow could not be saved left no
+     * server-side trace at all. WARN, with the model (null on a create), the target type and the
+     * unresolved name.</p>
+     *
+     * @param routeModelId The model being updated, or null on a create
+     * @param targetType The step target's type
+     * @param targetName The unresolved step target name
+     * @return the exception to throw
+     */
+    private ClientException unresolvedStepTarget(String routeModelId, AclTargetType targetType, String targetName) {
+        log.warn("Route model {} cannot be saved: a step targets the {} \"{}\", which resolves to no active"
+                        + " principal",
+                routeModelId == null ? "(new)" : routeModelId, targetType, targetName);
+        return new ClientException("ValidationError",
+                targetName + (targetType == AclTargetType.USER ? " is not a valid user" : " is not a valid group"));
+    }
+
+    /**
      * Update a route model.
      *
      * @api {post} /routemodel/:id Update a route model
@@ -326,6 +365,7 @@ public class RouteModelResource extends BaseResource {
      * @apiSuccess {String} status Status OK
      * @apiError (client) ForbiddenError Access denied
      * @apiError (client) ValidationError Validation error
+     * @apiError (client) InvalidRouteModel A step target was re-targeted by a concurrent group rename
      * @apiError (client) NotFound Route model not found
      * @apiPermission admin
      * @apiVersion 1.5.0

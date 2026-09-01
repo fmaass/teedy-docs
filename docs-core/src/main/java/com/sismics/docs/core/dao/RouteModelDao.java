@@ -242,21 +242,67 @@ public class RouteModelDao {
     }
 
     /**
-     * Returns the IDs of the non-deleted route models that are "incomplete": at least one of their
-     * derived T_ROUTE_MODEL_TARGET rows references a principal (user or group) that no longer
-     * resolves to an active user or active group. Used by the LIST endpoint to flag models that can
-     * no longer be started faithfully because one of their step targets was deleted.
+     * Returns the IDs of the non-deleted route models that are "incomplete": at least one step of their
+     * stored blob has a target that no longer resolves to an active principal. Used by the LIST endpoint
+     * to flag models that can no longer be started faithfully.
+     *
+     * <p><b>Derived from the blob, through the resolver the start itself uses</b>
+     * ({@link SecurityUtil#getRouteTargetIdFromName}) — deliberately NOT from the derived
+     * {@code T_ROUTE_MODEL_TARGET} index (#312). The index is keyed on the principal ID while the start
+     * resolves the blob's NAME, and the two keys can disagree in both directions: a legacy blob naming a
+     * renamed group by what is now only its id keeps an index row (so the id-keyed query called it
+     * complete) while the name lookup failed, and a blob target that resolves to nothing produces no
+     * index row at all (so the id-keyed query, seeing no row, also called it complete). Evaluating the
+     * blob makes the flag mean exactly "this model can be started", which is the contract the UI relies
+     * on when it offers the model.</p>
+     *
+     * <p>The model count is small (admin-authored workflows), so the per-model blob parse this costs is
+     * paid on a list of a handful of rows.</p>
      *
      * @return Distinct list of incomplete route model IDs
      */
-    @SuppressWarnings("unchecked")
     public List<String> findIncompleteModelIds() {
-        EntityManager em = ThreadLocalContext.get().getEntityManager();
-        Query q = em.createNativeQuery("select distinct t.RMT_IDROUTEMODEL_C from T_ROUTE_MODEL_TARGET t " +
-                " join T_ROUTE_MODEL rm on rm.RTM_ID_C = t.RMT_IDROUTEMODEL_C and rm.RTM_DELETEDATE_D is null " +
-                " where not exists (select 1 from T_USER u where u.USE_ID_C = t.RMT_IDTARGET_C and u.USE_DELETEDATE_D is null) " +
-                "   and not exists (select 1 from T_GROUP g where g.GRP_ID_C = t.RMT_IDTARGET_C and g.GRP_DELETEDATE_D is null)");
-        return q.getResultList();
+        List<String> incompleteIdList = new ArrayList<>();
+        for (RouteModel routeModel : findAll()) {
+            if (!allStepTargetsResolve(routeModel.getSteps())) {
+                incompleteIdList.add(routeModel.getId());
+            }
+        }
+        return incompleteIdList;
+    }
+
+    /**
+     * True when EVERY step of the blob has a target that resolves to an active principal — i.e. when
+     * {@code RouteResource.resolveSteps} would accept the model. A blob that is empty, malformed, or
+     * carries an unknown target type is NOT startable, so it answers false rather than throwing: this
+     * runs on a read path (the model list) that must never fail on one bad row.
+     *
+     * @param steps Steps JSON blob
+     * @return true if every step target resolves
+     */
+    private boolean allStepTargetsResolve(String steps) {
+        if (steps == null || steps.isEmpty()) {
+            return false;
+        }
+        try (JsonReader reader = Json.createReader(new StringReader(steps))) {
+            JsonArray stepsJson = reader.readArray();
+            if (stepsJson.isEmpty()) {
+                return false;
+            }
+            for (int i = 0; i < stepsJson.size(); i++) {
+                JsonObject target = stepsJson.getJsonObject(i).getJsonObject("target");
+                if (target == null) {
+                    return false;
+                }
+                AclTargetType targetType = AclTargetType.valueOf(target.getString("type"));
+                if (SecurityUtil.getRouteTargetIdFromName(target.getString("name"), targetType) == null) {
+                    return false;
+                }
+            }
+        } catch (RuntimeException e) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -286,7 +332,9 @@ public class RouteModelDao {
                 }
                 AclTargetType targetType = AclTargetType.valueOf(target.getString("type"));
                 String targetName = target.getString("name");
-                String targetId = SecurityUtil.getTargetIdFromName(targetName, targetType);
+                // The route-model resolver (name, then a GROUP's id) — the same one the start and the
+                // write gate use, so a legacy blob naming a renamed group by its id still indexes (#312).
+                String targetId = SecurityUtil.getRouteTargetIdFromName(targetName, targetType);
                 if (targetId == null) {
                     continue;
                 }
