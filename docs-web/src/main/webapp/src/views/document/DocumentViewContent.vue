@@ -28,6 +28,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import AutoComplete from 'primevue/autocomplete'
 import Dialog from 'primevue/dialog'
+import Popover from 'primevue/popover'
 import SelectButton from 'primevue/selectbutton'
 import Select from 'primevue/select'
 import FileUpload, { type FileUploadUploaderEvent } from 'primevue/fileupload'
@@ -39,6 +40,7 @@ import FileExtraActions from '../../components/FileExtraActions.vue'
 import FileConflictDialog from '../../components/FileConflictDialog.vue'
 import FilePreviewDialog, { type PreviewFile } from '../../components/FilePreviewDialog.vue'
 import AccessCountBadge from '../../components/AccessCountBadge.vue'
+import SearchHelpContent from '../../components/SearchHelpContent.vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { usePreviewQueue } from '../../composables/usePreviewQueue'
@@ -176,6 +178,14 @@ const relationSortOptions = computed(() => [
 ])
 
 const relationSearchResults = ref<DocumentListItem[]>([])
+// The relation typeahead runs the query through `GET /document/list`, so it accepts the FULL
+// search syntax the main search bar documents — `tag:`, `by:`, `after:` and the rest (#309).
+// Nothing on the row said so, hence the same help popover the search bar offers, sharing its body
+// component so the operator list has one source.
+const relationHelpPanel = ref<InstanceType<typeof Popover> | null>(null)
+function toggleRelationHelp(event: Event) {
+  relationHelpPanel.value?.toggle(event)
+}
 const selectedRelationTarget = ref<DocumentListItem | null>(null)
 const savingRelation = ref(false)
 
@@ -1543,6 +1553,7 @@ onUnmounted(() => {
           :suggestions="relationSearchResults"
           optionLabel="title"
           forceSelection
+          fluid
           size="small"
           class="relation-add-autocomplete"
           :placeholder="t('ui.relations.search_placeholder')"
@@ -1556,6 +1567,16 @@ onUnmounted(() => {
           </template>
         </AutoComplete>
         <Button
+          icon="pi pi-question-circle"
+          text
+          rounded
+          size="small"
+          severity="secondary"
+          data-testid="relation-search-help"
+          :aria-label="t('document.search_help.title')"
+          @click="toggleRelationHelp"
+        />
+        <Button
           :label="t('add')"
           icon="pi pi-plus"
           size="small"
@@ -1563,6 +1584,9 @@ onUnmounted(() => {
           :loading="savingRelation"
           @click="handleAddRelation"
         />
+        <Popover ref="relationHelpPanel" class="relation-add-help">
+          <SearchHelpContent />
+        </Popover>
       </div>
     </div>
 
@@ -2155,6 +2179,9 @@ onUnmounted(() => {
 }
 .relation-add-autocomplete {
   flex: 1;
+  /* Without this the flex item's automatic minimum size is the input's own intrinsic width, which
+     would push the Add button out of a narrow column instead of letting the field shrink. */
+  min-width: 0;
 }
 .relation-search-result {
   display: flex;

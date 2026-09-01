@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, type Page } from './fixtures'
 import { unique, createDocument, confirmDanger, deleteDocApi, ROUTE_ROOT, gotoRouteReady } from './helpers'
 
 // Document relations end to end via the "Related documents" section on the
@@ -198,4 +198,149 @@ test('order the linked documents by the linked document’s own creation date', 
   await page.locator('.relation-sort-select').click()
   await page.getByRole('option', { name: 'Created (oldest first)' }).click()
   await expect(linkTitles).toHaveText([new RegExp(titleOlder), new RegExp(titleNewer)])
+})
+
+// #309 — the "add an outgoing relation" row itself, reported against 3.8.8. Two complaints:
+//
+//  1. The field is too narrow to show a full document title. Root cause: the AutoComplete carried
+//     no `fluid`, and PrimeVue stretches `.p-autocomplete-input` to its wrapper only for a
+//     component that renders a dropdown BUTTON (@primeuix/styles/autocomplete). This one has no
+//     `dropdown`, so the input kept the intrinsic width of a bare `<input>` while
+//     `.relation-add-autocomplete { flex: 1 }` grew the wrapper around it — the same mechanism as
+//     the ACL search boxes in acl-search-width.spec.ts (#301).
+//  2. The field silently accepts the FULL search syntax: `completeRelationSearch` calls
+//     `GET /document/list`, i.e. `DocumentSearchCriteriaUtil.parseSearchQuery` — the same parser
+//     the main search bar documents in its help popover. Nothing on the row said so.
+//
+// Both are invisible to the functional tests above (a clipped field still accepts a pick) and to
+// the visual gate (no baseline captures the document Content tab), so the width is MEASURED here
+// and the help affordance is opened from the keyboard.
+
+interface FieldFit {
+  value: string
+  // The value's rendered width, measured with a canvas primed from the input's OWN computed
+  // font — not a character count, which no proportional font honours.
+  textWidth: number
+  // The input's CONTENT box: clientWidth is the padding box, so the horizontal padding comes off.
+  contentWidth: number
+  // scrollWidth exceeds clientWidth exactly when the text is scrolled out of view, i.e. clipped.
+  scrollWidth: number
+  clientWidth: number
+  inputWidth: number
+  wrapperWidth: number
+  rowWidth: number
+  viewportWidth: number
+}
+
+async function measureRelationField(page: Page): Promise<FieldFit> {
+  return page.evaluate(() => {
+    const wrapper = document.querySelector<HTMLElement>('.relation-add .p-autocomplete')!
+    const input = wrapper.querySelector<HTMLInputElement>('input')!
+    const row = document.querySelector<HTMLElement>('.relation-add')!
+    const style = getComputedStyle(input)
+    const ctx = document.createElement('canvas').getContext('2d')!
+    ctx.font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} / ${style.lineHeight} ${style.fontFamily}`
+    const round = (n: number) => Math.round(n * 10) / 10
+    return {
+      value: input.value,
+      textWidth: round(ctx.measureText(input.value).width),
+      contentWidth: round(
+        input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      ),
+      scrollWidth: input.scrollWidth,
+      clientWidth: input.clientWidth,
+      inputWidth: round(input.getBoundingClientRect().width),
+      wrapperWidth: round(wrapper.getBoundingClientRect().width),
+      rowWidth: round(row.getBoundingClientRect().width),
+      viewportWidth: window.innerWidth,
+    }
+  })
+}
+
+test('the relation search field fills its row and shows a long title whole (#309)', async ({
+  page,
+  isMobile,
+  cleanup,
+}) => {
+  // 60+ characters, under the backend's 100-char title cap (DocumentResource validateLength
+  // title 1..100) — long enough that the pre-fix ~233px input could never display it.
+  const longTitle = unique('A-Long-Related-Document-Title-That-Overruns-The-Relation-Field')
+  expect(longTitle.length, 'the probe title is at least 60 characters').toBeGreaterThanOrEqual(60)
+  expect(longTitle.length, 'title within the backend 100-char cap').toBeLessThanOrEqual(100)
+
+  const idTarget = (await createDocument(page, longTitle)).id
+  cleanup.defer('purge the long-titled relation target', () => deleteDocApi(page.request, idTarget))
+  const idSource = (await createDocument(page, unique('relwidth-source'))).id
+  cleanup.defer('purge the relation source document', () => deleteDocApi(page.request, idSource))
+
+  await gotoRouteReady(page, `/#/document/view/${idSource}/content`, ROUTE_ROOT.documentContent)
+  const addRow = page.locator('.relation-add')
+  await expect(addRow).toBeVisible()
+
+  // Pick the long-titled document, so the field holds a real value rather than a placeholder.
+  // Typed whole rather than as a prefix: the query goes to the document search parser, which
+  // tokenises on the hyphens, so a cut mid-token would be a search-behaviour experiment inside a
+  // layout test. The measurement below is taken on the SELECTED value either way.
+  await addRow.locator('input').first().fill(longTitle)
+  await page.getByRole('option', { name: new RegExp(longTitle) }).click()
+  await expect(addRow.locator('input').first()).toHaveValue(longTitle)
+
+  const fit = await measureRelationField(page)
+
+  // THE defect, asserted at BOTH viewports: the input must fill its AutoComplete wrapper. Before
+  // `fluid` it was a constant intrinsic width no matter how wide the row grew, so widening the
+  // container could never reach the field the title is painted into.
+  expect(
+    fit.inputWidth,
+    `the relation input fills its wrapper (input ${fit.inputWidth}px in a ${fit.wrapperWidth}px ` +
+      `wrapper, row ${fit.rowWidth}px at a ${fit.viewportWidth}px viewport)`,
+  ).toBeGreaterThanOrEqual(fit.wrapperWidth - 2)
+
+  if (isMobile) {
+    // A 60-character title cannot fit a 393px phone whatever the CSS does, so "not clipped" is
+    // not a claim this viewport can make. Filling the row — asserted above — is the whole of the
+    // available fix here, and asserting more would be asserting the viewport.
+    return
+  }
+
+  expect(
+    fit.contentWidth,
+    `the picked title "${fit.value}" renders ${fit.textWidth}px wide in the input's own font but ` +
+      `the field offers only ${fit.contentWidth}px of content box`,
+  ).toBeGreaterThanOrEqual(fit.textWidth)
+  expect(
+    fit.scrollWidth,
+    `the field scrolls (${fit.scrollWidth}px of content in a ${fit.clientWidth}px box), so part of ` +
+      'the title is out of view',
+  ).toBeLessThanOrEqual(fit.clientWidth)
+})
+
+test('the relation search field tells the user it takes search operators (#309)', async ({
+  page,
+  cleanup,
+}) => {
+  const idSource = (await createDocument(page, unique('relhelp-source'))).id
+  cleanup.defer('purge the relation help source document', () => deleteDocApi(page.request, idSource))
+
+  await gotoRouteReady(page, `/#/document/view/${idSource}/content`, ROUTE_ROOT.documentContent)
+  const addRow = page.locator('.relation-add')
+  await expect(addRow).toBeVisible()
+
+  // Same accessible name as the search bar's help button — the copy is one shared component.
+  const help = addRow.getByRole('button', { name: 'Search help' })
+  await expect(help).toBeVisible()
+
+  // Keyboard-reachable: focused and opened with Enter, never a pointer-only affordance.
+  await help.focus()
+  await expect(help).toBeFocused()
+  await help.press('Enter')
+
+  // The popover is teleported to the body, so it is addressed globally by its own class.
+  const panel = page.locator('.p-popover.relation-add-help')
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Search help' })).toBeVisible()
+  // The operator that motivated the report, plus one more, proving the real operator table is
+  // rendered and not a one-line hint.
+  await expect(panel.getByText('tag:invoice', { exact: true })).toBeVisible()
+  await expect(panel.getByText('by:alice', { exact: true })).toBeVisible()
 })
