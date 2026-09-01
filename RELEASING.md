@@ -73,7 +73,13 @@ Enable the hook once per clone — `scripts/dev_setup.sh` does it, or
 `git config core.hooksPath .githooks`. Deliberate override: `SKIP_RELEASE_MIRRORS=1`.
 
 Before tagging, run the issue-close-comment gate: every issue closed by this release must already
-carry its close comment.
+carry its close comment. It takes its candidates from GitHub rather than from commit trailers — every
+issue closed between the previous release tag and the head ref, plus every issue the delta's commit
+messages name by number, because the closing ceremony runs by hand once the tag exists and leaves no
+trailer behind. Each candidate is reported as ok, FAIL (closed without a maintainer comment as part
+of the close — within fifteen minutes before it, or any time after), pending close (still open) or
+skipped (closed before this release's window), and an empty candidate set is stated as such rather
+than passing silently.
 
 ```
 scripts/check-issue-close-comments.sh <prev-release-tag>
