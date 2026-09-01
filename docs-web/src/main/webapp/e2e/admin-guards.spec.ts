@@ -166,3 +166,40 @@ test('the disable/enable toggle is hidden for the guest and admin rows', async (
   const userRow = page.getByRole('row', { name: new RegExp(username) })
   await expect(userRow.getByRole('button', { name: 'Disable account' })).toBeVisible()
 })
+
+// #325: the same two rows the disable toggle hides for cannot be DELETED either — the backend
+// refuses the guest user (Constants.GUEST_USER_ID) and any ADMIN-role user outright. The delete
+// button used to render on them anyway, so the only thing it could do was raise a refusal toast.
+// It must not be offered there, while a normal user row keeps it.
+test('the delete action is not offered for the guest and admin rows', async ({ page, cleanup }) => {
+  const username = unique('deletable').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  const password = 'DeletablePass123'
+  const email = `${username}@example.com`
+
+  await gotoRouteReady(page, '/#/settings/users', ROUTE_ROOT.settingsUsers)
+  await page.getByRole('button', { name: 'Add user' }).click()
+  const addDialog = page.getByRole('dialog')
+  await addDialog.locator('#add-user-name').fill(username)
+  await addDialog.locator('#add-user-email').fill(email)
+  await addDialog.locator('#add-user-pass').fill(password)
+  await addDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('User created')).toBeVisible()
+  cleanup.defer('delete the created user', () => deleteUserApi(page.request, username))
+
+  // admin row: no delete control (matches "admin" exactly to avoid other rows).
+  const adminRow = page.getByRole('row', { name: /(^|\s)admin(\s|$)/ }).first()
+  await expect(adminRow).toBeVisible()
+  await expect(adminRow.getByRole('button', { name: 'Delete' })).toHaveCount(0)
+
+  // guest row (the built-in guest account is always listed): no delete control either.
+  const guestRow = page.getByRole('row', { name: /(^|\s)guest(\s|$)/ }).first()
+  await expect(guestRow).toBeVisible()
+  await expect(guestRow.getByRole('button', { name: 'Delete' })).toHaveCount(0)
+
+  // The normal user row DOES carry it — the hide above is account-specific, not the delete
+  // control disappearing from the table altogether. Its edit control is asserted alongside, so a
+  // row that rendered no actions at all could not pass this as a "delete is hidden" success.
+  const userRow = page.getByRole('row', { name: new RegExp(username) })
+  await expect(userRow.getByRole('button', { name: 'Edit' })).toBeVisible()
+  await expect(userRow.getByRole('button', { name: 'Delete' })).toBeVisible()
+})

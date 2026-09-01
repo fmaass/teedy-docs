@@ -28,6 +28,11 @@ vi.mock('../../composables/useConfirmDanger', () => ({
   useConfirmDanger: () => ({ confirmDanger: confirmDangerSpy }),
 }))
 
+// The toasts are the observable surface of a failed delete: what the admin is told when the
+// backend refuses. Capture every toast.add so a test can assert the summary AND the detail.
+const toastAdd = vi.hoisted(() => vi.fn())
+vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAdd }) }))
+
 beforeAll(() => {
   if (typeof window.matchMedia !== 'function') {
     Object.defineProperty(window, 'matchMedia', {
@@ -499,5 +504,99 @@ describe('SettingsUsers — storage quota field', () => {
       email: 'alice@x.com',
       storage_quota: 2.5 * BYTES_PER_GB,
     })
+  })
+})
+
+// #325: the backend refuses to delete the guest user (UserResource.delete guards
+// Constants.GUEST_USER_ID) and any ADMIN-role user — the same two rows for which the disable
+// toggle is already hidden. Offering a Delete button there can only ever produce a refusal toast,
+// and that toast used to be the generic "Failed to delete user" with the backend's reason thrown
+// away. Both halves are covered here: the action is not offered, and when the backend does refuse
+// for any other reason its own message reaches the admin.
+describe('SettingsUsers — actions the backend will never honour (#325)', () => {
+  beforeEach(() => {
+    apiMock.listUsers.mockReset().mockResolvedValue({
+      data: { users: [ENABLED_USER, ADMIN_USER, GUEST_USER] },
+    })
+    apiMock.deleteUser.mockReset().mockResolvedValue({ data: { status: 'ok' } })
+    confirmDangerSpy.mockReset()
+    toastAdd.mockReset()
+  })
+
+  it('offers the delete action only on rows the backend can actually delete', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    // DOM first — this is the affordance the admin actually sees: the delete control exists on the
+    // regular row only, not on the guest or admin row.
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(3)
+    const deleteByUser = Object.fromEntries(
+      rows.map((row) => [
+        row.find('.user-name').text().split(/\s+/).filter(Boolean)[0],
+        row.find(`[aria-label="${en.delete}"]`).exists(),
+      ]),
+    )
+    expect(deleteByUser).toEqual({ alice: true, root: false, guest: false })
+
+    const vm = wrapper.vm as unknown as { canDelete: (u: UserListItem) => boolean }
+    expect(vm.canDelete(ENABLED_USER)).toBe(true)
+    expect(vm.canDelete(ADMIN_USER)).toBe(false)
+    expect(vm.canDelete(GUEST_USER)).toBe(false)
+  })
+
+  it('surfaces the backend message as the toast detail when a delete is refused', async () => {
+    // A refusal that is NOT ReassignRequired: the backend says exactly why, and that reason must
+    // reach the admin instead of being replaced by the generic summary alone.
+    apiMock.deleteUser.mockReset().mockRejectedValue({
+      response: { data: { type: 'ForbiddenError', message: 'The guest user cannot be deleted' } },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openDeleteDialog: (u: UserListItem) => void
+      reassignToUsername: string | null
+      handleDelete: () => Promise<void>
+    }
+    vm.openDeleteDialog(ENABLED_USER)
+    await flushPromises()
+    vm.reassignToUsername = 'root'
+    await vm.handleDelete()
+    await flushPromises()
+
+    const errorToasts = toastAdd.mock.calls
+      .map((call) => call[0] as { severity: string; summary: string; detail?: string })
+      .filter((toastArg) => toastArg.severity === 'error')
+    expect(errorToasts).toHaveLength(1)
+    expect(errorToasts[0].summary).toBe(en.ui.users.failed_delete)
+    expect(errorToasts[0].detail).toBe('The guest user cannot be deleted')
+  })
+
+  it('falls back to the summary alone when the refusal carries no message', async () => {
+    // A network failure or a body without a message must not produce an empty detail line.
+    apiMock.deleteUser.mockReset().mockRejectedValue(new Error('network down'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      openDeleteDialog: (u: UserListItem) => void
+      reassignToUsername: string | null
+      handleDelete: () => Promise<void>
+    }
+    vm.openDeleteDialog(ENABLED_USER)
+    await flushPromises()
+    vm.reassignToUsername = 'root'
+    await vm.handleDelete()
+    await flushPromises()
+
+    const errorToasts = toastAdd.mock.calls
+      .map((call) => call[0] as { severity: string; summary: string; detail?: string })
+      .filter((toastArg) => toastArg.severity === 'error')
+    expect(errorToasts).toHaveLength(1)
+    expect(errorToasts[0].summary).toBe(en.ui.users.failed_delete)
+    // The key must be PRESENT with an undefined value: a toast built without a `detail` key at
+    // all (the pre-fix shape) satisfies a bare toBeUndefined() and would hide a broken wiring.
+    expect(errorToasts[0]).toHaveProperty('detail', undefined)
   })
 })

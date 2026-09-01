@@ -15,6 +15,7 @@ import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 import { useConfirmDanger } from '../../composables/useConfirmDanger'
 import { formatDate, formatStorage, BYTES_PER_GB } from '../../utils/formatters'
+import { apiErrorMessage } from '../../utils/apiError'
 import EmptyState from '../../components/EmptyState.vue'
 import ErrorState from '../../components/ErrorState.vue'
 
@@ -200,7 +201,16 @@ async function handleDelete() {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.add({ severity: 'error', summary: t('ui.users.reassign_required'), life: 3000 })
     } else {
-      toast.add({ severity: 'error', summary: t('ui.users.failed_delete'), life: 3000 })
+      // Any other refusal carries the backend's own reason (`{ type, message }`) — for the guest and
+      // admin guards, literally why the account cannot be deleted. Showing only the generic summary
+      // left the admin with nothing to act on (#325), so the message rides along as the detail;
+      // absent or blank, the summary stands alone.
+      toast.add({
+        severity: 'error',
+        summary: t('ui.users.failed_delete'),
+        detail: apiErrorMessage(error),
+        life: 3000,
+      })
     }
   } finally {
     deleteLoading.value = false
@@ -280,6 +290,14 @@ function canToggleDisabled(data: UserListItem): boolean {
   return data.username !== GUEST_USERNAME && !data.admin
 }
 
+// The backend also REFUSES to delete those same two kinds of row — the guest user
+// (UserResource.delete guards Constants.GUEST_USER_ID) and any ADMIN-role user. The rules are
+// independent of the disable rule above, they simply cover the same rows today, so a delete button
+// on them could only ever produce a refusal toast (#325). Hide it, as the disable toggle does.
+function canDelete(data: UserListItem): boolean {
+  return data.username !== GUEST_USERNAME && !data.admin
+}
+
 </script>
 
 <template>
@@ -340,7 +358,7 @@ function canToggleDisabled(data: UserListItem): boolean {
               :aria-label="data.disabled ? t('ui.users.enable_user_btn') : t('ui.users.disable_user_btn')"
             />
             <Button icon="pi pi-pencil" text rounded size="small" severity="secondary" @click="openEditDialog(data)" v-tooltip="t('edit')" :aria-label="t('edit')" />
-            <Button icon="pi pi-trash" text rounded size="small" severity="danger" @click="openDeleteDialog(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
+            <Button v-if="canDelete(data)" icon="pi pi-trash" text rounded size="small" severity="danger" @click="openDeleteDialog(data)" v-tooltip="t('delete')" :aria-label="t('delete')" />
           </span>
         </template>
       </Column>
