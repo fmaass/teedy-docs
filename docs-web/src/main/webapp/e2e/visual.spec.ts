@@ -217,14 +217,26 @@ async function apiEnsureTag(request: APIRequestContext, name: string, color: str
   return (await res.json()).id as string
 }
 
+// Every seeded document carries an explicit creation date on the day the committed baselines
+// were captured (2026-08-11, commit 3d0bc297): the gallery cards and the list rows render that
+// date as text, and a document stamped with the run's real clock differs from the baseline by
+// exactly the glyphs of the new date — 472 px on 2026-09-01, under the tolerance on some other
+// days, which is why the failure came and went with the calendar. Midday UTC keeps the day the
+// same in every timezone a runner might use; each document gets a strictly later second so the
+// default `create_date DESC` order below stays deterministic.
+const BASELINE_DAY_MS = Date.UTC(2026, 7, 11, 12, 0, 0)
+
 async function apiCreateDoc(
   request: APIRequestContext,
   title: string,
-  opts: { tagIds?: string[]; description?: string } = {},
+  opts: { tagIds?: string[]; description?: string; createDateMs?: number } = {},
 ): Promise<string> {
   const body = new URLSearchParams([
     ['title', title],
     ['language', 'eng'],
+    ...(opts.createDateMs !== undefined
+      ? ([['create_date', String(opts.createDateMs)]] as [string, string][])
+      : []),
     ...(opts.description ? ([['description', opts.description]] as [string, string][]) : []),
     ...(opts.tagIds ?? []).map((id): [string, string] => ['tags', id]),
   ])
@@ -244,11 +256,12 @@ let seeded = false
 async function ensureCorpus(request: APIRequestContext): Promise<void> {
   if (seeded) return
   await purgeAllDocuments(request)
+  let i = 0
   for (const d of SEED_DOCS) {
     const tagId = await apiEnsureTag(request, d.tag, d.color)
-    await apiCreateDoc(request, d.title, { tagIds: [tagId] })
+    await apiCreateDoc(request, d.title, { tagIds: [tagId], createDateMs: BASELINE_DAY_MS + i++ * 1000 })
   }
-  await apiCreateDoc(request, LONG_TITLE)
+  await apiCreateDoc(request, LONG_TITLE, { createDateMs: BASELINE_DAY_MS + i * 1000 })
   seeded = true
 }
 

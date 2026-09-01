@@ -92,6 +92,14 @@ key screens most prone to layout/overflow, each rendered in **English then Germa
 every volatile region is `mask`ed (`.doc-meta` per-row dates, `.about-version` badge)
 so a diff only ever reflects a real CSS/layout change.
 
+**Baseline dependency — the seed date.** The corpus the spec seeds is stamped with an explicit
+`create_date` on the day the committed baselines were captured (`BASELINE_DAY_MS`, 2026-08-11,
+midday UTC), because the gallery cards and the list rows render that date as text. A document
+created with the run's real clock differs from the baseline by the glyphs of the new date (472 px
+on 2026-09-01; under the tolerance on some other days), which looked like a non-reproducible flake
+and was calendar drift. Regenerating the baselines on another day means moving `BASELINE_DAY_MS`
+to that day in the same commit.
+
 Key screens covered:
 
 1. **Document list** (`/#/document`, seeded corpus with tag chips).
