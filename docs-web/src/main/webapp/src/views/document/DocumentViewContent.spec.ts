@@ -1016,15 +1016,25 @@ describe('DocumentViewContent — grid drag reorder (#211)', () => {
     expect(tileNames(wrapper)).toEqual(['a.txt', 'b.txt', 'c.txt'])
   })
 
+  // The threshold rule needs a hundred-plus tiles actually mounted, and a mount that size scales
+  // with host load rather than with correctness: under a concurrent Maven build the two mounts
+  // that used to share one test took 6.4–7.5 s against vitest's 5 s default (seven recurrences
+  // between 2026-08-25 and 2026-09-01), then passed in isolation every time. Each mount gets its
+  // own test and a budget that is a load tolerance, not a behaviour change.
+  const LARGE_MOUNT_TIMEOUT = 30_000
+
   it('withdraws the handles above the 100-file threshold (the endpoint needs the complete order)', () => {
     const many = Array.from({ length: 101 }, (_, i) => file(`f${i}`, `f${i}.txt`))
     const { wrapper } = mountView(gridDoc(true, many))
     expect(wrapper.findAll('.file-preview-card').length, 'every tile still renders').toBe(101)
     expect(wrapper.findAll('.file-card-drag-handle').length).toBe(0)
+  }, LARGE_MOUNT_TIMEOUT)
 
-    const hundred = mountView(gridDoc(true, many.slice(0, 100))).wrapper
-    expect(hundred.findAll('.file-card-drag-handle').length).toBe(100)
-  })
+  it('keeps the handles at exactly 100 files (the threshold is exclusive)', () => {
+    const hundred = Array.from({ length: 100 }, (_, i) => file(`f${i}`, `f${i}.txt`))
+    const { wrapper } = mountView(gridDoc(true, hundred))
+    expect(wrapper.findAll('.file-card-drag-handle').length).toBe(100)
+  }, LARGE_MOUNT_TIMEOUT)
 
   // The handle is the only drag origin: a tile carries a preview click, rotation controls, PDF
   // controls and an action menu, and none of them may become a way to reorder the document.
