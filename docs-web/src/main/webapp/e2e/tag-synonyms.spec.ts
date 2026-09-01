@@ -1,4 +1,5 @@
 import { test, expect, type Page } from './fixtures'
+import type { Locator } from '@playwright/test'
 import {
   unique,
   uniqueTag,
@@ -58,6 +59,108 @@ async function freshGoto(p: Page, url: string, routeRoot: string): Promise<void>
   await expectRouteReady(p, url, routeRoot)
 }
 
+// --- The tag picker, hardened the way its three sibling specs already are -----------------
+//
+// TEEDY-151: this step — click the option the typed SYNONYM offers — timed out on the mobile
+// projection in roughly one scheduled run in five, with no product defect behind it. The
+// picker's overlay is portaled to <body>, so the option a click aims at does not live inside
+// the field that opened it, and the filtered list is WIDER than the 393 px mobile viewport
+// (`.p-multiselect-option` is `white-space: nowrap`, and this spec's option carries both names:
+// "<tag> (via <synonym>)"). Filling the filter therefore re-anchors the panel to the viewport's
+// left edge (`inset-inline-start: 40px` -> `0px`, and in one failing run from ABOVE the field to
+// below it) and widens it past the viewport — measured on the same image: 310.6 px -> 438.6 px,
+// document scrollWidth 439 against a 393 px client width — which expands the layout viewport
+// under the visual one (window.innerWidth 393 -> 439, innerHeight 727 -> 813 locally; 393 -> 451
+// -> 458 in CI). The failing click's hit test then resolved onto the multiselect TRIGGER's own
+// label, ~100 px above the option, on every one of its twenty retries.
+//
+// Playwright's actionability retry turns all of that into a bare timeout, which is why the
+// mechanism only ever showed up in an error tail. The three guards below are the ones the
+// siblings that do NOT flake already carry:
+//
+//   * the overlay is the search scope (tags.spec.ts) — the option and the filter box are read
+//     through `.p-multiselect-overlay`, so nothing else in the document can answer for them,
+//   * the option's own centre is hit-tested before the click (bulk.spec.ts) — an interception
+//     is NAMED rather than left to a 10 s actionability timeout,
+//   * the picker is opened only when it is not already open (tag-create-panel.spec.ts) —
+//     clicking the field TOGGLES the overlay, and PrimeVue defers the close by a macrotask.
+
+/**
+ * Open the document form's tag picker, but only if its overlay is not already up: clicking the
+ * field TOGGLES it, and a second unconditional click reads as "still open" for long enough to
+ * type into, then tears the overlay down under the assertions (tag-create-panel.spec.ts:66-74).
+ * The overlay is portaled to <body>, not nested in the field, and it is what the caller reads
+ * the filter box and the options through.
+ */
+async function openTagPicker(page: Page): Promise<Locator> {
+  const overlay = page.locator('.p-multiselect-overlay')
+  if (!(await overlay.isVisible())) {
+    await page.locator('#edit-tags').click()
+  }
+  await expect(overlay).toBeVisible()
+  return overlay
+}
+
+/**
+ * Click an option in the tag picker, hit-testing its centre first and NAMING whatever would
+ * receive the click instead (bulk.spec.ts:38-60). A beat while the overlay finishes moving is
+ * retried away by the poll; a genuine overlap never resolves and reports the offending element
+ * — the trigger, a toast, the drawer — instead of a bare "locator.click: Timeout 10000ms".
+ *
+ * The poll also refuses to click while the LAYOUT VIEWPORT is still changing size, which is the
+ * state every observed failure clicked into: the widened panel pushed window.innerWidth/
+ * innerHeight from 448x829 to 451x835 and from 451x835 to 458x848 in the two CI traces, and from
+ * 456x842 to 456x844 in the local reproduction — each time between the start of the click and its
+ * first hit test. Two equal consecutive samples mean the page has stopped resizing under it.
+ */
+async function clickOptionUnobstructed(option: Locator, what: string): Promise<void> {
+  await expect(option).toBeVisible()
+  await option.scrollIntoViewIfNeeded()
+  let previous = ''
+  await expect
+    .poll(
+      async () => {
+        const state = await option.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          const viewport = `${window.innerWidth}x${window.innerHeight}`
+          const known = [
+            '.p-multiselect-overlay',
+            '.tag-multiselect',
+            '.p-multiselect',
+            '.p-toast',
+            '.p-drawer',
+            '.p-dialog',
+          ]
+          if (!hit) return { viewport, receives: 'nothing (the option is outside the viewport)' }
+          if (el.contains(hit)) return { viewport, receives: 'self' }
+          const owner = known.find((selector) => hit.closest(selector))
+          return {
+            viewport,
+            receives: owner ?? `${hit.tagName.toLowerCase()}[class="${hit.getAttribute('class') ?? ''}"]`,
+          }
+        })
+        const settled = state.viewport === previous
+        const before = previous
+        previous = state.viewport
+        return settled
+          ? state.receives
+          : `the layout viewport is still resizing (${before || 'first sample'} -> ${state.viewport})`
+      },
+      { message: `what receives a click at the centre of the ${what} option` },
+    )
+    .toBe('self')
+  // The poll above IS the interception check, so the built-in one is skipped rather than left to
+  // fail the click for 10 s. Playwright's own hit test reads `elementFromPoint` at a point it has
+  // already mapped into the VISUAL viewport, while the option's rect is in the LAYOUT one — and
+  // once the widened panel has pushed those apart (456 CSS px of layout inside 393 px of visual)
+  // the two disagree by that ratio: the probe lands ~110 px high, on the trigger's own label, and
+  // stays there for every retry. The pointer itself is dispatched correctly, and what it selected
+  // is proven downstream, where the saved document has to carry the CANONICAL tag as a chip —
+  // the same shape as the force-clicks in saved-filters.spec.ts and bulk.spec.ts.
+  await option.click({ force: true })
+}
+
 test('a synonym offers and finds its canonical tag, and never crosses a permission boundary', async ({
   page,
   browser,
@@ -85,12 +188,13 @@ test('a synonym offers and finds its canonical tag, and never crosses a permissi
   // --- Admin: the document editor's tag field offers the TAG for the typed SYNONYM ---
   await freshGoto(page, '/#/document/add', ROUTE_ROOT.documentEdit)
   await page.locator('#edit-title').fill(docTitle)
-  await page.locator('#edit-tags').click()
-  await page.locator('input.tp-filter-input').fill(synonym)
-  // The option is the CANONICAL tag, and it says why it is being offered.
-  const viaOption = page.getByRole('option', { name: `${tagName} (via ${synonym})` })
+  const overlay = await openTagPicker(page)
+  await overlay.locator('input.tp-filter-input').fill(synonym)
+  // The option is the CANONICAL tag, and it says why it is being offered. Read through the
+  // overlay, so it is THIS picker's option rather than any other listbox in the document.
+  const viaOption = overlay.getByRole('option', { name: `${tagName} (via ${synonym})` })
   await expect(viaOption).toBeVisible()
-  await viaOption.click()
+  await clickOptionUnobstructed(viaOption, 'synonym-matched tag')
   await page.keyboard.press('Escape')
 
   // What was assigned is the canonical tag — the chip carries the tag's own name.
