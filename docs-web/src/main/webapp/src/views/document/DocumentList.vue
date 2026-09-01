@@ -226,6 +226,17 @@ const { data: documentsData, isLoading, isError, refetch } = useQuery<DocumentLi
 const documents = computed(() => documentsData.value?.documents ?? [])
 const totalCount = computed(() => documentsData.value?.total ?? 0)
 
+// Is ANY filter dimension narrowing the list right now? (#308)
+//
+// The store's `hasActiveFilters` answers that for the dimensions the store owns —
+// tags and free text. The two toggles above are COMPONENT-owned and deliberately
+// outside it (other features read `hasActiveFilters` for tag-filter semantics, and
+// folding these in would change what they mean), so the empty state ORs them back
+// in here rather than in the store.
+const hasAnyActiveFilter = computed(
+  () => tf.hasActiveFilters || workflowMe.value || favoritesMe.value,
+)
+
 // --- Client-side quick filter (#53) ---
 //
 // A purely LOCAL, instant filter over the already-loaded page of results — it never
@@ -845,11 +856,17 @@ async function bulkDownload() {
 
       <ErrorState v-else-if="isError" @retry="refetch()" />
 
+      <!-- "Add your first document" is offered ONLY when nothing is filtering the list.
+           Under a filter it is an invitation the user cannot act on: a newly created
+           document is neither assigned to the viewer (workflow assignment is
+           route-model-driven, never set at creation) nor favorited, so it can never
+           join a `workflow=me` / `favorites=me` result set — the user clicks, creates a
+           document, and the list is empty again (#308). -->
       <EmptyState
         v-else
         icon="pi pi-inbox"
-        :message="tf.hasActiveFilters ? t('ui.no_documents_match') : t('ui.no_documents_yet')"
-        :action-label="tf.hasActiveFilters ? undefined : t('ui.add_first_document')"
+        :message="hasAnyActiveFilter ? t('ui.no_documents_match') : t('ui.no_documents_yet')"
+        :action-label="hasAnyActiveFilter ? undefined : t('ui.add_first_document')"
         @action="router.push({ name: 'document-add' })"
       />
     </div>

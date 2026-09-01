@@ -1,5 +1,14 @@
-import { test, expect, type Page, type APIRequestContext } from './fixtures'
-import { unique, deleteDocApi, gotoDocumentList } from './helpers'
+import { test, expect, request as pwRequest, type Page, type APIRequestContext } from './fixtures'
+import {
+  unique,
+  deleteDocApi,
+  deleteUserApi,
+  expectResponseOk,
+  expectRouteReady,
+  gotoDocumentList,
+  login,
+  ROUTE_ROOT,
+} from './helpers'
 
 // #28: the "Assigned to me" (workflow=me) document-list filter must round-trip
 // through the URL — toggling it activates the filter and puts `workflow=me` in the
@@ -104,4 +113,72 @@ test('the "Assigned to me" filter round-trips through open + in-app Back (#28)',
   // And the restored filter is LIVE, not just cosmetic: the filtered row set holds.
   await expect(rowFor(page, assignedTitle)).toBeVisible()
   await expect(rowFor(page, otherTitle)).toBeHidden()
+})
+
+// --- #308: the empty-state call to action under the "Assigned to me" filter.
+//
+// The empty document list invites the user to add a first document. Under
+// `workflow=me` that invitation cannot be satisfied: workflow assignment comes from
+// starting a route model on an EXISTING document, never from creating one, so the
+// document the button produces can never enter the filtered result set — the list
+// comes back empty and the affordance reads as broken.
+//
+// The premise is CONSTRUCTED BY THE SPEC, not borrowed: a brand-new account owns no
+// documents and holds no ACLs, so both renders below are genuinely empty result sets
+// from the real server, with the same account and the same page — the ONLY thing that
+// differs between them is the filter toggle.
+
+const EMPTY_STATE_USER_PASSWORD = 'EmptyState308'
+
+test.describe('the empty-state CTA on a filtered list', () => {
+  // Cleared so the shared admin storageState cannot log the browser in as admin —
+  // admin owns the whole seeded corpus and its list is never empty.
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test('an empty "Assigned to me" list reports no match and offers no add-first CTA (#308)', async ({
+    page,
+    baseURL,
+    cleanup,
+  }) => {
+    const username = unique('emptycta').replace(/[^a-z0-9]/gi, '').toLowerCase()
+
+    const admin = await pwRequest.newContext({ baseURL })
+    const adminLogin = await admin.post('/api/user/login', {
+      form: { username: 'admin', password: 'admin', remember: false },
+    })
+    await expectResponseOk(adminLogin, 'admin login for the empty-state user seed')
+    const created = await admin.put('/api/user', {
+      form: {
+        username,
+        password: EMPTY_STATE_USER_PASSWORD,
+        email: `${username}@example.com`,
+        storage_quota: 1_000_000_000,
+      },
+    })
+    await expectResponseOk(created, `create the empty-state user ${username}`)
+    cleanup.defer(`delete the empty-state user ${username}`, () => deleteUserApi(admin, username))
+    cleanup.defer('dispose the admin request context', () => admin.dispose())
+
+    await login(page, username, EMPTY_STATE_USER_PASSWORD)
+    await expectRouteReady(page, '/#/document', ROUTE_ROOT.documentList)
+
+    const addFirst = page.getByRole('button', { name: 'Add your first document' })
+
+    // UNFILTERED: nothing narrows the list, so the invitation is honest and shown.
+    await expect(page.getByText('No documents yet')).toBeVisible()
+    await expect(addFirst).toBeVisible()
+
+    // Activate the component-owned workflow filter. The URL param is the barrier that
+    // the filtered request has been issued, not just the button's own pressed state.
+    const toggle = page.getByRole('button', { name: 'Assigned to me' })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(page).toHaveURL(/workflow=me/)
+
+    // FILTERED: the same empty list now explains itself as a filter miss, and the
+    // unsatisfiable invitation is gone.
+    await expect(page.getByText('No documents match your filters')).toBeVisible()
+    await expect(addFirst).toBeHidden()
+    await expect(page.getByText('No documents yet')).toBeHidden()
+  })
 })

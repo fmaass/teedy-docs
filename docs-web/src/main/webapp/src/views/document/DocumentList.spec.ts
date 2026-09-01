@@ -239,9 +239,13 @@ vi.mock('@tanstack/vue-query', () => ({
       // Paginator; documents come from the reactive listResult so the #142 tests can
       // model a refetch (new array of new objects) and prove the menu re-resolves.
       data: computed(() => ({ documents: listResult.docs, total: listTotalHolder.total })),
-      isLoading: { value: false },
-      isError: { value: false },
-      error: { value: null },
+      // REAL refs, not { value: false } literals. `<script setup>` unwraps a ref in the
+      // template but exposes a plain object as-is, so an inert literal is TRUTHY there:
+      // `v-if="documents.length || isLoading"` would win on an empty list and the
+      // empty/error branches would be unreachable to every test (#308).
+      isLoading: ref(false),
+      isError: ref(false),
+      error: ref(null),
       refetch: vi.fn(),
     }
   },
@@ -438,6 +442,23 @@ const InputTextStub = defineComponent({
 // IconField / InputIcon are pure presentational wrappers — render their default slot.
 const slotWrapper = defineComponent({ setup: (_p, { slots }) => () => h('div', slots.default?.()) })
 
+// EmptyState stub (#308): surfaces the two props the empty-state gate drives — the
+// message and the OPTIONAL action label. The real component renders the action button
+// only when `actionLabel` is set, so mirroring that here makes "no CTA" an assertion
+// about the rendered affordance rather than about a prop value alone.
+const EmptyStateStub = defineComponent({
+  props: ['icon', 'message', 'actionLabel'],
+  emits: ['action'],
+  setup(props, { emit }) {
+    return () =>
+      h('div', { class: 'empty-state-stub', 'data-message': props.message }, [
+        props.actionLabel
+          ? h('button', { class: 'empty-action', onClick: () => emit('action') }, props.actionLabel)
+          : null,
+      ])
+  },
+})
+
 function mountView() {
   return mount(DocumentList, {
     global: {
@@ -479,7 +500,7 @@ function mountView() {
             + '<button class="reduction-done" @click="$emit(\'reduced\', { status: \'ok\', dryRun: false, count: 2, documents: [], skipped: [] })">go</button>'
             + '<button class="reduction-close" @click="$emit(\'close\')">x</button></div>',
         },
-        EmptyState: passthrough,
+        EmptyState: EmptyStateStub,
         ErrorState: passthrough,
         TagQuickMenu: TagQuickMenuStub,
         ToggleButton: passthrough,
@@ -1437,5 +1458,88 @@ describe('DocumentList — tag reduction over the selection (#293)', () => {
     expect(invalidated).toContain(JSON.stringify(['documents']))
     // Tags moved off documents, so the sidebar/facet counts are stale too.
     expect(invalidated).toContain(JSON.stringify(['tagStats']))
+  })
+})
+
+// --- #308: the empty-state call to action must be reachable from the CURRENT filter.
+//
+//     "Add your first document" is an invitation the user can act on: create a document
+//     and the list stops being empty. Under the two COMPONENT-OWNED filters that is a
+//     lie — a freshly created document is neither assigned to the viewer (workflow
+//     assignment is route-model-driven, never set at creation) nor favorited, so it can
+//     never appear in a `workflow=me` / `favorites=me` result set. The user clicks, the
+//     document is created, and the list is empty again.
+//
+//     The store's `hasActiveFilters` covers only the tag/text dimensions it owns and
+//     deliberately excludes these two toggles (they live in this component); the mocked
+//     store below keeps it `false` throughout, which is exactly the production state
+//     these three renders reproduce. The gate therefore has to OR the component's own
+//     flags in — hence three renders of the SAME empty list, differing only in the route
+//     query that hydrates the toggles. ---
+describe('DocumentList — the empty-state CTA is gated on the component-owned filters (#308)', () => {
+  beforeEach(() => {
+    routerPush.mockReset()
+    routerReplace.mockReset()
+    mockRoute.query = {}
+    filterState.selectedTags = []
+    filterState.debouncedText = ''
+    filterState.filterQuery = {}
+    listDocumentsMock.mockClear()
+    // The subject: a genuinely empty result set. Both must move together — the view
+    // renders the empty state off `documents.length`, and a non-zero total with zero
+    // rows is the separate false-empty-page case.
+    listResult.docs = []
+    listTotalHolder.total = 0
+  })
+
+  afterEach(() => {
+    listResult.docs = [doc, docB]
+    listTotalHolder.total = 2
+  })
+
+  it('with NO filters, the empty state invites the first document — and the CTA navigates', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const empty = wrapper.find('.empty-state-stub')
+    expect(empty.exists()).toBe(true)
+    expect(empty.attributes('data-message')).toBe('ui.no_documents_yet')
+
+    // The invitation is genuinely actionable here: it is rendered, and it navigates to
+    // the add-document route (the click path the ticket noted no test exercised).
+    const action = wrapper.find('button.empty-action')
+    expect(action.exists()).toBe(true)
+    expect(action.text()).toBe('ui.add_first_document')
+    await action.trigger('click')
+    expect(routerPush).toHaveBeenCalledWith({ name: 'document-add' })
+  })
+
+  it('with workflow=me active and zero results, it says no documents MATCH and offers no action', async () => {
+    mockRoute.query = { workflow: 'me' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    // Non-vacuity: the filter really is live for this render — the request carried it.
+    const params = listDocumentsMock.mock.calls.at(-1)![0]
+    expect(params['search[searchworkflow]']).toBe('me')
+
+    const empty = wrapper.find('.empty-state-stub')
+    expect(empty.exists()).toBe(true)
+    expect(empty.attributes('data-message')).toBe('ui.no_documents_match')
+    expect(wrapper.find('button.empty-action').exists()).toBe(false)
+  })
+
+  it('with favorites=me active and zero results, it says no documents MATCH and offers no action', async () => {
+    mockRoute.query = { favorites: 'me' }
+    const wrapper = mountView()
+    await flushPromises()
+
+    const params = listDocumentsMock.mock.calls.at(-1)![0]
+    expect(params.favorites).toBe('me')
+
+    const empty = wrapper.find('.empty-state-stub')
+    expect(empty.exists()).toBe(true)
+    expect(empty.attributes('data-message')).toBe('ui.no_documents_match')
+    expect(wrapper.find('button.empty-action').exists()).toBe(false)
   })
 })
