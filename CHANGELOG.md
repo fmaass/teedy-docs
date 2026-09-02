@@ -8,6 +8,21 @@ Per-release detail lives in the [GitHub releases](https://github.com/fmaass/teed
 
 ## [Unreleased]
 
+## [3.8.10] - 2026-09-02
+
+There is no database migration; the schema level remains 70.
+
+### Added
+- A synonym can be promoted to the tag's main name from the tag edit page. Every synonym chip carries an action that swaps it with the name in the form: the promoted word becomes the tag's name and the name it replaces leads the synonym list, announced as a pending swap until Save sends it as the single update it always was. Documents keep resolving to the tag across the swap, because they link to it by identifier and not by name (#280).
+- A synonym can be split off into its own tag from the tag edit page. The action takes the synonym off its tag and creates a standalone tag with that name in one step, under the same parent and in the same colour, and confirms with the server's spelling of both names. Documents do not follow a split: nothing records which synonym a document was tagged through, so they stay on the original tag, the new tag starts empty, and the confirmation says so. The name is judged exactly as it would be in the create form — a word that is another visible tag's synonym is refused — and the split is offered only on synonyms the tag has already been saved with, leaving unsaved edits on the form intact (#280).
+
+### Fixed
+- A workflow could not be started on installs where a group the seeded route model targets had been renamed before the rename repair existed: the model was still offered, but starting it — or re-saving it — failed with a generic message and left nothing in the log to explain it. A route model's group targets now resolve by name first and by the stored identifier as a fallback, and whether a model is offered is derived through the same resolution, so a model is offered exactly when it can actually start. A save whose target resolves to a different group than the one that was picked is refused rather than written. Targets that had already drifted are repaired once at application start, idempotently and only where the stored name matches no live group, and every repair is written to the application log. Where a target still cannot be resolved, the server's own reason is shown instead of a bare failure, both when starting a workflow and when saving a route model (#312).
+- The input for adding a linked document kept its own narrow width inside a much wider row, so long document titles were clipped; it now fills the row. The field accepts the whole search syntax the search bar documents — `tag:`, `by:`, `after:` and the rest — because it queries the same document list, and nothing said so: a help button beside it now opens that same operator list, so both places explain the syntax from one text (#309).
+- The compact create card on the tag management page had no icon field. The picker lived only in the full form, which the card reveals behind a button labelled "Permissions", so the icon feature looked missing to anyone who never expanded permissions; it is now on the card itself, and an icon can be chosen while creating the tag without opening the reveal (#324).
+- Settings > Users offered a delete action on the built-in guest user and on administrators, which the server refuses by design, and reported every refusal other than "reassign required" as a generic "failed to delete", so the reason never reached the screen. Those rows no longer offer delete — the same rule the disable toggle already used — and for the refusals that remain, such as a bad reassign target, the server's own message is shown with the failure (#325).
+- With "Assigned to me" or "Favorites" switched on and nothing to show, the document list rendered the pristine empty state and its "Add your first document" invitation, although a document created from that button could never satisfy either toggle. With either toggle active the list now says that no documents match and offers no action; a list that has not been filtered at all keeps the invitation (#308).
+
 ## [3.8.9] - 2026-08-26
 
 This release contains database migrations to schema level 70 (comment edit timestamps, access events, published filters, the tag-name repair marker, tag icons, tag synonyms).
@@ -690,7 +705,8 @@ Wave 1 fork remediation: launch-blocker security and integrity fixes.
 - SEC-05: database migrations fail fast (rollback + boot refusal) instead of booting on a partial schema.
 - TST-07/08: PostgreSQL Testcontainers guardrail runs the real migrations on real PostgreSQL in CI.
 
-[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.9...HEAD
+[Unreleased]: https://github.com/fmaass/teedy-docs/compare/v3.8.10...HEAD
+[3.8.10]: https://github.com/fmaass/teedy-docs/compare/v3.8.9...v3.8.10
 [3.8.9]: https://github.com/fmaass/teedy-docs/compare/v3.8.8...v3.8.9
 [3.8.8]: https://github.com/fmaass/teedy-docs/compare/v3.8.7...v3.8.8
 [3.8.7]: https://github.com/fmaass/teedy-docs/compare/v3.8.6...v3.8.7
