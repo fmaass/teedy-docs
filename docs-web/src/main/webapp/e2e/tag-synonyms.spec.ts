@@ -267,3 +267,88 @@ test('a synonym that is already another tag name is refused at save, naming the 
   await page.reload()
   await expect(page.locator('.synonym-chip')).toHaveCount(0)
 })
+
+// TEEDY-153 — the swap #280 deferred. A synonym chip carries a "make this the main name" action:
+// the two words trade places in the form, and the page's ordinary Save stores both in the ONE tag
+// write the server already accepts. What has to survive it is everything that pointed at the tag —
+// the tag itself is only renamed, so the document tagged under the OLD main name is still tagged,
+// and the old word goes on finding it as a synonym.
+test('a synonym can be made the main name, and the demoted name keeps finding the tag', async ({
+  page,
+  cleanup,
+}) => {
+  const tagName = uniqueTag('synswap-was')
+  const synonym = uniqueTag('synswap-now')
+  const docTitle = unique('synswap-doc')
+
+  // The tag is deleted under whichever name it ends the run with; the other lookup finds nothing
+  // and is a no-op.
+  await createTag(page, tagName)
+  cleanup.defer('delete the tag under its original name', () =>
+    deleteTagByNameApi(page.request, tagName),
+  )
+  cleanup.defer('delete the tag under its promoted name', () =>
+    deleteTagByNameApi(page.request, synonym),
+  )
+
+  await openTagEdit(page, tagName)
+  await addSynonym(page, synonym)
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Tag updated')).toBeVisible()
+
+  // --- A document tagged under the tag's ORIGINAL main name, before the swap ---
+  await freshGoto(page, '/#/document/add', ROUTE_ROOT.documentEdit)
+  await page.locator('#edit-title').fill(docTitle)
+  const picker = await openTagPicker(page)
+  await picker.locator('input.tp-filter-input').fill(tagName)
+  await clickOptionUnobstructed(picker.getByRole('option', { name: tagName }), 'canonical tag')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/#\/document\/view\//)
+  const docId = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+  cleanup.defer('purge the tagged document', () => deleteDocApi(page.request, docId))
+
+  // --- The swap itself: one click on the chip, then the page's own Save ---
+  await freshGoto(page, '/#/tag', ROUTE_ROOT.tagList)
+  await openTagEdit(page, tagName)
+  await page.locator('.synonym-chip', { hasText: synonym }).locator('.synonym-promote').click()
+
+  // Both fields change at once, and the notice says so — the Name field is above the chips and
+  // could otherwise change unseen.
+  await expect(page.locator('#tag-name')).toHaveValue(synonym)
+  await expect(page.locator('.synonym-chip', { hasText: tagName })).toBeVisible()
+  await expect(page.locator('.synonym-chip', { hasText: synonym })).toHaveCount(0)
+  await expect(page.locator('.synonym-swap-notice')).toContainText(synonym)
+  await expect(page.locator('.synonym-swap-notice')).toContainText(tagName)
+
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Tag updated')).toBeVisible()
+
+  // It is STORED, and it reached the tag list the whole app resolves against: a full reload busts
+  // the 60 s cache the SPA would otherwise answer the tree and the tag inputs from.
+  await freshGoto(page, '/#/tag', ROUTE_ROOT.tagList)
+  await page.locator('.tag-tree').getByText(synonym, { exact: true }).click()
+  await expect(page.locator('#tag-synonym')).toBeVisible()
+  await expect(page.locator('#tag-name')).toHaveValue(synonym)
+  await expect(page.locator('.synonym-chip', { hasText: tagName })).toBeVisible()
+
+  // The demoted word is a synonym now, so the tag input offers the tag under its NEW name and
+  // says which word matched.
+  await freshGoto(page, '/#/document/add', ROUTE_ROOT.documentEdit)
+  const swappedPicker = await openTagPicker(page)
+  await swappedPicker.locator('input.tp-filter-input').fill(tagName)
+  await expect(
+    swappedPicker.getByRole('option', { name: `${synonym} (via ${tagName})` }),
+  ).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // And the document tagged before the swap is still the tag's document, under either word: the
+  // swap renamed the tag it already carried rather than moving it to another one.
+  await freshGoto(page, '/#/document', ROUTE_ROOT.documentList)
+  const search = page.getByPlaceholder('Search')
+  await search.fill(`tag:${tagName}`)
+  await expect(page.getByText(docTitle, { exact: true })).toBeVisible()
+  await search.fill(`tag:${synonym}`)
+  await expect(page.getByText(docTitle, { exact: true })).toBeVisible()
+  await search.fill('')
+})

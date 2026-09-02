@@ -296,6 +296,55 @@ function removeSynonym(synonym: string) {
   )
 }
 
+// --- Making a synonym the main name (TEEDY-153) ---
+//
+// A tag's name and one of its synonyms trade places. It is deliberately NOT a call of its own:
+// both values are already fields of this form, so the swap is two ordinary edits reported to the
+// host, and the page's existing Save persists them in the ONE tag write the server already
+// accepts (name plus the full synonym list). The tag therefore keeps its id, and with it its
+// documents and its ACLs — nothing is re-tagged, and every word that resolved before resolves
+// after, only from the other side of the pair.
+
+/**
+ * The swap this form is currently carrying, so the notice can name both words.
+ *
+ * It holds the pair AND the list it emitted, and the message lasts exactly as long as that state
+ * does: any later edit — another chip, another name, the re-seed a save performs — leaves the
+ * form somewhere else, and a sentence about the previous state would be describing nothing on
+ * screen. The message itself says only what is true of the form both before and after a save, so
+ * it can never contradict what has already been stored.
+ */
+const pendingSwap = ref<{ promoted: string; demoted: string; list: string[] } | null>(null)
+
+function makeMainName(synonym: string) {
+  const demoted = props.name.trim()
+  // Whatever its spelling, the promoted word leaves the chips: a tag whose name is also its own
+  // synonym is refused by the server, and the two would be indistinguishable to every search.
+  const rest = synonymList.value.filter((value) => !sameName(value, synonym))
+  // An empty Name field has nothing to demote — the swap is then simply "use this word" rather
+  // than a trade, and adding a blank chip would be a synonym the user could never have typed.
+  const demote = !!demoted && !rest.some((value) => sameName(value, demoted))
+  const next = demote ? [demoted, ...rest] : rest
+  pendingSwap.value = demoted ? { promoted: synonym, demoted, list: next } : null
+  emit('update:synonyms', next)
+  emit('update:name', synonym)
+}
+
+function sameList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+// Compared by CONTENT rather than by array identity: a host is free to copy what
+// `update:synonyms` hands it — the re-seed after a save does exactly that — and the message has
+// to survive its own change arriving back, then go when a different one does.
+watch([() => props.synonyms, () => props.name], ([synonyms, name]) => {
+  const pending = pendingSwap.value
+  if (!pending) return
+  if (name !== pending.promoted || !sameList(synonyms ?? [], pending.list)) {
+    pendingSwap.value = null
+  }
+})
+
 function onHexInput(raw: string) {
   hexText.value = raw
   const complete = completeHex(raw)
@@ -415,6 +464,17 @@ function onHexBlur() {
         <div v-if="synonymList.length" class="synonym-chips">
           <span v-for="synonym in synonymList" :key="synonym" class="synonym-chip">
             {{ synonym }}
+            <!-- The swap (TEEDY-153). An icon button rather than a labelled one: the chip's text
+                 is the word itself, and every chip carries the pair of actions. -->
+            <button
+              type="button"
+              class="synonym-promote"
+              :aria-label="t('ui.tag_edit.synonym_make_main', { name: synonym })"
+              :title="t('ui.tag_edit.synonym_make_main', { name: synonym })"
+              @click="makeMainName(synonym)"
+            >
+              <i class="pi pi-arrow-up" aria-hidden="true" />
+            </button>
             <button
               type="button"
               class="synonym-remove"
@@ -425,6 +485,16 @@ function onHexBlur() {
             </button>
           </span>
         </div>
+        <!-- Two fields changed from one click, one of them out of sight above: the notice is
+             what says so. Polite rather than an alert, like the notice under the input. -->
+        <small v-if="pendingSwap" class="synonym-swap-notice" role="status" aria-live="polite">
+          {{
+            t('ui.tag_edit.synonym_swapped', {
+              name: pendingSwap.promoted,
+              previous: pendingSwap.demoted,
+            })
+          }}
+        </small>
         <div class="synonym-row">
           <InputText
             :id="`${idPrefix}-synonym`"
@@ -562,7 +632,8 @@ function onHexBlur() {
   background: var(--p-content-background);
   font-size: 0.8125rem;
 }
-.synonym-remove {
+.synonym-remove,
+.synonym-promote {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -575,16 +646,28 @@ function onHexBlur() {
   color: var(--p-text-muted-color);
   cursor: pointer;
 }
-.synonym-remove:hover {
+.synonym-remove:hover,
+.synonym-promote:hover {
   background: var(--p-content-hover-background);
   color: var(--p-text-color);
 }
-.synonym-remove:focus-visible {
+.synonym-remove:focus-visible,
+.synonym-promote:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--p-primary-color);
 }
-.synonym-remove .pi {
+.synonym-remove .pi,
+.synonym-promote .pi {
   font-size: 0.625rem;
+}
+
+/* The swap message belongs to the chips above it, not to the input below. */
+.synonym-swap-notice {
+  display: block;
+  margin: -0.125rem 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--p-text-muted-color);
 }
 
 .synonym-row {

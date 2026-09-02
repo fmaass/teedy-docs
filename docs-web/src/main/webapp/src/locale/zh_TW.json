@@ -459,7 +459,9 @@
       "synonym_remove": "移除同義詞 {name}",
       "synonym_duplicate": "「{name}」已在此標籤上。",
       "synonym_in_use": "「{name}」已被使用：{tags}。儲存將被拒絕。",
-      "synonym_similar": "已存在：{tags}"
+      "synonym_similar": "已存在：{tags}",
+      "synonym_make_main": "將「{name}」設為主要名稱",
+      "synonym_swapped": "已互換：「{name}」是主要名稱，「{previous}」是同義詞。"
     },
     "tag_icon": {
       "label": "圖示",

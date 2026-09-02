@@ -463,3 +463,91 @@ describe('TagForm — synonyms (#280)', () => {
     expect(wrapper.find('.synonym-notice').exists()).toBe(false)
   })
 })
+
+// TEEDY-153 — the swap the synonyms feature deferred: one action makes a synonym the tag's main
+// name and the old name a synonym of it. It happens entirely in the form's own state and is
+// persisted by the page's ordinary Save, which sends name and synonyms in the ONE request the
+// server already accepts — so the tag keeps its id, its documents and its ACLs, and every word
+// that resolved before resolves after.
+describe('TagForm — promoting a synonym to the main name (TEEDY-153)', () => {
+  const OTHER_TAGS = [{ id: 'a', name: 'Alpha', color: '#111', parent: null, synonyms: ['Erste'] }]
+
+  function mountSwap(props: Record<string, unknown> = {}) {
+    return mountForm({
+      name: 'Rechnung',
+      synonyms: ['Quittung', 'Beleg'],
+      synonymTags: OTHER_TAGS,
+      synonymTagId: 'b',
+      ...props,
+    })
+  }
+
+  it('offers the action on every chip', () => {
+    const wrapper = mountSwap()
+    expect(wrapper.findAll('.synonym-promote')).toHaveLength(2)
+    // The chip still reads as the word it holds: the action is an icon button, so the text the
+    // list of chips shows is unchanged.
+    expect(wrapper.findAll('.synonym-chip').map((chip) => chip.text())).toEqual([
+      'Quittung',
+      'Beleg',
+    ])
+  })
+
+  it('reports the swap as one name change and one synonym-list change', async () => {
+    const wrapper = mountSwap()
+    await wrapper.findAll('.synonym-promote')[0].trigger('click')
+
+    expect(wrapper.emitted('update:name')?.at(-1)).toEqual(['Quittung'])
+    // The demoted name leads the list, and the synonym the swap did not touch keeps its place.
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Rechnung', 'Beleg']])
+  })
+
+  it('shows the swapped pair once the host applies it', async () => {
+    const wrapper = mountSwap()
+    await wrapper.findAll('.synonym-promote')[0].trigger('click')
+    // What `v-model:name` / `v-model:synonyms` do on the page.
+    await wrapper.setProps({ name: 'Quittung', synonyms: ['Rechnung', 'Beleg'] })
+
+    expect(wrapper.findAll('.synonym-chip').map((chip) => chip.text())).toEqual([
+      'Rechnung',
+      'Beleg',
+    ])
+    expect(wrapper.find('.synonym-swap-notice').text()).toContain('Quittung')
+    expect(wrapper.find('.synonym-swap-notice').text()).toContain('Rechnung')
+  })
+
+  it('drops the notice as soon as the pair it announces is superseded', async () => {
+    const wrapper = mountSwap()
+    await wrapper.findAll('.synonym-promote')[0].trigger('click')
+    await wrapper.setProps({ name: 'Quittung', synonyms: ['Rechnung', 'Beleg'] })
+    expect(wrapper.find('.synonym-swap-notice').exists()).toBe(true)
+
+    // A saved form is re-seeded from the server, and any later chip edit replaces the list too:
+    // either way the message is about a state the form no longer holds.
+    await wrapper.setProps({ synonyms: ['Beleg', 'Rechnung'] })
+    expect(wrapper.find('.synonym-swap-notice').exists()).toBe(false)
+  })
+
+  it('does not demote an empty name into a chip', async () => {
+    const wrapper = mountSwap({ name: '' })
+    await wrapper.findAll('.synonym-promote')[0].trigger('click')
+
+    expect(wrapper.emitted('update:name')?.at(-1)).toEqual(['Quittung'])
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Beleg']])
+  })
+
+  it('never leaves the promoted word behind as a synonym of itself', async () => {
+    // The server refuses a tag whose name is also its own synonym, so the promoted word has to
+    // leave the list however it is spelled — the fold is the same case-insensitive one the rest
+    // of the form uses.
+    const wrapper = mountSwap({ synonyms: ['quittung', 'Beleg'] })
+    await wrapper.findAll('.synonym-promote')[0].trigger('click')
+
+    expect(wrapper.emitted('update:name')?.at(-1)).toEqual(['quittung'])
+    expect(wrapper.emitted('update:synonyms')?.at(-1)).toEqual([['Rechnung', 'Beleg']])
+  })
+
+  it('renders no action for a host that does not manage synonyms', () => {
+    expect(mountForm().find('.synonym-promote').exists()).toBe(false)
+  })
+})

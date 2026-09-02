@@ -459,7 +459,9 @@
       "synonym_remove": "Αφαίρεση του συνωνύμου {name}",
       "synonym_duplicate": "Το «{name}» υπάρχει ήδη σε αυτήν την ετικέτα.",
       "synonym_in_use": "Το «{name}» χρησιμοποιείται ήδη από: {tags}. Η αποθήκευση θα απορριφθεί.",
-      "synonym_similar": "Υπάρχει ήδη: {tags}"
+      "synonym_similar": "Υπάρχει ήδη: {tags}",
+      "synonym_make_main": "Να γίνει το «{name}» το κύριο όνομα",
+      "synonym_swapped": "Έγινε εναλλαγή: το «{name}» είναι το κύριο όνομα, το «{previous}» είναι συνώνυμο."
     },
     "tag_icon": {
       "label": "Εικονίδιο",

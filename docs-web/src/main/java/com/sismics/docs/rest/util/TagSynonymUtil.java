@@ -50,7 +50,8 @@ import java.util.TreeSet;
  *   <li><b>The tag being written is always inside it</b>, even when the caller cannot READ it.
  *       READ and WRITE are independent ACL rows, so edit-without-view is a reachable state, and
  *       a rule that dropped the tag out of its own scope would stop applying to it: renaming it
- *       onto a synonym it keeps would be accepted, which is the swap flow this slice defers.</li>
+ *       onto a synonym it KEEPS would be accepted, and a tag whose name is also its own synonym
+ *       is the one thing this rule exists to prevent.</li>
  * </ul>
  *
  * @author fmaass
@@ -166,20 +167,22 @@ public final class TagSynonymUtil {
         if (name != null && !name.isEmpty()) {
             for (TagDto tagDto : scope) {
                 // The tag being written is compared against the synonyms this write LEAVES IT
-                // WITH, not the ones it currently has. Both halves matter: renaming a tag onto
-                // its own synonym without touching the chips is the swap flow (out of slice for
-                // #280), so it has to be refused rather than quietly produce a tag whose name is
-                // also its synonym; but renaming onto a synonym the SAME request removes is two
-                // ordinary edits at once, and refusing that would be a collision with a name
-                // that will not exist by the time the transaction commits.
+                // WITH, not the ones it currently has. Both halves matter: renaming a tag onto a
+                // synonym it KEEPS has to be refused rather than quietly produce a tag whose name
+                // is also its synonym; but renaming onto a synonym the SAME request removes is two
+                // ordinary edits at once, and refusing that would be a collision with a name that
+                // will not exist by the time the transaction commits. That second shape is also
+                // how the tag form swaps a name with a synonym (TEEDY-153): the promoted word
+                // arrives as the name with the demoted one in its place among the synonyms, so
+                // the whole swap is one write and the tag keeps its id, documents and ACLs.
                 List<String> tagSynonyms = tagDto.getId().equals(tagId) && synonyms != null
                         ? synonyms
                         : tagDto.getSynonyms();
                 for (String synonym : tagSynonyms) {
                     if (synonym.equalsIgnoreCase(name)) {
-                        // Turning an existing tag INTO a synonym of another (and the reverse) is
-                        // the swap/merge flow, which #280 deliberately leaves to a later ticket —
-                        // so the honest answer here is a refusal that says where the name went.
+                        // Turning an existing tag INTO a synonym of ANOTHER tag is the merge
+                        // flow, which #280 deliberately leaves to a later ticket — so the honest
+                        // answer here is a refusal that says where the name went.
                         throw new ClientException("TagNameIsSynonym", MessageFormat.format(
                                 "The name \"{0}\" is already a synonym of the tag \"{1}\"",
                                 name, tagDto.getName()));
@@ -233,8 +236,8 @@ public final class TagSynonymUtil {
      * rows ({@code AclResource.add} creates exactly the one permission it is given), so a caller
      * holding WRITE on a tag it cannot READ is a state the API can be put into — and the tag
      * editor can grant edit alone. Scoping to the readable set only would drop the tag being
-     * written out of its OWN rule: renaming it onto a synonym it keeps would then be accepted,
-     * which is exactly the swap flow #280 defers. The caller is entitled to that tag's name and
+     * written out of its OWN rule: renaming it onto a synonym it KEEPS would then be accepted,
+     * producing a tag whose name is also its own synonym. The caller is entitled to its name and
      * synonyms — the WRITE was already checked before this runs — so it belongs in the scope,
      * and it is read BY ID rather than through the ACL-scoped query for that reason.</p>
      *

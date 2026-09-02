@@ -459,7 +459,9 @@
       "synonym_remove": "Hiq sinonimin {name}",
       "synonym_duplicate": "«{name}» është tashmë në këtë etiketë.",
       "synonym_in_use": "«{name}» përdoret tashmë nga: {tags}. Ruajtja do të refuzohet.",
-      "synonym_similar": "Ekziston tashmë: {tags}"
+      "synonym_similar": "Ekziston tashmë: {tags}",
+      "synonym_make_main": "Bëje «{name}» emrin kryesor",
+      "synonym_swapped": "U ndërruan: «{name}» është emri kryesor, «{previous}» është sinonim."
     },
     "tag_icon": {
       "label": "Ikonë",

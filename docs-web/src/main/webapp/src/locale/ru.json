@@ -459,7 +459,9 @@
       "synonym_remove": "Удалить синоним {name}",
       "synonym_duplicate": "«{name}» уже есть у этого тега.",
       "synonym_in_use": "«{name}» уже используется: {tags}. Сохранение будет отклонено.",
-      "synonym_similar": "Уже есть: {tags}"
+      "synonym_similar": "Уже есть: {tags}",
+      "synonym_make_main": "Сделать «{name}» основным названием",
+      "synonym_swapped": "Поменяли местами: «{name}» — основное название, «{previous}» — синоним."
     },
     "tag_icon": {
       "label": "Значок",

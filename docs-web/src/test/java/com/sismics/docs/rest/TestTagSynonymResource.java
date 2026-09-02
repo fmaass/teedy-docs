@@ -220,9 +220,9 @@ public class TestTagSynonymResource extends BaseJerseyTest {
     }
 
     /**
-     * Renaming a tag onto its OWN synonym — without touching the chips — is the "make the synonym
-     * the main name" swap, which #280 deliberately leaves to a later ticket. It has to be refused
-     * rather than quietly produce a tag whose name is also one of its synonyms.
+     * Renaming a tag onto a synonym it KEEPS has to be refused rather than quietly produce a tag
+     * whose name is also one of its synonyms. The "make the synonym the main name" swap is the
+     * request below it, which demotes the old name in the same write.
      */
     @Test
     public void testATagMayNotBeRenamedOntoItsOwnSynonym() {
@@ -254,6 +254,78 @@ public class TestTagSynonymResource extends BaseJerseyTest {
                 .get(JsonObject.class);
         Assertions.assertEquals("Auto", detail.getString("name"));
         Assertions.assertEquals(List.of(), stringsOf(detail.getJsonArray("synonyms")));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The swap: promoting a synonym to the main name — the follow-up #280 deferred (TEEDY-153)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Promoting a synonym to the main name and demoting the old name to a synonym is ONE ordinary
+     * tag write: the form sends the new name together with the synonym list the tag is left with,
+     * and both halves of the collision rule read that same request. Nothing about the tag's
+     * identity moves — the id, its documents and its ACLs are untouched — so every word that
+     * resolved before resolves after, only through the other side of the pair.
+     */
+    @Test
+    public void testASynonymAndTheMainNameCanBeSwappedInOneWrite() {
+        String token = user("syn_swap");
+        String tagId = createTag(token, "Rechnung", "Quittung", "Beleg");
+
+        updateTag(token, tagId, new Form().param("name", "Quittung").param("color", "#ff0000")
+                .param("synonyms", "Rechnung").param("synonyms", "Beleg"));
+
+        JsonObject detail = target().path("/tag/" + tagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("Quittung", detail.getString("name"),
+                "the promoted synonym is the tag's name after the write");
+        Assertions.assertEquals(List.of("Beleg", "Rechnung"), stringsOf(detail.getJsonArray("synonyms")),
+                "the demoted name joins the synonyms, and the untouched one is still there");
+        Assertions.assertEquals(List.of("Beleg", "Rechnung"), synonymsInList(token, tagId),
+                "and /tag/list, which the tag inputs resolve against, agrees");
+    }
+
+    /**
+     * The swap keeps the documents: they link to the tag by ID, so a document tagged under the old
+     * main name is still tagged, and every word of the pair still finds it.
+     */
+    @Test
+    public void testDocumentsKeepResolvingAcrossTheSwap() {
+        String token = user("syn_swap_docs");
+        String tagId = createTag(token, "Rechnung", "Quittung", "Beleg");
+        String docId = createDocument(token, "Invoice filed before the swap", tagId);
+        createDocument(token, "Unrelated", null);
+
+        updateTag(token, tagId, new Form().param("name", "Quittung").param("color", "#ff0000")
+                .param("synonyms", "Rechnung").param("synonyms", "Beleg"));
+
+        Assertions.assertEquals(List.of(tagId), tagIdsOfDocument(token, docId),
+                "the document keeps the very same tag row — the swap renames, it does not re-tag");
+        Assertions.assertEquals(Set.of(docId), searchIds(token, "tag:Quittung"),
+                "the promoted word resolves as the tag's name now");
+        Assertions.assertEquals(Set.of(docId), searchIds(token, "tag:Rechnung"),
+                "the demoted word keeps resolving, now through the synonym");
+        Assertions.assertEquals(Set.of(docId), searchIds(token, "tag:Beleg"),
+                "and the synonym the swap did not touch is unaffected");
+    }
+
+    /**
+     * The swap is available to a caller holding WRITE without READ as well — the tag being written
+     * is inside its own collision scope, and this is the write that scope has to accept rather than
+     * refuse: the old name is not a collision with itself once the request is demoting it.
+     */
+    @Test
+    public void testAWriteOnlyCallerMaySwapTheNameWithASynonym() {
+        WriteOnly fixture = seedWriteOnlyTag("synscope_promote", "Insurance", "Versicherung");
+
+        updateTag(fixture.callerToken(), fixture.tagId(),
+                new Form().param("name", "Versicherung").param("color", "#ff0000")
+                        .param("synonyms", "Insurance"));
+
+        Assertions.assertEquals("Versicherung", nameOfDetail(fixture.ownerToken(), fixture.tagId()));
+        Assertions.assertEquals(List.of("Insurance"),
+                synonymsOfDetail(fixture.ownerToken(), fixture.tagId()));
     }
 
     // ---------------------------------------------------------------------------------------
@@ -421,9 +493,8 @@ public class TestTagSynonymResource extends BaseJerseyTest {
     }
 
     /**
-     * The retained-synonym rule has to hold for a WRITE-only caller too: renaming T onto one of
-     * T's OWN synonyms is the swap flow #280 defers, and it must be refused even though T is not
-     * in the caller's readable set.
+     * The retained-synonym rule has to hold for a WRITE-only caller too: renaming T onto a synonym
+     * T KEEPS must be refused even though T is not in the caller's readable set.
      */
     @Test
     public void testAWriteOnlyCallerMayNotRenameOntoARetainedSynonym() {
@@ -547,6 +618,18 @@ public class TestTagSynonymResource extends BaseJerseyTest {
         return target().path("/tag/" + tagId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .get(JsonObject.class).getString("name");
+    }
+
+    /** The ids of the tags a document carries — the swap must not move a document off its tag. */
+    private List<String> tagIdsOfDocument(String token, String documentId) {
+        JsonArray tags = target().path("/document/" + documentId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class).getJsonArray("tags");
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < tags.size(); i++) {
+            ids.add(tags.getJsonObject(i).getString("id"));
+        }
+        return ids;
     }
 
     private List<String> synonymsOfDetail(String token, String tagId) {

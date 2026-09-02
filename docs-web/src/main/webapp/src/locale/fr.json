@@ -459,7 +459,9 @@
       "synonym_remove": "Supprimer le synonyme {name}",
       "synonym_duplicate": "« {name} » est déjà sur ce tag.",
       "synonym_in_use": "« {name} » est déjà utilisé par : {tags}. L’enregistrement sera refusé.",
-      "synonym_similar": "Déjà présent : {tags}"
+      "synonym_similar": "Déjà présent : {tags}",
+      "synonym_make_main": "Faire de « {name} » le nom principal",
+      "synonym_swapped": "Échangés : « {name} » est le nom principal, « {previous} » est un synonyme."
     },
     "tag_icon": {
       "label": "Icône",
