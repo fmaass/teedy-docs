@@ -461,7 +461,12 @@
       "synonym_in_use": "« {name} » est déjà utilisé par : {tags}. L’enregistrement sera refusé.",
       "synonym_similar": "Déjà présent : {tags}",
       "synonym_make_main": "Faire de « {name} » le nom principal",
-      "synonym_swapped": "Échangés : « {name} » est le nom principal, « {previous} » est un synonyme."
+      "synonym_swapped": "Échangés : « {name} » est le nom principal, « {previous} » est un synonyme.",
+      "synonym_split": "Détacher « {name} » dans son propre tag",
+      "synonym_split_title": "Détacher dans son propre tag",
+      "synonym_split_confirm": "« {name} » cesse d’être un synonyme de « {tag} » et devient un tag à part entière. Les documents restent sur « {tag} » ; le nouveau tag démarre vide.",
+      "synonym_split_done": "« {name} » est désormais un tag à part entière",
+      "synonym_split_failed": "Échec du détachement du synonyme"
     },
     "tag_icon": {
       "label": "Icône",

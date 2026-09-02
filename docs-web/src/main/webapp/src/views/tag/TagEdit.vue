@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
-import { listTags, getTag, getTagStats, updateTag, deleteTag } from '../../api/tag'
+import { listTags, getTag, getTagStats, updateTag, deleteTag, splitSynonym } from '../../api/tag'
 import { queryKeys } from '../../api/queryKeys'
 import type { AclEntry } from '../../api/acl'
 import Button from 'primevue/button'
@@ -30,6 +30,8 @@ const icon = ref<string | null>(null)
 // one this page already refetches after every change; `synonyms` is undefined only while that
 // read is in flight, and the form renders its (empty) chips editor from the moment it lands.
 const synonyms = ref<string[]>([])
+// TEEDY-154. What the SERVER holds, seeded from the same detail read as `synonyms` below.
+const storedSynonyms = ref<string[]>([])
 
 const { data: tags } = useQuery({
   queryKey: ['tags'],
@@ -163,10 +165,15 @@ watch([tags, () => props.id], loadFromCache, { immediate: true })
 // The synonyms come off the detail read and are re-seeded whenever it lands — including after a
 // save, which is what makes the chips show what the SERVER stored (a name normalized on the way
 // in, a case-duplicate collapsed) rather than what was typed.
+//
+// `storedSynonyms` is the same list kept apart from the editable one: it is what the SERVER
+// holds, and the only thing there is anything to split off (TEEDY-154). The draft may hold chips
+// that have only been typed; those are not synonyms yet.
 watch(
   detail,
   (value) => {
     synonyms.value = [...(value?.synonyms ?? [])]
+    storedSynonyms.value = [...(value?.synonyms ?? [])]
   },
   { immediate: true },
 )
@@ -201,6 +208,72 @@ const { mutate: save, isPending: loading } = useMutation({
     })
   },
 })
+
+// --- Splitting a synonym off into its own tag (TEEDY-154) ---
+//
+// The promote (TEEDY-153) is two form edits the ordinary Save persists. This is not: it removes
+// a synonym from THIS tag and creates ANOTHER one, which no tag write expresses, so it is a call
+// of its own and the page owns it. The form only reports which chip was picked.
+
+/** The same case-insensitive fold the form uses; never `toLocaleLowerCase` (#266 Turkish I). */
+function sameName(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
+/**
+ * Ask, then split.
+ *
+ * The confirmation names BOTH tags and states what happens to the documents, because that is the
+ * part nobody can see coming: nothing records which name a document was tagged through, so every
+ * document stays on this tag and the new one starts empty. Saying it here is the whole reason
+ * this action asks at all — it is not destructive, it is surprising.
+ */
+function handleSplit(synonym: string) {
+  confirm.require({
+    header: t('ui.tag_edit.synonym_split_title'),
+    // The tag is named as the SERVER holds it, not as the form currently reads: an unsaved
+    // rename in the box is not what the split will leave the documents on.
+    message: t('ui.tag_edit.synonym_split_confirm', {
+      name: synonym,
+      tag: detail.value?.name ?? name.value,
+    }),
+    icon: 'pi pi-arrow-right',
+    rejectProps: { severity: 'secondary', outlined: true },
+    accept: () =>
+      splitSynonym(props.id, synonym)
+        .then(() => {
+          // APPLY THE ONE CHANGE LOCALLY rather than re-reading the tag. A refetch would re-seed
+          // the whole form from the server and silently throw away everything the user has typed
+          // and not yet saved — a half-finished rename, a colour, chips added since the page
+          // loaded. The split changed exactly one thing this screen shows, so exactly that one
+          // thing is applied: the word leaves both the draft chips and the stored set.
+          synonyms.value = synonyms.value.filter((value) => !sameName(value, synonym))
+          storedSynonyms.value = storedSynonyms.value.filter((value) => !sameName(value, synonym))
+          // The tag list is marked stale so the new tag reaches every input that resolves against
+          // it, but WITHOUT refetching now: `loadFromCache` re-seeds name/colour/parent/icon from
+          // that query, so an eager refetch would overwrite the same unsaved edits by the other
+          // route. The next screen to mount the query reads it fresh.
+          queryClient.invalidateQueries({ queryKey: ['tags'], refetchType: 'none' })
+          toast.add({
+            severity: 'success',
+            summary: t('ui.tag_edit.synonym_split_done', { name: synonym }),
+            life: 3000,
+          })
+        })
+        .catch((error) => {
+          // A collision is refused BY NAME ("… is already a synonym of Beleg"), and that
+          // sentence is the only thing that says which word is the problem.
+          const message = (error as { response?: { data?: { message?: string } } }).response?.data
+            ?.message
+          toast.add({
+            severity: 'error',
+            summary: t('ui.tag_edit.synonym_split_failed'),
+            detail: message || undefined,
+            life: 6000,
+          })
+        }),
+  })
+}
 
 function handleDelete() {
   confirmDanger({
@@ -253,10 +326,12 @@ function handleDelete() {
       :parent-options="parentOptions"
       :synonym-tags="tags ?? []"
       :synonym-tag-id="props.id"
+      :stored-synonyms="storedSynonyms"
       id-prefix="tag"
       :acl="aclState"
       max-width="480px"
       @acl-changed="refetchDetail"
+      @split-synonym="handleSplit"
     >
       <template #actions>
         <div class="flex gap-2 mt-4">

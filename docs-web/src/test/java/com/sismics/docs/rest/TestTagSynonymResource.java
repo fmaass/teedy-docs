@@ -549,6 +549,267 @@ public class TestTagSynonymResource extends BaseJerseyTest {
                 "the error must name the readable tag it collides with: " + error.getString("message"));
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Splitting a synonym off into its own tag (TEEDY-154)
+    // ---------------------------------------------------------------------------------------
+    //
+    // The other half of the swap. A word that turns out to deserve an identity of its own leaves
+    // the root tag and becomes a tag — and nothing goes with it, because nothing records which
+    // name a document was tagged THROUGH: T_TAG_SYNONYM carries no document link, and a document
+    // is linked to the root tag's id alone. So every document stays on the root tag and the new
+    // tag starts empty, which is what the confirmation on screen says before the split runs.
+
+    /**
+     * The whole outcome of one split: the word leaves the root's synonyms, a standalone tag with
+     * that name exists, the root keeps its documents, and the word now resolves to the NEW tag
+     * rather than through the root.
+     */
+    @Test
+    public void testASynonymIsSplitIntoAStandaloneTag() {
+        String token = user("syn_split");
+        String rootId = createTag(token, "Rechnung", "Quittung", "Beleg");
+        String rootDocId = createDocument(token, "Invoice filed under the root tag", rootId);
+
+        String newTagId = splitSynonym(token, rootId, "Quittung");
+
+        Assertions.assertNotEquals(rootId, newTagId, "the split makes a tag of its own");
+        Assertions.assertEquals("Rechnung", nameOfDetail(token, rootId),
+                "the root keeps its own name");
+        Assertions.assertEquals(List.of("Beleg"), synonymsOfDetail(token, rootId),
+                "the split word leaves the root's synonyms; the untouched one stays");
+        Assertions.assertEquals("Quittung", nameOfDetail(token, newTagId),
+                "the new tag is called the word that was split off");
+        Assertions.assertEquals(List.of(), synonymsOfDetail(token, newTagId),
+                "and starts with no synonyms of its own");
+        Assertions.assertEquals(List.of("Beleg"), synonymsInList(token, rootId),
+                "/tag/list, which the tag inputs resolve against, agrees about the root");
+        Assertions.assertEquals(List.of(), synonymsInList(token, newTagId),
+                "...and knows the new tag");
+
+        Assertions.assertEquals(List.of(rootId), tagIdsOfDocument(token, rootDocId),
+                "the document stays on the root tag: nothing records which name it was tagged "
+                        + "through, so there is nothing to move");
+
+        // The word resolves to the NEW tag now, not through the root's synonym. Shown with a
+        // document of the new tag's own: "tag:Quittung" must find that one and NOT the root's,
+        // which is exactly the difference between resolving to a tag and resolving via a synonym.
+        String newDocId = createDocument(token, "Receipt filed under the split tag", newTagId);
+        Assertions.assertEquals(Set.of(newDocId), searchIds(token, "tag:Quittung"),
+                "the split word resolves to the new tag, whose documents come back");
+        Assertions.assertEquals(Set.of(rootDocId), searchIds(token, "tag:Rechnung"),
+                "the root's name still resolves to the root, which kept its document");
+        Assertions.assertEquals(Set.of(rootDocId), searchIds(token, "tag:Beleg"),
+                "and the synonym the split did not touch is unaffected");
+    }
+
+    /** The new tag is shaped like the tag it came out of: same colour, same place in the tree. */
+    @Test
+    public void testTheSplitTagInheritsTheRootsColourAndParent() {
+        String token = user("syn_split_shape");
+        String parentId = createTag(token, "Finance");
+        String rootId = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .put(Entity.form(new Form().param("name", "Rechnung").param("color", "#00ff00")
+                        .param("parent", parentId).param("synonyms", "Quittung")), JsonObject.class)
+                .getString("id");
+
+        String newTagId = splitSynonym(token, rootId, "Quittung");
+
+        JsonObject detail = target().path("/tag/" + newTagId).request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .get(JsonObject.class);
+        Assertions.assertEquals("#00ff00", detail.getString("color"),
+                "the split tag looks like the tag it came out of");
+        Assertions.assertEquals(parentId, detail.getString("parent", null),
+                "and sits where that tag sits");
+    }
+
+    /** The chip's own spelling is what the new tag is called, whatever spelling the caller sent. */
+    @Test
+    public void testTheSplitTakesTheStoredSpelling() {
+        String token = user("syn_split_case");
+        String rootId = createTag(token, "Rechnung", "Quittung");
+
+        String newTagId = splitSynonym(token, rootId, "quittung");
+
+        Assertions.assertEquals("Quittung", nameOfDetail(token, newTagId),
+                "the stored spelling is the name, not the caller's");
+        Assertions.assertEquals(List.of(), synonymsOfDetail(token, rootId));
+    }
+
+    /** A name that is not one of this tag's synonyms is refused, and nothing is changed. */
+    @Test
+    public void testSplittingSomethingThatIsNotASynonymIsRefused() {
+        String token = user("syn_split_absent");
+        String rootId = createTag(token, "Rechnung", "Quittung");
+
+        Response response = postSplit(token, rootId, "Beleg");
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals("ValidationError",
+                response.readEntity(JsonObject.class).getString("type"));
+        Assertions.assertEquals(List.of("Quittung"), synonymsOfDetail(token, rootId),
+                "the refused split changed nothing");
+    }
+
+    /** A tag's own name is not one of its synonyms, so it cannot be split off either. */
+    @Test
+    public void testTheTagsOwnNameCannotBeSplitOff() {
+        String token = user("syn_split_self");
+        String rootId = createTag(token, "Rechnung", "Quittung");
+
+        Response response = postSplit(token, rootId, "Rechnung");
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        Assertions.assertEquals("Rechnung", nameOfDetail(token, rootId));
+        Assertions.assertEquals(List.of("Quittung"), synonymsOfDetail(token, rootId));
+    }
+
+    /**
+     * Splitting a synonym off is editing the tag, so it takes the same WRITE the name and the
+     * colour take — and the refusal is the same 404 every other tag write gives a caller without
+     * it, which is also what keeps the endpoint from answering "does this tag exist".
+     */
+    @Test
+    public void testSplittingASynonymRequiresWrite() {
+        String ownerToken = user("syn_split_owner");
+        clientUtil.createUser("syn_split_reader");
+        String readerToken = clientUtil.login("syn_split_reader");
+        String rootId = createTag(ownerToken, "Rechnung", "Quittung");
+        grantRead(ownerToken, rootId, "syn_split_reader");
+
+        Response response = postSplit(readerToken, rootId, "Quittung");
+        Assertions.assertEquals(Status.NOT_FOUND, Status.fromStatusCode(response.getStatus()),
+                "a reader may not split a synonym off");
+        Assertions.assertEquals(List.of("Quittung"), synonymsOfDetail(ownerToken, rootId),
+                "and the refused split changed nothing");
+
+        // The same call from the owner succeeds, so the 404 above is the permission answering
+        // rather than the route being absent.
+        Assertions.assertEquals("Quittung", nameOfDetail(ownerToken, splitSynonym(ownerToken, rootId, "Quittung")));
+    }
+
+    /**
+     * The word the split takes may be a synonym of a tag the caller CAN see by now — the two
+     * coexisted because they were invisible to each other when they were stored, and a READ
+     * grant made later brings them into one list. The new tag would then be a tag whose name is
+     * another visible tag's synonym, which is the one thing the collision rule exists to
+     * prevent, so the split is refused by name.
+     *
+     * <p>It also pins the endpoint as ONE unit of work: the synonym is still on the root tag
+     * afterwards, so the removal that ran before the refusal was rolled back with it.</p>
+     */
+    @Test
+    public void testASplitOntoAWordThatIsNowAnotherVisibleTagsSynonymIsRefused() {
+        String ownerToken = user("syn_split_taken");
+        String otherToken = user("syn_split_taken_other");
+        String rootId = createTag(ownerToken, "Rechnung", "Quittung");
+        // Stored while the other tag is invisible, which the collision rule accepts by design.
+        String otherTagId = createTag(otherToken, "Beleg", "Quittung");
+        grantRead(otherToken, otherTagId, "syn_split_taken");
+
+        Response response = postSplit(ownerToken, rootId, "Quittung");
+        Assertions.assertEquals(Status.BAD_REQUEST, Status.fromStatusCode(response.getStatus()));
+        JsonObject error = response.readEntity(JsonObject.class);
+        Assertions.assertEquals("TagNameIsSynonym", error.getString("type"));
+        Assertions.assertTrue(error.getString("message").contains("Beleg"),
+                "the error names the visible tag it collides with: " + error.getString("message"));
+        Assertions.assertEquals(List.of("Quittung"), synonymsOfDetail(ownerToken, rootId),
+                "the refused split leaves the synonym on the root tag — one transaction");
+    }
+
+    /**
+     * The disclosure boundary holds across the split. A synonym colliding only with a tag the
+     * caller CANNOT read was accepted when it was stored (see
+     * {@link #testASynonymCollidingOnlyWithAnUnreadableTagIsAccepted}), so splitting it off is
+     * accepted too — with the same status and the same shape of body as splitting a word that
+     * collides with nothing. A refusal here would answer "is this word a tag somewhere I cannot
+     * look" for any caller holding WRITE on any tag.
+     */
+    @Test
+    public void testASplitCollidingOnlyWithAnUnreadableTagIsAccepted() {
+        WriteOnly fixture = seedWriteOnlyTag("synsplit_hidden", "Insurance", "Geheim", "Freieswort");
+        // A third account's tag, named like one of the synonyms and readable by neither of them.
+        String strangerToken = user("synsplit_hidden_stranger");
+        createTag(strangerToken, "Geheim");
+
+        Response collides = postSplit(fixture.callerToken(), fixture.tagId(), "Geheim");
+        JsonObject collidesBody = collides.readEntity(JsonObject.class);
+        Response matchesNothing = postSplit(fixture.callerToken(), fixture.tagId(), "Freieswort");
+        JsonObject matchesNothingBody = matchesNothing.readEntity(JsonObject.class);
+
+        Assertions.assertEquals(matchesNothing.getStatus(), collides.getStatus(),
+                "splitting a word that collides with an unreadable tag must answer with the same "
+                        + "status as splitting one that collides with nothing");
+        Assertions.assertEquals(matchesNothingBody.keySet(), collidesBody.keySet(),
+                "...and with the same shape of body, so the response carries no signal about the "
+                        + "unreadable tag");
+        Assertions.assertEquals("Geheim", nameOfDetail(fixture.callerToken(), collidesBody.getString("id")),
+                "the split really happened rather than merely not being refused");
+        Assertions.assertEquals(List.of(), synonymsOfDetail(fixture.ownerToken(), fixture.tagId()),
+                "both words left the root tag");
+    }
+
+    /**
+     * A word that is another VISIBLE tag's NAME is judged exactly as a CREATE of that name would
+     * be judged: the split runs the create's own collision call with the create's own arguments,
+     * so it can neither be a back door to a tag {@code PUT /tag} would refuse nor be stricter
+     * than the create button beside it.
+     *
+     * <p>The control is in the test rather than in a comment, and it is run by a SECOND caller
+     * who can read the same colliding tag but holds no synonym of that word — which is exactly
+     * the state the split judges in, because the split removes the word from its own tag before
+     * the rule reads it. (Creating the name as the SPLITTING caller instead would be refused
+     * TagNameIsSynonym by their own root tag, which is a different question.)</p>
+     *
+     * <p>On this build both answer 200: Teedy has never made tag names unique — the tags are a
+     * TREE, two branches may both carry "2024", and nothing in {@code TagResource.add} compares a
+     * name against another tag's name. Should that ever change, this test fails until the split
+     * changes with it.</p>
+     *
+     * <p>The reachable refusal for a split is the OTHER one, a word that is another visible tag's
+     * SYNONYM, and {@link #testASplitOntoAWordThatIsNowAnotherVisibleTagsSynonymIsRefused} pins
+     * that it is refused.</p>
+     */
+    @Test
+    public void testASplitJudgesAVisibleTagsNameExactlyAsACreateDoes() {
+        String ownerToken = user("syn_split_dupname");
+        String otherToken = user("syn_split_dupname_other");
+        clientUtil.createUser("syn_split_dupname_ctl");
+        String controlToken = clientUtil.login("syn_split_dupname_ctl");
+
+        String rootId = createTag(ownerToken, "Rechnung", "Quittung");
+        // Stored while the other tag is invisible, which the collision rule accepts by design...
+        String otherTagId = createTag(otherToken, "Quittung");
+        // ...and only then do both callers gain sight of it.
+        grantRead(otherToken, otherTagId, "syn_split_dupname");
+        grantRead(otherToken, otherTagId, "syn_split_dupname_ctl");
+
+        // The control: creating that exact name by hand, seeing the same colliding tag and
+        // holding no synonym of the word — the state the split judges in.
+        Response created = target().path("/tag").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, controlToken)
+                .put(Entity.form(new Form().param("name", "Quittung").param("color", "#ff0000")));
+        JsonObject createdBody = created.readEntity(JsonObject.class);
+
+        Response split = postSplit(ownerToken, rootId, "Quittung");
+        JsonObject splitBody = split.readEntity(JsonObject.class);
+
+        Assertions.assertEquals(created.getStatus(), split.getStatus(),
+                "the split must answer the same as creating that name by hand does");
+        Assertions.assertEquals(createdBody.keySet(), splitBody.keySet(),
+                "...with the same shape of body");
+        if (created.getStatus() == Status.OK.getStatusCode()) {
+            Assertions.assertEquals("Quittung", nameOfDetail(ownerToken, splitBody.getString("id")),
+                    "the split really produced the tag rather than merely not being refused");
+            Assertions.assertEquals(List.of(), synonymsOfDetail(ownerToken, rootId),
+                    "and the word left the root tag");
+        } else {
+            Assertions.assertEquals(createdBody.getString("type"), splitBody.getString("type"),
+                    "a refusal must carry the create's own error type");
+            Assertions.assertEquals(List.of("Quittung"), synonymsOfDetail(ownerToken, rootId),
+                    "and a refused split leaves the synonym on the root tag");
+        }
+    }
+
     // --- helpers ---
 
     private String user(String username) {
@@ -598,6 +859,21 @@ public class TestTagSynonymResource extends BaseJerseyTest {
         return target().path("/tag/" + tagId).request()
                 .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
                 .post(Entity.form(form));
+    }
+
+    /** POST /tag/{id}/synonym/split as the given caller, raw, for status/body assertions. */
+    private Response postSplit(String token, String tagId, String name) {
+        return target().path("/tag/" + tagId + "/synonym/split").request()
+                .cookie(TokenBasedSecurityFilter.COOKIE_NAME, token)
+                .post(Entity.form(new Form().param("name", name)));
+    }
+
+    /** Splits a synonym off and returns the id of the tag it became. */
+    private String splitSynonym(String token, String tagId, String name) {
+        Response response = postSplit(token, tagId, name);
+        Assertions.assertEquals(Status.OK, Status.fromStatusCode(response.getStatus()),
+                "the split must be accepted");
+        return response.readEntity(JsonObject.class).getString("id");
     }
 
     private Status statusOfCreate(String token, Form form) {

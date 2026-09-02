@@ -3597,6 +3597,59 @@
         }
       }
     },
+    "/tag/{id}/synonym/split": {
+      "post": {
+        "tags": [
+          "tag"
+        ],
+        "summary": "Split a synonym into its own tag",
+        "operationId": "post_tag_id_synonym_split",
+        "description": "Removes one synonym from the tag and creates a standalone tag with that name, in one transaction. The name is matched against the tag's synonyms ignoring case and the stored spelling becomes the new tag's name; the new tag takes the source tag's colour and parent. Documents stay on the tag they are on — nothing records which name a document was tagged through — so the new tag starts empty.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The synonym to split off into its own tag."
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "ValidationError when the name is not one of this tag's synonyms; IllegalTagName when the name contains a whitespace character inside it, a colon or an asterisk, or is left empty once its invisible format characters are removed and its edges trimmed; TagNameIsSynonym when the name is already a synonym of another visible tag"
+          },
+          "403": {
+            "description": "Not authenticated"
+          },
+          "404": {
+            "description": "The tag is not writable by the caller"
+          }
+        }
+      }
+    },
     "/tag": {
       "put": {
         "tags": [

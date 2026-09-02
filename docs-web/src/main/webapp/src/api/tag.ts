@@ -118,6 +118,26 @@ export function updateTag(
   return api.post<{ id: string }>(`/tag/${id}`, params)
 }
 
+/**
+ * Splits one synonym off the tag and makes it a tag of its own (TEEDY-154), in one server call.
+ *
+ * The other half of the swap, and the reason it is a call rather than a form edit: it removes a
+ * synonym from one tag AND creates another, which no tag write can express. `name` is matched
+ * against the tag's synonyms ignoring case; the STORED spelling becomes the new tag's name, and
+ * the new tag takes the source tag's colour and parent.
+ *
+ * DOCUMENTS DO NOT MOVE. Nothing records which name a document was tagged through — a document
+ * is linked to the tag's id alone — so every document stays where it is and the new tag starts
+ * empty. The screen says so before it calls this.
+ *
+ * @returns the new tag's id
+ */
+export function splitSynonym(id: string, name: string) {
+  const params = new URLSearchParams()
+  params.set('name', name)
+  return api.post<{ id: string }>(`/tag/${id}/synonym/split`, params)
+}
+
 export function deleteTag(id: string) {
   return api.delete(`/tag/${id}`)
 }

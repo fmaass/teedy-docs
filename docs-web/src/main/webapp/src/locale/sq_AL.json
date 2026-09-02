@@ -461,7 +461,12 @@
       "synonym_in_use": "«{name}» përdoret tashmë nga: {tags}. Ruajtja do të refuzohet.",
       "synonym_similar": "Ekziston tashmë: {tags}",
       "synonym_make_main": "Bëje «{name}» emrin kryesor",
-      "synonym_swapped": "U ndërruan: «{name}» është emri kryesor, «{previous}» është sinonim."
+      "synonym_swapped": "U ndërruan: «{name}» është emri kryesor, «{previous}» është sinonim.",
+      "synonym_split": "Ndaje «{name}» në një etiketë të vetën",
+      "synonym_split_title": "Ndaje në një etiketë të vetën",
+      "synonym_split_confirm": "«{name}» nuk do të jetë më sinonim i «{tag}» dhe bëhet etiketë më vete. Dokumentet mbeten te «{tag}»; etiketa e re nis bosh.",
+      "synonym_split_done": "«{name}» tani është etiketë më vete",
+      "synonym_split_failed": "Ndarja e sinonimit dështoi"
     },
     "tag_icon": {
       "label": "Ikonë",

@@ -461,7 +461,12 @@
       "synonym_in_use": "„{name}“ wird bereits verwendet von: {tags}. Das Speichern wird abgelehnt.",
       "synonym_similar": "Schon vorhanden: {tags}",
       "synonym_make_main": "„{name}“ zum Hauptnamen machen",
-      "synonym_swapped": "Getauscht: „{name}“ ist der Hauptname, „{previous}“ ist ein Synonym."
+      "synonym_swapped": "Getauscht: „{name}“ ist der Hauptname, „{previous}“ ist ein Synonym.",
+      "synonym_split": "„{name}“ in ein eigenes Tag auslagern",
+      "synonym_split_title": "In ein eigenes Tag auslagern",
+      "synonym_split_confirm": "„{name}“ ist dann kein Synonym von „{tag}“ mehr, sondern ein eigenes Tag. Die Dokumente bleiben an „{tag}“; das neue Tag beginnt leer.",
+      "synonym_split_done": "„{name}“ ist jetzt ein eigenes Tag",
+      "synonym_split_failed": "Synonym konnte nicht ausgelagert werden"
     },
     "tag_icon": {
       "label": "Symbol",

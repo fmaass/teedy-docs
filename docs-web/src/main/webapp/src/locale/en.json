@@ -461,7 +461,12 @@
       "synonym_in_use": "\"{name}\" is already used by: {tags}. Saving will be refused.",
       "synonym_similar": "Already there: {tags}",
       "synonym_make_main": "Make \"{name}\" the main name",
-      "synonym_swapped": "Swapped: \"{name}\" is the main name, \"{previous}\" is a synonym."
+      "synonym_swapped": "Swapped: \"{name}\" is the main name, \"{previous}\" is a synonym.",
+      "synonym_split": "Split \"{name}\" into its own tag",
+      "synonym_split_title": "Split into its own tag",
+      "synonym_split_confirm": "\"{name}\" stops being a synonym of \"{tag}\" and becomes a tag of its own. Documents stay on \"{tag}\"; the new tag starts empty.",
+      "synonym_split_done": "\"{name}\" is now a tag of its own",
+      "synonym_split_failed": "Failed to split the synonym"
     },
     "tag_icon": {
       "label": "Icon",

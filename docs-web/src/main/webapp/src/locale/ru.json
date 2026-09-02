@@ -461,7 +461,12 @@
       "synonym_in_use": "«{name}» уже используется: {tags}. Сохранение будет отклонено.",
       "synonym_similar": "Уже есть: {tags}",
       "synonym_make_main": "Сделать «{name}» основным названием",
-      "synonym_swapped": "Поменяли местами: «{name}» — основное название, «{previous}» — синоним."
+      "synonym_swapped": "Поменяли местами: «{name}» — основное название, «{previous}» — синоним.",
+      "synonym_split": "Выделить «{name}» в отдельный тег",
+      "synonym_split_title": "Выделить в отдельный тег",
+      "synonym_split_confirm": "«{name}» перестанет быть синонимом тега «{tag}» и станет отдельным тегом. Документы останутся у «{tag}»; новый тег начнётся пустым.",
+      "synonym_split_done": "«{name}» теперь отдельный тег",
+      "synonym_split_failed": "Не удалось выделить синоним"
     },
     "tag_icon": {
       "label": "Значок",

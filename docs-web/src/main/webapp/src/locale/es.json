@@ -461,7 +461,12 @@
       "synonym_in_use": "«{name}» ya lo usa: {tags}. No se podrá guardar.",
       "synonym_similar": "Ya existe: {tags}",
       "synonym_make_main": "Convertir «{name}» en el nombre principal",
-      "synonym_swapped": "Intercambiados: «{name}» es el nombre principal y «{previous}» es un sinónimo."
+      "synonym_swapped": "Intercambiados: «{name}» es el nombre principal y «{previous}» es un sinónimo.",
+      "synonym_split": "Separar «{name}» en su propia etiqueta",
+      "synonym_split_title": "Separar en su propia etiqueta",
+      "synonym_split_confirm": "«{name}» dejará de ser un sinónimo de «{tag}» y pasará a ser una etiqueta propia. Los documentos se quedan en «{tag}»; la nueva etiqueta empieza vacía.",
+      "synonym_split_done": "«{name}» ya es una etiqueta propia",
+      "synonym_split_failed": "No se pudo separar el sinónimo"
     },
     "tag_icon": {
       "label": "Icono",

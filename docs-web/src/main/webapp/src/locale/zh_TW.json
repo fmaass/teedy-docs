@@ -461,7 +461,12 @@
       "synonym_in_use": "「{name}」已被使用：{tags}。儲存將被拒絕。",
       "synonym_similar": "已存在：{tags}",
       "synonym_make_main": "將「{name}」設為主要名稱",
-      "synonym_swapped": "已互換：「{name}」是主要名稱，「{previous}」是同義詞。"
+      "synonym_swapped": "已互換：「{name}」是主要名稱，「{previous}」是同義詞。",
+      "synonym_split": "將「{name}」拆分為獨立標籤",
+      "synonym_split_title": "拆分為獨立標籤",
+      "synonym_split_confirm": "「{name}」將不再是「{tag}」的同義詞，而成為獨立標籤。文件仍保留在「{tag}」上；新標籤一開始為空。",
+      "synonym_split_done": "「{name}」現在是獨立標籤",
+      "synonym_split_failed": "拆分同義詞失敗"
     },
     "tag_icon": {
       "label": "圖示",

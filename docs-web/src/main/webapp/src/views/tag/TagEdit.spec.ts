@@ -24,8 +24,33 @@ const tagApiMock = vi.hoisted(() => ({
   getTagStats: vi.fn(),
   updateTag: vi.fn(),
   deleteTag: vi.fn(),
+  splitSynonym: vi.fn(),
 }))
 vi.mock('../../api/tag', () => tagApiMock)
+
+// TEEDY-154 captures what the page ASKS before it splits a synonym off, and lets a test drive
+// the accept path deterministically — and, just as importantly, assert the call has NOT been
+// made before it does. `confirm.require` is the page's own confirm seam (the READ-grant
+// disclosure uses it too); the danger-styled wrapper is for destructive actions.
+const confirmMock = vi.hoisted(() => ({
+  lastOptions: null as null | {
+    header: string
+    message: string
+    accept: () => void | Promise<void>
+  },
+  require: vi.fn(),
+}))
+vi.mock('primevue/useconfirm', () => ({
+  useConfirm: () => ({
+    require: (opts: unknown) => {
+      confirmMock.lastOptions = opts as typeof confirmMock.lastOptions
+      confirmMock.require(opts)
+    },
+  }),
+}))
+
+const toastAdd = vi.hoisted(() => vi.fn())
+vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAdd }) }))
 
 // #281/#289: TagEdit navigates through the tag-filter store's REPLACE-semantics
 // action. The real store drags in the router, more of the tag API surface, and
@@ -349,5 +374,115 @@ describe('TagEdit — synonyms (#280)', () => {
     await flushPromises()
 
     expect(tagApiMock.updateTag).toHaveBeenCalledWith('b', 'Bravo', '#222222', undefined, null, [])
+  })
+})
+
+// TEEDY-154 — splitting a synonym off into a tag of its own. Unlike the promote (which is two
+// form edits the ordinary Save persists), this is a server call that removes a synonym from one
+// tag and creates another, so the page owns it: it asks first, calls, and then refreshes both
+// the tag list every input resolves against and the tag it is showing.
+describe('TagEdit — splitting a synonym into its own tag (TEEDY-154)', () => {
+  beforeEach(() => {
+    tagApiMock.listTags.mockReset().mockResolvedValue({ data: { tags: TAGS } })
+    tagApiMock.getTag.mockReset().mockResolvedValue({
+      data: {
+        id: 'b',
+        name: 'Bravo',
+        creator: 'admin',
+        color: '#222222',
+        parent: null,
+        writable: true,
+        acls: [],
+        synonyms: ['Rechnung', 'Quittung'],
+      },
+    })
+    tagApiMock.getTagStats.mockReset().mockResolvedValue({ data: { stats: {} } })
+    tagApiMock.splitSynonym.mockReset().mockResolvedValue({ data: { id: 'new-tag' } })
+    confirmMock.require.mockReset()
+    confirmMock.lastOptions = null
+    toastAdd.mockReset()
+  })
+
+  it('tells the form which synonyms the server actually holds', async () => {
+    const wrapper = await mountEdit()
+    expect(wrapper.findComponent(TagForm).props('storedSynonyms')).toEqual(['Rechnung', 'Quittung'])
+  })
+
+  it('asks first, naming both tags and saying the documents stay', async () => {
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagForm).vm.$emit('split-synonym', 'Quittung')
+    await flushPromises()
+
+    expect(confirmMock.require).toHaveBeenCalledTimes(1)
+    expect(tagApiMock.splitSynonym).not.toHaveBeenCalled()
+    const message = confirmMock.lastOptions!.message
+    expect(message).toContain('Quittung')
+    expect(message).toContain('Bravo')
+    expect(message.toLowerCase()).toContain('document')
+    expect(message.toLowerCase()).toContain('stay')
+  })
+
+  it('splits on accept, drops the word locally and stales the tag list', async () => {
+    const queryClient = freshQueryClient()
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    const wrapper = await mountEdit(queryClient)
+    const detailReads = tagApiMock.getTag.mock.calls.length
+    wrapper.findComponent(TagForm).vm.$emit('split-synonym', 'Quittung')
+    await flushPromises()
+
+    await confirmMock.lastOptions!.accept()
+    await flushPromises()
+
+    expect(tagApiMock.splitSynonym).toHaveBeenCalledWith('b', 'Quittung')
+    // The word leaves both lists without a re-read: the page applies the one change it made.
+    expect(wrapper.findComponent(TagForm).props('synonyms')).toEqual(['Rechnung'])
+    expect(wrapper.findComponent(TagForm).props('storedSynonyms')).toEqual(['Rechnung'])
+    expect(tagApiMock.getTag.mock.calls.length).toBe(detailReads)
+    // The tag list is STALED rather than refetched — `loadFromCache` re-seeds the form's
+    // name/colour/parent/icon from that query, so refetching now would overwrite unsaved edits
+    // by the other route.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tags'], refetchType: 'none' })
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success' }),
+    )
+  })
+
+  it('keeps everything the user has typed and not yet saved', async () => {
+    // The split is one server call about ONE word. Anything else on the form is unsaved work,
+    // and re-reading the tag (or refetching the list the fields are seeded from) would throw it
+    // away with nothing on screen to say so.
+    const wrapper = await mountEdit()
+    const form = wrapper.findComponent(TagForm)
+    form.vm.$emit('update:name', 'Bravo renamed but not saved')
+    form.vm.$emit('update:color', 'abcdef')
+    form.vm.$emit('update:synonyms', ['Rechnung', 'Quittung', 'Faktura'])
+    await flushPromises()
+
+    form.vm.$emit('split-synonym', 'Quittung')
+    await flushPromises()
+    await confirmMock.lastOptions!.accept()
+    await flushPromises()
+
+    expect(form.props('name')).toBe('Bravo renamed but not saved')
+    expect(form.props('color')).toBe('abcdef')
+    // Only the split word is gone; the chip typed a moment ago is still there.
+    expect(form.props('synonyms')).toEqual(['Rechnung', 'Faktura'])
+  })
+
+  it("reports the server's own refusal rather than a generic failure", async () => {
+    // A collision is refused BY NAME ("Quittung is already a synonym of Beleg"), and that
+    // sentence is the only thing that says which word is the problem.
+    tagApiMock.splitSynonym.mockRejectedValue({
+      response: { data: { message: 'The name "Quittung" is already a synonym of the tag "Beleg"' } },
+    })
+    const wrapper = await mountEdit()
+    wrapper.findComponent(TagForm).vm.$emit('split-synonym', 'Quittung')
+    await flushPromises()
+    await confirmMock.lastOptions!.accept()
+    await flushPromises()
+
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', detail: expect.stringContaining('Beleg') }),
+    )
   })
 })

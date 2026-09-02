@@ -352,3 +352,85 @@ test('a synonym can be made the main name, and the demoted name keeps finding th
   await expect(page.getByText(docTitle, { exact: true })).toBeVisible()
   await search.fill('')
 })
+
+// TEEDY-154 — the other half of the swap. A synonym chip carries a "split into its own tag"
+// action: one server call takes the word off this tag and makes it a tag of its own. What the
+// confirmation has to state, because nobody could see it coming, is that the DOCUMENTS DO NOT
+// MOVE — nothing records which name a document was tagged through, so they stay on the tag they
+// are on and the new tag starts empty.
+test('a synonym can be split into its own tag, and the documents stay on the original', async ({
+  page,
+  cleanup,
+}) => {
+  const tagName = uniqueTag('synsplit-root')
+  const synonym = uniqueTag('synsplit-alt')
+  const docTitle = unique('synsplit-doc')
+
+  await createTag(page, tagName)
+  cleanup.defer('delete the original tag', () => deleteTagByNameApi(page.request, tagName))
+  cleanup.defer('delete the tag the split created', () =>
+    deleteTagByNameApi(page.request, synonym),
+  )
+
+  await openTagEdit(page, tagName)
+  await addSynonym(page, synonym)
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Tag updated')).toBeVisible()
+
+  // --- A document on the tag, filed before the split ---
+  await freshGoto(page, '/#/document/add', ROUTE_ROOT.documentEdit)
+  await page.locator('#edit-title').fill(docTitle)
+  const picker = await openTagPicker(page)
+  await picker.locator('input.tp-filter-input').fill(tagName)
+  await clickOptionUnobstructed(picker.getByRole('option', { name: tagName }), 'canonical tag')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page).toHaveURL(/#\/document\/view\//)
+  const docId = page.url().split('/document/view/')[1].split(/[/?#]/)[0]
+  cleanup.defer('purge the tagged document', () => deleteDocApi(page.request, docId))
+
+  // --- The split: one click on the chip, then the confirmation ---
+  await freshGoto(page, '/#/tag', ROUTE_ROOT.tagList)
+  await openTagEdit(page, tagName)
+  await page.locator('.synonym-chip', { hasText: synonym }).locator('.synonym-split').click()
+
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toBeVisible()
+  // It names both tags and says where the documents end up — the part that cannot be guessed.
+  await expect(dialog).toContainText(synonym)
+  await expect(dialog).toContainText(tagName)
+  await expect(dialog).toContainText('Documents stay')
+  await dialog.getByRole('button', { name: 'Yes' }).click()
+  await expect(dialog).toBeHidden()
+
+  // The chip is gone from the tag it left, without a Save: the split is its own write.
+  await expect(page.locator('.p-toast')).toContainText(synonym)
+  await expect(page.locator('.synonym-chip')).toHaveCount(0)
+
+  // It reached the tag list the whole app resolves against: a full reload busts the 60 s cache
+  // the SPA would otherwise answer the tree and the tag inputs from.
+  await freshGoto(page, '/#/tag', ROUTE_ROOT.tagList)
+  await expect(page.locator('.tag-tree').getByText(tagName, { exact: true })).toBeVisible()
+  await expect(page.locator('.tag-tree').getByText(synonym, { exact: true })).toBeVisible()
+
+  // The new tag is a tag in its own right: its own name, no synonyms of its own.
+  await openTagEdit(page, synonym)
+  await expect(page.locator('#tag-name')).toHaveValue(synonym)
+  await expect(page.locator('.synonym-chip')).toHaveCount(0)
+
+  // ...and the original kept its name and lost only that one word.
+  await freshGoto(page, '/#/tag', ROUTE_ROOT.tagList)
+  await openTagEdit(page, tagName)
+  await expect(page.locator('#tag-name')).toHaveValue(tagName)
+  await expect(page.locator('.synonym-chip')).toHaveCount(0)
+
+  // The document stayed where it was. The split word still RESOLVES — to the new tag — so the
+  // empty result is the new tag's own emptiness rather than an unresolvable search term.
+  await freshGoto(page, '/#/document', ROUTE_ROOT.documentList)
+  const search = page.getByPlaceholder('Search')
+  await search.fill(`tag:${tagName}`)
+  await expect(page.getByText(docTitle, { exact: true })).toBeVisible()
+  await search.fill(`tag:${synonym}`)
+  await expect(page.getByText(docTitle, { exact: true })).toHaveCount(0)
+  await search.fill('')
+})

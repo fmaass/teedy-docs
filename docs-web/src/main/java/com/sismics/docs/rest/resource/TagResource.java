@@ -488,6 +488,79 @@ public class TagResource extends BaseResource {
     }
     
     /**
+     * Split a synonym off into a tag of its own.
+     *
+     * @api {post} /tag/:id/synonym/split Split a synonym into its own tag
+     * @apiName PostTagSynonymSplit
+     * @apiGroup Tag
+     * @apiParam {String} id Tag ID
+     * @apiParam {String} name The synonym to split off; matched against the tag's synonyms
+     *                         ignoring case, and the STORED spelling becomes the new tag's name
+     * @apiSuccess {String} id The new tag's ID
+     * @apiError (client) ForbiddenError Access denied
+     * @apiError (client) ValidationError The name is not one of this tag's synonyms
+     * @apiError (client) IllegalTagName Spaces, colons and asterisks are not allowed inside a tag name
+     * @apiError (client) TagNameIsSynonym The name is already a synonym of another visible tag
+     * @apiError (client) NotFound Tag not found
+     * @apiPermission user
+     * @apiVersion 1.5.0
+     *
+     * @param id Tag ID
+     * @param name The synonym to split off
+     * @return Response
+     */
+    @POST
+    @Path("{id: [a-z0-9\\-]+}/synonym/split")
+    @Operation(
+            summary = "Split a synonym into its own tag",
+            description = "Removes one synonym from the tag and creates a standalone tag with that "
+                    + "name, in one transaction. Documents stay on the tag they are on — nothing "
+                    + "records which name a document was tagged through — so the new tag starts empty.",
+            parameters = {
+                    @Parameter(name = "id", in = ParameterIn.PATH, required = true,
+                            description = "Tag ID", schema = @Schema(type = "string"))
+            },
+            requestBody = @RequestBody(content = @Content(
+                    schema = @Schema(implementation = TagSynonymSplitForm.class))),
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Success",
+                            content = @Content(schema = @Schema(implementation = TagIdResult.class))),
+                    @ApiResponse(responseCode = "403", description = "ForbiddenError - Access denied"),
+                    @ApiResponse(responseCode = "404", description = "NotFound - Tag not found"),
+                    @ApiResponse(responseCode = "400", description = "ValidationError - The name is not "
+                            + "one of this tag's synonyms; "
+                            + "IllegalTagName - Spaces, colons and asterisks are not allowed inside a tag name "
+                            + "(invisible format characters are removed and the edges trimmed instead, and a "
+                            + "name left empty by that normalization is refused); "
+                            + "TagNameIsSynonym - The name is already a synonym of another visible tag")
+            }
+    )
+    public Response splitSynonym(
+            @PathParam("id") String id,
+            @Parameter(description = "The synonym to split off") @FormParam("name") String name) {
+        if (!authenticate()) {
+            throw new ForbiddenClientException();
+        }
+
+        // The whole operation — the WRITE check, the synonym rows, the collision rule and the
+        // tag creation — lives in TagSynonymUtil. Keeping it on the util side is what stops
+        // rest.resource growing new core.dao edges: that dependency web is FROZEN and may only
+        // shrink (DocumentSliceArchitectureTest.legacy_resource_dao_frozen), and a caller
+        // without WRITE gets the same 404 every other tag write gives them.
+        String tagId;
+        try {
+            tagId = TagSynonymUtil.split(id, name, principal.getId(), getTargetIdList(null));
+        } catch (InactiveOwnerException e) {
+            // The caller's own account stopped being active mid-request, exactly as on a create.
+            throw new ForbiddenClientException();
+        }
+
+        JsonObjectBuilder response = Json.createObjectBuilder()
+                .add("id", tagId);
+        return Response.ok().entity(response.build()).build();
+    }
+
+    /**
      * Delete a tag.
      *
      * @api {delete} /tag/:id Delete a tag
@@ -1252,6 +1325,12 @@ public class TagResource extends BaseResource {
                 + "set is replaced: repeat the parameter once per synonym, send it once with an empty "
                 + "value to remove them all, and omit it to leave them untouched.")
         public List<String> synonyms;
+    }
+
+    @Schema(name = "TagSynonymSplitForm", description = "Synonym split form body")
+    private static class TagSynonymSplitForm {
+        @Schema(description = "The synonym to split off into its own tag", requiredMode = Schema.RequiredMode.REQUIRED)
+        public String name;
     }
 
     @Schema(name = "TagIdResult", description = "Tag ID envelope")

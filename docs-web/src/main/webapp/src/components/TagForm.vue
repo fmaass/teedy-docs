@@ -107,6 +107,14 @@ const props = defineProps<{
   synonymTags?: Tag[]
   /** The tag being edited, excluded from that hint — its own names are not conflicts. */
   synonymTagId?: string
+  /**
+   * The synonyms the SERVER currently holds (TEEDY-154). Only these can be split off into a tag
+   * of their own, because a split is a server action on a stored row: a word that has only been
+   * typed into the form is not a synonym yet, and offering the action on it would promise a call
+   * the server would refuse. Omitted means nothing is stored — which is what the two CREATE
+   * hosts have, editing a tag that does not exist yet — and the action is then never offered.
+   */
+  storedSynonyms?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -116,6 +124,12 @@ const emit = defineEmits<{
   'update:parent': [value: string | null]
   /** The synonym chip list changed. */
   'update:synonyms': [value: string[]]
+  /**
+   * Split this synonym off into a tag of its own (TEEDY-154). Reported rather than performed:
+   * it is a server call that removes a synonym from one tag and creates another, which no tag
+   * write expresses, and this component saves nothing.
+   */
+  'split-synonym': [name: string]
   /** The persisted ACL list changed on the server; the host must re-read it. */
   'acl-changed': []
   /** Deferred mode: a grant to hold until the tag exists. */
@@ -345,6 +359,35 @@ watch([() => props.synonyms, () => props.name], ([synonyms, name]) => {
   }
 })
 
+// --- Splitting a synonym off into its own tag (TEEDY-154) ---
+//
+// The other half of the swap, and the one this form cannot do: it removes a synonym from THIS
+// tag and creates ANOTHER one, which no tag write expresses. So the chip only reports the ask
+// and the host makes the call.
+
+/**
+ * The SERVER'S spelling of this word, or null when it holds no such word.
+ *
+ * Matched case-insensitively because a chip may have been removed and re-added in another case
+ * without being saved — the server still holds the row, under the spelling it stored. That
+ * spelling is what the split has to travel with: the confirmation names it, the call sends it
+ * and the toast reports it, so all three say the word the tag will actually be called rather
+ * than a casing that exists only in this form.
+ */
+function storedSpelling(synonym: string): string | null {
+  return (props.storedSynonyms ?? []).find((value) => sameName(value, synonym)) ?? null
+}
+
+function isStored(synonym: string): boolean {
+  return storedSpelling(synonym) !== null
+}
+
+function requestSplit(synonym: string) {
+  const stored = storedSpelling(synonym)
+  if (stored === null) return
+  emit('split-synonym', stored)
+}
+
 function onHexInput(raw: string) {
   hexText.value = raw
   const complete = completeHex(raw)
@@ -474,6 +517,18 @@ function onHexBlur() {
               @click="makeMainName(synonym)"
             >
               <i class="pi pi-arrow-up" aria-hidden="true" />
+            </button>
+            <!-- The split (TEEDY-154). Offered only for a word the server already holds: a chip
+                 that has only been typed is not a synonym yet, so there is nothing to split. -->
+            <button
+              v-if="isStored(synonym)"
+              type="button"
+              class="synonym-split"
+              :aria-label="t('ui.tag_edit.synonym_split', { name: synonym })"
+              :title="t('ui.tag_edit.synonym_split', { name: synonym })"
+              @click="requestSplit(synonym)"
+            >
+              <i class="pi pi-arrow-right" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -633,7 +688,8 @@ function onHexBlur() {
   font-size: 0.8125rem;
 }
 .synonym-remove,
-.synonym-promote {
+.synonym-promote,
+.synonym-split {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -647,17 +703,20 @@ function onHexBlur() {
   cursor: pointer;
 }
 .synonym-remove:hover,
-.synonym-promote:hover {
+.synonym-promote:hover,
+.synonym-split:hover {
   background: var(--p-content-hover-background);
   color: var(--p-text-color);
 }
 .synonym-remove:focus-visible,
-.synonym-promote:focus-visible {
+.synonym-promote:focus-visible,
+.synonym-split:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--p-primary-color);
 }
 .synonym-remove .pi,
-.synonym-promote .pi {
+.synonym-promote .pi,
+.synonym-split .pi {
   font-size: 0.625rem;
 }
 

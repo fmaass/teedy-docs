@@ -551,3 +551,75 @@ describe('TagForm — promoting a synonym to the main name (TEEDY-153)', () => {
     expect(mountForm().find('.synonym-promote').exists()).toBe(false)
   })
 })
+
+// TEEDY-154 — the other half of the swap: a synonym that turns out to deserve an identity of its
+// own leaves the tag and becomes one. Unlike the promote, this cannot be expressed as a form
+// edit — it removes a synonym from one tag AND creates another, in one server call — so the form
+// only reports which chip was picked and the host makes the call.
+describe('TagForm — splitting a synonym into its own tag (TEEDY-154)', () => {
+  function mountSplit(props: Record<string, unknown> = {}) {
+    return mountForm({
+      name: 'Rechnung',
+      synonyms: ['Quittung', 'Beleg'],
+      storedSynonyms: ['Quittung', 'Beleg'],
+      synonymTags: [],
+      synonymTagId: 'b',
+      ...props,
+    })
+  }
+
+  it('offers the action on every stored chip', () => {
+    const wrapper = mountSplit()
+    expect(wrapper.findAll('.synonym-split')).toHaveLength(2)
+    // The chip still reads as the word it holds: the actions are icon buttons.
+    expect(wrapper.findAll('.synonym-chip').map((chip) => chip.text())).toEqual([
+      'Quittung',
+      'Beleg',
+    ])
+  })
+
+  it('reports the chip the user picked and changes nothing itself', async () => {
+    const wrapper = mountSplit()
+    await wrapper.findAll('.synonym-split')[1].trigger('click')
+
+    expect(wrapper.emitted('split-synonym')?.at(-1)).toEqual(['Beleg'])
+    // The split is a server call the host makes; the form must not pretend it has happened.
+    expect(wrapper.emitted('update:synonyms')).toBeUndefined()
+    expect(wrapper.emitted('update:name')).toBeUndefined()
+  })
+
+  it('offers nothing on a chip the server does not hold yet', () => {
+    // A word typed into the form is not a synonym on the server, so there is nothing to split
+    // off it: the action appears once the chip has been saved.
+    const wrapper = mountSplit({ synonyms: ['Quittung', 'Faktura'], storedSynonyms: ['Quittung'] })
+    const chips = wrapper.findAll('.synonym-chip')
+    expect(chips[0].find('.synonym-split').exists()).toBe(true)
+    expect(chips[1].find('.synonym-split').exists()).toBe(false)
+  })
+
+  it('recognises the stored chip however it is spelled', () => {
+    // Re-spelling a chip is an edit the server folds back onto the same row, so the word is
+    // still one it holds — the same case-insensitive fold the rest of the form uses.
+    const wrapper = mountSplit({ synonyms: ['quittung'], storedSynonyms: ['Quittung'] })
+    expect(wrapper.find('.synonym-split').exists()).toBe(true)
+  })
+
+  it("reports the SERVER's spelling, not the one the form happens to show", async () => {
+    // A chip removed and re-added in another case has not been saved: the server still holds the
+    // row under the spelling it stored, and that is the name the new tag will carry. Emitting the
+    // local casing would make the confirmation, the request and the toast all name a word that
+    // does not exist.
+    const wrapper = mountSplit({ synonyms: ['quittung'], storedSynonyms: ['Quittung'] })
+    await wrapper.find('.synonym-split').trigger('click')
+    expect(wrapper.emitted('split-synonym')?.at(-1)).toEqual(['Quittung'])
+  })
+
+  it('renders no action for a host that does not manage synonyms', () => {
+    expect(mountForm().find('.synonym-split').exists()).toBe(false)
+  })
+
+  it('renders no action for a host that has nothing stored to split', () => {
+    // The two create hosts are editing a tag that does not exist yet.
+    expect(mountForm({ synonyms: ['Quittung'] }).find('.synonym-split').exists()).toBe(false)
+  })
+})

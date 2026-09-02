@@ -461,7 +461,12 @@
       "synonym_in_use": "“{name}”已被使用：{tags}。保存将被拒绝。",
       "synonym_similar": "已存在：{tags}",
       "synonym_make_main": "将“{name}”设为主名称",
-      "synonym_swapped": "已互换：“{name}”是主名称，“{previous}”是同义词。"
+      "synonym_swapped": "已互换：“{name}”是主名称，“{previous}”是同义词。",
+      "synonym_split": "将“{name}”拆分为独立标签",
+      "synonym_split_title": "拆分为独立标签",
+      "synonym_split_confirm": "“{name}”将不再是“{tag}”的同义词，而成为独立标签。文档仍保留在“{tag}”上；新标签从空开始。",
+      "synonym_split_done": "“{name}”现在是独立标签",
+      "synonym_split_failed": "拆分同义词失败"
     },
     "tag_icon": {
       "label": "图标",

@@ -1,11 +1,18 @@
 package com.sismics.docs.rest.util;
 
+import com.sismics.docs.core.constant.PermType;
+import com.sismics.docs.core.dao.AclDao;
 import com.sismics.docs.core.dao.TagDao;
 import com.sismics.docs.core.dao.TagSynonymDao;
 import com.sismics.docs.core.dao.criteria.TagCriteria;
 import com.sismics.docs.core.dao.dto.TagDto;
+import com.sismics.docs.core.exception.InactiveOwnerException;
+import com.sismics.docs.core.model.jpa.Tag;
+import com.sismics.docs.core.util.TagCreationUtil;
 import com.sismics.rest.exception.ClientException;
 import com.sismics.rest.util.ValidationUtil;
+
+import jakarta.ws.rs.NotFoundException;
 
 import java.text.MessageFormat;
 import java.util.ArrayList;
@@ -287,5 +294,117 @@ public final class TagSynonymUtil {
      */
     public static List<String> store(String tagId, List<String> names) {
         return new TagSynonymDao().replaceForTag(tagId, names);
+    }
+
+    /**
+     * Take one synonym off a tag and make it a tag of its own (TEEDY-154).
+     *
+     * <p>The other half of the swap, and the one that cannot be expressed as an ordinary tag
+     * write: it removes a synonym from one tag AND creates another, so it is a single call and a
+     * single unit of work. The request transaction is that unit — {@code RequestContextFilter}
+     * commits only for a 2xx — so a refusal below leaves the synonym exactly where it was.</p>
+     *
+     * <p><b>Documents do not move, because there is nothing to move them by.</b> {@code
+     * T_TAG_SYNONYM} records no document link and nothing anywhere records WHICH name a document
+     * was tagged through: a document is linked to the root tag's id alone. So every document
+     * stays on the root tag and the new tag starts empty — a decision the confirmation on screen
+     * states before the split runs, rather than a limitation it hides.</p>
+     *
+     * <p>The new tag is made the way {@code PUT /tag} makes one — {@link
+     * TagCreationUtil#createTag} under the owner's row lock, with the create flow's base ACLs and
+     * the caller as its creator — and it is shaped like the tag it came out of: same colour, same
+     * parent. It carries no icon and no synonyms, because neither belonged to the word.</p>
+     *
+     * <p>The name is judged by the ordinary {@link #checkCollisions} rule, run AFTER the removal
+     * so that what it judges is the state the split leaves behind (the JPQL query it makes
+     * flushes the removal first). That it can collide at all is not theoretical: two tags may
+     * hold the same synonym while they are invisible to each other, and a READ grant made later
+     * brings them into one caller's list. The scope, and with it the disclosure boundary, is the
+     * ordinary one — a word colliding only with a tag the caller cannot read is accepted, with
+     * the same answer as a word colliding with nothing.</p>
+     *
+     * @param tagId The tag the synonym is taken off
+     * @param submittedName The synonym to split off, in whatever spelling the caller sent
+     * @param userId The caller, who becomes the new tag's owner
+     * @param targetIdList The caller's ACL target list — the WRITE check and the scope of the
+     *                     collision rule
+     * @return the new tag's ID
+     * @throws NotFoundException if the caller may not WRITE the tag
+     * @throws ClientException if the name is not one of the tag's synonyms, or the tag it would
+     *                         become collides with something the caller can see
+     * @throws InactiveOwnerException if the caller's own account stopped being active mid-request
+     */
+    public static String split(String tagId, String submittedName, String userId,
+                               List<String> targetIdList) {
+        // Splitting a synonym off is editing the tag, so it takes the same WRITE its name and
+        // colour take — checked FIRST, before anything is judged about the name, so a caller
+        // without it learns nothing beyond the 404 every other tag write gives them. The check
+        // lives here rather than in the resource because the resource package's dependency on
+        // core.dao is a frozen ratchet that may only shrink (DocumentSliceArchitectureTest); the
+        // rest.util helpers that authorize a document read do exactly this
+        // ({@code AccessResourceHelper}, {@code DocumentResourceHelper}).
+        if (!new AclDao().checkPermission(tagId, PermType.WRITE, targetIdList)) {
+            throw new NotFoundException();
+        }
+
+        // The submitted word goes through the same name rule its stored counterpart went through,
+        // so a caller that pads or decorates it is asking about the same synonym rather than
+        // about a name that could never have been stored.
+        String requested = ValidationUtil.validateTagName(submittedName);
+        requested = ValidationUtil.validateLength(requested, "name", 1, MAX_LENGTH, false);
+
+        TagSynonymDao tagSynonymDao = new TagSynonymDao();
+        List<String> live = tagSynonymDao.findByTagId(tagId);
+        // equalsIgnoreCase per character, never toLowerCase(): the fold is locale-dependent and
+        // on a Turkish host would make this disagree with the resolution the user sees (#266).
+        String stored = null;
+        List<String> remaining = new ArrayList<>();
+        for (String name : live) {
+            if (stored == null && name.equalsIgnoreCase(requested)) {
+                stored = name;
+            } else {
+                remaining.add(name);
+            }
+        }
+        if (stored == null) {
+            // Names only this tag's own synonyms, which the caller already holds WRITE on, so it
+            // discloses nothing. A tag's own NAME lands here too: it is not one of its synonyms,
+            // and splitting it would leave the tag nameless.
+            throw new ClientException("ValidationError", MessageFormat.format(
+                    "\"{0}\" is not a synonym of this tag", requested));
+        }
+
+        // The removal FIRST, so the collision rule below judges the state the split leaves
+        // behind: its query flushes this write, so the word being taken is no longer a synonym
+        // of the root by the time the rule reads it, and the root cannot collide with itself.
+        tagSynonymDao.replaceForTag(tagId, remaining);
+
+        // The SAME call a create makes for the same name: {@code TagResource.add} runs
+        // checkCollisions(name, validateNames(...), null, targetIdList), and validateNames
+        // returns an EMPTY list when the caller sent no synonyms — so the arguments here are the
+        // create's arguments, and the split cannot be a back door to a tag PUT /tag would refuse.
+        //
+        // tagId is deliberately NOT passed: the tag being written is the NEW one, which does not
+        // exist yet. The root tag is therefore in scope only if the caller can read it, which is
+        // the scope a create gets — and by this point its own row no longer holds the word,
+        // because the removal above has been flushed by this check's own query.
+        //
+        // What this rejects is a word that is another VISIBLE tag's SYNONYM (TagNameIsSynonym) —
+        // reachable here because two tags may hold one synonym while invisible to each other and
+        // a later READ grant brings them into one list. It does NOT reject a word that is another
+        // visible tag's NAME, because Teedy has never made tag names unique: the tags are a tree,
+        // two branches may both carry "2024", and PUT /tag answers 200 for a name a readable tag
+        // already has (verified against this build). Refusing it here alone would make the split
+        // stricter than the create button beside it.
+        checkCollisions(stored, List.of(), null, targetIdList);
+
+        TagDao tagDao = new TagDao();
+        Tag source = tagDao.getById(tagId);
+        Tag tag = new Tag();
+        tag.setName(stored);
+        tag.setColor(source.getColor());
+        tag.setUserId(userId);
+        tag.setParentId(source.getParentId());
+        return TagCreationUtil.createTag(tag, userId);
     }
 }

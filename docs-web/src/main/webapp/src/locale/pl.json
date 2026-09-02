@@ -461,7 +461,12 @@
       "synonym_in_use": "„{name}” jest już używane przez: {tags}. Zapis zostanie odrzucony.",
       "synonym_similar": "Już istnieje: {tags}",
       "synonym_make_main": "Ustaw „{name}” jako nazwę główną",
-      "synonym_swapped": "Zamienione: „{name}” to nazwa główna, a „{previous}” to synonim."
+      "synonym_swapped": "Zamienione: „{name}” to nazwa główna, a „{previous}” to synonim.",
+      "synonym_split": "Wydziel „{name}” do własnej etykiety",
+      "synonym_split_title": "Wydziel do własnej etykiety",
+      "synonym_split_confirm": "„{name}” przestanie być synonimem etykiety „{tag}” i stanie się osobną etykietą. Dokumenty zostają przy „{tag}”; nowa etykieta zaczyna pusta.",
+      "synonym_split_done": "„{name}” jest teraz osobną etykietą",
+      "synonym_split_failed": "Nie udało się wydzielić synonimu"
     },
     "tag_icon": {
       "label": "Ikona",
